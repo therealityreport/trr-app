@@ -5,6 +5,10 @@ import { useParams, usePathname, useRouter, useSearchParams } from "next/navigat
 import type { Route } from "next";
 import Link from "next/link";
 import SocialAdminPageHeader from "@/components/admin/SocialAdminPageHeader";
+import {
+  AdminCommentThread,
+  type AdminCommentThreadItem,
+} from "@/components/admin/comments/AdminCommentThread";
 import { SeasonTabsNav } from "@/components/admin/season-tabs/SeasonTabsNav";
 import { ImageLightbox } from "@/components/admin/ImageLightbox";
 import SocialPlatformTabIcon, { type SocialPlatformTabIconKey } from "@/components/admin/SocialPlatformTabIcon";
@@ -46,9 +50,12 @@ import { invalidateAdminSnapshotFamilies } from "@/lib/admin/admin-snapshot-clie
 import { useSharedPollingResource, useSharedSseResource } from "@/lib/admin/shared-live-resource";
 import type { PhotoMetadata } from "@/lib/photo-metadata";
 import {
+  selectDisplayThumbnail,
+  selectInstagramTikTokThumbnail,
   pickFirstNonVideoUrl,
-  selectInstagramTikTokThumbnailUrl,
-  selectTwitterThumbnailUrl,
+  selectTwitterThumbnail,
+  type DisplayThumbnailSelection,
+  type DisplayThumbnailVariants,
 } from "./social-media-thumbnails";
 
 /* ------------------------------------------------------------------ */
@@ -207,6 +214,10 @@ interface BasePost {
   media_asset_meta?: MediaAssetMeta | null;
   media_urls?: string[] | null;
   thumbnail_url?: string | null;
+  display_thumbnail_url?: string | null;
+  display_thumbnail_variants?: DisplayThumbnailVariants;
+  display_thumbnail_status?: string | Record<string, unknown> | null;
+  display_thumbnail_srcset?: string | null;
   cover_source?: string | null;
   cover_source_confidence?: string | null;
   metadata_error?: string | null;
@@ -426,6 +437,10 @@ interface PostDetailResponse {
   title?: string;
   display_name?: string;
   thumbnail_url?: string | null;
+  display_thumbnail_url?: string | null;
+  display_thumbnail_variants?: DisplayThumbnailVariants;
+  display_thumbnail_status?: string | Record<string, unknown> | null;
+  display_thumbnail_srcset?: string | null;
   media_urls?: string[] | null;
   source_media_urls?: string[] | null;
   hosted_media_urls?: string[] | null;
@@ -676,7 +691,7 @@ type SocialPlatform = Exclude<PlatformFilter, "all">;
 type SortField = "engagement" | "likes" | "views" | "comments_count" | "shares" | "retweets" | "posted_at";
 type SortDir = "desc" | "asc";
 type SummaryTokenKey = "collaborators" | "tags" | "mentions" | "hashtags";
-type SourceScope = "bravo" | "creator" | "community";
+type SourceScope = "network" | "creator" | "community" | "news";
 type SocialMediaType = "image" | "video" | "embed";
 type SeasonTabId = "overview" | "episodes" | "assets" | "news" | "fandom" | "cast" | "surveys" | "social";
 type SocialAnalyticsViewId = "bravo" | "sentiment" | "hashtags" | "advanced" | "reddit" | "cast-content";
@@ -744,6 +759,10 @@ interface PostDetailMediaFields {
   source_media_urls?: string[] | null;
   hosted_media_urls?: string[] | null;
   thumbnail_url?: string | null;
+  display_thumbnail_url?: string | null;
+  display_thumbnail_variants?: DisplayThumbnailVariants;
+  display_thumbnail_status?: string | Record<string, unknown> | null;
+  display_thumbnail_srcset?: string | null;
   source_thumbnail_url?: string | null;
   hosted_thumbnail_url?: string | null;
   media_asset_meta?: MediaAssetMeta | null;
@@ -1522,27 +1541,49 @@ function getTwitterRepostCount(post: AnyPost): number {
   return Math.max(0, getNum(post, "retweets"));
 }
 
-function getPostThumbnailUrl(platform: string, post: AnyPost): string | null {
+function getDisplayThumbnailVariants(post: Record<string, unknown>): DisplayThumbnailVariants {
+  const variants = post.display_thumbnail_variants;
+  return variants && typeof variants === "object" && !Array.isArray(variants)
+    ? (variants as DisplayThumbnailVariants)
+    : null;
+}
+
+function getPostThumbnailImage(platform: string, post: AnyPost): DisplayThumbnailSelection {
   const hostedThumbnail = getStr(post, "hosted_thumbnail_url");
+  const displayThumbnail = getStr(post, "display_thumbnail_url");
+  const displayThumbnailSrcSet = getStr(post, "display_thumbnail_srcset");
+  const displayThumbnailVariants = getDisplayThumbnailVariants(post as unknown as Record<string, unknown>);
   if (platform === "twitter") {
     const thumbnail = getStr(post, "thumbnail_url");
     const hostedMediaUrls = getStrArr(post, "hosted_media_urls");
     const mediaUrls = getStrArr(post, "media_urls");
-    return selectTwitterThumbnailUrl({
+    return selectTwitterThumbnail({
+      displayThumbnail,
+      displayThumbnailSrcSet,
+      displayThumbnailVariants,
       hostedThumbnail,
       thumbnail,
       hostedMediaUrls,
       mediaUrls,
     });
   }
-  if (hostedThumbnail) return hostedThumbnail;
-  if (platform === "youtube") return getStr(post, "thumbnail_url") || null;
+  if (platform === "youtube") {
+    return selectDisplayThumbnail({
+      displayThumbnail,
+      displayThumbnailSrcSet,
+      displayThumbnailVariants,
+      fallbackUrls: [hostedThumbnail, getStr(post, "thumbnail_url")],
+    });
+  }
   if (platform === "instagram" || platform === "tiktok") {
     const thumbnail = getStr(post, "thumbnail_url");
     const hostedMediaUrls = getStrArr(post, "hosted_media_urls");
     const sourceMediaUrls = getStrArr(post, "source_media_urls");
     const mediaUrls = getStrArr(post, "media_urls");
-    return selectInstagramTikTokThumbnailUrl({
+    return selectInstagramTikTokThumbnail({
+      displayThumbnail,
+      displayThumbnailSrcSet,
+      displayThumbnailVariants,
       hostedThumbnail,
       thumbnail,
       hostedMediaUrls,
@@ -1550,7 +1591,16 @@ function getPostThumbnailUrl(platform: string, post: AnyPost): string | null {
       sourceMediaUrls,
     });
   }
-  return getStr(post, "thumbnail_url") || getStrArr(post, "hosted_media_urls")[0] || null;
+  return selectDisplayThumbnail({
+    displayThumbnail,
+    displayThumbnailSrcSet,
+    displayThumbnailVariants,
+    fallbackUrls: [hostedThumbnail, getStr(post, "thumbnail_url"), ...getStrArr(post, "hosted_media_urls")],
+  });
+}
+
+function getPostThumbnailUrl(platform: string, post: AnyPost): string | null {
+  return getPostThumbnailImage(platform, post).src;
 }
 
 function detectSocialMediaType(url: string): SocialMediaType {
@@ -1732,8 +1782,10 @@ function getPostMediaCandidates(platform: string, post: AnyPost): SocialMediaCan
   const sourceThumbnail =
     getStr(post, "source_thumbnail_url") || mediaAssetUrls.sourceThumbnailUrl || getStr(post, "thumbnail_url");
   const hostedThumbnail = getStr(post, "hosted_thumbnail_url") || mediaAssetUrls.hostedThumbnailUrl;
+  const displayThumbnail = getPostThumbnailImage(platform, post);
   const thumbnail =
     pickFirstNonVideoUrl([
+      displayThumbnail.src,
       hostedThumbnail,
       getStr(post, "thumbnail_url"),
       sourceThumbnail,
@@ -1917,14 +1969,20 @@ function getPreferredCastScreentimeImportSource(
 }
 
 function getPostDetailThumbnailUrl(data: PostDetailMediaFields): string | null {
-  const preferred = pickFirstNonVideoUrl([
+  const displayThumbnail = selectDisplayThumbnail({
+    displayThumbnail: data.display_thumbnail_url,
+    displayThumbnailSrcSet: data.display_thumbnail_srcset,
+    displayThumbnailVariants: data.display_thumbnail_variants,
+    fallbackUrls: [
     data.hosted_thumbnail_url,
     data.thumbnail_url,
     data.source_thumbnail_url,
     ...(data.hosted_media_urls ?? []),
     ...(data.media_urls ?? []),
     ...(data.source_media_urls ?? []),
-  ]);
+    ],
+  });
+  const preferred = displayThumbnail.src;
   if (preferred) return preferred;
   return pickFirstUrl([
     data.hosted_thumbnail_url,
@@ -2009,6 +2067,7 @@ function buildPostDetailPreviewCandidates(
   return buildNormalizedMediaUrlList([
     preferredPreviewUrl,
     getPostDetailThumbnailUrl(data),
+    data.display_thumbnail_url,
     data.hosted_thumbnail_url,
     mediaAssetUrls.hostedThumbnailUrl,
     data.thumbnail_url,
@@ -2029,6 +2088,10 @@ function mergePostWithDetailMedia(post: AnyPost, detailMedia: PostDetailMediaFie
     source_media_urls: detailMedia.source_media_urls ?? post.source_media_urls ?? null,
     hosted_media_urls: detailMedia.hosted_media_urls ?? post.hosted_media_urls ?? null,
     thumbnail_url: detailMedia.thumbnail_url ?? post.thumbnail_url ?? null,
+    display_thumbnail_url: detailMedia.display_thumbnail_url ?? post.display_thumbnail_url ?? null,
+    display_thumbnail_variants: detailMedia.display_thumbnail_variants ?? post.display_thumbnail_variants ?? null,
+    display_thumbnail_status: detailMedia.display_thumbnail_status ?? post.display_thumbnail_status ?? null,
+    display_thumbnail_srcset: detailMedia.display_thumbnail_srcset ?? post.display_thumbnail_srcset ?? null,
     source_thumbnail_url: detailMedia.source_thumbnail_url ?? post.source_thumbnail_url ?? null,
     hosted_thumbnail_url: detailMedia.hosted_thumbnail_url ?? post.hosted_thumbnail_url ?? null,
     media_asset_meta: detailMedia.media_asset_meta ?? post.media_asset_meta ?? null,
@@ -3440,135 +3503,41 @@ const MAX_THREADED_COMMENT_DEPTH = 128;
 /* Threaded comment component                                          */
 /* ------------------------------------------------------------------ */
 
-function ThreadedCommentItem({
-  comment,
-  depth = 0,
-  seenCommentIds = new Set<string>(),
-}: {
-  comment: ThreadedComment;
-  depth?: number;
-  seenCommentIds?: ReadonlySet<string>;
-}) {
-  const commentId = comment.comment_id;
-  const visited = useMemo(() => {
-    const next = new Set<string>(seenCommentIds);
-    if (commentId) next.add(commentId);
-    return next;
-  }, [seenCommentIds, commentId]);
-  const [expanded, setExpanded] = useState(depth < 2);
+function toAdminThreadCommentItem(comment: ThreadedComment): AdminCommentThreadItem {
   const replies = Array.isArray(comment.replies) ? comment.replies : [];
-  const hasReplies = replies.length > 0;
-  const visibleReplies = replies.filter((reply) => !visited.has(reply.comment_id));
-  const suppressedReplies = replies.length - visibleReplies.length;
-  const hasDepthBudget = depth < MAX_THREADED_COMMENT_DEPTH;
-  if (commentId && seenCommentIds.has(commentId)) {
-    return (
-      <div className="ml-4 border-l-2 border-amber-200 pl-3 py-2 text-xs text-amber-700">
-        Recursion guard: comment already rendered in this thread.
-      </div>
-    );
-  }
   const hostedMedia = Array.isArray(comment.hosted_media_urls) ? comment.hosted_media_urls : [];
   const sourceMedia = Array.isArray(comment.media_urls) ? comment.media_urls : [];
   const mediaUrls = (hostedMedia.length > 0 ? hostedMedia : sourceMedia).filter((url) => !!url);
-  const avatarUrl =
-    (typeof comment.user?.avatar_url === "string" ? comment.user.avatar_url : "") ||
-    null;
+  const avatarUrl = (typeof comment.user?.avatar_url === "string" ? comment.user.avatar_url : "") || null;
   const displayHandle =
     (typeof comment.user?.username === "string" ? comment.user.username : "") ||
     comment.author ||
     "unknown";
-  const displayName =
-    (typeof comment.user?.display_name === "string" ? comment.user.display_name : "") ||
-    "";
-  const isImageUrl = (url: string): boolean =>
-    /\.(png|jpe?g|gif|webp)(\?|$)/i.test(url) || url.includes("image-origin");
+  const displayName = (typeof comment.user?.display_name === "string" ? comment.user.display_name : "") || displayHandle;
+  return {
+    id: comment.comment_id || `${displayHandle}:${comment.created_at ?? ""}:${comment.text}`,
+    authorName: displayName,
+    authorHandle: displayHandle,
+    authorRole: comment.is_reply ? "reply" : null,
+    avatarUrl,
+    avatarAlt: `@${displayHandle.replace(/^@/, "")} avatar`,
+    body: comment.text,
+    timestamp: comment.created_at,
+    timestampLabel: comment.created_at ? fmtDateTime(comment.created_at) : null,
+    likes: comment.likes > 0 ? comment.likes : null,
+    replyCount: Math.max(Number(comment.reply_count ?? 0) || 0, replies.length),
+    mediaUrls,
+    replies: replies.map(toAdminThreadCommentItem),
+  };
+}
 
+function ThreadedCommentItem({ comment }: { comment: ThreadedComment }) {
   return (
-    <div className={depth > 0 ? "ml-4 pl-3 border-l-2 border-gray-100" : ""}>
-      <div className="py-2">
-        <div className="flex items-center gap-2 text-xs text-gray-500">
-          {avatarUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={avatarUrl}
-              alt={`@${displayHandle} avatar`}
-              loading="lazy"
-              referrerPolicy="no-referrer"
-              className="h-5 w-5 rounded-full object-cover border border-gray-200"
-            />
-          ) : null}
-          <span className="font-medium text-gray-700">@{displayHandle}</span>
-          {displayName ? <span className="text-gray-500">({displayName})</span> : null}
-          {comment.created_at && <span>{fmtDateTime(comment.created_at)}</span>}
-          {comment.likes > 0 && (
-            <span className="font-medium text-gray-600">{fmtNum(comment.likes)} likes</span>
-          )}
-        </div>
-        <p className="text-sm text-gray-700 mt-0.5 whitespace-pre-wrap break-words">
-          {comment.text}
-        </p>
-        {mediaUrls.length > 0 && (
-          <div className="mt-2 flex flex-wrap gap-2">
-            {mediaUrls.map((mediaUrl, index) => (
-              <a
-                key={`${comment.comment_id}-media-${index + 1}`}
-                href={mediaUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                aria-label={`Comment media ${index + 1}`}
-                className="inline-flex items-center rounded border border-gray-200 bg-gray-50 px-2 py-1 text-xs text-blue-700 hover:bg-blue-50"
-              >
-                {isImageUrl(mediaUrl) ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={mediaUrl}
-                    alt={`Comment media ${index + 1}`}
-                    loading="lazy"
-                    referrerPolicy="no-referrer"
-                    className="h-14 w-14 rounded object-cover"
-                  />
-                ) : (
-                  `Comment media ${index + 1}`
-                )}
-              </a>
-            ))}
-          </div>
-        )}
-        {hasReplies && (
-          <button
-            type="button"
-            onClick={() => setExpanded(!expanded)}
-            className="text-xs text-blue-600 hover:text-blue-800 mt-1"
-          >
-            {expanded ? "Hide" : "Show"} {comment.replies.length}{" "}
-            {comment.replies.length === 1 ? "reply" : "replies"}
-          </button>
-        )}
-      </div>
-      {expanded && hasReplies && hasDepthBudget && (
-        <div>
-          {visibleReplies.map((reply) => (
-            <ThreadedCommentItem
-              key={reply.comment_id}
-              comment={reply}
-              depth={depth + 1}
-              seenCommentIds={visited}
-            />
-          ))}
-          {suppressedReplies > 0 ? (
-            <p className="ml-4 border-l-2 border-amber-200 pl-3 py-1 text-xs text-amber-700">
-              {suppressedReplies} nested replies skipped due to thread cycle.
-            </p>
-          ) : null}
-        </div>
-      )}
-      {expanded && hasReplies && !hasDepthBudget ? (
-        <p className="ml-4 border-l-2 border-amber-200 pl-3 py-1 text-xs text-amber-700">
-          Max thread depth reached. {replies.length} {replies.length === 1 ? "reply" : "replies"} hidden.
-        </p>
-      ) : null}
-    </div>
+    <AdminCommentThread
+      items={[toAdminThreadCommentItem(comment)]}
+      maxDepth={MAX_THREADED_COMMENT_DEPTH}
+      defaultExpandedDepth={2}
+    />
   );
 }
 
@@ -4308,7 +4277,8 @@ function PostCard({
   const savedComments = getSavedCommentsForPost(post);
   const displayedSavedComments = getDisplayedSavedCommentsForPost(platform, post);
   const commentsCoverageIncomplete = isCommentsCoverageIncomplete(savedComments, actualComments);
-  const thumbnailUrl = getPostThumbnailUrl(platform, post);
+  const thumbnailImage = getPostThumbnailImage(platform, post);
+  const thumbnailUrl = thumbnailImage.src;
   const platformIconKey = getPlatformIconKey(platform);
   const headerAccounts = buildHeaderAccounts(platform, post, collaborators);
   const headerAuthorHandle = normalizeHandle(post.author);
@@ -4434,6 +4404,7 @@ function PostCard({
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
                       src={thumbnailUrl}
+                      srcSet={thumbnailImage.srcSet ?? undefined}
                       alt={`${PLATFORM_LABELS[platform] ?? platform} post thumbnail`}
                       loading="lazy"
                       referrerPolicy="no-referrer"
@@ -4633,9 +4604,11 @@ export default function WeekDetailPage() {
   const showIdForApi = resolvedShowId ?? "";
   const showSlugForRouting = resolvedShowSlug ?? showRouteParam;
   const sourceScope: SourceScope = (() => {
-    const raw = searchParams.get("source_scope") ?? searchParams.get("scope") ?? "bravo";
-    if (raw === "creator" || raw === "community") return raw;
-    return "bravo";
+    const raw = searchParams.get("source_scope") ?? searchParams.get("scope") ?? "network";
+    if (raw === "creator" || raw === "community" || raw === "news" || raw === "network") {
+      return raw;
+    }
+    return "network";
   })();
   const seasonIdHint = (() => {
     const raw = searchParams.get("season_id");
@@ -5212,6 +5185,7 @@ export default function WeekDetailPage() {
         weekParams.set("post_offset", String(pageRequestOffset));
         weekParams.set("sort_field", resolvedSortField);
         weekParams.set("sort_dir", resolvedSortDir);
+        weekParams.set("include_status", "false");
         if (resolvedSeasonId) {
           weekParams.set("season_id", resolvedSeasonId);
         }
@@ -5427,6 +5401,7 @@ export default function WeekDetailPage() {
           post_offset: String(pageOffset),
           sort_field: "posted_at",
           sort_dir: "desc",
+          include_status: "false",
         });
         if (resolvedSeasonId) {
           weekParams.set("season_id", resolvedSeasonId);
@@ -5734,7 +5709,7 @@ export default function WeekDetailPage() {
         dateEnd,
       });
       const isRhoslcInstagramSync =
-        sourceScope === "bravo" &&
+        sourceScope === "network" &&
         isRhoslcSeason &&
         Array.isArray(platforms) &&
         platforms.length === 1 &&
@@ -6511,7 +6486,7 @@ export default function WeekDetailPage() {
         return;
       }
       const isRhoslcInstagramSync =
-        sourceScope === "bravo" &&
+        sourceScope === "network" &&
         isRhoslcSeason &&
         Array.isArray(selectedPlatforms) &&
         selectedPlatforms.length === 1 &&

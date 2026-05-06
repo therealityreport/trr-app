@@ -1,17 +1,30 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { NextRequest } from "next/server";
 
-const { getBackendApiUrlMock, fetchAdminBackendJsonMock } = vi.hoisted(() => ({
+const {
+  getBackendApiUrlMock,
+  fetchAdminBackendJsonMock,
+  requireAdminMock,
+  buildAdminReadResponseHeadersMock,
+} = vi.hoisted(() => ({
   getBackendApiUrlMock: vi.fn(),
   fetchAdminBackendJsonMock: vi.fn(),
+  requireAdminMock: vi.fn(),
+  buildAdminReadResponseHeadersMock: vi.fn(),
 }));
 
 vi.mock("@/lib/server/trr-api/backend", () => ({
   getBackendApiUrl: getBackendApiUrlMock,
 }));
 
+vi.mock("@/lib/server/auth", () => ({
+  requireAdmin: requireAdminMock,
+}));
+
 vi.mock("@/lib/server/trr-api/admin-read-proxy", () => ({
   fetchAdminBackendJson: fetchAdminBackendJsonMock,
   ADMIN_READ_PROXY_SHORT_TIMEOUT_MS: 5_000,
+  buildAdminReadResponseHeaders: buildAdminReadResponseHeadersMock,
 }));
 
 import {
@@ -21,6 +34,7 @@ import {
   SOCIAL_PROXY_PROGRESS_TIMEOUT_MS,
   socialProxyErrorResponse,
 } from "@/lib/server/trr-api/social-admin-proxy";
+import { createSocialProfileProxyRoute } from "@/lib/server/trr-api/social-profile-route-factory";
 
 describe("social-admin-proxy", () => {
   beforeEach(() => {
@@ -29,6 +43,17 @@ describe("social-admin-proxy", () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     process.env.TRR_INTERNAL_ADMIN_SHARED_SECRET = "internal-secret-for-tests";
     delete process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY;
+    requireAdminMock.mockReset();
+    requireAdminMock.mockResolvedValue({
+      uid: "admin-1",
+      email: "admin@example.com",
+      provider: "firebase",
+      token: {},
+    });
+    buildAdminReadResponseHeadersMock.mockReset();
+    buildAdminReadResponseHeadersMock.mockImplementation(({ cacheStatus }: { cacheStatus: string }) => ({
+      "x-trr-cache": cacheStatus,
+    }));
     fetchAdminBackendJsonMock.mockReset();
     fetchAdminBackendJsonMock.mockResolvedValue({
       status: 200,
@@ -590,5 +615,172 @@ describe("social-admin-proxy", () => {
     expect(payload.retryable).toBe(true);
     expect(payload.retry_after_seconds).toBe(0);
     expect(response.headers.get("retry-after")).toBe("0");
+  });
+
+  describe("social profile route factory proxy matrix", () => {
+    const routeContext = {
+      params: Promise.resolve({ platform: "instagram", handle: "bravo/tv" }),
+    };
+
+    beforeEach(() => {
+      getBackendApiUrlMock.mockImplementation((path: string) => `http://backend.local/api/v1${path}`);
+    });
+
+    it.each([
+      {
+        name: "GET query forwarding",
+        config: {
+          endpoint: "posts",
+          fallbackError: "Failed to fetch social account profile posts",
+          logLabel: "[test] factory posts",
+          method: "GET" as const,
+          queryString: "forward" as const,
+          timeoutMs: 1000,
+        },
+        request: new NextRequest(
+          "http://localhost/api/admin/trr-api/social/profiles/instagram/bravo%2Ftv/posts?limit=2&cursor=a%20b",
+        ),
+        expectedUrl:
+          "http://backend.local/api/v1/admin/socials/profiles/instagram/bravo%2Ftv/posts?limit=2&cursor=a+b",
+        expectedMethod: "GET",
+        expectedBody: undefined,
+      },
+      {
+        name: "POST body forwarding with stripped refresh query",
+        config: {
+          endpoint: "comments/scrape",
+          fallbackError: "Failed to start social account comments scrape",
+          logLabel: "[test] factory comments scrape",
+          method: "POST" as const,
+          queryString: "strip-refresh" as const,
+          headers: { "content-type": "application/json" },
+          timeoutMs: 1000,
+        },
+        request: new NextRequest(
+          "http://localhost/api/admin/trr-api/social/profiles/instagram/bravo%2Ftv/comments/scrape?refresh=1&limit=5",
+          {
+            method: "POST",
+            body: JSON.stringify({ mode: "full" }),
+          },
+        ),
+        expectedUrl:
+          "http://backend.local/api/v1/admin/socials/profiles/instagram/bravo%2Ftv/comments/scrape?limit=5",
+        expectedMethod: "POST",
+        expectedBody: JSON.stringify({ mode: "full" }),
+      },
+    ])("centralizes $name", async ({ config, request, expectedUrl, expectedMethod, expectedBody }) => {
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true }),
+      } as Response);
+      vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+      const response = await createSocialProfileProxyRoute(config)(request, routeContext);
+      const payload = await response.json();
+      const requestInit = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined;
+
+      expect(response.status).toBe(200);
+      expect(payload).toEqual({ ok: true });
+      expect(fetchMock).toHaveBeenCalledWith(expectedUrl, expect.objectContaining({ method: expectedMethod }));
+      expect(requestInit?.body).toBe(expectedBody);
+      expect(new Headers(requestInit?.headers).get("Authorization")).toMatch(/^Bearer /);
+    });
+
+    it("normalizes upstream errors through the shared error response", async () => {
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 503,
+        headers: { get: () => null },
+        json: async () => ({ detail: "connection pool exhausted" }),
+      } as Response);
+      vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+      const response = await createSocialProfileProxyRoute({
+        endpoint: "summary",
+        fallbackError: "Failed to fetch social account profile summary",
+        logLabel: "[test] factory summary",
+        queryString: "forward",
+        timeoutMs: 1000,
+      })(
+        new NextRequest("http://localhost/api/admin/trr-api/social/profiles/instagram/bravo%2Ftv/summary"),
+        routeContext,
+      );
+      const payload = (await response.json()) as { code?: string; retryable?: boolean };
+
+      expect(response.status).toBe(503);
+      expect(payload.code).toBe("BACKEND_SATURATED");
+      expect(payload.retryable).toBe(true);
+    });
+
+    it("keeps timeout tier metadata on factory-created routes", async () => {
+      const abortError = new Error("signal aborted");
+      abortError.name = "AbortError";
+      const fetchMock = vi.fn().mockRejectedValue(abortError);
+      vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+      const response = await createSocialProfileProxyRoute({
+        endpoint: "summary",
+        fallbackError: "Failed to fetch social account profile summary",
+        logLabel: "[test] factory timeout",
+        queryString: "forward",
+        timeoutMs: 60_000,
+      })(
+        new NextRequest("http://localhost/api/admin/trr-api/social/profiles/instagram/bravo%2Ftv/summary"),
+        routeContext,
+      );
+      const payload = (await response.json()) as { code?: string; trace_id?: string };
+      const consoleErrorMock = vi.mocked(console.error);
+      const [, logPayload] = consoleErrorMock.mock.calls.at(-1) ?? [];
+
+      expect(response.status).toBe(504);
+      expect(payload.code).toBe("UPSTREAM_TIMEOUT");
+      expect(logPayload).toEqual(
+        expect.objectContaining({
+          code: "UPSTREAM_TIMEOUT",
+          trace_id: payload.trace_id,
+          context: expect.objectContaining({
+            backend_path: "/api/v1/admin/socials/profiles/instagram/bravo%2Ftv/summary",
+            timeout_ms: 60_000,
+            timeout_tier: "long",
+          }),
+        }),
+      );
+    });
+
+    it("runs optional cache invalidation hooks after successful mutating proxy calls", async () => {
+      const invalidateCache = vi.fn();
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ saved: true }),
+      } as Response);
+      vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+      const response = await createSocialProfileProxyRoute({
+        endpoint: "hashtags",
+        fallbackError: "Failed to update social account profile hashtags",
+        logLabel: "[test] factory hashtag update",
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        timeoutMs: 45_000,
+        invalidateCache,
+      })(
+        new NextRequest("http://localhost/api/admin/trr-api/social/profiles/instagram/bravo%2Ftv/hashtags", {
+          method: "PUT",
+          body: JSON.stringify({ hashtags: [] }),
+        }),
+        routeContext,
+      );
+
+      expect(response.status).toBe(200);
+      expect(invalidateCache).toHaveBeenCalledWith(
+        expect.objectContaining({
+          backendPath: "/profiles/instagram/bravo%2Ftv/hashtags",
+          data: { saved: true },
+          params: { platform: "instagram", handle: "bravo/tv" },
+        }),
+      );
+    });
   });
 });

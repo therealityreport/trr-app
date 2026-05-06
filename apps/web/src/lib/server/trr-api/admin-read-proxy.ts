@@ -12,17 +12,20 @@ export type AdminReadRequestRole = "primary" | "secondary" | "polling";
 export class AdminReadProxyError extends Error {
   status: number;
   code?: string;
+  reason?: string;
   retryable?: boolean;
   detail?: Record<string, unknown>;
 
   constructor(message: string, status: number, options?: {
     code?: string;
+    reason?: string;
     retryable?: boolean;
     detail?: Record<string, unknown>;
   }) {
     super(message);
     this.status = status;
     this.code = options?.code;
+    this.reason = options?.reason;
     this.retryable = options?.retryable;
     this.detail = options?.detail;
   }
@@ -91,6 +94,51 @@ const parseJsonRecord = async (response: Response): Promise<Record<string, unkno
     return { error: "Invalid response from backend" };
   }
 };
+
+const isRetryableStatus = (status: number): boolean =>
+  status === 408 || status === 409 || status === 425 || status === 429 || status >= 500;
+
+const readStringField = (value: unknown): string | undefined =>
+  typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+
+const readBooleanField = (value: unknown): boolean | undefined =>
+  typeof value === "boolean" ? value : undefined;
+
+export function buildAdminBackendStatusError(options: {
+  status: number;
+  data: Record<string, unknown>;
+  fallbackMessage: string;
+  routeName: string;
+  requestRole?: AdminReadRequestRole;
+}): AdminReadProxyError {
+  const detail =
+    options.data.detail && typeof options.data.detail === "object" && !Array.isArray(options.data.detail)
+      ? (options.data.detail as Record<string, unknown>)
+      : null;
+  const message =
+    readStringField(options.data.error) ??
+    readStringField(options.data.detail) ??
+    readStringField(detail?.message) ??
+    options.fallbackMessage;
+  const code = readStringField(options.data.code) ?? readStringField(detail?.code);
+  const reason = readStringField(options.data.reason) ?? readStringField(detail?.reason);
+  const retryable =
+    readBooleanField(options.data.retryable) ??
+    readBooleanField(detail?.retryable) ??
+    isRetryableStatus(options.status);
+
+  return new AdminReadProxyError(message, options.status, {
+    ...(code ? { code } : {}),
+    ...(reason ? { reason } : {}),
+    retryable,
+    detail: {
+      ...(detail ?? {}),
+      route: readStringField(detail?.route) ?? options.routeName,
+      upstream_status: options.status,
+      ...(options.requestRole ? { request_role: options.requestRole } : {}),
+    },
+  });
+}
 
 export async function fetchAdminBackendJson(
   path: string,
@@ -254,6 +302,9 @@ export function buildAdminProxyErrorResponse(error: unknown): NextResponse {
   const body: Record<string, unknown> = { error: message };
   if (error instanceof AdminReadProxyError && error.code) {
     body.code = error.code;
+  }
+  if (error instanceof AdminReadProxyError && error.reason) {
+    body.reason = error.reason;
   }
   if (error instanceof AdminReadProxyError && typeof error.retryable === "boolean") {
     body.retryable = error.retryable;

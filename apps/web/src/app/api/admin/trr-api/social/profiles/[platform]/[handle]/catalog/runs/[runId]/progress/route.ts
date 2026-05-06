@@ -23,6 +23,48 @@ const elapsedMs = (start: number): number => Math.round(performance.now() - star
 const PROGRESS_CACHE_NAMESPACE = "social-account-catalog-run-progress";
 const PROGRESS_CACHE_TTL_MS = 5_000;
 const PROGRESS_CACHE_STALE_MS = 60_000;
+const FAST_PROGRESS_TIMEOUT_MS = 12_000;
+
+const markProgressDegraded = (value: unknown, reason: string): unknown => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return value;
+  }
+  const statusOverride =
+    reason === "stale_if_error"
+      ? {
+          run_status: "unknown",
+          run_state: "degraded",
+          status: "unknown",
+        }
+      : {};
+  return {
+    ...(value as Record<string, unknown>),
+    ...statusOverride,
+    progress_degraded: true,
+    progress_degraded_reason: reason,
+    progress_degraded_at: new Date().toISOString(),
+    progress_authoritative: false,
+  };
+};
+
+const buildDegradedProgressPayload = (runId: string, reason: string): Record<string, unknown> => ({
+  run_id: runId,
+  run_status: "unknown",
+  run_state: "degraded",
+  status: "unknown",
+  stages: {},
+  summary: {},
+  recent_log: [],
+  progress_degraded: true,
+  progress_degraded_reason: reason,
+  progress_degraded_at: new Date().toISOString(),
+  progress_authoritative: false,
+});
+
+const isFastProgressRequest = (request: NextRequest): boolean => {
+  const fast = request.nextUrl.searchParams.get("fast");
+  return fast === "true" || fast === "1";
+};
 
 export async function GET(request: NextRequest, context: RouteContext) {
   const totalStart = performance.now();
@@ -58,15 +100,17 @@ export async function GET(request: NextRequest, context: RouteContext) {
 
     const upstreamStart = performance.now();
     let data: unknown;
+    const isFastPoll = isFastProgressRequest(request);
+    const timeoutMs = isFastPoll ? FAST_PROGRESS_TIMEOUT_MS : SOCIAL_PROXY_PROGRESS_TIMEOUT_MS;
     try {
-      data = await getOrCreateRouteResponsePromise(PROGRESS_CACHE_NAMESPACE, cacheKey, () =>
+      const fetchProgress = () =>
         fetchSocialBackendJson(path, {
           adminContext,
           fallbackError: "Failed to fetch social account catalog run progress",
           retries: 0,
-          timeoutMs: SOCIAL_PROXY_PROGRESS_TIMEOUT_MS,
-        }),
-      );
+          timeoutMs,
+        });
+      data = await getOrCreateRouteResponsePromise(PROGRESS_CACHE_NAMESPACE, cacheKey, fetchProgress);
       setRouteResponseCache(
         PROGRESS_CACHE_NAMESPACE,
         cacheKey,
@@ -77,7 +121,9 @@ export async function GET(request: NextRequest, context: RouteContext) {
     } catch (error) {
       const stale = getStaleRouteResponseCache(PROGRESS_CACHE_NAMESPACE, cacheKey);
       if (stale) {
-        data = stale;
+        data = markProgressDegraded(stale, "stale_if_error");
+      } else if (isFastPoll) {
+        data = buildDegradedProgressPayload(runId, "fast_progress_timeout");
       } else {
         throw error;
       }
@@ -97,7 +143,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
       upstream_ms: upstreamMs,
       response_ms: responseMs,
       total_ms: elapsedMs(totalStart),
-      timeout_ms: SOCIAL_PROXY_PROGRESS_TIMEOUT_MS,
+      timeout_ms: timeoutMs,
       retries: 0,
     });
 
@@ -112,7 +158,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
       upstream_ms: upstreamMs,
       response_ms: responseMs,
       total_ms: elapsedMs(totalStart),
-      timeout_ms: SOCIAL_PROXY_PROGRESS_TIMEOUT_MS,
+      timeout_ms: isFastProgressRequest(request) ? FAST_PROGRESS_TIMEOUT_MS : SOCIAL_PROXY_PROGRESS_TIMEOUT_MS,
       retries: 0,
       failed: true,
     });

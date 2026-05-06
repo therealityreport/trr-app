@@ -11,6 +11,7 @@ describe("social week detail wiring", () => {
     const contents = fs.readFileSync(filePath, "utf8");
 
     expect(contents).toMatch(/max_comments_per_post",\s*"0"/);
+    expect(contents).toMatch(/include_status",\s*"false"/);
     expect(contents).toMatch(/retries:\s*0/);
     expect(contents).toMatch(/timeoutMs:\s*40_000/);
   });

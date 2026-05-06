@@ -39,9 +39,13 @@ const SOCIAL_LANDING_STALE_CACHE_TTL_MS = parseCacheTtlMs(
   900_000,
 );
 const NETWORK_SOURCE_SCOPE_BY_KEY = {
-  "bravo-tv": "bravo",
+  "bravo-tv": "network",
 } as const;
-const SHOW_HANDLE_SHARED_SOURCE_SCOPE = "bravo";
+const SHOW_HANDLE_SHARED_SOURCE_SCOPE = "network";
+const SHARED_SOURCE_TARGET_SCOPES = {
+  news: "news",
+  creator: "creator",
+} as const;
 const SHOW_EXTERNAL_ID_KEYS_BY_PLATFORM = {
   instagram: ["instagram_handle", "instagram", "instagram_id"],
   facebook: ["facebook_handle", "facebook", "facebook_id"],
@@ -51,14 +55,18 @@ const SHOW_EXTERNAL_ID_KEYS_BY_PLATFORM = {
   youtube: ["youtube_handle", "youtube", "youtube_id"],
 } as const;
 
-type LandingTargetType = "network" | "show" | "person";
+type LandingTargetType = "network" | "show" | "person" | "shared_source";
 type LandingPlatform = keyof typeof SHOW_EXTERNAL_ID_KEYS_BY_PLATFORM;
+type SharedSourceTargetScope = (typeof SHARED_SOURCE_TARGET_SCOPES)[keyof typeof SHARED_SOURCE_TARGET_SCOPES];
 
 const isLandingTargetType = (value: unknown): value is LandingTargetType =>
-  value === "network" || value === "show" || value === "person";
+  value === "network" || value === "show" || value === "person" || value === "shared_source";
 
 const isLandingPlatform = (value: unknown): value is LandingPlatform =>
   typeof value === "string" && value in SHOW_EXTERNAL_ID_KEYS_BY_PLATFORM;
+
+const isSharedSourceTargetScope = (value: unknown): value is SharedSourceTargetScope =>
+  value === "news" || value === "creator";
 
 const normalizeInternalHandle = (platform: LandingPlatform, rawValue: string): string => {
   const normalizedValue = normalizePersonExternalIdValue(platform, rawValue);
@@ -114,6 +122,7 @@ const buildShowSharedSourceMetadata = ({
   seed_source: "admin-social-landing-show-add",
   display_name: showName,
   network_name: showName,
+  network_key: "bravo-tv",
   profile_kind: "show_official",
   assigned_show_id: showId,
   source_scope: SHOW_HANDLE_SHARED_SOURCE_SCOPE,
@@ -209,6 +218,86 @@ const syncShowSharedSource = async ({
   });
 };
 
+const upsertSharedSource = async ({
+  adminContext,
+  sourceScope,
+  platform,
+  accountHandle,
+  metadata,
+}: {
+  adminContext: ReturnType<typeof toVerifiedAdminContext>;
+  sourceScope: string;
+  platform: LandingPlatform;
+  accountHandle: string;
+  metadata: Record<string, unknown>;
+}) => {
+  const current = (await fetchSocialBackendJson("/shared/sources", {
+    adminContext,
+    queryString: `source_scope=${sourceScope}&include_inactive=true`,
+    fallbackError: "Failed to load shared social account sources",
+    retries: 0,
+    timeoutMs: 30_000,
+  })) as { sources?: Array<Record<string, unknown>> };
+  const nextSources = (Array.isArray(current.sources) ? current.sources : [])
+    .map((source) => {
+      const sourcePlatform = String(source.platform ?? "").trim().toLowerCase();
+      const sourceHandle = normalizeSharedAccountHandle(source.account_handle);
+      if (!sourcePlatform || !sourceHandle) return null;
+      return {
+        platform: sourcePlatform,
+        account_handle: sourceHandle,
+        is_active: source.is_active !== false,
+        scrape_priority: Number(source.scrape_priority || 100),
+        metadata: toRecord(source.metadata),
+      };
+    })
+    .filter((source): source is {
+      platform: string;
+      account_handle: string;
+      is_active: boolean;
+      scrape_priority: number;
+      metadata: Record<string, unknown>;
+    } => source !== null);
+
+  const existingIndex = nextSources.findIndex(
+    (source) =>
+      source.platform === platform &&
+      source.account_handle.toLowerCase() === accountHandle.toLowerCase(),
+  );
+  const nextSource = {
+    platform,
+    account_handle: accountHandle,
+    is_active: true,
+    scrape_priority: existingIndex >= 0 ? nextSources[existingIndex].scrape_priority : 100,
+    metadata: {
+      ...(existingIndex >= 0 ? nextSources[existingIndex].metadata : {}),
+      ...metadata,
+      source_scope: sourceScope,
+      account_handle: accountHandle,
+      platform,
+    },
+  };
+
+  if (existingIndex >= 0) {
+    nextSources[existingIndex] = nextSource;
+  } else {
+    nextSources.push(nextSource);
+  }
+
+  await fetchSocialBackendJson("/shared/sources", {
+    adminContext,
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      source_scope: sourceScope,
+      sources: nextSources,
+    }),
+    fallbackError: "Failed to update shared social account sources",
+    retries: 0,
+    timeoutMs: 45_000,
+  });
+};
+
 export async function GET(request: NextRequest) {
   try {
     const user = await requireAdmin(request);
@@ -287,6 +376,8 @@ export async function POST(request: NextRequest) {
     const targetId = typeof body?.target_id === "string" ? body.target_id.trim() : "";
     const platform = body?.platform;
     const rawValue = typeof body?.value === "string" ? body.value.trim() : "";
+    const sourceScope = typeof body?.source_scope === "string" ? body.source_scope.trim() : "";
+    const displayName = typeof body?.display_name === "string" ? body.display_name.trim() : "";
 
     if (!isLandingTargetType(targetType)) {
       return NextResponse.json({ error: "target_type is required" }, { status: 400 });
@@ -299,6 +390,24 @@ export async function POST(request: NextRequest) {
     }
     if (!rawValue) {
       return NextResponse.json({ error: "value is required" }, { status: 400 });
+    }
+
+    if (targetType === "shared_source") {
+      if (!isSharedSourceTargetScope(sourceScope)) {
+        return NextResponse.json({ error: "source_scope must be news or creator" }, { status: 400 });
+      }
+      const normalizedHandle = normalizeInternalHandle(platform, rawValue);
+      await upsertSharedSource({
+        adminContext,
+        sourceScope,
+        platform,
+        accountHandle: normalizedHandle,
+        metadata: {
+          seed_source: `admin-social-landing-${sourceScope}-add`,
+          display_name: displayName || normalizedHandle,
+          profile_kind: sourceScope,
+        },
+      });
     }
 
     if (targetType === "network") {

@@ -14,7 +14,6 @@ import CastContentSection from "@/components/admin/cast-content-section";
 import { invalidateAdminSnapshotFamilies } from "@/lib/admin/admin-snapshot-client";
 import { fetchAdminWithAuth, getClientAuthHeaders } from "@/lib/admin/client-auth";
 import {
-  canonicalizeHostedMediaUrl,
   inferHostedMediaFileNameFromUrl,
   isLikelyHostedMediaUrl,
 } from "@/lib/hosted-media";
@@ -34,10 +33,15 @@ import {
 } from "@/lib/admin/social-sync-session";
 import { useSharedPollingResource, useSharedSseResource } from "@/lib/admin/shared-live-resource";
 import { logAdminPageReadDiagnostic, measurePayloadBytes } from "@/lib/admin/page-read-diagnostics";
+import {
+  selectDisplayThumbnail,
+  type DisplayThumbnailSelection,
+  type DisplayThumbnailVariants,
+} from "@/components/admin/social-week/social-media-thumbnails";
 
 type Platform = "instagram" | "tiktok" | "twitter" | "youtube" | "facebook" | "threads";
 export type PlatformTab = "overview" | Platform;
-type Scope = "bravo" | "creator" | "community";
+type Scope = "network" | "creator" | "community" | "news";
 type SyncStrategy = "incremental" | "full_refresh";
 type WeeklyMetric = "posts" | "comments" | "completeness";
 type BenchmarkCompareMode = "previous" | "trailing";
@@ -375,6 +379,10 @@ type AnalyticsResponse = {
       hosted_thumbnail_url?: string | null;
       source_thumbnail_url?: string | null;
       thumbnail_url?: string | null;
+      display_thumbnail_url?: string | null;
+      display_thumbnail_variants?: DisplayThumbnailVariants;
+      display_thumbnail_status?: string | Record<string, unknown> | null;
+      display_thumbnail_srcset?: string | null;
     }>;
     viewer_discussion: Array<{
       platform: string;
@@ -387,6 +395,10 @@ type AnalyticsResponse = {
       hosted_thumbnail_url?: string | null;
       source_thumbnail_url?: string | null;
       thumbnail_url?: string | null;
+      display_thumbnail_url?: string | null;
+      display_thumbnail_variants?: DisplayThumbnailVariants;
+      display_thumbnail_status?: string | Record<string, unknown> | null;
+      display_thumbnail_srcset?: string | null;
     }>;
   };
   jobs: SocialJob[];
@@ -2106,15 +2118,29 @@ const isVideoLikeThumbnailUrl = (url: string): boolean => {
 const detectSocialMediaType = (url: string): SocialMediaType =>
   isVideoLikeThumbnailUrl(url) ? "video" : "image";
 
+const getCanonicalLeaderboardThumbnailImage = (item: {
+  hosted_thumbnail_url?: string | null;
+  thumbnail_url?: string | null;
+  source_thumbnail_url?: string | null;
+  display_thumbnail_url?: string | null;
+  display_thumbnail_variants?: DisplayThumbnailVariants;
+  display_thumbnail_srcset?: string | null;
+}): DisplayThumbnailSelection =>
+  selectDisplayThumbnail({
+    displayThumbnail: item.display_thumbnail_url,
+    displayThumbnailSrcSet: item.display_thumbnail_srcset,
+    displayThumbnailVariants: item.display_thumbnail_variants,
+    fallbackUrls: [item.hosted_thumbnail_url, item.thumbnail_url, item.source_thumbnail_url],
+  });
+
 const getCanonicalLeaderboardThumbnailUrl = (item: {
   hosted_thumbnail_url?: string | null;
   thumbnail_url?: string | null;
   source_thumbnail_url?: string | null;
-}) =>
-  canonicalizeHostedMediaUrl(item.hosted_thumbnail_url) ??
-  canonicalizeHostedMediaUrl(item.thumbnail_url) ??
-  canonicalizeHostedMediaUrl(item.source_thumbnail_url) ??
-  null;
+  display_thumbnail_url?: string | null;
+  display_thumbnail_variants?: DisplayThumbnailVariants;
+  display_thumbnail_srcset?: string | null;
+}) => getCanonicalLeaderboardThumbnailImage(item).src;
 
 const buildLeaderboardMediaMetadata = (input: {
   item: {
@@ -2126,6 +2152,10 @@ const buildLeaderboardMediaMetadata = (input: {
     hosted_thumbnail_url?: string | null;
     source_thumbnail_url?: string | null;
     thumbnail_url?: string | null;
+    display_thumbnail_url?: string | null;
+    display_thumbnail_variants?: DisplayThumbnailVariants;
+    display_thumbnail_status?: string | Record<string, unknown> | null;
+    display_thumbnail_srcset?: string | null;
   };
   sourceScope: Scope;
   showName: string;
@@ -2216,7 +2246,7 @@ export default function SeasonSocialAnalyticsSection({
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const scope: Scope = "bravo";
+  const scope: Scope = "network";
   const [uncontrolledPlatformTab, setUncontrolledPlatformTab] = useState<PlatformTab>("overview");
   const [socialDensity, setSocialDensity] = useState<SocialDensity>("comfortable");
   const [socialAlertsEnabled, setSocialAlertsEnabled] = useState(true);
@@ -6059,6 +6089,10 @@ export default function SeasonSocialAnalyticsSection({
         hosted_thumbnail_url?: string | null;
         source_thumbnail_url?: string | null;
         thumbnail_url?: string | null;
+        display_thumbnail_url?: string | null;
+        display_thumbnail_variants?: DisplayThumbnailVariants;
+        display_thumbnail_status?: string | Record<string, unknown> | null;
+        display_thumbnail_srcset?: string | null;
       },
       sectionTitle: string,
       extraStats: SocialStatsItem[] = [],
@@ -8262,7 +8296,8 @@ export default function SeasonSocialAnalyticsSection({
                   <h4 className="mb-4 text-lg font-semibold text-zinc-900">Bravo Content Leaderboard</h4>
                   <div className="space-y-2">
                     {(analytics?.leaderboards.bravo_content ?? []).slice(0, 10).map((item) => {
-                      const canonicalThumbnailUrl = getCanonicalLeaderboardThumbnailUrl(item);
+                      const canonicalThumbnail = getCanonicalLeaderboardThumbnailImage(item);
+                      const canonicalThumbnailUrl = canonicalThumbnail.src;
                       return (
                       <div
                         key={`${item.platform}-${item.source_id}`}
@@ -8284,6 +8319,7 @@ export default function SeasonSocialAnalyticsSection({
                                 // eslint-disable-next-line @next/next/no-img-element
                                 <img
                                   src={canonicalThumbnailUrl}
+                                  srcSet={canonicalThumbnail.srcSet ?? undefined}
                                   alt={`${PLATFORM_LABELS[item.platform] ?? item.platform} leaderboard thumbnail`}
                                   loading="lazy"
                                   referrerPolicy="no-referrer"
@@ -8326,7 +8362,8 @@ export default function SeasonSocialAnalyticsSection({
                 <h4 className="mb-4 text-lg font-semibold text-zinc-900">Viewer Discussion Highlights</h4>
                 <div className="space-y-2">
                   {(analytics?.leaderboards.viewer_discussion ?? []).slice(0, 10).map((item) => {
-                    const canonicalThumbnailUrl = getCanonicalLeaderboardThumbnailUrl(item);
+                    const canonicalThumbnail = getCanonicalLeaderboardThumbnailImage(item);
+                    const canonicalThumbnailUrl = canonicalThumbnail.src;
                     return (
                     <div
                       key={`${item.platform}-${item.source_id}`}
@@ -8352,6 +8389,7 @@ export default function SeasonSocialAnalyticsSection({
                               // eslint-disable-next-line @next/next/no-img-element
                               <img
                                 src={canonicalThumbnailUrl}
+                                srcSet={canonicalThumbnail.srcSet ?? undefined}
                                 alt={`${PLATFORM_LABELS[item.platform] ?? item.platform} discussion thumbnail`}
                                 loading="lazy"
                                 referrerPolicy="no-referrer"

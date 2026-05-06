@@ -21,6 +21,7 @@ export type AdminNormalizedError = {
   code?: string;
   reason?: string;
   retryAfterMs?: number;
+  detail?: Record<string, unknown>;
 };
 
 export type AdminStreamEventPayload = Record<string, unknown> | string | null;
@@ -35,8 +36,9 @@ export class AdminRequestError extends Error {
   code?: string;
   reason?: string;
   retryAfterMs?: number;
+  detail?: Record<string, unknown>;
 
-  constructor({ error, status, retryable, code, reason, retryAfterMs }: AdminNormalizedError) {
+  constructor({ error, status, retryable, code, reason, retryAfterMs, detail }: AdminNormalizedError) {
     super(error);
     this.name = "AdminRequestError";
     this.status = status;
@@ -44,6 +46,7 @@ export class AdminRequestError extends Error {
     this.code = code;
     this.reason = reason;
     this.retryAfterMs = retryAfterMs;
+    this.detail = detail;
   }
 }
 
@@ -78,7 +81,7 @@ const inputToKey = (input: RequestInfo | URL): string =>
 
 const looksLikeGalleryRead = (input: RequestInfo | URL): boolean => {
   const value = inputToKey(input).toLowerCase();
-  return value.includes("/photos") || value.includes("/gallery");
+  return value.includes("/assets") || value.includes("/photos") || value.includes("/gallery");
 };
 
 const resolveTimeoutMs = (
@@ -208,9 +211,10 @@ const normalizeErrorPayload = async (response: Response): Promise<AdminNormalize
     error: message,
     status: response.status,
     retryable,
-    code,
-    reason,
-    retryAfterMs,
+    ...(code ? { code } : {}),
+    ...(reason ? { reason } : {}),
+    ...(typeof retryAfterMs === "number" ? { retryAfterMs } : {}),
+    ...(detail ? { detail } : {}),
   };
 };
 
@@ -220,9 +224,10 @@ const normalizeThrownError = (error: unknown): AdminNormalizedError => {
       error: error.message,
       status: error.status,
       retryable: error.retryable,
-      code: error.code,
-      reason: error.reason,
-      retryAfterMs: error.retryAfterMs,
+      ...(error.code ? { code: error.code } : {}),
+      ...(error.reason ? { reason: error.reason } : {}),
+      ...(typeof error.retryAfterMs === "number" ? { retryAfterMs: error.retryAfterMs } : {}),
+      ...(error.detail ? { detail: error.detail } : {}),
     };
   }
   if (isAbortLikeError(error)) {

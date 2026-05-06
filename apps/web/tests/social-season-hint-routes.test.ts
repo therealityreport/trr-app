@@ -267,6 +267,7 @@ describe("social routes season_id hint forwarding", () => {
 
     const options = fetchSeasonBackendJsonMock.mock.calls[0]?.[3] as { queryString?: string };
     expect(String(options.queryString ?? "")).toContain("max_comments_per_post=0");
+    expect(String(options.queryString ?? "")).toContain("include_status=false");
     expect(String(options.queryString ?? "")).not.toContain("post_offset=20");
   });
 

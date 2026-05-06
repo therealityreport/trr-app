@@ -1,5 +1,5 @@
 export type SocialSyncPlatform = "instagram" | "tiktok" | "twitter" | "youtube" | "facebook" | "threads";
-export type SocialSyncSourceScope = "bravo" | "creator" | "community";
+export type SocialSyncSourceScope = "network" | "creator" | "community" | "news";
 export type SocialYouTubeSourceMode = "hybrid" | "api_only" | "scraper_only";
 export type SocialSyncRetryKind =
   | "retry_missing_comments"

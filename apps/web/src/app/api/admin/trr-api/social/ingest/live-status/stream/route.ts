@@ -16,7 +16,7 @@ function formatStreamError(message: string): string {
   return `event: error\ndata: ${JSON.stringify({ error: message })}\n\n`;
 }
 
-function streamErrorResponse(message: string, status = 500): Response {
+function streamErrorResponse(message: string, status = 200): Response {
   return new Response(formatStreamError(message), {
     status,
     headers: STREAM_HEADERS,
@@ -108,7 +108,7 @@ export async function GET(request: NextRequest) {
 
     if (!backendResponse.ok || !backendResponse.body) {
       const errorText = await backendResponse.text().catch(() => "");
-      return streamErrorResponse(errorText || "Backend live status stream failed", backendResponse.status || 502);
+      return streamErrorResponse(errorText || "Backend live status stream failed");
     }
 
     return proxiedEventStreamResponse(backendResponse);

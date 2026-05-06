@@ -3,11 +3,19 @@ import { NextRequest } from "next/server";
 
 const {
   requireAdminMock,
+  buildAdminAuthPartitionMock,
+  buildAdminSnapshotCacheKeyMock,
+  getOrCreateAdminSnapshotMock,
+  buildAdminReadResponseHeadersMock,
   fetchSocialBackendJsonMock,
   invalidateAdminSnapshotFamiliesMock,
   socialProxyErrorResponseMock,
 } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
+  buildAdminAuthPartitionMock: vi.fn(),
+  buildAdminSnapshotCacheKeyMock: vi.fn(),
+  getOrCreateAdminSnapshotMock: vi.fn(),
+  buildAdminReadResponseHeadersMock: vi.fn(),
   fetchSocialBackendJsonMock: vi.fn(),
   invalidateAdminSnapshotFamiliesMock: vi.fn(),
   socialProxyErrorResponseMock: vi.fn(),
@@ -23,7 +31,14 @@ vi.mock("@/lib/server/trr-api/social-admin-proxy", () => ({
 }));
 
 vi.mock("@/lib/server/admin/admin-snapshot-cache", () => ({
+  buildAdminAuthPartition: buildAdminAuthPartitionMock,
+  buildAdminSnapshotCacheKey: buildAdminSnapshotCacheKeyMock,
+  getOrCreateAdminSnapshot: getOrCreateAdminSnapshotMock,
   invalidateAdminSnapshotFamilies: invalidateAdminSnapshotFamiliesMock,
+}));
+
+vi.mock("@/lib/server/trr-api/admin-read-proxy", () => ({
+  buildAdminReadResponseHeaders: buildAdminReadResponseHeadersMock,
 }));
 
 import { POST } from "@/app/api/admin/trr-api/social/profiles/[platform]/[handle]/comments/scrape/route";
@@ -31,11 +46,15 @@ import { POST } from "@/app/api/admin/trr-api/social/profiles/[platform]/[handle
 describe("social account comments scrape proxy route", () => {
   beforeEach(() => {
     requireAdminMock.mockReset();
+    buildAdminAuthPartitionMock.mockReset();
+    buildAdminSnapshotCacheKeyMock.mockReset();
+    getOrCreateAdminSnapshotMock.mockReset();
+    buildAdminReadResponseHeadersMock.mockReset();
     fetchSocialBackendJsonMock.mockReset();
     invalidateAdminSnapshotFamiliesMock.mockReset();
     socialProxyErrorResponseMock.mockReset();
 
-    requireAdminMock.mockResolvedValue(undefined);
+    requireAdminMock.mockResolvedValue({ uid: "admin-1", provider: "firebase" });
     fetchSocialBackendJsonMock.mockResolvedValue({ run_id: "comments-run-1", status: "queued" });
     socialProxyErrorResponseMock.mockImplementation((error: unknown) =>
       new Response(JSON.stringify({ error: String(error), code: "BACKEND_UNREACHABLE" }), {
@@ -51,7 +70,7 @@ describe("social account comments scrape proxy route", () => {
         method: "POST",
         body: JSON.stringify({
           mode: "profile",
-          source_scope: "bravo",
+          source_scope: "network",
           refresh_policy: "all_saved_posts",
         }),
       }),
@@ -67,7 +86,7 @@ describe("social account comments scrape proxy route", () => {
         method: "POST",
         body: JSON.stringify({
           mode: "profile",
-          source_scope: "bravo",
+          source_scope: "network",
           refresh_policy: "all_saved_posts",
         }),
         fallbackError: "Failed to start social account comments scrape",
@@ -80,6 +99,24 @@ describe("social account comments scrape proxy route", () => {
     ]);
   });
 
+  it("sends an empty JSON object when the launch body is blank", async () => {
+    const response = await POST(
+      new NextRequest("http://localhost/api/admin/trr-api/social/profiles/instagram/thetraitorsus/comments/scrape", {
+        method: "POST",
+        body: "   ",
+      }),
+      {
+        params: Promise.resolve({ platform: "instagram", handle: "thetraitorsus" }),
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(fetchSocialBackendJsonMock).toHaveBeenCalledWith(
+      "/profiles/instagram/thetraitorsus/comments/scrape",
+      expect.objectContaining({ body: "{}" }),
+    );
+  });
+
   it("returns standardized proxy errors", async () => {
     fetchSocialBackendJsonMock.mockRejectedValueOnce(new Error("fetch failed"));
 
@@ -88,7 +125,7 @@ describe("social account comments scrape proxy route", () => {
         method: "POST",
         body: JSON.stringify({
           mode: "profile",
-          source_scope: "bravo",
+          source_scope: "network",
           refresh_policy: "all_saved_posts",
         }),
       }),

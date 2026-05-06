@@ -93,8 +93,12 @@ describe("social account profile snapshot route", () => {
     );
   });
 
-  it("proxies one backend dashboard request and does not forward refresh", async () => {
-    const consoleInfoSpy = vi.spyOn(console, "info").mockImplementation(() => undefined);
+  it("uses bounded direct progress when a run id is present and does not forward refresh", async () => {
+    fetchSocialBackendJsonMock.mockResolvedValueOnce({
+      run_id: "run-1",
+      run_status: "running",
+      progress_degraded: false,
+    });
 
     const response = await GET(
       new NextRequest(
@@ -102,41 +106,65 @@ describe("social account profile snapshot route", () => {
       ),
       { params: Promise.resolve({ platform: "instagram", handle: "thetraitorsus" }) },
     );
-    const body = (await response.json()) as { data: { summary?: { account_handle?: string } } };
+    const body = (await response.json()) as {
+      data: {
+        summary: unknown;
+        catalog_run_progress?: { run_id?: string; run_status?: string };
+        dashboard_freshness?: { source?: string; status?: string };
+        summary_omitted_reason?: string | null;
+      };
+    };
 
     expect(response.status).toBe(200);
-    expect(body.data.summary?.account_handle).toBe("thetraitorsus");
+    expect(body.data.summary).toBeNull();
+    expect(body.data.summary_omitted_reason).toBe("progress_only");
+    expect(body.data.catalog_run_progress?.run_id).toBe("run-1");
     expect(fetchSocialBackendJsonMock).toHaveBeenCalledTimes(1);
     expect(fetchSocialBackendJsonMock).toHaveBeenCalledWith(
-      "/profiles/instagram/thetraitorsus/dashboard",
+      "/profiles/instagram/thetraitorsus/catalog/runs/run-1/progress",
       expect.objectContaining({
-        fallbackError: "Failed to fetch social account profile dashboard",
-        queryString: "detail=lite&run_id=run-1&recent_log_limit=12",
+        fallbackError: "Failed to fetch social account catalog run progress",
+        queryString: "fast=1&recent_log_limit=12",
         retries: 0,
-        timeoutMs: 25_000,
+        timeoutMs: 12_000,
       }),
     );
-    expect(getOrCreateAdminSnapshotMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        ttlMs: 3_000,
-        staleIfErrorTtlMs: 30_000,
-        forceRefresh: true,
-      }),
+    expect(getOrCreateAdminSnapshotMock).not.toHaveBeenCalled();
+    expect(body.data.dashboard_freshness?.status).toBe("degraded");
+    expect(body.data.dashboard_freshness?.source).toBe("direct-progress");
+    expect(response.headers.get("x-trr-dashboard-freshness")).toBe("degraded");
+    expect(response.headers.get("x-trr-dashboard-source")).toBe("direct-progress");
+  });
+
+  it("does not synthesize a running state when direct progress times out", async () => {
+    fetchSocialBackendJsonMock.mockRejectedValueOnce(new Error("timeout"));
+
+    const response = await GET(
+      new NextRequest(
+        "http://localhost/api/admin/trr-api/social/profiles/instagram/thetraitorsus/snapshot?run_id=run-timeout-1",
+      ),
+      { params: Promise.resolve({ platform: "instagram", handle: "thetraitorsus" }) },
     );
-    expect(response.headers.get("x-trr-dashboard-freshness")).toBe("fresh");
-    expect(response.headers.get("x-trr-dashboard-source")).toBe("live");
-    expect(consoleInfoSpy).toHaveBeenCalledWith(
-      "social_profile_dashboard_budget",
-      expect.objectContaining({
-        platform: "instagram",
-        handle: "thetraitorsus",
-        cacheStatus: "miss",
-        freshnessStatus: "fresh",
-        initialRequestCount: 1,
-        stale: false,
-        staleCacheHit: false,
-      }),
-    );
+    const body = (await response.json()) as {
+      data: {
+        catalog_run_progress?: {
+          run_id?: string;
+          run_status?: string;
+          run_state?: string;
+          progress_authoritative?: boolean;
+          progress_degraded_reason?: string;
+        };
+        dashboard_freshness?: { source?: string; status?: string };
+      };
+    };
+
+    expect(response.status).toBe(200);
+    expect(body.data.catalog_run_progress?.run_id).toBe("run-timeout-1");
+    expect(body.data.catalog_run_progress?.run_status).toBe("unknown");
+    expect(body.data.catalog_run_progress?.run_state).toBe("degraded");
+    expect(body.data.catalog_run_progress?.progress_authoritative).toBe(false);
+    expect(body.data.catalog_run_progress?.progress_degraded_reason).toBe("direct_progress_timeout");
+    expect(body.data.dashboard_freshness?.source).toBe("direct-progress-degraded");
   });
 
   it("maps stale snapshot fallback to dashboard freshness headers and telemetry", async () => {
@@ -184,6 +212,93 @@ describe("social account profile snapshot route", () => {
         stale: true,
         cacheAgeMs: 180_000,
         staleCacheHit: true,
+      }),
+    );
+  });
+
+  it("bypasses cached social profile snapshots while comments coverage has an active run", async () => {
+    getOrCreateAdminSnapshotMock
+      .mockResolvedValueOnce({
+        data: {
+          summary: makeSocialAccountSummary({
+            comments_saved_summary: {
+              saved_comments: 96564,
+              retrieved_comments: 106592,
+            },
+            comments_coverage: {
+              eligible_posts: 437,
+              missing_posts: 12,
+              stale_posts: 203,
+              active_run_id: "comments-run-active",
+              effective_status: "running",
+              last_comments_run_status: "running",
+            },
+          }),
+          catalog_run_progress: null,
+          dashboard_freshness: {
+            status: "fresh",
+            source: "live",
+            generated_at: "2026-04-26T12:00:00.000Z",
+            age_seconds: 0,
+          },
+          operational_alerts: [],
+        },
+        meta: {
+          cacheStatus: "hit",
+          generatedAt: "2026-04-26T12:00:00.000Z",
+          cacheAgeMs: 120_000,
+          stale: false,
+        },
+      })
+      .mockResolvedValueOnce({
+        data: {
+          summary: makeSocialAccountSummary({
+            comments_saved_summary: {
+              saved_comments: 98409,
+              retrieved_comments: 106212,
+            },
+            comments_coverage: {
+              eligible_posts: 437,
+              missing_posts: 12,
+              stale_posts: 203,
+              active_run_id: "comments-run-active",
+              effective_status: "running",
+              last_comments_run_status: "running",
+            },
+          }),
+          catalog_run_progress: null,
+          dashboard_freshness: {
+            status: "fresh",
+            source: "live",
+            generated_at: "2026-04-26T12:02:00.000Z",
+            age_seconds: 0,
+          },
+          operational_alerts: [],
+        },
+        meta: {
+          cacheStatus: "refresh",
+          generatedAt: "2026-04-26T12:02:00.000Z",
+          cacheAgeMs: 0,
+          stale: false,
+        },
+      });
+
+    const response = await GET(
+      new NextRequest("http://localhost/api/admin/trr-api/social/profiles/instagram/thetraitorsus/snapshot?detail=lite"),
+      { params: Promise.resolve({ platform: "instagram", handle: "thetraitorsus" }) },
+    );
+    const body = (await response.json()) as {
+      data: { summary?: { comments_saved_summary?: { saved_comments?: number } } };
+    };
+
+    expect(response.status).toBe(200);
+    expect(body.data.summary?.comments_saved_summary?.saved_comments).toBe(98409);
+    expect(response.headers.get("x-trr-cache")).toBe("refresh");
+    expect(getOrCreateAdminSnapshotMock).toHaveBeenCalledTimes(2);
+    expect(getOrCreateAdminSnapshotMock).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        forceRefresh: true,
       }),
     );
   });

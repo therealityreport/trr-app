@@ -2,6 +2,25 @@ import type { SocialAccountProfileTab, SocialPlatformSlug } from "@/lib/admin/sh
 
 export type { SocialAccountProfileTab, SocialPlatformSlug } from "@/lib/admin/show-admin-routes";
 
+export type SocialDisplayThumbnailVariant =
+  | string
+  | null
+  | {
+      url?: string | null;
+      width?: number | null;
+      height?: number | null;
+      format?: string | null;
+      content_type?: string | null;
+      descriptor?: string | null;
+      variant_key?: string | null;
+      storage_key?: string | null;
+      source_role?: string | null;
+      bytes?: number | null;
+      generated_at?: string | null;
+    };
+
+export type SocialDisplayThumbnailVariants = Record<string, SocialDisplayThumbnailVariant> | null;
+
 export const SOCIAL_ACCOUNT_PROFILE_PLATFORMS: ReadonlyArray<SocialPlatformSlug> = [
   "instagram",
   "tiktok",
@@ -188,6 +207,57 @@ export type SocialAccountProfileSeasonBucket = {
   engagement?: number | null;
 };
 
+export type SocialAccountFacebookCrosspost = {
+  comments_count?: number | null;
+  likes_count?: number | null;
+  is_shared_to_fb?: boolean | null;
+  post_id?: string | null;
+  post_url?: string | null;
+  metadata?: Record<string, unknown> | null;
+  social_context?: Record<string, unknown> | null;
+  observed_at?: string | null;
+  source?: string | null;
+};
+
+export type SocialAccountCommentCaptureHealth = {
+  capture_rate?: number | null;
+  phase_counts?: Record<string, number | null | undefined> | null;
+  cursor_param_counts?: Record<string, number | null | undefined> | null;
+  covered_comments?: number | null;
+  status_counts?: Record<string, number | null | undefined> | null;
+  observed_at?: string | null;
+};
+
+export type SocialAccountCommentCaptureRateTrendPoint = {
+  run_id?: string | null;
+  observed_at?: string | null;
+  reported_comments?: number | null;
+  fetched_comments?: number | null;
+  capture_rate?: number | null;
+};
+
+export type SocialAccountCommentBreakdown = {
+  reported_comments?: number | null;
+  saved_parent_comments?: number | null;
+  saved_child_replies?: number | null;
+  facebook_comments?: number | null;
+  saved_instagram_comments?: number | null;
+  accounted_comments?: number | null;
+  missing_comments?: number | null;
+  missing_reasons?: Record<string, number | null | undefined> | null;
+  formula_label?: string | null;
+  capture_health?: SocialAccountCommentCaptureHealth | null;
+  capture_rate_trend?: SocialAccountCommentCaptureRateTrendPoint[] | null;
+};
+
+export type SocialAccountLegacyCommentCompleteness = {
+  reported_comments?: number | null;
+  external_facebook_comments?: number | null;
+  instagram_fetchable_comments?: number | null;
+  saved_instagram_comments?: number | null;
+  missing_instagram_comments?: number | null;
+};
+
 export type SocialAccountProfilePost = {
   id: string;
   source_id: string;
@@ -211,6 +281,10 @@ export type SocialAccountProfilePost = {
   thumbnail_url?: string | null;
   source_thumbnail_url?: string | null;
   hosted_thumbnail_url?: string | null;
+  display_thumbnail_url?: string | null;
+  display_thumbnail_variants?: SocialDisplayThumbnailVariants;
+  display_thumbnail_status?: string | Record<string, unknown> | null;
+  display_thumbnail_srcset?: string | null;
   media_urls?: string[] | null;
   source_media_urls?: string[] | null;
   hosted_media_urls?: string[] | null;
@@ -218,11 +292,17 @@ export type SocialAccountProfilePost = {
   match_mode?: "owner" | "collaborator";
   source_surface?: "materialized" | "catalog";
   saved_comments?: number | null;
+  facebook_crosspost?: SocialAccountFacebookCrosspost | null;
+  comment_completeness?: SocialAccountLegacyCommentCompleteness | null;
+  comment_breakdown?: SocialAccountCommentBreakdown | null;
   metrics: {
     likes?: number | null;
     comments_count?: number | null;
     views?: number | null;
+    video_views?: number | null;
     shares?: number | null;
+    reposts?: number | null;
+    saves?: number | null;
     retweets?: number | null;
     replies_count?: number | null;
     quotes?: number | null;
@@ -263,6 +343,8 @@ export type SocialAccountCommentsSavedSummary = {
   saved_comment_posts?: number | null;
   retrieved_comment_posts?: number | null;
   saved_comment_media_files?: number | null;
+  inline_comments_upserted?: number | null;
+  inline_comment_samples?: number | null;
 };
 
 export type SocialAccountMediaCoverage = {
@@ -319,6 +401,9 @@ export type SocialAccountProfileComment = {
 export type SocialAccountProfileCommentsResponse = {
   items: SocialAccountProfileComment[];
   pagination: SocialAccountProfilePagination;
+  comment_breakdown?: SocialAccountCommentBreakdown | null;
+  facebook_crosspost?: SocialAccountFacebookCrosspost | null;
+  pagination_basis?: "parent_threads" | "comments" | string | null;
 };
 
 export type SocialAccountCatalogDiscussionItem = SocialAccountProfileComment & {
@@ -345,6 +430,16 @@ export type SocialAccountCommentsScrapeRequest =
       dry_run?: boolean;
     };
 
+export type InstagramCommentsAuthRepairStatus = "skipped" | "succeeded" | "failed";
+
+export type InstagramCommentsLaunchAuthMetadata = {
+  auth_repair_attempted?: boolean;
+  auth_repair_status?: InstagramCommentsAuthRepairStatus;
+  auth_repair_reason?: string | null;
+  comments_auth_probe?: Record<string, unknown> | null;
+  posts_auth_probe?: Record<string, unknown> | null;
+};
+
 export type SocialAccountCommentsScrapeResponse = {
   run_id: string;
   status?: string | null;
@@ -357,7 +452,7 @@ export type SocialAccountCommentsScrapeResponse = {
   comments_proxy_shard_sessions?: boolean;
   recommended_comments_shard_count?: number;
   timing?: Record<string, unknown> | null;
-};
+} & InstagramCommentsLaunchAuthMetadata;
 
 export type SocialAccountCommentsCancelResponse = {
   run_id: string;
@@ -405,16 +500,30 @@ export type SocialAccountCommentsShardProgress = {
   comments_shard_target_count?: number | null;
   processed_post_count?: number | null;
   completed_posts?: number | null;
+  complete_posts?: number | null;
+  incomplete_posts?: number | null;
   matched_posts?: number | null;
   saved_posts?: number | null;
   remaining_target_count?: number | null;
+  retry_target_count?: number | null;
+  comments_processed?: number | null;
   comments_upserted?: number | null;
+  comments_inserted?: number | null;
+  comments_refreshed?: number | null;
+  comments_changed?: number | null;
+  new_comments?: number | null;
   replies_upserted?: number | null;
   items_found_total?: number | null;
   queue_wait_seconds?: number | null;
   posts_per_minute?: number | null;
   comments_per_minute?: number | null;
   latest_failure_reason?: string | null;
+  latest_fetch_reason?: string | null;
+  fetch_reason_counts?: Record<string, number | null | undefined> | null;
+  latest_stop_reason?: string | null;
+  stop_reason_counts?: Record<string, number | null | undefined> | null;
+  completion_reason_counts?: Record<string, number | null | undefined> | null;
+  retry_reason_counts?: Record<string, number | null | undefined> | null;
   error_message?: string | null;
 };
 
@@ -430,6 +539,7 @@ export type SocialAccountCommentsRunProgress = {
   job_status?: string | null;
   job_metadata?: Record<string, unknown> | null;
   error_message?: string | null;
+  mode?: "profile" | "single_post" | string | null;
   target_source_ids?: string[];
   target_source_ids_count?: number;
   target_filter?: "incomplete" | string | null;
@@ -444,6 +554,8 @@ export type SocialAccountCommentsRunProgress = {
   failed_comment_jobs?: number;
   post_progress?: {
     completed_posts?: number;
+    complete_posts?: number;
+    incomplete_posts?: number;
     matched_posts?: number;
     saved_posts?: number;
     total_posts?: number | null;
@@ -502,6 +614,10 @@ export type SocialAccountCatalogPostDetail = {
   thumbnail_url?: string | null;
   source_thumbnail_url?: string | null;
   hosted_thumbnail_url?: string | null;
+  display_thumbnail_url?: string | null;
+  display_thumbnail_variants?: SocialDisplayThumbnailVariants;
+  display_thumbnail_status?: string | Record<string, unknown> | null;
+  display_thumbnail_srcset?: string | null;
   media_urls?: string[] | null;
   source_media_urls?: string[] | null;
   hosted_media_urls?: string[] | null;
@@ -511,6 +627,9 @@ export type SocialAccountCatalogPostDetail = {
   post_status?: Record<string, unknown> | null;
   stats?: Record<string, number | null> | null;
   saved_metrics?: Record<string, number | null> | null;
+  facebook_crosspost?: SocialAccountFacebookCrosspost | null;
+  comment_completeness?: SocialAccountLegacyCommentCompleteness | null;
+  comment_breakdown?: SocialAccountCommentBreakdown | null;
   saved_comments?: number | null;
   hashtags?: string[];
   mentions?: string[];
@@ -550,7 +669,11 @@ export type SocialAccountCatalogAttachedCommentsFollowup = {
   run_id?: string | null;
   state?: string | null;
   status?: string | null;
+  // Legacy compatibility: new stage-graph progress should prefer explicit comments stage blockers.
   source?: "new_run" | "reused_run" | "deferred_after_catalog" | null;
+  error_message?: string | null;
+  failed_at?: string | null;
+  retryable?: boolean | null;
 };
 
 export type SocialAccountCatalogAttachedMediaFollowup = {
@@ -578,12 +701,139 @@ export type SocialAccountCatalogRun = {
   completed_at?: string | null;
   error_message?: string | null;
   launch_group_id?: string | null;
-  launch_state?: "pending" | "ready" | "failed" | null;
+  launch_state?: "pending" | "finalizing" | "ready" | "failed" | "blocked_auth" | null;
   selected_tasks?: CatalogBackfillSelectedTask[];
   effective_selected_tasks?: CatalogBackfillSelectedTask[];
   comments_run_id?: string | null;
   attached_followups?: SocialAccountCatalogAttachedFollowups | null;
 };
+
+export type SocialAccountCatalogStageGraphNode = {
+  status?: string | null;
+  state?: string | null;
+  label?: string | null;
+  detail?: string | null;
+  blocker?: string | null;
+  blocker_reason?: string | null;
+  blocked_reason?: string | null;
+  blocker_reasons?: string[];
+  blocked_reasons?: string[];
+  target_count?: number | null;
+  eligible_count?: number | null;
+  pending_count?: number | null;
+  running_count?: number | null;
+  completed_count?: number | null;
+  failed_count?: number | null;
+  total_count?: number | null;
+  started_at?: string | null;
+  completed_at?: string | null;
+  updated_at?: string | null;
+  lanes?: Record<string, SocialAccountCatalogStageGraphNode> | null;
+  metadata?: Record<string, unknown> | null;
+};
+
+export type SocialAccountCatalogStageGraph = {
+  target_readiness?: SocialAccountCatalogStageGraphNode | null;
+  detail_refresh?: SocialAccountCatalogStageGraphNode | null;
+  comments?: SocialAccountCatalogStageGraphNode | null;
+  media?: SocialAccountCatalogStageGraphNode | null;
+  enrichment?: SocialAccountCatalogStageGraphNode | null;
+  finalization?: SocialAccountCatalogStageGraphNode | null;
+  [stage: string]: SocialAccountCatalogStageGraphNode | null | undefined;
+};
+
+export type SocialAccountCatalogDetailRefreshProgress = {
+  fetch_policy?: "smart" | "force_metrics" | "force_network_detail" | string | null;
+  details_refresh_policy?: "smart" | "force_metrics" | "force_network_detail" | string | null;
+  fetch_attempts?: number | null;
+  fetch_avoided?: number | null;
+  fetch_reason_counts?: Record<string, number> | null;
+  rows_seen?: number | null;
+  rows_satisfied_from_gallery?: number | null;
+  rows_satisfied_from_existing?: number | null;
+  write_batches?: number | null;
+  rows_per_batch?: number | number[] | null;
+  timing?: Record<string, unknown> | null;
+};
+
+export type SocialAccountCatalogEnrichmentLaneProgress = {
+  key?: string | null;
+  lane?: string | null;
+  status?: string | null;
+  pending_count?: number | null;
+  running_count?: number | null;
+  completed_count?: number | null;
+  failed_count?: number | null;
+  total_count?: number | null;
+  blocked_reason?: string | null;
+  blocker_reason?: string | null;
+  detail?: string | null;
+};
+
+export type SocialAccountCatalogProxyMetadata = {
+  proxy_fingerprint?: string | null;
+  proxy_session_mode?: string | null;
+  proxy_provider?: string | null;
+  posts_proxy_fingerprint?: string | null;
+  posts_proxy_session_mode?: string | null;
+  detail_proxy_fingerprint?: string | null;
+  detail_proxy_session_mode?: string | null;
+  comments_proxy_fingerprint?: string | null;
+  comments_proxy_session_mode?: string | null;
+  lanes?: Record<string, Pick<SocialAccountCatalogProxyMetadata, "proxy_fingerprint" | "proxy_session_mode" | "proxy_provider">> | null;
+};
+
+export type SocialAccountCatalogPhaseProgress = {
+  status?: string | null;
+  phase?: string | null;
+  pages_scanned?: number | null;
+  pages_completed?: number | null;
+  posts_seen?: number | null;
+  posts_checked?: number | null;
+  posts_saved?: number | null;
+  posts_upserted?: number | null;
+  completed_posts?: number | null;
+  matched_posts?: number | null;
+  saved_posts?: number | null;
+  total_posts?: number | null;
+  running_count?: number | null;
+  queued_count?: number | null;
+  failed_count?: number | null;
+  [key: string]: unknown;
+};
+
+export type SocialAccountCatalogPaginationState = {
+  source_scope?: string | null;
+  direction?: string | null;
+  cursor_in?: string | null;
+  end_cursor?: string | null;
+  page_index?: number | null;
+  posts_seen?: number | null;
+  posts_upserted?: number | null;
+  doc_id_used?: string | null;
+  doc_ids_attempted?: string[] | null;
+  proxy_fingerprint?: string | null;
+  proxy_session_key?: string | null;
+  stop_reason?: string | null;
+  partial?: boolean | null;
+  updated_at?: string | null;
+  completed_at?: string | null;
+  [key: string]: unknown;
+};
+
+export type SocialAccountCatalogCoverageMetric = {
+  present_count?: number | null;
+  covered_count?: number | null;
+  saved_count?: number | null;
+  missing_count?: number | null;
+  total_count?: number | null;
+  total_posts?: number | null;
+  pct?: number | null;
+  percent?: number | null;
+  [key: string]: unknown;
+};
+
+export type SocialAccountCatalogFeatureFlagSnapshot = Record<string, boolean | string | number | null | undefined>;
 
 export type SocialAccountCatalogRunProgressStage = {
   jobs_total: number;
@@ -763,11 +1013,55 @@ export type SocialAccountCatalogRunProgressSnapshot = {
   run_id: string;
   run_status: string;
   launch_group_id?: string | null;
-  launch_state?: "pending" | "ready" | "failed" | null;
+  launch_state?: "pending" | "finalizing" | "ready" | "failed" | "blocked_auth" | null;
   catalog_action?: SocialAccountCatalogAction | null;
   catalog_action_scope?: SocialAccountCatalogActionScope | null;
   selected_tasks?: CatalogBackfillSelectedTask[];
   effective_selected_tasks?: CatalogBackfillSelectedTask[];
+  pipeline_strategy?: "stage_graph" | string | null;
+  stage_graph?: SocialAccountCatalogStageGraph | null;
+  target_readiness?: SocialAccountCatalogStageGraphNode | null;
+  detail_refresh?: SocialAccountCatalogDetailRefreshProgress | null;
+  enrichment?: {
+    pending_count?: number | null;
+    lanes?: SocialAccountCatalogEnrichmentLaneProgress[] | Record<string, SocialAccountCatalogEnrichmentLaneProgress> | null;
+  } | null;
+  comments_started_before_detail_complete?: boolean;
+  comments_blocked_reason?: string | null;
+  posts_auth_probe?: Record<string, unknown> | null;
+  auth_repair_attempted?: boolean;
+  auth_repair_status?: InstagramCommentsAuthRepairStatus;
+  auth_repair_reason?: string | null;
+  partial_scrape?: boolean | null;
+  stop_reason?: string | null;
+  pagination_state?: SocialAccountCatalogPaginationState | SocialAccountCatalogPaginationState[] | null;
+  resume_cursor_saved?: boolean | string | null;
+  listing_progress?: SocialAccountCatalogPhaseProgress | null;
+  details_progress?: SocialAccountCatalogPhaseProgress | null;
+  inline_comments_upserted?: number | null;
+  profile_posts_doc_ids?: string[] | null;
+  doc_id_used?: string | null;
+  pagination_doc_id_stale?: boolean | null;
+  proxy_pacing?: Record<string, unknown> | null;
+  warmup_pool?: Record<string, unknown> | null;
+  bidirectional_probe?: Record<string, unknown> | null;
+  acceleration_feature_flags?: SocialAccountCatalogFeatureFlagSnapshot | null;
+  feature_flags?: SocialAccountCatalogFeatureFlagSnapshot | null;
+  posts_acceleration_flags?: SocialAccountCatalogFeatureFlagSnapshot | null;
+  field_coverage?: Record<string, SocialAccountCatalogCoverageMetric | number | null> | null;
+  rich_field_coverage?: Record<string, SocialAccountCatalogCoverageMetric | number | null> | null;
+  sample_comments?: Record<string, unknown> | null;
+  proxy_fingerprint?: string | null;
+  proxy_session_mode?: string | null;
+  proxy_metadata?: SocialAccountCatalogProxyMetadata | null;
+  progress_degraded?: boolean;
+  progress_degraded_reason?: string | null;
+  progress_degraded_at?: string | null;
+  // Legacy compatibility: preserved while backend rolls out details_refresh_policy / force_network_detail_fetch.
+  details_refresh_force_detail_fetch?: boolean;
+  details_refresh_policy?: "smart" | "force_metrics" | "force_network_detail" | string | null;
+  force_network_detail_fetch?: boolean;
+  details_refresh_shard_count?: number | null;
   comments_run_id?: string | null;
   attached_followups?: SocialAccountCatalogAttachedFollowups | null;
   operational_state?:
@@ -778,7 +1072,8 @@ export type SocialAccountCatalogRunProgressSnapshot = {
     | "classifying"
     | "completed"
     | "failed"
-    | "cancelled";
+    | "cancelled"
+    | "runtime_superseded";
   run_state?:
     | "discovering"
     | "fetching"
@@ -964,7 +1259,7 @@ export type SocialAccountCatalogReviewItem = {
 };
 
 export type CatalogBackfillRequest = {
-  source_scope?: "bravo" | "creator" | "community";
+  source_scope?: "network" | "creator" | "community" | "news";
   date_start?: string | null;
   date_end?: string | null;
   backfill_scope: "full_history" | "bounded_window";
@@ -987,7 +1282,7 @@ export type CatalogBackfillLaunchResponse = {
   attached_followups?: SocialAccountCatalogAttachedFollowups | null;
   catalog_bootstrap_required?: boolean;
   comments_deferred_until_catalog_complete?: boolean;
-};
+} & InstagramCommentsLaunchAuthMetadata;
 
 export type CatalogSyncRecentRequest = {
   lookback_days: number;
@@ -1000,7 +1295,7 @@ export type CatalogSyncNewerRequest = {
 export type CatalogRemediateDriftRequest = {
   run_id?: string | null;
   requeue_canary?: boolean;
-  source_scope?: "bravo" | "creator" | "community";
+  source_scope?: "network" | "creator" | "community" | "news";
 };
 
 export type CatalogRemediateDriftResponse = {
@@ -1133,6 +1428,14 @@ export type SocialProfileCookieHealth = {
   source_kind: string;
   source_path?: string;
   refresh_target_path?: string;
+  posts_auth_health?: {
+    platform: string;
+    account_handle?: string;
+    ready: boolean;
+    reason: string | null;
+    execution_backend?: string;
+  };
+  posts_auth_probe?: Record<string, unknown> | null;
   warning_code?: string;
   warning_message?: string;
 };

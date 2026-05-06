@@ -1,8 +1,29 @@
 import { describe, expect, it } from "vitest";
 
-import { fetchAllPaginatedGalleryRowsWithMeta } from "@/lib/admin/paginated-gallery-fetch";
+import {
+  fetchAllPaginatedGalleryRowsWithMeta,
+  fetchFirstPaginatedGalleryRowsWithMeta,
+} from "@/lib/admin/paginated-gallery-fetch";
 
 describe("show gallery pagination", () => {
+  it("requests the default first page at the smaller gallery page size", async () => {
+    const requests: Array<{ cursor: string | null; limit: number }> = [];
+
+    const result = await fetchFirstPaginatedGalleryRowsWithMeta({
+      async fetchPage(cursor, limit) {
+        requests.push({ cursor, limit });
+        return {
+          rows: Array.from({ length: 48 }, (_, index) => ({ id: `asset-${index + 1}` })),
+          nextCursor: "offset:48",
+        };
+      },
+    });
+
+    expect(result.rows).toHaveLength(48);
+    expect(result.truncated).toBe(true);
+    expect(requests).toEqual([{ cursor: null, limit: 48 }]);
+  });
+
   it("aggregates all pages exposed by backend cursors without a fixed page cap", async () => {
     const requests: Array<{ cursor: string | null; limit: number }> = [];
 

@@ -47,7 +47,7 @@ describe("social account catalog run progress proxy route", () => {
     );
   });
 
-  it("forwards progress polling with the fast timeout and no retry", async () => {
+  it("forwards progress polling with the progress timeout and no retry", async () => {
     const response = await GET(
       new NextRequest(
         "http://localhost/api/admin/trr-api/social/profiles/instagram/bravotv/catalog/runs/run-123/progress?recent_log_limit=25",
@@ -67,6 +67,43 @@ describe("social account catalog run progress proxy route", () => {
         timeoutMs: 30_000,
       }),
     );
+  });
+
+  it("uses a shorter timeout and degraded fallback for fast polling", async () => {
+    fetchSocialBackendJsonMock.mockRejectedValueOnce(new Error("timeout"));
+
+    const response = await GET(
+      new NextRequest(
+        "http://localhost/api/admin/trr-api/social/profiles/instagram/bravotv/catalog/runs/run-fast-1/progress?recent_log_limit=25&fast=1",
+      ),
+      {
+        params: Promise.resolve({ platform: "instagram", handle: "bravotv", runId: "run-fast-1" }),
+      },
+    );
+    const payload = (await response.json()) as {
+      run_id?: string;
+      run_status?: string;
+      run_state?: string;
+      progress_authoritative?: boolean;
+      progress_degraded?: boolean;
+      progress_degraded_reason?: string;
+    };
+
+    expect(response.status).toBe(200);
+    expect(payload.run_id).toBe("run-fast-1");
+    expect(payload.run_status).toBe("unknown");
+    expect(payload.run_state).toBe("degraded");
+    expect(payload.progress_authoritative).toBe(false);
+    expect(payload.progress_degraded).toBe(true);
+    expect(payload.progress_degraded_reason).toBe("fast_progress_timeout");
+    expect(fetchSocialBackendJsonMock).toHaveBeenCalledWith(
+      "/profiles/instagram/bravotv/catalog/runs/run-fast-1/progress?recent_log_limit=25&fast=1",
+      expect.objectContaining({
+        retries: 0,
+        timeoutMs: 12_000,
+      }),
+    );
+    expect(socialProxyErrorResponseMock).not.toHaveBeenCalled();
   });
 
   it("returns standardized proxy errors", async () => {

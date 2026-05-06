@@ -43,7 +43,7 @@ describe("social mirror requeue proxy route", () => {
       {
         method: "POST",
         body: JSON.stringify({
-          source_scope: "bravo",
+          source_scope: "network",
           failed_only: false,
           date_start: "2026-01-01T00:00:00.000Z",
           date_end: "2026-01-08T00:00:00.000Z",

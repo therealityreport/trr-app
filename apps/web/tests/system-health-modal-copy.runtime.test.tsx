@@ -70,6 +70,19 @@ describe("SystemHealthModal copy snapshot", () => {
         },
         queue_status: {
           queue_enabled: true,
+          instagram_posts_acceleration: {
+            feature_flags: {
+              SOCIAL_INSTAGRAM_POSTS_BIDIRECTIONAL_WALK_ENABLED: false,
+              SOCIAL_INSTAGRAM_POSTS_PER_IP_PACING_ENABLED: true,
+              SOCIAL_INSTAGRAM_POSTS_PAGE_PROXY_ROTATION_ENABLED: true,
+              SOCIAL_INSTAGRAM_POSTS_SHARED_WARMUP_ENABLED: false,
+            },
+            proxy_pacing: {
+              mode: "per_ip",
+              proxy_url: "http://user:super-secret@proxy.example:8080",
+            },
+            disable_guidance: "Set SOCIAL_INSTAGRAM_POSTS_PER_IP_PACING_ENABLED=false or SOCIAL_INSTAGRAM_POSTS_PAGE_PROXY_ROTATION_ENABLED=false, then restart workers.",
+          },
           remote_plane: {
             execution_mode_canonical: "remote",
             execution_owner: "remote_worker",
@@ -190,6 +203,11 @@ describe("SystemHealthModal copy snapshot", () => {
     expect(copiedText).toContain("\"queue_status\"");
     expect(copiedText).toContain("\"admin_operations\"");
     expect(copiedText).toContain("\"live_status_sequence\": 17");
+    expect(copiedText).toContain("\"instagram_posts_acceleration\"");
+    expect(copiedText).toContain("\"SOCIAL_INSTAGRAM_POSTS_PER_IP_PACING_ENABLED\": true");
+    expect(copiedText).toContain("Set SOCIAL_INSTAGRAM_POSTS_PER_IP_PACING_ENABLED=false");
+    expect(copiedText).not.toContain("super-secret");
+    expect(copiedText).not.toContain("user:super-secret");
 
     expect(await screen.findByText("Copied System Jobs Health debug snapshot to clipboard.")).toBeInTheDocument();
   });

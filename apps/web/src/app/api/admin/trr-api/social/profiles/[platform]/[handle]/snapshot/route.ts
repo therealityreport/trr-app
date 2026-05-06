@@ -20,6 +20,8 @@ const LIVE_TTL_MS = 5 * 60_000;
 const LIVE_STALE_MS = 15 * 60_000;
 const RUN_PROGRESS_TTL_MS = 3_000;
 const RUN_PROGRESS_STALE_MS = 30_000;
+const DIRECT_PROGRESS_TIMEOUT_MS = 12_000;
+const ACTIVE_PROFILE_WORK_STATUSES = new Set(["queued", "pending", "retrying", "running", "cancelling"]);
 
 export const dynamic = "force-dynamic";
 
@@ -37,6 +39,7 @@ type SocialProfileSnapshotPayload = {
   catalog_run_progress: Record<string, unknown> | null;
   dashboard_freshness: Record<string, unknown> | null;
   operational_alerts: unknown[];
+  summary_omitted_reason?: "progress_only" | null;
 };
 
 const normalizeDashboardSnapshot = (dashboard: BackendDashboardPayload): SocialProfileSnapshotPayload => ({
@@ -44,6 +47,48 @@ const normalizeDashboardSnapshot = (dashboard: BackendDashboardPayload): SocialP
   catalog_run_progress: dashboard.data?.catalog_run_progress ?? null,
   dashboard_freshness: dashboard.freshness ?? null,
   operational_alerts: Array.isArray(dashboard.operational_alerts) ? dashboard.operational_alerts : [],
+});
+
+const readNestedRecord = (value: unknown): Record<string, unknown> | null =>
+  value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+
+const hasActiveCommentsCoverage = (summary: Record<string, unknown> | null): boolean => {
+  const coverage = readNestedRecord(summary?.comments_coverage);
+  if (!coverage) return false;
+  const activeRunId = String(coverage.active_run_id ?? "").trim();
+  if (activeRunId) return true;
+  const status = String(
+    coverage.effective_status ?? coverage.last_attempt_status ?? coverage.last_comments_run_status ?? "",
+  )
+    .trim()
+    .toLowerCase();
+  return ACTIVE_PROFILE_WORK_STATUSES.has(status);
+};
+
+const hasActiveCatalogWork = (summary: Record<string, unknown> | null): boolean => {
+  const runs = Array.isArray(summary?.catalog_recent_runs) ? summary.catalog_recent_runs : [];
+  return runs.some((row) => {
+    const run = readNestedRecord(row);
+    const status = String(run?.status ?? "").trim().toLowerCase();
+    return ACTIVE_PROFILE_WORK_STATUSES.has(status);
+  });
+};
+
+const hasActiveProfileWork = (snapshot: SocialProfileSnapshotPayload): boolean =>
+  hasActiveCommentsCoverage(snapshot.summary) || hasActiveCatalogWork(snapshot.summary);
+
+const buildDegradedProgressPayload = (runId: string, reason: string): Record<string, unknown> => ({
+  run_id: runId,
+  run_status: "unknown",
+  run_state: "degraded",
+  status: "unknown",
+  stages: {},
+  summary: {},
+  recent_log: [],
+  progress_degraded: true,
+  progress_degraded_reason: reason,
+  progress_degraded_at: new Date().toISOString(),
+  progress_authoritative: false,
 });
 
 const logSocialProfileDashboardBudget = (input: {
@@ -81,17 +126,60 @@ export async function GET(request: NextRequest, context: RouteContext) {
     }
     searchParams.delete("refresh");
 
-    const snapshot = await getOrCreateAdminSnapshot({
-      cacheKey: buildAdminSnapshotCacheKey({
-        authPartition: buildAdminAuthPartition(user),
-        pageFamily: "social-profile",
-        scope: `${platform}:${handle}`,
-        query: searchParams,
-      }),
-      ttlMs,
-      staleIfErrorTtlMs,
-      forceRefresh,
-      fetcher: async () => {
+    if (runId) {
+      const progressParams = new URLSearchParams();
+      progressParams.set("fast", "1");
+      progressParams.set("recent_log_limit", recentLogLimit || "25");
+      let progress: Record<string, unknown>;
+      let source = "direct-progress";
+      try {
+        progress = (await fetchSocialBackendJson(
+          `/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/catalog/runs/${encodeURIComponent(runId)}/progress`,
+          {
+            adminContext,
+            fallbackError: "Failed to fetch social account catalog run progress",
+            queryString: progressParams.toString(),
+            retries: 0,
+            timeoutMs: DIRECT_PROGRESS_TIMEOUT_MS,
+          },
+        )) as Record<string, unknown>;
+      } catch {
+        progress = buildDegradedProgressPayload(runId, "direct_progress_timeout");
+        source = "direct-progress-degraded";
+      }
+      const generatedAt = new Date().toISOString();
+      const responseData: SocialProfileSnapshotPayload = {
+        summary: null,
+        catalog_run_progress: progress,
+        dashboard_freshness: {
+          status: "degraded",
+          source,
+          generated_at: generatedAt,
+          age_seconds: 0,
+        },
+        operational_alerts: [],
+        summary_omitted_reason: "progress_only",
+      };
+      const response = buildSnapshotResponse({
+        data: responseData,
+        cacheStatus: "miss",
+        generatedAt,
+        cacheAgeMs: 0,
+        stale: false,
+      });
+      response.headers.set("x-trr-dashboard-freshness", "degraded");
+      response.headers.set("x-trr-dashboard-source", source);
+      return response;
+    }
+
+    const cacheKey = buildAdminSnapshotCacheKey({
+      authPartition: buildAdminAuthPartition(user),
+      pageFamily: "social-profile",
+      scope: `${platform}:${handle}`,
+      query: searchParams,
+    });
+    const fetchProfileDashboardSnapshot = async () => {
+      try {
         const dashboard = await fetchSocialBackendJson(
           `/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/dashboard`,
           {
@@ -103,8 +191,53 @@ export async function GET(request: NextRequest, context: RouteContext) {
           },
         );
         return normalizeDashboardSnapshot(dashboard as BackendDashboardPayload);
-      },
+      } catch (error) {
+        if (!runId) {
+          throw error;
+        }
+        const progressParams = new URLSearchParams();
+        progressParams.set("fast", "1");
+        progressParams.set("recent_log_limit", recentLogLimit || "25");
+        const progress = await fetchSocialBackendJson(
+          `/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/catalog/runs/${encodeURIComponent(runId)}/progress`,
+          {
+            adminContext,
+            fallbackError: "Failed to fetch social account catalog run progress",
+            queryString: progressParams.toString(),
+            retries: 0,
+            timeoutMs: SOCIAL_PROXY_DEFAULT_TIMEOUT_MS,
+          },
+        );
+        return {
+          summary: null,
+          catalog_run_progress: progress as Record<string, unknown>,
+          dashboard_freshness: {
+            status: "degraded",
+            source: "direct-progress",
+            generated_at: new Date().toISOString(),
+            age_seconds: 0,
+          },
+          operational_alerts: [],
+        } satisfies SocialProfileSnapshotPayload;
+      }
+    };
+
+    let snapshot = await getOrCreateAdminSnapshot({
+      cacheKey,
+      ttlMs,
+      staleIfErrorTtlMs,
+      forceRefresh,
+      fetcher: fetchProfileDashboardSnapshot,
     });
+    if (!forceRefresh && snapshot.meta.cacheStatus === "hit" && hasActiveProfileWork(snapshot.data)) {
+      snapshot = await getOrCreateAdminSnapshot({
+        cacheKey,
+        ttlMs,
+        staleIfErrorTtlMs,
+        forceRefresh: true,
+        fetcher: fetchProfileDashboardSnapshot,
+      });
+    }
 
     const dashboardFreshness: Record<string, unknown> =
       snapshot.data.dashboard_freshness && typeof snapshot.data.dashboard_freshness === "object"

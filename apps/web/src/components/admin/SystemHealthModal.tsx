@@ -70,6 +70,30 @@ type WorkerHealth = {
   reason: string | null;
 };
 
+const EMPTY_WORKER_HEALTH: WorkerHealth = {
+  healthy: false,
+  healthy_workers: 0,
+  fresh_workers: 0,
+  stale_workers: 0,
+  stale_hidden_count: 0,
+  active_workers: 0,
+  total_workers: 0,
+  stale_after_seconds: 0,
+  by_stage: {},
+  by_platform: {},
+  executor_backend: null,
+  dispatch_enabled: false,
+  dispatcher_heartbeat_fresh: false,
+  active_invocations: 0,
+  oldest_queued_age_seconds: null,
+  stale_running_count: 0,
+  dispatcher_readiness: null,
+  remote_auth_capabilities: null,
+  shared_account_backfill_readiness: null,
+  workers: [],
+  reason: null,
+};
+
 type FailureEntry = {
   id: string;
   run_id: string | null;
@@ -197,6 +221,12 @@ type QueueStatus = {
     execution_backend_canonical?: string | null;
     remote_job_plane_enforced?: boolean;
   };
+  instagram_posts_acceleration?: Record<string, unknown> | null;
+  posts_acceleration?: Record<string, unknown> | null;
+  diagnostics?: {
+    instagram_posts_acceleration?: Record<string, unknown> | null;
+    [key: string]: unknown;
+  } | null;
   workers: WorkerHealth;
   queue: {
     by_status: Record<string, number>;
@@ -224,6 +254,108 @@ type QueueStatus = {
     error?: string;
   };
 };
+
+const EMPTY_QUEUE_SUMMARY: QueueStatus["queue"] = {
+  by_status: {},
+  by_stage: {},
+  by_stage_platform: {},
+  runs_by_status: {},
+  runs_total: 0,
+  by_platform: {},
+  by_job_type: {},
+  running_jobs: [],
+  recent_failures: [],
+  stuck_jobs: [],
+  stuck_jobs_total: 0,
+  dispatch_blocked_jobs: [],
+  dispatch_blocked_jobs_total: 0,
+  dispatch_blocked_by_reason: {},
+  waiting_for_claim_jobs_total: 0,
+  retrying_dispatch_jobs_total: 0,
+};
+
+const INSTAGRAM_POSTS_ACCELERATION_FLAG_NAMES = [
+  "SOCIAL_INSTAGRAM_POSTS_BIDIRECTIONAL_WALK_ENABLED",
+  "SOCIAL_INSTAGRAM_POSTS_PER_IP_PACING_ENABLED",
+  "SOCIAL_INSTAGRAM_POSTS_PAGE_PROXY_ROTATION_ENABLED",
+  "SOCIAL_INSTAGRAM_POSTS_SHARED_WARMUP_ENABLED",
+] as const;
+
+const INSTAGRAM_POSTS_ACCELERATION_DISABLE_GUIDANCE =
+  "Disable risky Instagram posts acceleration by setting any active flag to false and restarting the social worker runtime.";
+const REDACTED_DEBUG_VALUE = "<redacted>";
+const DEBUG_REDACT_KEY_PATTERN = /cookie|authorization|password|secret|token|proxy_url|proxyurl|sessionid|csrf|x-ig-|claim/i;
+
+function redactDebugString(value: string): string {
+  return value
+    .replace(/(https?:\/\/)([^/@\s]+)@/gi, `$1${REDACTED_DEBUG_VALUE}@`)
+    .replace(/(sessionid|csrftoken|ds_user_id|ig_did|mid)=([^;\s]+)/gi, `$1=${REDACTED_DEBUG_VALUE}`)
+    .replace(/(Bearer\s+)[A-Za-z0-9._~+/=-]+/gi, `$1${REDACTED_DEBUG_VALUE}`);
+}
+
+function sanitizeDebugValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeDebugValue(item));
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, innerValue]) => [
+        key,
+        DEBUG_REDACT_KEY_PATTERN.test(key) ? REDACTED_DEBUG_VALUE : sanitizeDebugValue(innerValue),
+      ]),
+    );
+  }
+  if (typeof value === "string") {
+    return redactDebugString(value);
+  }
+  return value;
+}
+
+function normalizeDebugRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return sanitizeDebugValue(value) as Record<string, unknown>;
+}
+
+function extractInstagramPostsAccelerationSnapshot(queueStatus: QueueStatus): Record<string, unknown> | null {
+  const rawSnapshot =
+    queueStatus.instagram_posts_acceleration ??
+    queueStatus.posts_acceleration ??
+    queueStatus.diagnostics?.instagram_posts_acceleration ??
+    null;
+  const snapshot = normalizeDebugRecord(rawSnapshot);
+  if (!snapshot) return null;
+  const rawFlags =
+    normalizeDebugRecord(snapshot.feature_flags) ??
+    normalizeDebugRecord(snapshot.flags) ??
+    normalizeDebugRecord(snapshot.acceleration_feature_flags) ??
+    {};
+  const featureFlags = Object.fromEntries(
+    INSTAGRAM_POSTS_ACCELERATION_FLAG_NAMES.map((flagName) => [
+      flagName,
+      rawFlags[flagName] ?? rawFlags[flagName.toLowerCase()] ?? snapshot[flagName] ?? snapshot[flagName.toLowerCase()] ?? null,
+    ]),
+  );
+  return {
+    ...snapshot,
+    feature_flags: featureFlags,
+    disable_guidance: String(snapshot.disable_guidance || INSTAGRAM_POSTS_ACCELERATION_DISABLE_GUIDANCE),
+  };
+}
+
+function normalizeQueueStatusPayload(queueStatus: QueueStatus | null | undefined): QueueStatus | null {
+  if (!queueStatus) return null;
+  return {
+    ...queueStatus,
+    workers: {
+      ...EMPTY_WORKER_HEALTH,
+      ...(queueStatus.workers ?? {}),
+    },
+    queue: {
+      ...EMPTY_QUEUE_SUMMARY,
+      ...(queueStatus.queue ?? {}),
+    },
+  };
+}
 
 type AdminOperationHealthEntry = {
   id: string;
@@ -265,6 +397,46 @@ type AdminOperationsHealth = {
   stale_operations: AdminOperationHealthEntry[];
   updated_at?: string;
 };
+
+const EMPTY_ADMIN_OPERATIONS_HEALTH: AdminOperationsHealth = {
+  summary: {
+    active_total: 0,
+    stale_total: 0,
+    cancelling_total: 0,
+    by_status: {},
+    by_type: {},
+    runtime_split: {
+      modal: 0,
+      local: 0,
+      other: 0,
+      unknown: 0,
+    },
+    stale_after_seconds: 0,
+    cancelling_grace_seconds: 0,
+  },
+  active_operations: [],
+  stale_operations: [],
+};
+
+function normalizeAdminOperationsPayload(
+  adminOperations: AdminOperationsHealth | null | undefined,
+): AdminOperationsHealth | null {
+  if (!adminOperations) return null;
+  return {
+    ...EMPTY_ADMIN_OPERATIONS_HEALTH,
+    ...adminOperations,
+    summary: {
+      ...EMPTY_ADMIN_OPERATIONS_HEALTH.summary,
+      ...(adminOperations.summary ?? {}),
+      runtime_split: {
+        ...EMPTY_ADMIN_OPERATIONS_HEALTH.summary.runtime_split,
+        ...(adminOperations.summary?.runtime_split ?? {}),
+      },
+    },
+    active_operations: adminOperations.active_operations ?? [],
+    stale_operations: adminOperations.stale_operations ?? [],
+  };
+}
 
 type HealthDotStatus = {
   queue_enabled: boolean;
@@ -446,6 +618,9 @@ type SystemHealthViewModel = {
   instagramRemoteAuthDetail: string;
   sharedAccountBackfillReadinessLabel: string;
   sharedAccountBackfillReadinessDetail: string;
+  instagramPostsAccelerationLabel: string;
+  instagramPostsAccelerationDetail: string;
+  instagramPostsAccelerationSnapshot: Record<string, unknown> | null;
   workerStageCards: WorkerStageCardViewModel[];
   staleClaimsSummary: string;
   queueStatusCards: SummaryCardViewModel[];
@@ -499,6 +674,11 @@ type SystemHealthDebugSnapshot = {
           shared_account_backfill: {
             label: string;
             detail: string;
+          };
+          instagram_posts_acceleration: {
+            label: string;
+            detail: string;
+            snapshot: Record<string, unknown> | null;
           };
           workers_summary_label: string;
           recent_failure_summary: string;
@@ -850,6 +1030,7 @@ function buildSystemHealthViewModel(queueStatus: QueueStatus, state: HealthState
   const instagramRemoteHealthyWorkers = Number(instagramRemoteAuth?.healthy_authenticated_workers ?? 0);
   const instagramRemoteFreshWorkers = Number(instagramRemoteAuth?.fresh_authenticated_workers ?? 0);
   const sharedAccountBackfillReadiness = queueStatus.workers.shared_account_backfill_readiness;
+  const instagramPostsAccelerationSnapshot = extractInstagramPostsAccelerationSnapshot(queueStatus);
   const embeddedQueueErrorMessage = formatEmbeddedQueueErrorMessage(queueStatus.queue.error);
   const oldestQueuedAgeSeconds =
     typeof queueStatus.workers.oldest_queued_age_seconds === "number"
@@ -858,7 +1039,10 @@ function buildSystemHealthViewModel(queueStatus: QueueStatus, state: HealthState
 
   let statusSummary = "Workers are available and the queue looks stable.";
   if (!queueStatus.queue_enabled) {
-    statusSummary = "Social sync is turned off right now.";
+    statusSummary =
+      jobRunning > 0 || runStatuses.running > 0
+        ? "Queue dispatch is off, but local inline social work is still running."
+        : "Queue dispatch is off for this runtime.";
   } else if (state === "loading") {
     statusSummary = "Checking workers and queue activity now.";
   } else if (state === "error" || state === "down") {
@@ -1009,6 +1193,18 @@ function buildSystemHealthViewModel(queueStatus: QueueStatus, state: HealthState
           dispatcherReadiness?.reason ||
           "Remote shared-account backfill is not ready yet.",
       ).replaceAll("_", " ");
+  const instagramPostsFeatureFlags = normalizeDebugRecord(instagramPostsAccelerationSnapshot?.feature_flags) ?? {};
+  const instagramPostsActiveFlags = Object.entries(instagramPostsFeatureFlags).filter(([, value]) => value === true || value === "true");
+  const instagramPostsAccelerationLabel =
+    instagramPostsAccelerationSnapshot == null
+      ? "Unavailable"
+      : instagramPostsActiveFlags.length > 0
+        ? `${instagramPostsActiveFlags.length.toLocaleString()} active`
+        : "All risky flags disabled";
+  const instagramPostsAccelerationDetail =
+    instagramPostsAccelerationSnapshot == null
+      ? "Backend did not include Instagram posts acceleration diagnostics in queue status."
+      : String(instagramPostsAccelerationSnapshot.disable_guidance || INSTAGRAM_POSTS_ACCELERATION_DISABLE_GUIDANCE);
 
   return {
     statusSummary,
@@ -1025,6 +1221,9 @@ function buildSystemHealthViewModel(queueStatus: QueueStatus, state: HealthState
     instagramRemoteAuthDetail,
     sharedAccountBackfillReadinessLabel,
     sharedAccountBackfillReadinessDetail,
+    instagramPostsAccelerationLabel,
+    instagramPostsAccelerationDetail,
+    instagramPostsAccelerationSnapshot,
     workerStageCards,
     staleClaimsSummary: staleClaims
       ? `${staleClaims.total.toLocaleString()} stale claimed jobs`
@@ -1131,6 +1330,11 @@ function buildSystemHealthDebugSnapshot({
               label: viewModel.sharedAccountBackfillReadinessLabel,
               detail: viewModel.sharedAccountBackfillReadinessDetail,
             },
+            instagram_posts_acceleration: {
+              label: viewModel.instagramPostsAccelerationLabel,
+              detail: viewModel.instagramPostsAccelerationDetail,
+              snapshot: viewModel.instagramPostsAccelerationSnapshot,
+            },
             workers_summary_label: viewModel.workersSummaryLabel,
             recent_failure_summary: viewModel.recentFailureSummary,
           }
@@ -1142,11 +1346,11 @@ function buildSystemHealthDebugSnapshot({
         admin_operations_error: adminOperationsError,
       },
       raw_payloads: {
-        health_dot: statusData,
-        queue_status: queueStatusData,
-        admin_operations: adminOperationsData,
-        selected_worker_detail: workerDetail,
-        job_debug_result: debugResult,
+        health_dot: sanitizeDebugValue(statusData) as HealthDotStatus | null,
+        queue_status: sanitizeDebugValue(queueStatusData) as QueueStatus | null,
+        admin_operations: sanitizeDebugValue(adminOperationsData) as AdminOperationsHealth | null,
+        selected_worker_detail: sanitizeDebugValue(workerDetail) as WorkerDetail | null,
+        job_debug_result: sanitizeDebugValue(debugResult) as DebugJobResult | null,
       },
     },
   };
@@ -1154,7 +1358,7 @@ function buildSystemHealthDebugSnapshot({
   return [
     "TRR System Jobs Health Debug Snapshot",
     "Paste this into Codex or Claude Code to debug the current app status from the System Jobs Health modal.",
-    JSON.stringify(snapshot, null, 2),
+    JSON.stringify(sanitizeDebugValue(snapshot), null, 2),
   ].join("\n\n");
 }
 
@@ -1414,7 +1618,7 @@ function WorkerPlaneSummary({ viewModel }: { viewModel: SystemHealthViewModel })
       <p className="text-sm text-zinc-600">
         All long-running sync work is expected to run on the configured remote executor, not in your browser or local app session.
       </p>
-      <div className="grid gap-2 md:grid-cols-6">
+      <div className="grid gap-2 md:grid-cols-7">
         <div className="rounded-xl border border-zinc-200 bg-zinc-50/80 px-3 py-2">
           <p className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Execution owner</p>
           <p className="mt-1 text-sm font-medium text-zinc-900">{viewModel.executionOwnerLabel.replace("Execution owner: ", "")}</p>
@@ -1440,6 +1644,11 @@ function WorkerPlaneSummary({ viewModel }: { viewModel: SystemHealthViewModel })
           <p className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Shared-account backfill</p>
           <p className="mt-1 text-sm font-medium text-zinc-900">{viewModel.sharedAccountBackfillReadinessLabel}</p>
           <p className="mt-1 text-[11px] text-zinc-500">{viewModel.sharedAccountBackfillReadinessDetail}</p>
+        </div>
+        <div className="rounded-xl border border-zinc-200 bg-zinc-50/80 px-3 py-2">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">IG posts acceleration</p>
+          <p className="mt-1 text-sm font-medium text-zinc-900">{viewModel.instagramPostsAccelerationLabel}</p>
+          <p className="mt-1 text-[11px] text-zinc-500">{viewModel.instagramPostsAccelerationDetail}</p>
         </div>
       </div>
       {viewModel.workerStageCards.length > 0 && (
@@ -2081,7 +2290,7 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
   const liveStatus = useAdminLiveStatus({ shouldRun: isOpen || socialRoute });
   const queueStatus = useMemo(
     () => ({
-      data: (liveStatus.data?.queue_status as QueueStatus | null | undefined) ?? null,
+      data: normalizeQueueStatusPayload(liveStatus.data?.queue_status as QueueStatus | null | undefined),
       error: liveStatus.error,
       lastFetched: liveStatus.lastFetched,
       refetch: liveStatus.refetch,
@@ -2090,7 +2299,9 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
   );
   const adminOperations = useMemo(
     () => ({
-      data: (liveStatus.data?.admin_operations as AdminOperationsHealth | null | undefined) ?? null,
+      data: normalizeAdminOperationsPayload(
+        liveStatus.data?.admin_operations as AdminOperationsHealth | null | undefined,
+      ),
       error: liveStatus.error,
       lastFetched: liveStatus.lastFetched,
       refetch: liveStatus.refetch,
@@ -2228,7 +2439,15 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
       await clipboard.writeText(snapshotText);
       setActionNotice("Copied System Jobs Health debug snapshot to clipboard.");
     } catch (error) {
-      setActionError(error instanceof Error ? error.message : "Failed to copy debug snapshot");
+      const clipboardDenied =
+        error instanceof DOMException && (error.name === "NotAllowedError" || error.name === "SecurityError");
+      setActionError(
+        clipboardDenied
+          ? "Clipboard write is blocked in this browser. Enable clipboard access and try Copy again."
+          : error instanceof Error
+            ? error.message
+            : "Failed to copy debug snapshot",
+      );
     } finally {
       setCopyingDebugSnapshot(false);
     }
@@ -2827,7 +3046,9 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-sm font-semibold text-zinc-900">{modalHealthLabel(modalState)}</span>
             {statusData?.queue_enabled === false && (
-              <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700">Queue disabled</span>
+              <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700">
+                Queue dispatch off
+              </span>
             )}
           </div>
           <p className="mt-1 text-sm text-zinc-600">
