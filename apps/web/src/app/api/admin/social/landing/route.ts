@@ -58,6 +58,13 @@ const SHOW_EXTERNAL_ID_KEYS_BY_PLATFORM = {
 type LandingTargetType = "network" | "show" | "person" | "shared_source";
 type LandingPlatform = keyof typeof SHOW_EXTERNAL_ID_KEYS_BY_PLATFORM;
 type SharedSourceTargetScope = (typeof SHARED_SOURCE_TARGET_SCOPES)[keyof typeof SHARED_SOURCE_TARGET_SCOPES];
+type NormalizedSocialSourceInput = {
+  accountHandle: string;
+  externalIdValue: string;
+  sourceType: "account" | "playlist";
+  sourceUrl?: string;
+  sourceExternalId?: string;
+};
 
 const isLandingTargetType = (value: unknown): value is LandingTargetType =>
   value === "network" || value === "show" || value === "person" || value === "shared_source";
@@ -89,6 +96,46 @@ const normalizeInternalHandle = (platform: LandingPlatform, rawValue: string): s
   return canonicalHandle;
 };
 
+const extractYouTubePlaylistId = (rawValue: string): string => {
+  const value = rawValue.trim();
+  if (!value) return "";
+  try {
+    const url = new URL(value.startsWith("http") ? value : `https://${value}`);
+    const playlistId = url.searchParams.get("list")?.trim() || "";
+    if (playlistId) return playlistId;
+  } catch {
+    // Fall through to raw-id parsing.
+  }
+  const direct = value.split(/[?#]/)[0]?.trim() || "";
+  if (/^(?:PL|UU|LL|FL|RD|OLAK5uy_)[A-Za-z0-9_-]{8,}$/.test(direct)) return direct;
+  const match = value.match(/(?:list=|\/playlist\/)([A-Za-z0-9_-]{10,})/);
+  return match?.[1]?.trim() || "";
+};
+
+const normalizeSocialSourceInput = (
+  platform: LandingPlatform,
+  rawValue: string,
+): NormalizedSocialSourceInput => {
+  if (platform === "youtube") {
+    const playlistId = extractYouTubePlaylistId(rawValue);
+    if (playlistId) {
+      return {
+        accountHandle: playlistId,
+        externalIdValue: playlistId,
+        sourceType: "playlist",
+        sourceUrl: `https://www.youtube.com/playlist?list=${playlistId}`,
+        sourceExternalId: playlistId,
+      };
+    }
+  }
+  const accountHandle = normalizeInternalHandle(platform, rawValue);
+  return {
+    accountHandle,
+    externalIdValue: accountHandle,
+    sourceType: "account",
+  };
+};
+
 const normalizePersonExternalId = (platform: LandingPlatform, rawValue: string): string => {
   const normalizedValue = normalizePersonExternalIdValue(platform, rawValue);
   if (!normalizedValue) {
@@ -110,12 +157,18 @@ const buildShowSharedSourceMetadata = ({
   showName,
   platform,
   accountHandle,
+  sourceType,
+  sourceUrl,
+  sourceExternalId,
   existingMetadata = {},
 }: {
   showId: string;
   showName: string;
   platform: LandingPlatform;
   accountHandle: string;
+  sourceType: "account" | "playlist";
+  sourceUrl?: string;
+  sourceExternalId?: string;
   existingMetadata?: Record<string, unknown>;
 }): Record<string, unknown> => ({
   ...existingMetadata,
@@ -128,7 +181,13 @@ const buildShowSharedSourceMetadata = ({
   source_scope: SHOW_HANDLE_SHARED_SOURCE_SCOPE,
   account_handle: accountHandle,
   platform,
-  assignment_mode: "community_match",
+  source_type: sourceType,
+  youtube_source_type: platform === "youtube" ? sourceType : undefined,
+  source_url: sourceUrl,
+  playlist_url: sourceType === "playlist" ? sourceUrl : undefined,
+  playlist_id: sourceType === "playlist" ? sourceExternalId : undefined,
+  source_external_id: sourceExternalId,
+  assignment_mode: sourceType === "playlist" ? "direct_source" : "community_match",
   assignment_rules: {
     use_hashtags: true,
     use_mentions: true,
@@ -143,13 +202,13 @@ const syncShowSharedSource = async ({
   showId,
   showName,
   platform,
-  accountHandle,
+  sourceInput,
 }: {
   adminContext: ReturnType<typeof toVerifiedAdminContext>;
   showId: string;
   showName: string;
   platform: LandingPlatform;
-  accountHandle: string;
+  sourceInput: NormalizedSocialSourceInput;
 }) => {
   const current = (await fetchSocialBackendJson("/shared/sources", {
     adminContext,
@@ -182,18 +241,21 @@ const syncShowSharedSource = async ({
   const existingIndex = nextSources.findIndex(
     (source) =>
       source.platform === platform &&
-      source.account_handle.toLowerCase() === accountHandle.toLowerCase(),
+      source.account_handle.toLowerCase() === sourceInput.accountHandle.toLowerCase(),
   );
   const nextSource = {
     platform,
-    account_handle: accountHandle,
+    account_handle: sourceInput.accountHandle,
     is_active: true,
     scrape_priority: existingIndex >= 0 ? nextSources[existingIndex].scrape_priority : 100,
     metadata: buildShowSharedSourceMetadata({
       showId,
       showName,
       platform,
-      accountHandle,
+      accountHandle: sourceInput.accountHandle,
+      sourceType: sourceInput.sourceType,
+      sourceUrl: sourceInput.sourceUrl,
+      sourceExternalId: sourceInput.sourceExternalId,
       existingMetadata: existingIndex >= 0 ? nextSources[existingIndex].metadata : {},
     }),
   };
@@ -396,16 +458,22 @@ export async function POST(request: NextRequest) {
       if (!isSharedSourceTargetScope(sourceScope)) {
         return NextResponse.json({ error: "source_scope must be news or creator" }, { status: 400 });
       }
-      const normalizedHandle = normalizeInternalHandle(platform, rawValue);
+      const sourceInput = normalizeSocialSourceInput(platform, rawValue);
       await upsertSharedSource({
         adminContext,
         sourceScope,
         platform,
-        accountHandle: normalizedHandle,
+        accountHandle: sourceInput.accountHandle,
         metadata: {
           seed_source: `admin-social-landing-${sourceScope}-add`,
-          display_name: displayName || normalizedHandle,
+          display_name: displayName || sourceInput.accountHandle,
           profile_kind: sourceScope,
+          source_type: sourceInput.sourceType,
+          youtube_source_type: platform === "youtube" ? sourceInput.sourceType : undefined,
+          source_url: sourceInput.sourceUrl,
+          playlist_url: sourceInput.sourceType === "playlist" ? sourceInput.sourceUrl : undefined,
+          playlist_id: sourceInput.sourceType === "playlist" ? sourceInput.sourceExternalId : undefined,
+          source_external_id: sourceInput.sourceExternalId,
         },
       });
     }
@@ -415,7 +483,7 @@ export async function POST(request: NextRequest) {
       if (!sourceScope) {
         return NextResponse.json({ error: "Network target not found" }, { status: 404 });
       }
-      const normalizedHandle = normalizeInternalHandle(platform, rawValue);
+      const sourceInput = normalizeSocialSourceInput(platform, rawValue);
       const current = (await fetchSocialBackendJson("/shared/sources", {
         adminContext,
         queryString: `source_scope=${sourceScope}&include_inactive=true`,
@@ -427,7 +495,10 @@ export async function POST(request: NextRequest) {
       const existingIndex = existingSources.findIndex(
         (entry) =>
           String(entry.platform || "").trim().toLowerCase() === platform &&
-          String(entry.account_handle || "").trim().replace(/^@+/, "").toLowerCase() === normalizedHandle.toLowerCase(),
+          String(entry.account_handle || "")
+            .trim()
+            .replace(/^@+/, "")
+            .toLowerCase() === sourceInput.accountHandle.toLowerCase(),
       );
       const nextSources = existingSources.map((entry) => ({
         platform: String(entry.platform || "").trim().toLowerCase(),
@@ -445,10 +516,17 @@ export async function POST(request: NextRequest) {
       } else {
         nextSources.push({
           platform,
-          account_handle: normalizedHandle,
+          account_handle: sourceInput.accountHandle,
           is_active: true,
           scrape_priority: 100,
-          metadata: {},
+          metadata: {
+            source_type: sourceInput.sourceType,
+            youtube_source_type: platform === "youtube" ? sourceInput.sourceType : undefined,
+            source_url: sourceInput.sourceUrl,
+            playlist_url: sourceInput.sourceType === "playlist" ? sourceInput.sourceUrl : undefined,
+            playlist_id: sourceInput.sourceType === "playlist" ? sourceInput.sourceExternalId : undefined,
+            source_external_id: sourceInput.sourceExternalId,
+          },
         });
       }
 
@@ -471,13 +549,18 @@ export async function POST(request: NextRequest) {
       if (!currentShow) {
         return NextResponse.json({ error: "Show not found" }, { status: 404 });
       }
-      const normalizedHandle = normalizeInternalHandle(platform, rawValue);
+      const sourceInput = normalizeSocialSourceInput(platform, rawValue);
       const existingExternalIds =
         currentShow.external_ids && typeof currentShow.external_ids === "object"
           ? { ...(currentShow.external_ids as Record<string, unknown>) }
           : {};
-      for (const key of SHOW_EXTERNAL_ID_KEYS_BY_PLATFORM[platform]) {
-        existingExternalIds[key] = normalizedHandle;
+      if (sourceInput.sourceType === "playlist" && platform === "youtube") {
+        existingExternalIds.youtube_playlist_id = sourceInput.sourceExternalId;
+        existingExternalIds.youtube_playlist_url = sourceInput.sourceUrl;
+      } else {
+        for (const key of SHOW_EXTERNAL_ID_KEYS_BY_PLATFORM[platform]) {
+          existingExternalIds[key] = sourceInput.externalIdValue;
+        }
       }
       await updateShowById(targetId, { externalIds: existingExternalIds });
       await syncShowSharedSource({
@@ -485,7 +568,7 @@ export async function POST(request: NextRequest) {
         showId: targetId,
         showName: currentShow.name || "Show",
         platform,
-        accountHandle: normalizedHandle,
+        sourceInput,
       });
       invalidateTrrShowReadCaches(`${user.uid}:`);
       await invalidateAdminBackendCache(`/admin/trr-api/shows/${targetId}/cache/invalidate`, {

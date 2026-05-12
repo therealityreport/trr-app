@@ -265,7 +265,7 @@ const normalizeCommentBreakdown = ({
     missingComments,
     formulaLabel: `${formatInteger(parentComments)} parent comments + ${formatInteger(childReplies)} child replies + ${formatInteger(
       facebookComments,
-    )} Facebook comments + ${formatInteger(missingComments)} missing comments = ${formatInteger(
+    )} Facebook comments + ${formatInteger(missingComments)} comments not captured = ${formatInteger(
       reportedComments,
     )} reported comments`,
   };
@@ -610,7 +610,7 @@ export default function InstagramCommentsPostModal({
               <span>{platformLabel}</span>
               <span>{post?.source_id || "Unknown post"}</span>
               <span>{formatDateTime(post?.posted_at)}</span>
-              <span>{formatInteger(commentBreakdown.savedInstagramComments)} Instagram rows</span>
+              <span>{formatInteger(commentBreakdown.savedInstagramComments)} {platformLabel} rows</span>
             </div>
             <p className="max-w-3xl whitespace-pre-wrap break-words text-sm leading-6 text-zinc-700">{captionPreview}</p>
             {post?.url ? (
@@ -654,7 +654,7 @@ export default function InstagramCommentsPostModal({
                     : "text-zinc-800"
                 }
               >
-                {formatInteger(commentBreakdown.missingComments)} missing comments
+                {formatInteger(commentBreakdown.missingComments)} not captured
               </span>
               <span className="text-zinc-400">=</span>
               <span>{formatInteger(commentBreakdown.reportedComments)} reported comments</span>

@@ -89,8 +89,8 @@ const COMMENTS_SORT_COLUMNS: Array<{ key: CommentsSortField; label: string }> = 
   { key: "created", label: "Created" },
   { key: "caption", label: "Caption" },
   { key: "post_total", label: "Reported Comments" },
-  { key: "saved_comments", label: "Instagram Saved" },
-  { key: "missing_comments", label: "Missing Comments" },
+  { key: "saved_comments", label: "Saved Comments" },
+  { key: "missing_comments", label: "Comment Gap" },
   { key: "likes", label: "Likes" },
 ];
 const DEFAULT_COMMENTS_SORT: CommentsSortState = { field: "missing_comments", direction: "desc" };
@@ -417,6 +417,17 @@ const formatCommentsProgressWarning = (progress?: SocialAccountCommentsRunProgre
     (typeof progress.warning_message === "string" && progress.warning_message.trim()) ||
     (progress.warnings ?? []).filter((warning) => typeof warning === "string" && warning.trim()).slice(0, 2).join(" ");
   if (explicitWarning) return explicitWarning;
+  const endpointProbe = progress.comments_endpoint_probe;
+  const endpointProbeStatus =
+    endpointProbe && typeof endpointProbe === "object"
+      ? String(endpointProbe.status || endpointProbe.result || "").trim().toLowerCase()
+      : "";
+  if (progress.manual_auth_required === true || endpointProbeStatus === "auth_blocked") {
+    return "Instagram comments auth is blocked. Repair Instagram auth, then rerun the comments scrape.";
+  }
+  if (endpointProbeStatus === "transport_blocked") {
+    return "Comments endpoint preflight timed out through the proxy; workers are continuing.";
+  }
   const targetCount =
     readFiniteNumber(progress.target_source_ids_count) ??
     readFiniteNumber(progress.post_progress?.total_posts) ??
@@ -598,7 +609,7 @@ export default function InstagramCommentsPanel({
           return;
         }
 
-        const errorMessage = readInstagramCommentsErrorMessage(data, "Failed to load Instagram posts with comments");
+        const errorMessage = readInstagramCommentsErrorMessage(data, `Failed to load ${platformLabel} posts with comments`);
         if (attempt < 2 && isRetryablePostsLoadFailure(data, errorMessage, response.status)) {
           const retryAfterMs =
             typeof data.retry_after_seconds === "number" && data.retry_after_seconds > 0
@@ -610,7 +621,7 @@ export default function InstagramCommentsPanel({
         throw new Error(errorMessage);
       }
     } catch (error) {
-      setPostsError(error instanceof Error ? error.message : "Failed to load Instagram posts with comments");
+      setPostsError(error instanceof Error ? error.message : `Failed to load ${platformLabel} posts with comments`);
     } finally {
       setPostsLoading(false);
     }
@@ -1114,11 +1125,11 @@ export default function InstagramCommentsPanel({
             <p className="mt-1 text-xs text-zinc-500">Commentable now: {formatInteger(commentablePosts)}</p>
           </div>
           <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Missing</p>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Missing All Comments</p>
             <p className="mt-2 text-2xl font-bold text-zinc-900">{formatInteger(coverage?.missing_posts)}</p>
           </div>
           <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Stale</p>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Refresh Candidates</p>
             <p className="mt-2 text-2xl font-bold text-zinc-900">{formatInteger(coverage?.stale_posts)}</p>
           </div>
           <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
