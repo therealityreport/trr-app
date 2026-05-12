@@ -8,7 +8,7 @@ import {
 import { buildSnapshotResponse } from "@/lib/server/admin/admin-snapshot-route";
 import {
   fetchSocialBackendJson,
-  SOCIAL_PROXY_DEFAULT_TIMEOUT_MS,
+  SOCIAL_PROXY_LONG_TIMEOUT_MS,
   socialProxyErrorResponse,
 } from "@/lib/server/trr-api/social-admin-proxy";
 
@@ -187,7 +187,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
             fallbackError: "Failed to fetch social account profile dashboard",
             queryString: backendParams.toString(),
             retries: 0,
-            timeoutMs: SOCIAL_PROXY_DEFAULT_TIMEOUT_MS,
+            timeoutMs: SOCIAL_PROXY_LONG_TIMEOUT_MS,
           },
         );
         return normalizeDashboardSnapshot(dashboard as BackendDashboardPayload);
@@ -205,7 +205,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
             fallbackError: "Failed to fetch social account catalog run progress",
             queryString: progressParams.toString(),
             retries: 0,
-            timeoutMs: SOCIAL_PROXY_DEFAULT_TIMEOUT_MS,
+            timeoutMs: SOCIAL_PROXY_LONG_TIMEOUT_MS,
           },
         );
         return {

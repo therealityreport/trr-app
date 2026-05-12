@@ -580,6 +580,9 @@ export type SocialAccountCommentsRunProgress = {
   warning_code?: string | null;
   warning_message?: string | null;
   warnings?: string[];
+  auth_validation_mode?: string | null;
+  comments_endpoint_probe?: Record<string, unknown> | null;
+  manual_auth_required?: boolean | null;
   started_at_epoch_seconds?: number | null;
   updated_at?: string | null;
 };
@@ -1427,15 +1430,38 @@ export type SocialProfileCookieHealth = {
   refresh_label?: string;
   source_kind: string;
   source_path?: string;
+  cookie_fingerprint?: string | null;
+  cookie_fingerprint_algorithm?: string | null;
   refresh_target_path?: string;
   posts_auth_health?: {
     platform: string;
     account_handle?: string;
     ready: boolean;
+    status?: string | null;
+    category?: string | null;
     reason: string | null;
     execution_backend?: string;
+    cookie_fingerprint?: string | null;
+    cookie_fingerprint_match?: boolean | null;
   };
   posts_auth_probe?: Record<string, unknown> | null;
+  comments_auth_health?: {
+    platform: string;
+    account_handle?: string;
+    shortcode?: string | null;
+    ready: boolean;
+    status?: string | null;
+    category?: string | null;
+    reason: string | null;
+    execution_backend?: string;
+    cookie_fingerprint?: string | null;
+    cookie_fingerprint_match?: boolean | null;
+    rendered_fallback_enabled?: boolean | null;
+    advisory_continue?: boolean | null;
+    advisory_reason?: string | null;
+  };
+  comments_auth_probe?: Record<string, unknown> | null;
+  auth_surface_blocked?: boolean;
   warning_code?: string;
   warning_message?: string;
 };
@@ -1447,6 +1473,8 @@ export type SocialProfileCookieRefreshResult = {
   refresh_action?: "cookie_refresh" | "instagram_auth_repair";
   steps?: Array<{ name: string; status: string }>;
   remote_auth_probe?: Record<string, unknown> | null;
+  instagram_posts_auth_probe?: Record<string, unknown> | null;
+  instagram_comments_auth_probe?: Record<string, unknown> | null;
   warning_code?: string;
   warning_message?: string;
 };

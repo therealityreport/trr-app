@@ -251,6 +251,7 @@ const ACTIVE_CATALOG_RUN_STATUSES = new Set(["queued", "pending", "retrying", "r
 const ACTIVE_CATALOG_RECOVERY_STATUSES = new Set(["queued", "running", "fallback_enqueued", "blocked"]);
 const TERMINAL_CATALOG_RUN_STATUSES = new Set(["completed", "failed", "cancelled"]);
 const COMMENTS_PROGRESS_POLL_INTERVAL_MS = 5_000;
+const TWITTER_BACKFILL_LOOKBACK_DAYS = 365;
 const TIKTOK_EMPTY_FIRST_PAGE_ERROR_CODE = "tiktok_discovery_empty_first_page";
 const TIKTOK_EMPTY_FIRST_PAGE_ALERT_CODE = "tiktok_empty_first_page";
 const TIKTOK_DIRECT_FALLBACK_FAILED_ALERT_CODE = "tiktok_direct_fallback_failed";
@@ -560,6 +561,16 @@ const formatSeasonLabel = (seasonNumber?: number | null): string => {
 
 const formatBackfillTaskLabel = (task: CatalogBackfillSelectedTask): string => {
   return INSTAGRAM_BACKFILL_TASK_OPTIONS.find((option) => option.value === task)?.label ?? task;
+};
+
+const buildTwitterBackfillWindow = (now = new Date()): { dateStart: string; dateEnd: string } => {
+  const dateEnd = new Date(now);
+  const dateStart = new Date(dateEnd);
+  dateStart.setUTCDate(dateStart.getUTCDate() - TWITTER_BACKFILL_LOOKBACK_DAYS);
+  return {
+    dateStart: dateStart.toISOString(),
+    dateEnd: dateEnd.toISOString(),
+  };
 };
 
 const formatCoverageFieldLabel = (value: string): string => {
@@ -1376,6 +1387,17 @@ const formatActiveCommentsProgressWarning = (progress?: SocialAccountCommentsRun
     (typeof progress.warning_message === "string" && progress.warning_message.trim()) ||
     (progress.warnings ?? []).filter((warning) => typeof warning === "string" && warning.trim()).slice(0, 2).join(" ");
   if (explicitWarning) return explicitWarning;
+  const endpointProbe = progress.comments_endpoint_probe;
+  const endpointProbeStatus =
+    endpointProbe && typeof endpointProbe === "object"
+      ? String(endpointProbe.status || endpointProbe.result || "").trim().toLowerCase()
+      : "";
+  if (progress.manual_auth_required === true || endpointProbeStatus === "auth_blocked") {
+    return "Instagram comments auth is blocked. Repair Instagram auth, then rerun the comments scrape.";
+  }
+  if (endpointProbeStatus === "transport_blocked") {
+    return "Comments endpoint preflight timed out through the proxy; workers are continuing.";
+  }
   const targetCount =
     readFiniteNumber(progress.target_source_ids_count) ??
     readFiniteNumber(progress.post_progress?.total_posts) ??
@@ -2221,6 +2243,21 @@ const getCatalogLaunchGuardMessage = (
   return null;
 };
 
+const formatCookieHealthSourceLabel = (cookieHealth?: SocialProfileCookieHealth | null): string => {
+  if (!cookieHealth) return "";
+  if (cookieHealth.source_kind === "env_json") return " (env JSON)";
+  if (cookieHealth.source_kind === "runtime_override") return " (runtime override)";
+  if (cookieHealth.source_path) return ` (${cookieHealth.source_path.split("/").pop()})`;
+  return "";
+};
+
+const formatCookieHealthWarningLabel = (cookieHealth?: SocialProfileCookieHealth | null): string => {
+  if (cookieHealth?.warning_code === "env_json_source_refresh_writes_file") {
+    return "Refresh writes file";
+  }
+  return "Warning";
+};
+
 const INSTAGRAM_BACKFILL_BLOCKED_AUTH_MESSAGE =
   "Instagram backfill blocked before jobs were queued. Local cookies are present, but Modal posts auth was not accepted by Instagram. Use Repair Instagram Auth to sync local cookies into Modal and verify posts auth, then rerun Backfill Posts.";
 
@@ -2240,28 +2277,122 @@ const getInstagramPostsAuthStatusCopy = (
   const health = cookieHealth?.posts_auth_health ?? null;
   const probe = progress?.posts_auth_probe ?? cookieHealth?.posts_auth_probe ?? null;
   const probeStatus = String(probe?.status || probe?.result || "").trim().toLowerCase();
+  const healthStatus = String(health?.status || "").trim().toLowerCase();
+  const status = probeStatus || healthStatus;
   const healthReason = String(health?.reason || "").trim().toLowerCase();
   if (isInstagramPostsAuthVerified(cookieHealth)) {
     return { tone: "text-emerald-700", text: "Modal posts auth verified" };
   }
+  if (status === "transport_blocked") {
+    return { tone: "text-amber-700", text: "Instagram posts transport blocked" };
+  }
+  if (status === "fetch_blocked") {
+    return { tone: "text-amber-700", text: "Instagram posts fetch blocked" };
+  }
   if (
     operationalState === "blocked_auth" ||
     repairStatus === "failed" ||
-    probeStatus === "auth_blocked" ||
-    health?.ready === false
+    status === "auth_blocked" ||
+    healthReason === "checkpoint_required" ||
+    healthReason === "redirect_to_login" ||
+    healthReason === "redirect_to_checkpoint"
   ) {
     if (healthReason === "probe_function_unavailable" || healthReason === "probe_invocation_failed") {
       return { tone: "text-amber-700", text: "Modal posts auth probe unavailable" };
     }
     return { tone: "text-red-600", text: "Instagram posts auth blocked" };
   }
-  if (probeStatus === "valid" || health?.ready === true) {
+  if (status === "valid" || health?.ready === true) {
     return { tone: "text-emerald-700", text: "Modal posts auth verified" };
   }
   if (repairStatus === "succeeded") {
     return { tone: "text-emerald-700", text: "Modal posts auth repaired" };
   }
   return { tone: "text-zinc-500", text: "Modal posts auth not verified" };
+};
+
+const getInstagramCommentsAuthStatusCopy = (
+  cookieHealth?: SocialProfileCookieHealth | null,
+): { tone: string; text: string } => {
+  const health = cookieHealth?.comments_auth_health ?? null;
+  const probe = cookieHealth?.comments_auth_probe as JsonRecord | null | undefined;
+  const probeStatus = String(probe?.status || probe?.result || "").trim().toLowerCase();
+  const healthStatus = String(health?.status || "").trim().toLowerCase();
+  const status = probeStatus || healthStatus;
+  if (health?.ready === true || probe?.ready === true || status === "valid") {
+    return { tone: "text-emerald-700", text: "Modal comments auth verified" };
+  }
+  if (status === "transport_blocked") {
+    return { tone: "text-amber-700", text: "Instagram comments transport blocked" };
+  }
+  if (status === "fetch_blocked") {
+    const reason = String(health?.reason || probe?.reason || "").trim();
+    return {
+      tone: "text-amber-700",
+      text: reason
+        ? `Instagram comments auth probe blocked: ${formatDiagnosticToken(reason)}`
+        : "Instagram comments auth probe blocked",
+    };
+  }
+  if (status === "auth_blocked") {
+    const reason = String(health?.reason || probe?.reason || "").trim();
+    const fallbackEnabled =
+      health?.rendered_fallback_enabled === true ||
+      health?.advisory_continue === true ||
+      probe?.advisory_continue === true;
+    if (fallbackEnabled && reason === "html_challenge_or_auth_required") {
+      return {
+        tone: "text-amber-700",
+        text: "Instagram comments endpoint challenged; rendered fallback enabled",
+      };
+    }
+    return {
+      tone: "text-red-600",
+      text: reason
+        ? `Instagram comments auth blocked: ${formatDiagnosticToken(reason)}`
+        : "Instagram comments auth blocked",
+    };
+  }
+  return { tone: "text-zinc-500", text: "Modal comments endpoint not checked yet" };
+};
+
+const getInstagramCookiePayloadStatusCopy = (
+  cookieHealth: SocialProfileCookieHealth | null | undefined,
+  selectedTab: SocialAccountProfileTab,
+): { tone: string; text: string } | null => {
+  if (!cookieHealth?.cookie_fingerprint) return null;
+  const authHealth =
+    selectedTab === "comments" ? cookieHealth.comments_auth_health : cookieHealth.posts_auth_health;
+  const probe =
+    (selectedTab === "comments" ? cookieHealth.comments_auth_probe : cookieHealth.posts_auth_probe) as
+      | JsonRecord
+      | null
+      | undefined;
+  const remoteFingerprint = String(authHealth?.cookie_fingerprint || probe?.cookie_fingerprint || "").trim();
+  const explicitMatch = authHealth?.cookie_fingerprint_match;
+  const matches =
+    typeof explicitMatch === "boolean"
+      ? explicitMatch
+      : remoteFingerprint
+        ? remoteFingerprint === cookieHealth.cookie_fingerprint
+        : null;
+  if (matches === true) {
+    return { tone: "text-emerald-700", text: "Modal uses same cookie payload" };
+  }
+  if (matches === false) {
+    return { tone: "text-red-600", text: "Modal cookie payload differs from local file" };
+  }
+  return null;
+};
+
+const buildCommentsAuthCookieHealthProbeKey = (
+  platform: string,
+  handle: string,
+  cookieHealth: SocialProfileCookieHealth,
+): string => {
+  const fingerprint = String(cookieHealth.cookie_fingerprint || "").trim();
+  const sourcePath = String(cookieHealth.source_path || "").trim();
+  return [platform, handle, fingerprint || "no-fingerprint", cookieHealth.source_kind || "", sourcePath].join(":");
 };
 
 const buildProvisionalCatalogRunProgress = (input: {
@@ -2426,6 +2557,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   const [cookieRefreshMessage, setCookieRefreshMessage] = useState<string | null>(null);
   const pendingCatalogActionAfterCookieRepairRef = useRef<PendingCatalogAction | null>(null);
   const liveProfileTotalProbeKeyRef = useRef<string | null>(null);
+  const commentsAuthCookieHealthProbeKeyRef = useRef<string | null>(null);
 
   const supportsCatalog = SOCIAL_ACCOUNT_CATALOG_ENABLED_PLATFORMS.includes(platform);
   const supportsCatalogDetail = SOCIAL_ACCOUNT_CATALOG_DETAIL_ENABLED_PLATFORMS.includes(platform);
@@ -2582,6 +2714,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     setCookieHealthError(null);
     setCookieRefreshing(false);
     setCookieRefreshMessage(null);
+    commentsAuthCookieHealthProbeKeyRef.current = null;
     setCollaboratorsTags(null);
     setCollaboratorsLoading(false);
     setCollaboratorsError(null);
@@ -2665,7 +2798,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   }, [fetchAdminWithAuth, handle, platform, user]);
 
   const refreshCommentsSummary = useCallback(async () => {
-    await refreshSummary({ detail: "full" });
+    await refreshSummary({ detail: "lite" });
   }, [refreshSummary]);
 
   const fetchCatalogRunProgressSnapshot = useCallback(
@@ -4140,13 +4273,19 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   const rawActiveCommentsRunProgressStatus = String(rawActiveCommentsRunProgressData?.run_status || "").trim().toLowerCase();
   const activeCommentsRunProgressLastSuccessMs = activeCommentsRunProgress.lastSuccessAt?.getTime() ?? 0;
   const activeCommentsRunProgressFromThisMount = activeCommentsRunProgressLastSuccessMs >= mountedAtMsRef.current;
+  const suppressStaleActiveCommentsErroredProgress =
+    Boolean(activeCommentsRunId) &&
+    rawActiveCommentsRunProgressData?.run_id === activeCommentsRunId &&
+    Boolean(activeCommentsRunProgress.error) &&
+    !activeCommentsRunProgressFromThisMount;
   const suppressStaleActiveCommentsTerminalProgress =
     Boolean(activeCommentsRunId) &&
     rawActiveCommentsRunProgressData?.run_id === activeCommentsRunId &&
     TERMINAL_CATALOG_RUN_STATUSES.has(rawActiveCommentsRunProgressStatus) &&
     ACTIVE_CATALOG_RUN_STATUSES.has(activeCommentsRunStatus) &&
     !activeCommentsRunProgressFromThisMount;
-  const activeCommentsRunProgressData = suppressStaleActiveCommentsTerminalProgress
+  const activeCommentsRunProgressData =
+    suppressStaleActiveCommentsTerminalProgress || suppressStaleActiveCommentsErroredProgress
     ? null
     : rawActiveCommentsRunProgressData;
   const refetchActiveCommentsRunProgress = activeCommentsRunProgress.refetch;
@@ -4279,10 +4418,47 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   const catalogLaunchGuardMessage = useMemo(() => {
     return getCatalogLaunchGuardMessage(catalogRunProgress, cookieHealth);
   }, [catalogRunProgress, cookieHealth]);
+  const instagramCommentsModalAuthActive = useMemo(() => {
+    if (platform !== "instagram") return false;
+    const activeCommentsStatus = String(activeCommentsRunProgressData?.run_status || "").trim().toLowerCase();
+    return (
+      ["queued", "running", "retrying", "pending"].includes(activeCommentsStatus) &&
+      activeCommentsRunProgressData?.manual_auth_required === false
+    );
+  }, [activeCommentsRunProgressData, platform]);
+  const instagramCommentsAuthOwnsCurrentSurface =
+    instagramCommentsModalAuthActive && selectedTab === "comments";
   const instagramPostsAuthStatusCopy = useMemo(() => {
     if (platform !== "instagram") return null;
+    if (instagramCommentsModalAuthActive) {
+      return { tone: "text-emerald-700", text: "Modal Instagram comments auth active" };
+    }
+    if (activeCommentsRunProgressData?.manual_auth_required === true) {
+      return { tone: "text-red-600", text: "Instagram comments auth blocked" };
+    }
+    if (selectedTab === "comments") {
+      return getInstagramCommentsAuthStatusCopy(cookieHealth);
+    }
     return getInstagramPostsAuthStatusCopy(catalogRunProgress, cookieHealth);
-  }, [catalogRunProgress, cookieHealth, platform]);
+  }, [activeCommentsRunProgressData, catalogRunProgress, cookieHealth, instagramCommentsModalAuthActive, platform, selectedTab]);
+  const cookieHealthPrimaryLabel = useMemo(() => {
+    if (!cookieHealth) return null;
+    const sourceLabel = formatCookieHealthSourceLabel(cookieHealth);
+    if (platform === "instagram" && selectedTab === "comments") {
+      return `Cookie file present${sourceLabel}`;
+    }
+    return `Local cookies healthy${sourceLabel}`;
+  }, [cookieHealth, platform, selectedTab]);
+  const instagramCookiePayloadStatusCopy = useMemo(() => {
+    if (platform !== "instagram") return null;
+    return getInstagramCookiePayloadStatusCopy(cookieHealth, selectedTab);
+  }, [cookieHealth, platform, selectedTab]);
+  const showCookieHealthLoading =
+    cookieHealthLoading &&
+    !cookieHealth &&
+    !instagramPostsAuthStatusCopy &&
+    !instagramCookiePayloadStatusCopy;
+  const showCookieHealthError = Boolean(cookieHealthError) && !cookieHealth;
 
   const catalogActionsBlocked =
     runningCatalogAction !== null ||
@@ -5091,7 +5267,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     () => Number(summary?.comments_saved_summary?.retrieved_comments ?? 0),
     [summary?.comments_saved_summary?.retrieved_comments],
   );
-  const commentsMissingCount = useMemo(
+  const commentsGapCount = useMemo(
     () => Math.max(0, commentsRetrievedCount - commentsSavedCount),
     [commentsRetrievedCount, commentsSavedCount],
   );
@@ -5360,12 +5536,16 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   const fetchCookieHealth = useCallback(
     async (force = false): Promise<SocialProfileCookieHealth | null> => {
       if (!platformRequiresCookies || !user) return null;
+      const commentsAuthRequested = platform === "instagram" && selectedTab === "comments";
       setCookieHealthLoading(true);
       setCookieHealthError(null);
       try {
         const params = new URLSearchParams();
         if (force) params.set("force", "true");
-        if (platform === "instagram") params.set("posts_auth", "true");
+        if (platform === "instagram") {
+          params.set("posts_auth", "true");
+          if (commentsAuthRequested) params.set("comments_auth", "true");
+        }
         const qs = params.size > 0 ? `?${params.toString()}` : "";
         const response = await fetchAdminWithAuth(
           `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/cookies/health${qs}`,
@@ -5375,6 +5555,9 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
         if (!response.ok) throw new Error("Failed to check cookie health");
         const data = (await response.json()) as SocialProfileCookieHealth;
         setCookieHealth(data);
+        if (commentsAuthRequested) {
+          commentsAuthCookieHealthProbeKeyRef.current = buildCommentsAuthCookieHealthProbeKey(platform, handle, data);
+        }
         return data;
       } catch (error) {
         setCookieHealthError(error instanceof Error ? error.message : "Cookie health check failed");
@@ -5383,22 +5566,35 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
         setCookieHealthLoading(false);
       }
     },
-    [platformRequiresCookies, user, platform, handle, fetchAdminWithAuth],
+    [platformRequiresCookies, user, platform, handle, selectedTab, fetchAdminWithAuth],
   );
 
   useEffect(() => {
+    const commentsAuthProbeMissing =
+      platform === "instagram" &&
+      selectedTab === "comments" &&
+      Boolean(cookieHealth) &&
+      !cookieHealth?.comments_auth_health &&
+      !cookieHealth?.comments_auth_probe;
+    const commentsAuthProbeKey =
+      commentsAuthProbeMissing && cookieHealth
+        ? buildCommentsAuthCookieHealthProbeKey(platform, handle, cookieHealth)
+        : null;
+    const commentsAuthProbeAlreadyRequested =
+      Boolean(commentsAuthProbeKey) && commentsAuthCookieHealthProbeKeyRef.current === commentsAuthProbeKey;
     if (
       checking ||
       !user ||
       !hasAccess ||
       !platformRequiresCookies ||
-      cookieHealth ||
+      (commentsAuthProbeMissing && commentsAuthProbeAlreadyRequested) ||
+      (cookieHealth && !commentsAuthProbeMissing) ||
       cookieHealthLoading
     ) {
       return;
     }
-    if (platformRequiresCookies && user && !cookieHealth && !cookieHealthLoading) {
-      void fetchCookieHealth();
+    if (platformRequiresCookies && user && (!cookieHealth || commentsAuthProbeMissing) && !cookieHealthLoading) {
+      void fetchCookieHealth(commentsAuthProbeMissing);
     }
   }, [
     checking,
@@ -5406,7 +5602,10 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     cookieHealthLoading,
     fetchCookieHealth,
     hasAccess,
+    handle,
+    platform,
     platformRequiresCookies,
+    selectedTab,
     user,
   ]);
 
@@ -5473,6 +5672,16 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
         : platform === "tiktok" ? [...TIKTOK_BACKFILL_DEFAULT_SELECTED_TASKS]
         : undefined;
       const resolvedSelectedTasks = selectedTasks ?? defaultSelectedTasks;
+      if (platform === "twitter") {
+        const { dateStart, dateEnd } = buildTwitterBackfillWindow();
+        return {
+          source_scope: activeCatalogSourceScope,
+          backfill_scope: "bounded_window",
+          date_start: dateStart,
+          date_end: dateEnd,
+          ...(resolvedSelectedTasks ? { selected_tasks: resolvedSelectedTasks } : {}),
+        };
+      }
       return {
         source_scope: activeCatalogSourceScope,
         backfill_scope: "full_history",
@@ -6336,6 +6545,8 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                   <p className="mt-2 text-xs text-zinc-500">
                     {platform === "instagram"
                       ? "Backfill Posts starts with listing saved post identities. Post Details, Comments, and Media are follow-up lanes and stay separate from listing completion."
+                      : platform === "twitter"
+                        ? "Backfill Posts runs the past-year catalog job. Sync Recent runs the same pipeline, limited to the last day."
                       : "Backfill Posts runs the full-history catalog job. Sync Recent runs the same pipeline, limited to the last day."}
                   </p>
                 ) : null}
@@ -6344,12 +6555,12 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                 {/* Cookie preflight card for cookie-dependent platforms */}
                 {supportsCatalog && platformRequiresCookies ? (
                   <div className="mt-3 flex items-center gap-3 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2.5">
-                    {cookieHealthLoading ? (
+                    {showCookieHealthLoading ? (
                       <>
                         <span className="inline-block h-2.5 w-2.5 animate-pulse rounded-full bg-zinc-400" />
                         <span className="text-xs text-zinc-500">Checking cookies…</span>
                       </>
-                    ) : cookieHealthError ? (
+                    ) : showCookieHealthError ? (
                       <>
                         <span className="inline-block h-2.5 w-2.5 rounded-full bg-amber-400" />
                         <span className="text-xs text-zinc-500">Cookie check failed</span>
@@ -6361,21 +6572,24 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                           Retry
                         </button>
                       </>
+                    ) : instagramCommentsAuthOwnsCurrentSurface ? (
+                      <>
+                        <span className="inline-block h-2.5 w-2.5 rounded-full bg-emerald-500" />
+                        <span className="text-xs text-zinc-600">Comments auth active</span>
+                      </>
                     ) : cookieHealth?.healthy === true ? (
                       <>
                         <span className="inline-block h-2.5 w-2.5 rounded-full bg-emerald-500" />
                         <span className="text-xs text-zinc-600">
-                          Local cookies healthy
-                          {cookieHealth.source_kind && cookieHealth.source_path
-                            ? ` (${cookieHealth.source_path.split("/").pop()})`
-                            : ""}
+                          {cookieHealthPrimaryLabel ?? "Local cookies healthy"}
                         </span>
                       </>
                     ) : cookieHealth?.healthy === false ? (
                       <>
                         <span className="inline-block h-2.5 w-2.5 rounded-full bg-red-500" />
                         <span className="text-xs text-zinc-600">
-                          Cookies expired{cookieHealth.reason ? ` — ${cookieHealth.reason}` : ""}
+                          {cookieHealth.auth_surface_blocked ? "Instagram auth blocked" : "Cookies expired"}
+                          {cookieHealth.reason ? ` — ${cookieHealth.reason}` : ""}
                         </span>
                         {cookieHealth.refresh_available ? (
                           <button
@@ -6398,12 +6612,17 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                         {instagramPostsAuthStatusCopy.text}
                       </span>
                     ) : null}
-                    {cookieRefreshMessage ? (
+                    {instagramCookiePayloadStatusCopy ? (
+                      <span className={`text-xs ${instagramCookiePayloadStatusCopy.tone}`}>
+                        {instagramCookiePayloadStatusCopy.text}
+                      </span>
+                    ) : null}
+                    {cookieRefreshMessage && !instagramCommentsAuthOwnsCurrentSurface ? (
                       <span className="text-xs text-zinc-500">{cookieRefreshMessage}</span>
                     ) : null}
                     {cookieHealth?.warning_message ? (
                       <span className="text-xs text-amber-600" title={cookieHealth.warning_message}>
-                        ⚠ {cookieHealth.warning_code === "env_json_source_refresh_writes_file" ? "env var source" : "warning"}
+                        ⚠ {formatCookieHealthWarningLabel(cookieHealth)}
                       </span>
                     ) : null}
                   </div>
@@ -6445,14 +6664,14 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                     )}
                   </div>
                   <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Missing Comments</p>
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Comment Gap</p>
                     {summaryInitialStatePending || commentsSavedSummaryUnavailable ? (
                       <p className="mt-2 text-sm font-semibold text-zinc-500">
                         {summaryInitialStatePending ? "Loading…" : "Unavailable"}
                       </p>
                     ) : (
                       <>
-                        <p className="mt-2 text-2xl font-bold text-zinc-900">{formatInteger(commentsMissingCount)}</p>
+                        <p className="mt-2 text-2xl font-bold text-zinc-900">{formatInteger(commentsGapCount)}</p>
                         <p className="mt-1 text-xs text-zinc-500">
                           {formatInteger(commentsRetrievedCount)} reported minus {formatInteger(commentsSavedCount)} saved
                         </p>

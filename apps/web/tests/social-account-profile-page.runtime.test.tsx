@@ -2291,8 +2291,8 @@ describe("SocialAccountProfilePage", () => {
     const postLink = await screen.findByRole("link", { name: "DVfQnTcjsCA" });
     expect(postLink).toBeInTheDocument();
     expect(screen.getByText("Reported Comments")).toBeInTheDocument();
-    expect(screen.getByText("Instagram Saved")).toBeInTheDocument();
-    expect(screen.getAllByText("Missing Comments").length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText("Saved Comments").length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText("Comment Gap").length).toBeGreaterThanOrEqual(2);
     const row = postLink.closest("tr") as HTMLElement;
     expect(within(row).getByText("27")).toBeInTheDocument();
     expect(within(row).getByText("13 parent")).toBeInTheDocument();
@@ -2315,7 +2315,7 @@ describe("SocialAccountProfilePage", () => {
     expect(within(dialog).getByText("13 parent comments")).toBeInTheDocument();
     expect(within(dialog).getByText("1 child replies")).toBeInTheDocument();
     expect(within(dialog).getByText("0 Facebook comments")).toBeInTheDocument();
-    expect(within(dialog).getByText("13 missing comments")).toBeInTheDocument();
+    expect(within(dialog).getByText("13 not captured")).toBeInTheDocument();
     expect(within(dialog).getByText("27 reported comments")).toBeInTheDocument();
     expect(within(dialog).getByText("Facebook comments: 0")).toBeInTheDocument();
     expect(within(dialog).queryByRole("link", { name: "Open Facebook post" })).not.toBeInTheDocument();
@@ -2382,8 +2382,8 @@ describe("SocialAccountProfilePage", () => {
       ["Created", "created", "desc"],
       ["Caption", "caption", "asc"],
       ["Reported Comments", "post_total", "desc"],
-      ["Instagram Saved", "saved_comments", "desc"],
-      ["Missing Comments", "missing_comments", "desc"],
+      ["Saved Comments", "saved_comments", "desc"],
+      ["Comment Gap", "missing_comments", "desc"],
       ["Likes", "likes", "desc"],
     ];
 
@@ -4529,6 +4529,45 @@ describe("SocialAccountProfilePage", () => {
     });
   });
 
+  it("does not keep rechecking cookie health when a comments auth probe response has no comments payload", async () => {
+    const cookieHealthUrls: string[] = [];
+
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse(baseSummary);
+      }
+      if (url.includes("/posts?page=1&page_size=25&comments_only=true")) {
+        return jsonResponse({
+          items: [],
+          pagination: { page: 1, page_size: 25, total: 0, total_pages: 1 },
+        });
+      }
+      if (url.includes("/cookies/health")) {
+        cookieHealthUrls.push(url);
+        return jsonResponse({
+          ...healthyCookieHealth("instagram"),
+          cookie_fingerprint: "cookie-fp-1",
+        });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="comments" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Cookie file present")).toBeInTheDocument();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(cookieHealthUrls).toHaveLength(1);
+    expect(cookieHealthUrls[0]).toContain("comments_auth=true");
+    expect(screen.queryByText("Checking cookies…")).not.toBeInTheDocument();
+  });
+
   it("repairs Instagram auth and then auto-starts backfill when Backfill Posts is clicked with unhealthy cookies", async () => {
     let cookieHealthChecks = 0;
     const backfillBodies: unknown[] = [];
@@ -4772,6 +4811,238 @@ describe("SocialAccountProfilePage", () => {
       );
     });
   });
+
+  it("renders Twitter env-cookie source without a stale refresh warning when refresh auto-syncs env JSON", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse({
+          ...baseSummary,
+          platform: "twitter",
+          account_handle: "bravotv",
+          profile_url: "https://x.com/BravoTV",
+          source_status: [{ source_scope: "creator" }],
+        });
+      }
+      if (url.includes("/cookies/health")) {
+        return jsonResponse({
+          ...healthyCookieHealth("twitter"),
+          source_kind: "env_json",
+          refresh_target_path:
+            "/Users/thomashulihan/Projects/TRR/TRR-Backend/scripts/socials/twitter/twitter_cookies.json",
+          refresh_sync_mode: "env_json_source",
+          refresh_sync_message:
+            "Refresh writes the cookie file and syncs the active env JSON source so it remains authoritative.",
+        });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="twitter" handle="bravotv" activeTab="catalog" />);
+
+    expect(await screen.findByText("Local cookies healthy (env JSON)")).toBeInTheDocument();
+    expect(screen.queryByText("⚠ Refresh writes file")).not.toBeInTheDocument();
+  });
+
+  it("does not show checking cookies alongside active Modal comments auth", async () => {
+    const runId = "comments-active-auth-run";
+    let resolveCookieHealth: ((response: Response) => void) | null = null;
+    const cookieHealthPromise = new Promise<Response>((resolve) => {
+      resolveCookieHealth = resolve;
+    });
+    const activeSummary = {
+      ...baseSummary,
+      account_handle: "thetraitorsus",
+      profile_url: "https://www.instagram.com/thetraitorsus/",
+      comments_coverage: {
+        ...baseSummary.comments_coverage,
+        active_run_id: runId,
+        effective_status: "running",
+        last_comments_run_status: "running",
+      },
+    };
+
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/snapshot")) {
+        return jsonResponse({
+          summary: activeSummary,
+          catalog_run_progress: null,
+          generated_at: "2026-05-11T18:00:00.000Z",
+        });
+      }
+      if (url.includes("/summary")) {
+        return jsonResponse(activeSummary);
+      }
+      if (url.includes("/cookies/health")) {
+        return cookieHealthPromise;
+      }
+      if (url.includes(`/comments/runs/${runId}/progress`)) {
+        return jsonResponse({
+          run_id: runId,
+          platform: "instagram",
+          account_handle: "thetraitorsus",
+          run_status: "running",
+          manual_auth_required: false,
+          comments_shard_count: 4,
+          active_comment_jobs: 2,
+          completed_comment_jobs: 2,
+          failed_comment_jobs: 0,
+          post_progress: { completed_posts: 150, total_posts: 230 },
+        });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="thetraitorsus" activeTab="catalog" />);
+
+    expect(await screen.findByText("Modal Instagram comments auth active")).toBeInTheDocument();
+    expect(screen.queryByText("Checking cookies…")).not.toBeInTheDocument();
+    resolveCookieHealth?.(jsonResponse(healthyCookieHealth("instagram")));
+  });
+
+  it("does not offer Instagram cookie refresh on the comments surface while Modal comments auth is active", async () => {
+    const runId = "comments-active-auth-run";
+    const activeSummary = {
+      ...baseSummary,
+      account_handle: "thetraitorsus",
+      profile_url: "https://www.instagram.com/thetraitorsus/",
+      comments_coverage: {
+        ...baseSummary.comments_coverage,
+        active_run_id: runId,
+        effective_status: "running",
+        last_comments_run_status: "running",
+      },
+    };
+
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/snapshot")) {
+        return jsonResponse({
+          summary: activeSummary,
+          catalog_run_progress: null,
+          generated_at: "2026-05-11T18:00:00.000Z",
+        });
+      }
+      if (url.includes("/summary")) {
+        return jsonResponse(activeSummary);
+      }
+      if (url.includes("/cookies/health")) {
+        return jsonResponse({
+          ...healthyCookieHealth("instagram"),
+          healthy: false,
+          reason: "request_error",
+        });
+      }
+      if (url.includes("/posts?page=1&page_size=25&comments_only=true")) {
+        return jsonResponse({
+          items: [],
+          pagination: { page: 1, page_size: 25, total: 0, total_pages: 1 },
+        });
+      }
+      if (url.includes(`/comments/runs/${runId}/progress`)) {
+        return jsonResponse({
+          run_id: runId,
+          platform: "instagram",
+          account_handle: "thetraitorsus",
+          run_status: "running",
+          manual_auth_required: false,
+          comments_shard_count: 4,
+          active_comment_jobs: 2,
+          completed_comment_jobs: 2,
+          failed_comment_jobs: 0,
+          post_progress: { completed_posts: 150, total_posts: 230 },
+        });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="thetraitorsus" activeTab="comments" />);
+
+    expect(await screen.findByText("Modal Instagram comments auth active")).toBeInTheDocument();
+    expect(await screen.findByText("Comments auth active")).toBeInTheDocument();
+    expect(screen.queryByText(/Cookies expired/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Repair Instagram Auth" })).not.toBeInTheDocument();
+  });
+
+  it("hides cached comments progress rows when the current poll is failing", async () => {
+    const runId = "comments-stale-progress-run";
+    window.localStorage.removeItem(`trr:shared-live:instagram-comments-run:instagram:thetraitorsus:${runId}:lease:v1`);
+    window.localStorage.setItem(
+      `trr:shared-live:instagram-comments-run:instagram:thetraitorsus:${runId}:snapshot:v1`,
+      JSON.stringify({
+        data: {
+          run_id: runId,
+          platform: "instagram",
+          account_handle: "thetraitorsus",
+          run_status: "running",
+          manual_auth_required: false,
+          comments_shard_count: 4,
+          active_comment_jobs: 2,
+          completed_comment_jobs: 0,
+          failed_comment_jobs: 2,
+          comment_shards: [
+            {
+              shard_index: 2,
+              shard_count: 4,
+              job_id: "451cc01e-old",
+              status: "failed",
+              target_count: 58,
+              completed_posts: 2,
+              retry_target_count: 56,
+              comments_processed: 411,
+              error_message: "function max(uuid) does not exist",
+            },
+          ],
+        },
+        error: null,
+        errorDetails: null,
+        lastEventAtMs: Date.now() - 60_000,
+        lastSuccessAtMs: Date.now() - 60_000,
+        connected: true,
+      }),
+    );
+    const activeSummary = {
+      ...baseSummary,
+      account_handle: "thetraitorsus",
+      profile_url: "https://www.instagram.com/thetraitorsus/",
+      comments_coverage: {
+        ...baseSummary.comments_coverage,
+        active_run_id: runId,
+        effective_status: "running",
+        last_comments_run_status: "running",
+      },
+    };
+
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/snapshot")) {
+        return jsonResponse({
+          summary: activeSummary,
+          catalog_run_progress: null,
+          generated_at: "2026-05-11T18:00:00.000Z",
+        });
+      }
+      if (url.includes("/summary")) {
+        return jsonResponse(activeSummary);
+      }
+      if (url.includes("/cookies/health")) {
+        return jsonResponse(healthyCookieHealth("instagram"));
+      }
+      if (url.includes(`/comments/runs/${runId}/progress`)) {
+        return jsonResponse({ error: "Allowlist admin access required" }, 403);
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="thetraitorsus" activeTab="catalog" />);
+
+    expect(
+      await screen.findByText("Progress poll is retrying: Allowlist admin access required", {}, { timeout: 7_000 }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/451cc01e/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/function max\(uuid\)/)).not.toBeInTheDocument();
+  }, 10_000);
 
   it("routes Fill Missing Posts to sync-newer for head gaps", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -5438,7 +5709,16 @@ describe("SocialAccountProfilePage", () => {
       }
       if (url.includes("/catalog/backfill")) {
         expect(init?.method).toBe("POST");
-        expect(init?.body).toBe(JSON.stringify({ source_scope: "network", backfill_scope: "full_history" }));
+        const requestBody = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+        expect(requestBody).toMatchObject({
+          source_scope: "network",
+          backfill_scope: "bounded_window",
+        });
+        const dateStart = Date.parse(String(requestBody.date_start));
+        const dateEnd = Date.parse(String(requestBody.date_end));
+        expect(Number.isNaN(dateStart)).toBe(false);
+        expect(Number.isNaN(dateEnd)).toBe(false);
+        expect(dateEnd - dateStart).toBe(365 * 24 * 60 * 60 * 1000);
         return jsonResponse({
           run_id: "catalog-run-twitter-12345678",
           status: "queued",
