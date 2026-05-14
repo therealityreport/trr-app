@@ -27,6 +27,9 @@ import type {
   SharedPipelineSummary,
   SharedReviewItemSummary,
   SharedRunSummary,
+  SocialAccountProgressLaneKey,
+  SocialAccountProgressLaneSummary,
+  SocialAccountProgressSummary,
   ShowProfileSet,
   SocialHandleSummary,
   SocialLandingPayload,
@@ -37,6 +40,7 @@ import {
   getCoveredShows,
   type CoveredShow,
 } from "@/lib/server/admin/covered-shows-repository";
+import { query } from "@/lib/server/postgres";
 import {
   ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
   fetchAdminBackendJson,
@@ -80,6 +84,22 @@ type BackendLandingSummaryPayload = {
 
 type SocialBladeRowsPayload = {
   rows?: SocialBladeSummaryRow[];
+};
+
+type SocialProgressRow = {
+  platform: string | null;
+  account_handle: string | null;
+  saved_count: number | string | null;
+  scraped_count: number | string | null;
+  socialblade_scraped_count?: number | string | null;
+  socialblade_saved_count?: number | string | null;
+  socialblade_supported?: boolean | null;
+  following_saved_count?: number | string | null;
+  following_total_count?: number | string | null;
+  comments_saved_count?: number | string | null;
+  comments_total_count?: number | string | null;
+  media_saved_count?: number | string | null;
+  media_total_count?: number | string | null;
 };
 
 type SupportedPersonSocialSource = Extract<
@@ -144,7 +164,7 @@ const SHARED_SOURCE_SETS: readonly {
     key: "bravo-tv",
     title: "Bravo TV",
     source_scope: "network",
-    description: "Network social handles used in sends and profile backfills.",
+    description: "Configured network-level shared social accounts.",
   },
   {
     key: "news",
@@ -160,13 +180,48 @@ const SHARED_SOURCE_SETS: readonly {
   },
 ];
 
+const LEGACY_NETWORK_SET_KEY = "bravo-tv";
+const LEGACY_NETWORK_SET_TITLE = "Bravo TV";
+const LEGACY_NETWORK_SET_DESCRIPTION =
+  "Shared Bravo social handles used in sends and profile backfills.";
+
 const CAST_SOCIALBLADE_PLATFORMS =
   SOCIAL_ACCOUNT_SOCIALBLADE_ENABLED_PLATFORMS.filter(
     (platform): platform is CastSocialBladePlatform =>
       platform === "instagram" ||
+      platform === "tiktok" ||
       platform === "youtube" ||
       platform === "facebook",
   );
+
+const SOCIAL_LANDING_PROGRESS_MAX_TARGETS = 96;
+
+const sqlJsonTextNonNegativeInt = (expr: string): string =>
+  `coalesce(nullif(regexp_replace(coalesce(${expr}, ''), '[^0-9]', '', 'g'), '')::bigint, 0)`;
+
+const instagramReportedCommentsSql = (alias: string): string => {
+  const safeAlias = alias.trim() || "p";
+  const raw = `coalesce(${safeAlias}.raw_data, '{}'::jsonb)`;
+  const rawCandidates = [
+    `${raw} ->> 'comments_count'`,
+    `${raw} ->> 'comments'`,
+    `${raw} ->> 'comment_count'`,
+    `${raw} ->> 'commentsCount'`,
+    `${raw} -> 'edge_media_to_comment' ->> 'count'`,
+    `${raw} -> 'edge_media_to_parent_comment' ->> 'count'`,
+    `${raw} -> 'edge_media_preview_comment' ->> 'count'`,
+    `${raw} -> 'media' ->> 'comments_count'`,
+    `${raw} -> 'media' ->> 'comments'`,
+    `${raw} -> 'media' ->> 'comment_count'`,
+    `${raw} -> 'media' ->> 'commentsCount'`,
+    `${raw} -> 'metrics' ->> 'comments_count'`,
+    `${raw} -> 'metrics' ->> 'comments'`,
+  ];
+
+  return `greatest(coalesce(${safeAlias}.comments_count, 0), ${rawCandidates
+    .map(sqlJsonTextNonNegativeInt)
+    .join(", ")}, 0)`;
+};
 
 const SHOW_EXTERNAL_ID_KEYS: Record<
   SupportedPersonSocialSource,
@@ -374,6 +429,555 @@ const dedupeHandles = (
       return left.handle.localeCompare(right.handle);
     });
 };
+
+const buildSocialProgressKey = (
+  platform: SocialLandingPlatform,
+  handle: string,
+): string => `${platform}:${handle}`.toLowerCase();
+
+const normalizeNonNegativeInteger = (value: unknown): number => {
+  const numberValue =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number(value)
+        : 0;
+  if (!Number.isFinite(numberValue) || numberValue <= 0) return 0;
+  return Math.trunc(numberValue);
+};
+
+const normalizeProgressPercent = (count: number, total: number): number => {
+  if (total <= 0 || count <= 0) return 0;
+  return Math.min(100, Math.round((count / total) * 1000) / 10);
+};
+
+const buildProgressFromCounts = (
+  savedCountInput: unknown,
+  scrapedCountInput: unknown,
+  row?: Partial<SocialProgressRow>,
+): SocialAccountProgressSummary | null => {
+  const savedCount = normalizeNonNegativeInteger(savedCountInput);
+  const scrapedCount = normalizeNonNegativeInteger(scrapedCountInput);
+  const totalCount = Math.max(savedCount, scrapedCount);
+  if (totalCount <= 0) {
+    const lanes = buildProgressLanes(row ?? {});
+    return lanes.some((lane) => lane.total_count > 0 || lane.status)
+      ? {
+          saved_count: savedCount,
+          scraped_count: scrapedCount,
+          total_count: totalCount,
+          saved_percent: 0,
+          scraped_percent: 0,
+          last_catalog_run_at: null,
+          last_catalog_run_status: null,
+          lanes,
+        }
+      : null;
+  }
+
+  const lanes = buildProgressLanes({
+    ...(row ?? {}),
+    saved_count: savedCount,
+    scraped_count: scrapedCount,
+  });
+
+  return {
+    saved_count: savedCount,
+    scraped_count: scrapedCount,
+    total_count: totalCount,
+    saved_percent: normalizeProgressPercent(savedCount, totalCount),
+    scraped_percent: normalizeProgressPercent(scrapedCount, totalCount),
+    last_catalog_run_at: null,
+    last_catalog_run_status: null,
+    lanes,
+  };
+};
+
+const buildLane = (
+  key: SocialAccountProgressLaneKey,
+  label: string,
+  savedCountInput: unknown,
+  scrapedCountInput: unknown,
+  totalCountInput?: unknown,
+  status?: SocialAccountProgressLaneSummary["status"],
+  detail?: string | null,
+): SocialAccountProgressLaneSummary => {
+  const savedCount = normalizeNonNegativeInteger(savedCountInput);
+  const scrapedCount = normalizeNonNegativeInteger(scrapedCountInput);
+  const explicitTotalCount = normalizeNonNegativeInteger(totalCountInput);
+  const totalCount = Math.max(explicitTotalCount, savedCount, scrapedCount);
+
+  return {
+    key,
+    label,
+    saved_count: savedCount,
+    scraped_count: scrapedCount,
+    total_count: totalCount,
+    saved_percent: normalizeProgressPercent(savedCount, totalCount),
+    scraped_percent: normalizeProgressPercent(scrapedCount, totalCount),
+    status,
+    detail,
+  };
+};
+
+const buildProgressLanes = (
+  row: Partial<SocialProgressRow>,
+): SocialAccountProgressLaneSummary[] => {
+  const platform = normalizePlatform(row.platform ?? "");
+  const socialBladeSupported =
+    row.socialblade_supported === true ||
+    platform === "instagram" ||
+    platform === "youtube" ||
+    platform === "tiktok";
+  const socialBladeScraped = normalizeNonNegativeInteger(row.socialblade_scraped_count);
+  const socialBladeSaved = normalizeNonNegativeInteger(row.socialblade_saved_count);
+  const followingSaved = normalizeNonNegativeInteger(row.following_saved_count);
+  const followingTotal = Math.max(
+    normalizeNonNegativeInteger(row.following_total_count),
+    followingSaved,
+  );
+  const socialBladeUnitTotal = socialBladeSupported ? 1 : 0;
+  const combinedSaved =
+    (socialBladeSaved > 0 && socialBladeSupported ? 1 : 0) + followingSaved;
+  const combinedScraped =
+    (socialBladeScraped > 0 && socialBladeSupported ? 1 : 0) + followingSaved;
+  const combinedTotal = socialBladeUnitTotal + followingTotal;
+  const firstLaneHasData = combinedScraped > 0 || combinedSaved > 0;
+  const firstLaneLabel = socialBladeSupported
+    ? "Social Blade + Following List"
+    : "Following List";
+  return [
+    buildLane(
+      "socialblade",
+      firstLaneLabel,
+      combinedSaved,
+      combinedScraped,
+      combinedTotal,
+      firstLaneHasData ? "ready" : "missing",
+      firstLaneHasData
+        ? null
+        : socialBladeSupported
+          ? "No SocialBlade or following-list snapshot"
+          : "No following-list snapshot",
+    ),
+    buildLane("posts", "Posts", row.saved_count, row.scraped_count),
+    buildLane("comments", "Comments", row.comments_saved_count, row.comments_saved_count, row.comments_total_count),
+    buildLane("media", "Media", row.media_saved_count, row.media_saved_count, row.media_total_count),
+  ];
+};
+
+type SocialProgressTarget = {
+  platform: SocialLandingPlatform;
+  handle: string;
+};
+
+const addProgressTarget = (
+  targetsByKey: Map<string, SocialProgressTarget>,
+  platform: SocialLandingPlatform,
+  handle: string,
+): void => {
+  const normalizedHandle = toCanonicalInternalHandle(platform, handle);
+  if (!normalizedHandle) return;
+  const key = buildSocialProgressKey(platform, normalizedHandle);
+  if (targetsByKey.has(key)) return;
+  targetsByKey.set(key, { platform, handle: normalizedHandle });
+};
+
+const collectSocialProgressTargets = ({
+  networkSets,
+  showSets,
+  sharedSourceSets,
+}: {
+  networkSets: readonly NetworkProfileSet[];
+  showSets: readonly ShowProfileSet[];
+  sharedSourceSets: readonly SharedAccountSourceSet[];
+}): SocialProgressTarget[] => {
+  const targetsByKey = new Map<string, SocialProgressTarget>();
+  for (const set of networkSets) {
+    for (const handle of set.handles) {
+      if (!handle.external) {
+        addProgressTarget(targetsByKey, handle.platform, handle.handle);
+      }
+    }
+  }
+  for (const set of showSets) {
+    for (const handle of set.handles) {
+      if (!handle.external) {
+        addProgressTarget(targetsByKey, handle.platform, handle.handle);
+      }
+    }
+  }
+  for (const set of sharedSourceSets) {
+    for (const source of set.sources) {
+      addProgressTarget(targetsByKey, source.platform, source.account_handle);
+    }
+  }
+  return [...targetsByKey.values()]
+    .sort((left, right) => {
+      if (left.platform !== right.platform) {
+        return left.platform.localeCompare(right.platform);
+      }
+      return left.handle.localeCompare(right.handle);
+    })
+    .slice(0, SOCIAL_LANDING_PROGRESS_MAX_TARGETS);
+};
+
+const safeLoadSocialProgressSummaries = async (
+  targets: readonly SocialProgressTarget[],
+): Promise<CacheableValue<ReadonlyMap<string, SocialAccountProgressSummary>>> => {
+  if (targets.length === 0) return cacheableValue(new Map());
+
+  const platforms = targets.map((target) => target.platform);
+  const handles = targets.map((target) => target.handle);
+  const instagramMaterializedReportedCommentsSql =
+    instagramReportedCommentsSql("p");
+  const instagramCatalogReportedCommentsSql = instagramReportedCommentsSql("p");
+
+  try {
+    const result = await query<SocialProgressRow>(
+      `
+        /* landing_social_progress */
+        WITH targets AS (
+          SELECT DISTINCT
+            lower(input.platform) AS platform,
+            lower(regexp_replace(input.account_handle, '^@+', '')) AS account_handle
+          FROM unnest($1::text[], $2::text[]) AS input(platform, account_handle)
+          WHERE input.platform IN ('instagram', 'tiktok', 'twitter', 'youtube', 'facebook', 'threads')
+            AND nullif(trim(input.account_handle), '') IS NOT NULL
+        ),
+        materialized_rows AS (
+          SELECT
+            'instagram'::text AS platform,
+            lower(regexp_replace(coalesce(source_account, ''), '^@+', '')) AS account_handle,
+            id,
+            nullif(shortcode, '') AS source_id,
+            (${instagramMaterializedReportedCommentsSql})::bigint AS reported_comments,
+            jsonb_array_length(coalesce(media_urls, '[]'::jsonb))::bigint AS source_media_files,
+            (
+              jsonb_array_length(coalesce(hosted_media_urls, '[]'::jsonb)) +
+              case when nullif(hosted_thumbnail_url, '') is not null then 1 else 0 end
+            )::bigint AS hosted_media_files
+          FROM social.instagram_posts p
+          UNION ALL
+          SELECT
+            'tiktok'::text AS platform,
+            lower(regexp_replace(coalesce(source_account, ''), '^@+', '')) AS account_handle,
+            id,
+            nullif(video_id, '') AS source_id,
+            greatest(coalesce(comments_count, 0), 0)::bigint AS reported_comments,
+            jsonb_array_length(coalesce(media_urls, '[]'::jsonb))::bigint AS source_media_files,
+            (
+              jsonb_array_length(coalesce(hosted_media_urls, '[]'::jsonb)) +
+              case when nullif(hosted_thumbnail_url, '') is not null then 1 else 0 end
+            )::bigint AS hosted_media_files
+          FROM social.tiktok_posts
+          UNION ALL
+          SELECT
+            'twitter'::text AS platform,
+            lower(regexp_replace(coalesce(source_account, ''), '^@+', '')) AS account_handle,
+            id,
+            nullif(tweet_id, '') AS source_id,
+            0::bigint AS reported_comments,
+            jsonb_array_length(coalesce(media_urls, '[]'::jsonb))::bigint AS source_media_files,
+            (
+              jsonb_array_length(coalesce(hosted_media_urls, '[]'::jsonb)) +
+              case when nullif(hosted_thumbnail_url, '') is not null then 1 else 0 end
+            )::bigint AS hosted_media_files
+          FROM social.twitter_tweets
+          UNION ALL
+          SELECT
+            'youtube'::text AS platform,
+            lower(regexp_replace(coalesce(source_account, ''), '^@+', '')) AS account_handle,
+            id,
+            nullif(video_id, '') AS source_id,
+            greatest(coalesce(comments_count, 0), 0)::bigint AS reported_comments,
+            0::bigint AS source_media_files,
+            case when nullif(hosted_thumbnail_url, '') is not null then 1 else 0 end::bigint AS hosted_media_files
+          FROM social.youtube_videos
+          UNION ALL
+          SELECT
+            'facebook'::text AS platform,
+            lower(regexp_replace(coalesce(source_account, ''), '^@+', '')) AS account_handle,
+            id,
+            nullif(post_id, '') AS source_id,
+            greatest(coalesce(comments_count, 0), 0)::bigint AS reported_comments,
+            jsonb_array_length(coalesce(media_urls, '[]'::jsonb))::bigint AS source_media_files,
+            (
+              jsonb_array_length(coalesce(hosted_media_urls, '[]'::jsonb)) +
+              case when nullif(hosted_thumbnail_url, '') is not null then 1 else 0 end
+            )::bigint AS hosted_media_files
+          FROM social.facebook_posts
+          UNION ALL
+          SELECT
+            'threads'::text AS platform,
+            lower(regexp_replace(coalesce(source_account, ''), '^@+', '')) AS account_handle,
+            id,
+            nullif(post_id, '') AS source_id,
+            0::bigint AS reported_comments,
+            jsonb_array_length(coalesce(media_urls, '[]'::jsonb))::bigint AS source_media_files,
+            (
+              jsonb_array_length(coalesce(hosted_media_urls, '[]'::jsonb)) +
+              case when nullif(hosted_thumbnail_url, '') is not null then 1 else 0 end
+            )::bigint AS hosted_media_files
+          FROM social.meta_threads_posts
+        ),
+        catalog_rows AS (
+          SELECT
+            'instagram'::text AS platform,
+            lower(regexp_replace(coalesce(source_account, ''), '^@+', '')) AS account_handle,
+            nullif(source_id, '') AS source_id,
+            (${instagramCatalogReportedCommentsSql})::bigint AS reported_comments,
+            jsonb_array_length(coalesce(media_urls, '[]'::jsonb))::bigint AS source_media_files
+          FROM social.instagram_account_catalog_posts p
+          UNION ALL
+          SELECT
+            'tiktok'::text AS platform,
+            lower(regexp_replace(coalesce(source_account, ''), '^@+', '')) AS account_handle,
+            nullif(source_id, '') AS source_id,
+            greatest(coalesce(comments_count, 0), 0)::bigint AS reported_comments,
+            jsonb_array_length(coalesce(media_urls, '[]'::jsonb))::bigint AS source_media_files
+          FROM social.tiktok_account_catalog_posts
+          UNION ALL
+          SELECT
+            'twitter'::text AS platform,
+            lower(regexp_replace(coalesce(source_account, ''), '^@+', '')) AS account_handle,
+            nullif(source_id, '') AS source_id,
+            greatest(coalesce(comments_count, 0), 0)::bigint + greatest(coalesce(quotes, 0), 0)::bigint AS reported_comments,
+            jsonb_array_length(coalesce(media_urls, '[]'::jsonb))::bigint AS source_media_files
+          FROM social.twitter_account_catalog_posts
+          UNION ALL
+          SELECT
+            'youtube'::text AS platform,
+            lower(regexp_replace(coalesce(source_account, ''), '^@+', '')) AS account_handle,
+            nullif(source_id, '') AS source_id,
+            greatest(coalesce(comments_count, 0), 0)::bigint AS reported_comments,
+            jsonb_array_length(coalesce(media_urls, '[]'::jsonb))::bigint AS source_media_files
+          FROM social.youtube_account_catalog_posts
+          UNION ALL
+          SELECT
+            'facebook'::text AS platform,
+            lower(regexp_replace(coalesce(source_account, ''), '^@+', '')) AS account_handle,
+            nullif(source_id, '') AS source_id,
+            greatest(coalesce(comments_count, 0), 0)::bigint AS reported_comments,
+            jsonb_array_length(coalesce(media_urls, '[]'::jsonb))::bigint AS source_media_files
+          FROM social.facebook_account_catalog_posts
+          UNION ALL
+          SELECT
+            'threads'::text AS platform,
+            lower(regexp_replace(coalesce(source_account, ''), '^@+', '')) AS account_handle,
+            nullif(source_id, '') AS source_id,
+            greatest(coalesce(comments_count, 0), 0)::bigint AS reported_comments,
+            jsonb_array_length(coalesce(media_urls, '[]'::jsonb))::bigint AS source_media_files
+          FROM social.threads_account_catalog_posts
+        ),
+        materialized_counts AS (
+          SELECT
+            rows.platform,
+            rows.account_handle,
+            count(*)::int AS saved_count,
+            sum(rows.reported_comments)::int AS comments_total_count,
+            sum(rows.hosted_media_files)::int AS media_saved_count
+          FROM materialized_rows rows
+          INNER JOIN targets
+            ON targets.platform = rows.platform
+           AND targets.account_handle = rows.account_handle
+          WHERE rows.account_handle <> ''
+          GROUP BY rows.platform, rows.account_handle
+        ),
+        catalog_counts AS (
+          SELECT
+            rows.platform,
+            rows.account_handle,
+            count(*)::int AS scraped_count,
+            sum(rows.reported_comments)::int AS comments_total_count,
+            sum(rows.source_media_files)::int AS media_total_count
+          FROM catalog_rows rows
+          INNER JOIN targets
+            ON targets.platform = rows.platform
+           AND targets.account_handle = rows.account_handle
+          WHERE rows.account_handle <> ''
+          GROUP BY rows.platform, rows.account_handle
+        ),
+        comment_rows AS (
+          SELECT 'instagram'::text AS platform, lower(regexp_replace(coalesce(source_account, ''), '^@+', '')) AS account_handle, id::text AS comment_id
+          FROM social.instagram_comments
+          WHERE coalesce(is_missing, false) = false
+          UNION ALL
+          SELECT 'tiktok'::text AS platform, lower(regexp_replace(coalesce(source_account, ''), '^@+', '')) AS account_handle, id::text AS comment_id
+          FROM social.tiktok_comments
+          WHERE coalesce(is_missing, false) = false
+          UNION ALL
+          SELECT 'youtube'::text AS platform, lower(regexp_replace(coalesce(source_account, ''), '^@+', '')) AS account_handle, id::text AS comment_id
+          FROM social.youtube_comments
+          WHERE coalesce(is_missing, false) = false
+          UNION ALL
+          SELECT 'facebook'::text AS platform, lower(regexp_replace(coalesce(source_account, ''), '^@+', '')) AS account_handle, id::text AS comment_id
+          FROM social.facebook_comments
+          UNION ALL
+          SELECT 'threads'::text AS platform, lower(regexp_replace(coalesce(source_account, ''), '^@+', '')) AS account_handle, id::text AS comment_id
+          FROM social.meta_threads_comments
+          UNION ALL
+          SELECT 'twitter'::text AS platform, lower(regexp_replace(coalesce(source_account, ''), '^@+', '')) AS account_handle, tweet_id AS comment_id
+          FROM social.twitter_tweets
+          WHERE coalesce(is_missing, false) = false
+            AND (coalesce(is_reply, false) = true OR coalesce(is_quote, false) = true)
+        ),
+        comment_counts AS (
+          SELECT
+            rows.platform,
+            rows.account_handle,
+            count(DISTINCT rows.comment_id)::int AS comments_saved_count
+          FROM comment_rows rows
+          INNER JOIN targets
+            ON targets.platform = rows.platform
+           AND targets.account_handle = rows.account_handle
+          WHERE rows.account_handle <> ''
+            AND nullif(rows.comment_id, '') IS NOT NULL
+          GROUP BY rows.platform, rows.account_handle
+        ),
+        socialblade_counts AS (
+          SELECT
+            lower(coalesce(nullif(platform, ''), 'instagram')) AS platform,
+            lower(regexp_replace(coalesce(nullif(account_handle, ''), instagram_handle, ''), '^@+', '')) AS account_handle,
+            count(*)::int AS socialblade_scraped_count,
+            count(*) filter (where coalesce(stats_refreshed, false) = true)::int AS socialblade_saved_count
+          FROM pipeline.socialblade_growth_data
+          WHERE coalesce(nullif(account_handle, ''), instagram_handle, '') <> ''
+          GROUP BY 1, 2
+        ),
+        instagram_profile_targets AS (
+          SELECT DISTINCT ON (targets.account_handle)
+            targets.account_handle,
+            profiles.id AS profile_id,
+            greatest(coalesce(profiles.follows_count, 0), 0)::int AS following_total_count
+          FROM targets
+          INNER JOIN social.instagram_profiles profiles
+            ON targets.platform = 'instagram'
+           AND lower(regexp_replace(coalesce(profiles.normalized_username, profiles.username, profiles.source_account, ''), '^@+', '')) = targets.account_handle
+          ORDER BY
+            targets.account_handle,
+            profiles.last_scraped_at DESC NULLS LAST,
+            profiles.updated_at DESC NULLS LAST,
+            profiles.id
+        ),
+        following_counts AS (
+          SELECT
+            'instagram'::text AS platform,
+            profile_targets.account_handle,
+            count(relationships.id) FILTER (WHERE coalesce(relationships.is_missing, false) = false)::int AS following_saved_count,
+            max(profile_targets.following_total_count)::int AS following_total_count
+          FROM instagram_profile_targets profile_targets
+          LEFT JOIN social.instagram_profile_relationships relationships
+            ON relationships.owner_profile_id = profile_targets.profile_id
+           AND relationships.relationship_type = 'following'
+          GROUP BY profile_targets.account_handle
+        )
+        SELECT
+          targets.platform,
+          targets.account_handle,
+          coalesce(materialized_counts.saved_count, 0)::int AS saved_count,
+          coalesce(catalog_counts.scraped_count, 0)::int AS scraped_count,
+          (targets.platform IN ('instagram', 'youtube', 'tiktok'))::boolean AS socialblade_supported,
+          coalesce(socialblade_counts.socialblade_scraped_count, 0)::int AS socialblade_scraped_count,
+          coalesce(socialblade_counts.socialblade_saved_count, 0)::int AS socialblade_saved_count,
+          coalesce(following_counts.following_saved_count, 0)::int AS following_saved_count,
+          coalesce(following_counts.following_total_count, 0)::int AS following_total_count,
+          coalesce(comment_counts.comments_saved_count, 0)::int AS comments_saved_count,
+          greatest(
+            coalesce(materialized_counts.comments_total_count, 0),
+            coalesce(catalog_counts.comments_total_count, 0),
+            coalesce(comment_counts.comments_saved_count, 0)
+          )::int AS comments_total_count,
+          coalesce(materialized_counts.media_saved_count, 0)::int AS media_saved_count,
+          greatest(coalesce(catalog_counts.media_total_count, 0), coalesce(materialized_counts.media_saved_count, 0))::int AS media_total_count
+        FROM targets
+        LEFT JOIN materialized_counts
+          ON materialized_counts.platform = targets.platform
+         AND materialized_counts.account_handle = targets.account_handle
+        LEFT JOIN catalog_counts
+          ON catalog_counts.platform = targets.platform
+         AND catalog_counts.account_handle = targets.account_handle
+        LEFT JOIN comment_counts
+          ON comment_counts.platform = targets.platform
+         AND comment_counts.account_handle = targets.account_handle
+        LEFT JOIN socialblade_counts
+          ON socialblade_counts.platform = targets.platform
+         AND socialblade_counts.account_handle = targets.account_handle
+        LEFT JOIN following_counts
+          ON following_counts.platform = targets.platform
+         AND following_counts.account_handle = targets.account_handle
+      `,
+      [platforms, handles],
+    );
+
+    const progressByKey = new Map<string, SocialAccountProgressSummary>();
+    for (const row of result.rows) {
+      const platform = normalizePlatform(row.platform ?? "");
+      const handle =
+        typeof row.account_handle === "string"
+          ? row.account_handle.trim().replace(/^@+/, "")
+          : "";
+      if (!platform || !handle) continue;
+      const progress = buildProgressFromCounts(row.saved_count, row.scraped_count, row);
+      if (!progress) continue;
+      progressByKey.set(buildSocialProgressKey(platform, handle), progress);
+    }
+    return cacheableValue(progressByKey);
+  } catch (error) {
+    console.warn("[social-landing] Failed to load social progress summaries", error);
+    return uncacheableValue(new Map());
+  }
+};
+
+const hydrateHandleProgress = (
+  handle: SocialHandleSummary,
+  progressByKey: ReadonlyMap<string, SocialAccountProgressSummary>,
+): SocialHandleSummary => ({
+  ...handle,
+  progress:
+    progressByKey.get(buildSocialProgressKey(handle.platform, handle.handle)) ?? null,
+});
+
+const hydrateNetworkSetProgress = (
+  set: NetworkProfileSet,
+  progressByKey: ReadonlyMap<string, SocialAccountProgressSummary>,
+): NetworkProfileSet => ({
+  ...set,
+  handles: set.handles.map((handle) =>
+    hydrateHandleProgress(handle, progressByKey),
+  ),
+});
+
+const hydrateShowSetProgress = (
+  set: ShowProfileSet,
+  progressByKey: ReadonlyMap<string, SocialAccountProgressSummary>,
+): ShowProfileSet => ({
+  ...set,
+  handles: set.handles.map((handle) =>
+    hydrateHandleProgress(handle, progressByKey),
+  ),
+});
+
+const hydrateSharedSourceProgress = (
+  source: SharedAccountSourceSummary,
+  progressByKey: ReadonlyMap<string, SocialAccountProgressSummary>,
+): SharedAccountSourceSummary => ({
+  ...source,
+  progress:
+    progressByKey.get(
+      buildSocialProgressKey(source.platform, source.account_handle),
+    ) ?? null,
+});
+
+const hydrateSharedSourceSetProgress = (
+  set: SharedAccountSourceSet,
+  progressByKey: ReadonlyMap<string, SocialAccountProgressSummary>,
+): SharedAccountSourceSet => ({
+  ...set,
+  sources: set.sources.map((source) =>
+    hydrateSharedSourceProgress(source, progressByKey),
+  ),
+});
 
 const safeLoadSharedSources = async (
   adminContext?: VerifiedAdminContext,
@@ -952,28 +1556,6 @@ const extractShowHandles = (
   return dedupeHandles(handles);
 };
 
-const isWwhlShow = (
-  show: Pick<CoveredShow, "show_name" | "canonical_slug" | "alternative_names">,
-): boolean => {
-  const candidates = [
-    show.show_name,
-    show.canonical_slug ?? "",
-    ...(show.alternative_names ?? []),
-  ]
-    .map((value) => value.trim().toLowerCase())
-    .filter(Boolean);
-
-  return candidates.some(
-    (candidate) =>
-      candidate.includes("watch what happens live") || candidate === "wwhl",
-  );
-};
-
-const isWwhlSharedSource = (source: SharedAccountSourceSummary): boolean => {
-  const canonicalHandle = normalizeSocialAccountProfileHandle(source.account_handle);
-  return canonicalHandle === "bravowwhl" || canonicalHandle === "wwhl";
-};
-
 const getAssignedShowId = (source: SharedAccountSourceSummary): string | null => {
   const metadata = toRecord(source.metadata);
   const assignedShowId = metadata?.assigned_show_id;
@@ -982,41 +1564,298 @@ const getAssignedShowId = (source: SharedAccountSourceSummary): string | null =>
     : null;
 };
 
+const getMetadataString = (
+  metadata: Record<string, unknown> | null | undefined,
+  keys: readonly string[],
+): string | null => {
+  for (const key of keys) {
+    const value = metadata?.[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return null;
+};
+
+const normalizeIdentityKey = (value: unknown): string | null => {
+  const rawValue =
+    typeof value === "string"
+      ? value
+      : typeof value === "number"
+        ? String(value)
+        : "";
+  const normalized = rawValue
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return normalized || null;
+};
+
+const formatIdentityTitle = (key: string): string => {
+  if (key === LEGACY_NETWORK_SET_KEY) return LEGACY_NETWORK_SET_TITLE;
+  return key
+    .split("-")
+    .filter(Boolean)
+    .map((part) =>
+      part.length <= 3
+        ? part.toUpperCase()
+        : `${part.charAt(0).toUpperCase()}${part.slice(1)}`,
+    )
+    .join(" ");
+};
+
+const getNetworkSetIdentityKey = (
+  source: SharedAccountSourceSummary,
+): string => {
+  const metadata = toRecord(source.metadata);
+  return (
+    normalizeIdentityKey(metadata?.network_set_id) ||
+    normalizeIdentityKey(metadata?.network_id) ||
+    normalizeIdentityKey(metadata?.network_key) ||
+    normalizeIdentityKey(source.source_scope) ||
+    LEGACY_NETWORK_SET_KEY
+  );
+};
+
+const getNetworkSetTitle = (
+  source: SharedAccountSourceSummary,
+  key: string,
+): string => {
+  const metadata = toRecord(source.metadata);
+  return (
+    getMetadataString(metadata, [
+      "network_set_title",
+      "network_title",
+      "network_name",
+      "network_label",
+    ]) || formatIdentityTitle(key)
+  );
+};
+
+const getNetworkSetDescription = (
+  source: SharedAccountSourceSummary,
+  key: string,
+  title: string,
+): string => {
+  const metadata = toRecord(source.metadata);
+  return (
+    getMetadataString(metadata, [
+      "network_set_description",
+      "network_description",
+    ]) ||
+    (key === LEGACY_NETWORK_SET_KEY
+      ? LEGACY_NETWORK_SET_DESCRIPTION
+      : `${title} shared social handles used in sends and profile backfills.`)
+  );
+};
+
+const isUnassignedNetworkSource = (source: SharedAccountSourceSummary): boolean => {
+  const scopeKey = normalizeIdentityKey(source.source_scope);
+  if (scopeKey === "creator" || scopeKey === "news") return false;
+  if (getAssignedShowId(source)) return false;
+  return source.is_active;
+};
+
+const getSharedSourceSortIdentity = (
+  source: SharedAccountSourceSummary,
+): string => {
+  const sourceId = typeof source.id === "string" ? source.id.trim() : "";
+  if (sourceId) return `source:${sourceId}`;
+  const canonicalHandle =
+    toCanonicalInternalHandle(source.platform, source.account_handle) ??
+    source.account_handle.trim().replace(/^@+/, "");
+  return `account:${source.platform}:${canonicalHandle}`.toLowerCase();
+};
+
+const sortSharedSources = (
+  sources: readonly SharedAccountSourceSummary[],
+): SharedAccountSourceSummary[] =>
+  [...sources].sort((left, right) => {
+    if (left.scrape_priority !== right.scrape_priority) {
+      return left.scrape_priority - right.scrape_priority;
+    }
+    if (left.platform !== right.platform) {
+      return left.platform.localeCompare(right.platform);
+    }
+    if (left.account_handle !== right.account_handle) {
+      return left.account_handle.localeCompare(right.account_handle);
+    }
+    return getSharedSourceSortIdentity(left).localeCompare(
+      getSharedSourceSortIdentity(right),
+    );
+  });
+
+const getSharedSourceHandleDisplayLabel = (
+  source: SharedAccountSourceSummary,
+): string | null => {
+  if (source.platform !== "youtube") return null;
+
+  const metadata = toRecord(source.metadata);
+  const sourceType = getMetadataString(metadata, [
+    "youtube_source_type",
+    "source_type",
+  ]);
+  const isPlaylistSource =
+    sourceType === "playlist" ||
+    typeof metadata?.playlist_id === "string" ||
+    typeof metadata?.playlist_url === "string";
+  if (!isPlaylistSource) return null;
+
+  const profileSnapshot = toRecord(metadata?.profile_snapshot);
+  return (
+    getMetadataString(profileSnapshot, [
+      "display_name",
+      "playlist_title",
+      "title",
+      "name",
+    ]) ||
+    getMetadataString(metadata, [
+      "playlist_title",
+      "display_name",
+      "title",
+      "name",
+    ])
+  );
+};
+
+const buildSharedSourceHandleSummary = (
+  source: SharedAccountSourceSummary,
+): SocialHandleSummary | null => {
+  const handle = buildInternalHandleSummary(source.platform, source.account_handle);
+  if (!handle) return null;
+  const displayLabel = getSharedSourceHandleDisplayLabel(source);
+  return displayLabel ? { ...handle, display_label: displayLabel } : handle;
+};
+
+const buildHashtagCandidate = (value: string): string | null => {
+  const normalized = value.replace(/[^a-zA-Z0-9]/g, "");
+  if (normalized.length < 2) return null;
+  return `#${normalized}`;
+};
+
+const buildShowHashtagSuggestions = (
+  show: Pick<CoveredShow, "show_name" | "alternative_names">,
+  sharedSources: readonly SharedAccountSourceSummary[],
+): ShowProfileSet["hashtag_suggestions"] => {
+  const activeNetworkSource = sharedSources.find(
+    (source) => isUnassignedNetworkSource(source),
+  );
+  if (!activeNetworkSource) return [];
+
+  const candidates = [show.show_name, ...(show.alternative_names ?? [])]
+    .map((value) => buildHashtagCandidate(value))
+    .filter((value): value is string => value !== null);
+  const uniqueCandidates = [...new Set(candidates)].slice(0, 4);
+
+  return uniqueCandidates.map((hashtag) => ({
+    hashtag,
+    platform: activeNetworkSource.platform,
+    account_handle:
+      normalizeSocialAccountProfileHandle(activeNetworkSource.account_handle) ||
+      activeNetworkSource.account_handle,
+    }));
+};
+
+type NetworkSetSourceGroup = {
+  key: string;
+  title: string;
+  description: string;
+  sources: SharedAccountSourceSummary[];
+};
+
+const buildEmptyLegacyNetworkSetGroup = (): NetworkSetSourceGroup => ({
+  key: LEGACY_NETWORK_SET_KEY,
+  title: LEGACY_NETWORK_SET_TITLE,
+  description: LEGACY_NETWORK_SET_DESCRIPTION,
+  sources: [],
+});
+
+const buildNetworkSetSourceGroups = (
+  sharedSources: readonly SharedAccountSourceSummary[],
+): NetworkSetSourceGroup[] => {
+  const groups = new Map<string, NetworkSetSourceGroup>();
+  for (const source of sharedSources.filter((item) => isUnassignedNetworkSource(item))) {
+    const key = getNetworkSetIdentityKey(source);
+    const title = getNetworkSetTitle(source, key);
+    const description = getNetworkSetDescription(source, key, title);
+    const existing = groups.get(key);
+    if (existing) {
+      existing.sources.push(source);
+      continue;
+    }
+    groups.set(key, {
+      key,
+      title,
+      description,
+      sources: [source],
+    });
+  }
+
+  const networkGroups = [...groups.values()].map((group) => ({
+    ...group,
+    sources: sortSharedSources(group.sources),
+  }));
+  if (networkGroups.length === 0) {
+    return [buildEmptyLegacyNetworkSetGroup()];
+  }
+  return networkGroups.sort((left, right) => left.key.localeCompare(right.key));
+};
+
+const getSharedSourceHandleIdentity = (
+  source: SharedAccountSourceSummary,
+  handle: SocialHandleSummary,
+): string => {
+  const sourceId = typeof source.id === "string" ? source.id.trim() : "";
+  if (sourceId) return `source:${sourceId}`;
+  return `account:${handle.platform}:${handle.handle}`.toLowerCase();
+};
+
+const buildNetworkHandleSummaries = (
+  sources: readonly SharedAccountSourceSummary[],
+): SocialHandleSummary[] => {
+  const handlesByIdentity = new Map<string, SocialHandleSummary>();
+  for (const source of sortSharedSources(sources)) {
+    const handle = buildInternalHandleSummary(source.platform, source.account_handle);
+    if (!handle) continue;
+    const identity = getSharedSourceHandleIdentity(source, handle);
+    if (!handlesByIdentity.has(identity)) {
+      handlesByIdentity.set(identity, handle);
+    }
+  }
+  return dedupeHandles([...handlesByIdentity.values()]);
+};
+
 const buildNetworkSets = (
   sharedSources: readonly SharedAccountSourceSummary[],
-): NetworkProfileSet[] => {
-  const activeHandles = dedupeHandles(
-    sharedSources
-      .filter((source) => source.is_active && !getAssignedShowId(source))
-      .map((source) => buildInternalHandleSummary(source.platform, source.account_handle))
-      .filter((source): source is SocialHandleSummary => source !== null),
-  );
-
-  return [
-    {
-      key: "bravo-tv",
-      title: "Bravo TV",
-      description: "Shared Bravo social handles used in sends and profile backfills.",
-      handles: activeHandles,
-    },
-  ];
-};
+): NetworkProfileSet[] =>
+  buildNetworkSetSourceGroups(sharedSources).map((group) => ({
+    key: group.key,
+    title: group.title,
+    description: group.description,
+    handles: buildNetworkHandleSummaries(group.sources),
+  }));
 
 const buildSharedSourceSets = (
   sourcesByScope: ReadonlyMap<SharedAccountSourceSetScope, readonly SharedAccountSourceSummary[]>,
-): SharedAccountSourceSet[] =>
-  SHARED_SOURCE_SETS.map((set) => ({
-    ...set,
-    sources: [...(sourcesByScope.get(set.source_scope) ?? [])].sort((left, right) => {
-      if (left.scrape_priority !== right.scrape_priority) {
-        return left.scrape_priority - right.scrape_priority;
-      }
-      if (left.platform !== right.platform) {
-        return left.platform.localeCompare(right.platform);
-      }
-      return left.account_handle.localeCompare(right.account_handle);
+): SharedAccountSourceSet[] => {
+  const networkSourceSets = buildNetworkSetSourceGroups(
+    sourcesByScope.get("network") ?? [],
+  ).map(
+    (group): SharedAccountSourceSet => ({
+      key: group.key,
+      title: group.title,
+      source_scope: "network",
+      description: group.description,
+      sources: group.sources,
     }),
+  );
+  const nonNetworkSourceSets = SHARED_SOURCE_SETS.filter(
+    (set) => set.source_scope !== "network",
+  ).map((set) => ({
+    ...set,
+    sources: sortSharedSources(sourcesByScope.get(set.source_scope) ?? []),
   }));
+  return [...networkSourceSets, ...nonNetworkSourceSets];
+};
 
 const buildShowSets = (
   coveredShows: readonly CoveredShow[],
@@ -1029,28 +1868,15 @@ const buildShowSets = (
       const directHandles = extractShowHandles(
         showExternalIdsById.get(coveredShow.trr_show_id) ?? null,
       );
-      const duplicatedWwhlHandles = isWwhlShow(coveredShow)
-        ? sharedSources
-            .filter((source) => source.is_active && isWwhlSharedSource(source))
-            .map((source) =>
-              buildInternalHandleSummary(source.platform, source.account_handle),
-            )
-            .filter(
-              (handle): handle is SocialHandleSummary => handle !== null,
-            )
-        : [];
       const assignedSharedHandles = sharedSources
         .filter(
           (source) =>
             source.is_active && getAssignedShowId(source) === coveredShow.trr_show_id,
         )
-        .map((source) =>
-          buildInternalHandleSummary(source.platform, source.account_handle),
-        )
+        .map((source) => buildSharedSourceHandleSummary(source))
         .filter((handle): handle is SocialHandleSummary => handle !== null);
       const handles = dedupeHandles([
         ...directHandles,
-        ...duplicatedWwhlHandles,
         ...assignedSharedHandles,
       ]);
 
@@ -1060,8 +1886,11 @@ const buildShowSets = (
         canonical_slug: coveredShow.canonical_slug ?? null,
         alternative_names: coveredShow.alternative_names ?? null,
         handles,
-        fallback_note:
-          handles.length === 0 ? "Shared coverage via Bravo TV" : null,
+        fallback_note: null,
+        hashtag_suggestions:
+          handles.length === 0
+            ? buildShowHashtagSuggestions(coveredShow, sharedSources)
+            : [],
       };
     });
 };
@@ -1491,17 +2320,44 @@ export async function getSocialLandingPayloadResult(
     socialBladeRawHandleCandidatesByPersonId,
     adminContext,
   );
+  const networkSets = buildNetworkSets(networkSharedSources);
+  const showSets = buildShowSets(
+    coveredShows,
+    showExternalIdsById,
+    networkSharedSources,
+  );
+  const sharedSourceSets = buildSharedSourceSets(sourcesByScope);
+  const progressResult = await safeLoadSocialProgressSummaries(
+    collectSocialProgressTargets({
+      networkSets,
+      showSets,
+      sharedSourceSets,
+    }),
+  );
+  const progressByKey = progressResult.value;
+  const hydratedNetworkSets = networkSets.map((set) =>
+    hydrateNetworkSetProgress(set, progressByKey),
+  );
+  const hydratedShowSets = showSets.map((set) =>
+    hydrateShowSetProgress(set, progressByKey),
+  );
+  const hydratedSharedSourceSets = sharedSourceSets.map((set) =>
+    hydrateSharedSourceSetProgress(set, progressByKey),
+  );
+  const hydratedNetworkSharedSources = networkSharedSources.map((source) =>
+    hydrateSharedSourceProgress(source, progressByKey),
+  );
 
   return {
     payload: {
-      network_sets: buildNetworkSets(networkSharedSources),
-      show_sets: buildShowSets(coveredShows, showExternalIdsById, networkSharedSources),
+      network_sets: hydratedNetworkSets,
+      show_sets: hydratedShowSets,
       people_profiles: peopleProfiles,
       person_targets: personTargets,
       cast_socialblade_shows: castSocialBladeShowsResult.value,
-      shared_source_sets: buildSharedSourceSets(sourcesByScope),
+      shared_source_sets: hydratedSharedSourceSets,
       shared_pipeline: {
-        sources: networkSharedSources,
+        sources: hydratedNetworkSharedSources,
         runs: sharedRuns,
         review_items: sharedReviewItems,
       } satisfies SharedPipelineSummary,
@@ -1511,7 +2367,8 @@ export async function getSocialLandingPayloadResult(
       landingSummaryCacheable &&
       showExternalIdsByIdResult.cacheable &&
       castByShowIdResult.cacheable &&
-      castSocialBladeShowsResult.cacheable,
+      castSocialBladeShowsResult.cacheable &&
+      progressResult.cacheable,
   };
 }
 

@@ -59,6 +59,10 @@ console.log(
 const nodeOptions = [`--max-old-space-size=${heapMb}`, process.env.NODE_OPTIONS]
   .filter(Boolean)
   .join(' ');
+const pnpmCommand =
+  process.env.npm_execpath && process.env.npm_execpath.includes('pnpm')
+    ? process.env.npm_execpath
+    : 'pnpm';
 
 for (const [index, batch] of batches.entries()) {
   const batchNumber = index + 1;
@@ -69,7 +73,7 @@ for (const [index, batch] of batches.entries()) {
   console.log(`\n[test:ci] Batch ${batchNumber}/${batches.length} (${batch.length} files)`);
 
   const result = spawnSync(
-    'pnpm',
+    pnpmCommand,
     [
       'exec',
       'vitest',

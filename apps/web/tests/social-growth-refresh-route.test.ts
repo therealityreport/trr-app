@@ -55,6 +55,7 @@ describe("social growth person refresh proxy route", () => {
       method: "POST",
       body: JSON.stringify({
         handle: "heathergay",
+        source_scope: "creator",
       }),
     });
 
@@ -77,6 +78,11 @@ describe("social growth person refresh proxy route", () => {
         Authorization: "Bearer test-admin-token",
         "Content-Type": "application/json",
       }),
+    });
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+      handle: "heathergay",
+      force: false,
+      source_scope: "creator",
     });
   });
 

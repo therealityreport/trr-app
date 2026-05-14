@@ -234,7 +234,7 @@ describe("social landing repository", () => {
               platform: "tiktok",
               source_scope: "network",
               account_handle: "bravowwhl",
-              is_active: true,
+              is_active: false,
               scrape_priority: 8,
             },
             {
@@ -242,7 +242,7 @@ describe("social landing repository", () => {
               platform: "youtube",
               source_scope: "network",
               account_handle: "wwhl",
-              is_active: true,
+              is_active: false,
               scrape_priority: 8,
             },
           ],
@@ -272,6 +272,21 @@ describe("social landing repository", () => {
               review_status: "open",
             },
           ],
+        };
+      }
+
+      if (path.startsWith("/profiles/") && path.endsWith("/summary")) {
+        const parts = path.split("/");
+        const platform = parts[2] ?? "";
+        const handle = decodeURIComponent(parts[3] ?? "");
+        return {
+          summary_detail: "lite",
+          platform,
+          account_handle: handle,
+          total_posts: 100,
+          materialized_total_posts: 80,
+          catalog_total_posts: 60,
+          live_catalog_total_posts: 60,
         };
       }
 
@@ -501,15 +516,16 @@ describe("social landing repository", () => {
     queryMock.mockResolvedValue({ rows: [] });
   });
 
-  it("builds networks, shows, and people with WWHL duplication and handle filtering", async () => {
+  it("builds networks, shows, and people with WWHL handle filtering", async () => {
     const payload = await getSocialLandingPayload();
 
     expect(payload.network_sets).toHaveLength(1);
     expect(payload.shared_pipeline.sources).toHaveLength(5);
 
-    const bravoSet = payload.network_sets[0];
-    expect(bravoSet.title).toBe("Bravo TV");
-    expect(bravoSet.handles).toEqual(
+    const networkSet = payload.network_sets[0];
+    expect(networkSet.key).toBe("network");
+    expect(networkSet.title).toBe("Network");
+    expect(networkSet.handles).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           platform: "instagram",
@@ -520,6 +536,10 @@ describe("social landing repository", () => {
           handle: "bravowwhl",
           href: "/social/instagram/bravowwhl",
         }),
+      ]),
+    );
+    expect(networkSet.handles).not.toEqual(
+      expect.arrayContaining([
         expect.objectContaining({
           platform: "youtube",
           handle: "wwhl",
@@ -531,9 +551,17 @@ describe("social landing repository", () => {
       show.show_name.includes("Salt Lake City"),
     );
     expect(rhoslc).toMatchObject({
-      fallback_note: "Shared coverage via Bravo TV",
+      fallback_note: null,
     });
     expect(rhoslc?.handles).toHaveLength(0);
+    expect(rhoslc?.hashtag_suggestions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          hashtag: "#TheRealHousewivesofSaltLakeCity",
+          account_handle: "bravotv",
+        }),
+      ]),
+    );
 
     const wwhl = payload.show_sets.find((show) =>
       show.show_name.includes("Watch What Happens Live"),
@@ -547,14 +575,6 @@ describe("social landing repository", () => {
         expect.objectContaining({
           platform: "facebook",
           handle: "watchwhathappenslive",
-        }),
-        expect.objectContaining({
-          platform: "tiktok",
-          handle: "bravowwhl",
-        }),
-        expect.objectContaining({
-          platform: "youtube",
-          handle: "wwhl",
         }),
       ]),
     );
@@ -621,6 +641,71 @@ describe("social landing repository", () => {
     });
   });
 
+  it("sums Instagram landing comments from post-detail reported counts", async () => {
+    await getSocialLandingPayload();
+
+    const landingCall = queryMock.mock.calls.find(([sql]) =>
+      String(sql).includes("landing_social_progress"),
+    );
+    const sql = String(landingCall?.[0] ?? "");
+
+    expect(sql).toContain("FROM social.instagram_posts p");
+    expect(sql).toContain("FROM social.instagram_account_catalog_posts p");
+    expect(sql).toContain("greatest(coalesce(p.comments_count, 0),");
+    expect(sql).toContain("p.raw_data");
+    expect(sql).toContain("-> 'metrics' ->> 'comments_count'");
+    expect(sql).toContain(
+      "sum(rows.reported_comments)::int AS comments_total_count",
+    );
+    expect(sql).toContain("coalesce(materialized_counts.comments_total_count, 0)");
+  });
+
+  it("labels assigned YouTube playlist show handles with playlist metadata", async () => {
+    const defaultSocialBackend = fetchSocialBackendJsonMock.getMockImplementation();
+    if (!defaultSocialBackend) throw new Error("Missing default social backend mock");
+    fetchSocialBackendJsonMock.mockImplementation(async (path: string, options?: unknown) => {
+      if (path.startsWith("/shared/sources")) {
+        return {
+          sources: [
+            {
+              id: "source-playlist-1",
+              platform: "youtube",
+              source_scope: "network",
+              account_handle: "plcsqhums6noyf7gnzgoo7uxurccmtmh1v",
+              is_active: true,
+              scrape_priority: 8,
+              metadata: {
+                assigned_show_id: "show-rhoslc",
+                source_type: "playlist",
+                youtube_source_type: "playlist",
+                playlist_id: "PLCsQHuMS6NoyF7gnzgOo7UxUrCcMtMH1v",
+                profile_snapshot: {
+                  display_name: "The Traitors Official Playlist",
+                },
+              },
+            },
+          ],
+        };
+      }
+      return defaultSocialBackend(path, options);
+    });
+
+    const payload = await getSocialLandingPayload();
+    const rhoslc = payload.show_sets.find((show) =>
+      show.show_name.includes("Salt Lake City"),
+    );
+
+    expect(rhoslc?.handles).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          platform: "youtube",
+          handle: "plcsqhums6noyf7gnzgoo7uxurccmtmh1v",
+          display_label: "The Traitors Official Playlist",
+        }),
+      ]),
+    );
+  });
+
   it("starts independent first-wave landing reads while shared sources are still loading", async () => {
     let resolveSharedSources!: () => void;
     let sharedSourcesStarted!: () => void;
@@ -644,6 +729,15 @@ describe("social landing repository", () => {
       }
       if (path === "/landing-socialblade-rows") {
         return { rows: [] };
+      }
+      if (path.startsWith("/profiles/") && path.endsWith("/summary")) {
+        return {
+          summary_detail: "lite",
+          total_posts: 0,
+          materialized_total_posts: 0,
+          catalog_total_posts: 0,
+          live_catalog_total_posts: 0,
+        };
       }
       throw new Error(`Unhandled social path: ${path}`);
     });
@@ -713,6 +807,24 @@ describe("social landing repository", () => {
               metadata: {},
             },
             {
+              id: "source-bravo-tiktok",
+              platform: "tiktok",
+              source_scope: "network",
+              account_handle: "bravotv",
+              is_active: false,
+              scrape_priority: 40,
+              metadata: {},
+            },
+            {
+              id: "source-daily-dish-threads",
+              platform: "threads",
+              source_scope: "network",
+              account_handle: "bravodailydish",
+              is_active: true,
+              scrape_priority: 50,
+              metadata: {},
+            },
+            {
               id: "source-traitors",
               platform: "twitter",
               source_scope: "network",
@@ -730,6 +842,33 @@ describe("social landing repository", () => {
       }
       if (path.startsWith("/shared/ingest/runs")) return [];
       if (path.startsWith("/shared/review-queue")) return { items: [] };
+      if (path.startsWith("/profiles/") && path.endsWith("/summary")) {
+        const [platform, rawHandle] = path
+          .replace(/^\/profiles\//, "")
+          .replace(/\/summary$/, "")
+          .split("/");
+        const handle = decodeURIComponent(rawHandle ?? "");
+        const counts: Record<string, { saved: number; scraped: number; total: number }> = {
+          "instagram:bravotv": { saved: 90, scraped: 75, total: 100 },
+          "instagram:thetraitorsus": { saved: 442, scraped: 442, total: 442 },
+          "tiktok:thetraitorsus": { saved: 275, scraped: 275, total: 275 },
+          "twitter:thetraitorsus": { saved: 5227, scraped: 285, total: 5227 },
+        };
+        const progress = counts[`${platform}:${handle}`] ?? {
+          saved: 0,
+          scraped: 0,
+          total: 0,
+        };
+        return {
+          summary_detail: "lite",
+          platform,
+          account_handle: handle,
+          total_posts: progress.total,
+          materialized_total_posts: progress.saved,
+          catalog_total_posts: progress.scraped,
+          live_catalog_total_posts: progress.scraped,
+        };
+      }
       throw new Error(`Unhandled social path: ${path}`);
     });
     listShowExternalIdsByIdsMock.mockResolvedValue(
@@ -743,22 +882,77 @@ describe("social landing repository", () => {
         ],
       ]),
     );
+    queryMock.mockImplementation(async (sql: string) => {
+      if (String(sql).includes("landing_social_progress")) {
+        return {
+          rows: [
+            {
+              platform: "instagram",
+              account_handle: "bravotv",
+              saved_count: 90,
+              scraped_count: 75,
+            },
+            {
+              platform: "instagram",
+              account_handle: "thetraitorsus",
+              saved_count: 442,
+              scraped_count: 442,
+            },
+            {
+              platform: "tiktok",
+              account_handle: "thetraitorsus",
+              saved_count: 275,
+              scraped_count: 275,
+            },
+            {
+              platform: "twitter",
+              account_handle: "thetraitorsus",
+              saved_count: 5227,
+              scraped_count: 285,
+            },
+          ],
+        };
+      }
+      return { rows: [] };
+    });
 
     const result = await getSocialLandingPayloadResult();
-    const bravoSet = result.payload.network_sets[0];
+    const networkSet = result.payload.network_sets[0];
     const traitors = result.payload.show_sets.find(
       (show) => show.show_name === "The Traitors",
     );
 
     expect(result.cacheable).toBe(true);
-    expect(bravoSet.handles).toEqual(
+    expect(networkSet.key).toBe("network");
+    expect(networkSet.handles).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ platform: "instagram", handle: "bravotv" }),
       ]),
     );
-    expect(bravoSet.handles).not.toEqual(
+    expect(networkSet.handles).not.toEqual(
       expect.arrayContaining([
         expect.objectContaining({ platform: "twitter", handle: "thetraitorsus" }),
+      ]),
+    );
+    expect(networkSet.handles).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ platform: "tiktok", handle: "bravotv" }),
+      ]),
+    );
+    expect(result.payload.shared_source_sets[0].sources).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ platform: "instagram", account_handle: "bravotv" }),
+        expect.objectContaining({ platform: "threads", account_handle: "bravodailydish" }),
+      ]),
+    );
+    expect(result.payload.shared_source_sets[0].sources).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ platform: "tiktok", account_handle: "bravotv" }),
+      ]),
+    );
+    expect(result.payload.shared_source_sets[0].sources).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ platform: "twitter", account_handle: "thetraitorsus" }),
       ]),
     );
     expect(traitors?.fallback_note).toBeNull();
@@ -769,6 +963,308 @@ describe("social landing repository", () => {
         expect.objectContaining({ platform: "twitter", handle: "thetraitorsus" }),
       ]),
     );
+    expect(traitors?.handles).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          platform: "twitter",
+          handle: "thetraitorsus",
+          progress: {
+            saved_count: 5227,
+            scraped_count: 285,
+            total_count: 5227,
+            saved_percent: 100,
+            scraped_percent: 5.5,
+            last_catalog_run_at: null,
+            last_catalog_run_status: null,
+            lanes: expect.arrayContaining([
+              expect.objectContaining({
+                key: "socialblade",
+                label: "Following List",
+                status: "missing",
+              }),
+              expect.objectContaining({
+                key: "posts",
+                saved_count: 5227,
+                scraped_count: 285,
+                total_count: 5227,
+              }),
+              expect.objectContaining({
+                key: "comments",
+              }),
+              expect.objectContaining({
+                key: "media",
+              }),
+            ]),
+          },
+        }),
+      ]),
+    );
+    expect(networkSet.handles).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          platform: "instagram",
+          handle: "bravotv",
+          progress: expect.objectContaining({
+            saved_count: 90,
+            scraped_count: 75,
+            total_count: 90,
+          }),
+        }),
+      ]),
+    );
+  });
+
+  it("scopes network shared sources by stable network-set identity", async () => {
+    getCoveredShowsMock.mockResolvedValue([
+      {
+        id: "covered-traitors",
+        trr_show_id: "show-traitors",
+        show_name: "The Traitors",
+        canonical_slug: "the-traitors",
+        alternative_names: [],
+        show_total_episodes: 40,
+        poster_url: null,
+      },
+    ]);
+    fetchAdminBackendJsonMock.mockResolvedValue({
+      status: 200,
+      data: {
+        shows: [
+          {
+            show_id: "show-traitors",
+            cast_members: [],
+          },
+        ],
+      },
+    });
+    listShowExternalIdsByIdsMock.mockResolvedValue(
+      new Map([["show-traitors", { instagram_handle: "thetraitorsus" }]]),
+    );
+    fetchSocialBackendJsonMock.mockImplementation(
+      async (path: string, options?: { queryString?: string }) => {
+        if (path.startsWith("/shared/sources")) {
+          if (!options?.queryString?.startsWith("source_scope=network")) {
+            return { sources: [] };
+          }
+          return {
+            sources: [
+              {
+                id: "source-bravo",
+                platform: "instagram",
+                source_scope: "network",
+                account_handle: "bravotv",
+                is_active: true,
+                scrape_priority: 10,
+                metadata: {
+                  network_set_id: "Bravo Primary",
+                  network_id: "ignored-bravo-id",
+                  network_key: "ignored-bravo-key",
+                  network_title: "Bravo TV",
+                },
+              },
+              {
+                id: "source-peacock",
+                platform: "instagram",
+                source_scope: "network",
+                account_handle: "peacock",
+                is_active: true,
+                scrape_priority: 20,
+                metadata: {
+                  network_id: "Peacock Network",
+                  network_key: "ignored-peacock-key",
+                  network_title: "Peacock",
+                },
+              },
+              {
+                id: "source-nbc",
+                platform: "youtube",
+                source_scope: "network",
+                account_handle: "nbc",
+                is_active: true,
+                scrape_priority: 30,
+                metadata: {
+                  network_key: "NBC Broadcast",
+                  network_title: "NBC",
+                },
+              },
+              {
+                id: "source-syndication",
+                platform: "threads",
+                source_scope: "syndication",
+                account_handle: "syndicatedreality",
+                is_active: true,
+                scrape_priority: 40,
+                metadata: {},
+              },
+              {
+                id: "source-traitors",
+                platform: "twitter",
+                source_scope: "network",
+                account_handle: "thetraitorsus",
+                is_active: true,
+                scrape_priority: 50,
+                metadata: {
+                  network_set_id: "Bravo Primary",
+                  assigned_show_id: "show-traitors",
+                  network_title: "Bravo TV",
+                },
+              },
+            ],
+          };
+        }
+        if (path.startsWith("/shared/ingest/runs")) return [];
+        if (path.startsWith("/shared/review-queue")) return { items: [] };
+        if (path.startsWith("/profiles/") && path.endsWith("/summary")) {
+          return {
+            summary_detail: "lite",
+            total_posts: 0,
+            materialized_total_posts: 0,
+            catalog_total_posts: 0,
+            live_catalog_total_posts: 0,
+          };
+        }
+        throw new Error(`Unhandled social path: ${path}`);
+      },
+    );
+
+    const result = await getSocialLandingPayloadResult();
+    const networkSetsByKey = new Map(
+      result.payload.network_sets.map((set) => [set.key, set]),
+    );
+    const sharedNetworkSets = result.payload.shared_source_sets.filter(
+      (set) => set.source_scope === "network",
+    );
+    const sharedNetworkSetsByKey = new Map(
+      sharedNetworkSets.map((set) => [set.key, set]),
+    );
+
+    expect([...networkSetsByKey.keys()]).toEqual([
+      "bravo-primary",
+      "nbc-broadcast",
+      "peacock-network",
+      "syndication",
+    ]);
+    expect(networkSetsByKey.get("bravo-primary")?.handles).toEqual([
+      expect.objectContaining({ platform: "instagram", handle: "bravotv" }),
+    ]);
+    expect(networkSetsByKey.get("peacock-network")?.handles).toEqual([
+      expect.objectContaining({ platform: "instagram", handle: "peacock" }),
+    ]);
+    expect(networkSetsByKey.get("bravo-primary")?.handles).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ platform: "instagram", handle: "peacock" }),
+        expect.objectContaining({ platform: "twitter", handle: "thetraitorsus" }),
+      ]),
+    );
+    expect(sharedNetworkSets.map((set) => set.key)).toEqual([
+      "bravo-primary",
+      "nbc-broadcast",
+      "peacock-network",
+      "syndication",
+    ]);
+    expect(sharedNetworkSetsByKey.get("bravo-primary")?.sources).toEqual([
+      expect.objectContaining({ id: "source-bravo" }),
+    ]);
+    expect(sharedNetworkSetsByKey.get("bravo-primary")?.sources).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "source-traitors" }),
+      ]),
+    );
+  });
+
+  it("keeps network-set keys stable when titles and source order change", async () => {
+    getCoveredShowsMock.mockResolvedValue([]);
+    fetchAdminBackendJsonMock.mockResolvedValue({
+      status: 200,
+      data: { shows: [] },
+    });
+    listShowExternalIdsByIdsMock.mockResolvedValue(new Map());
+    let sources = [
+      {
+        id: "source-peacock",
+        platform: "instagram",
+        source_scope: "network",
+        account_handle: "peacock",
+        is_active: true,
+        scrape_priority: 20,
+        metadata: {
+          network_set_id: "peacock-network",
+          network_title: "Peacock Original",
+        },
+      },
+      {
+        id: "source-bravo",
+        platform: "instagram",
+        source_scope: "network",
+        account_handle: "bravotv",
+        is_active: true,
+        scrape_priority: 10,
+        metadata: {
+          network_set_id: "bravo-network",
+          network_title: "Bravo Original",
+        },
+      },
+    ];
+    fetchSocialBackendJsonMock.mockImplementation(
+      async (path: string, options?: { queryString?: string }) => {
+        if (path.startsWith("/shared/sources")) {
+          if (!options?.queryString?.startsWith("source_scope=network")) {
+            return { sources: [] };
+          }
+          return { sources };
+        }
+        if (path.startsWith("/shared/ingest/runs")) return [];
+        if (path.startsWith("/shared/review-queue")) return { items: [] };
+        if (path.startsWith("/profiles/") && path.endsWith("/summary")) {
+          return {
+            summary_detail: "lite",
+            total_posts: 0,
+            materialized_total_posts: 0,
+            catalog_total_posts: 0,
+            live_catalog_total_posts: 0,
+          };
+        }
+        throw new Error(`Unhandled social path: ${path}`);
+      },
+    );
+
+    const firstPayload = await getSocialLandingPayload();
+    sources = [
+      {
+        ...sources[1],
+        metadata: {
+          network_set_id: "bravo-network",
+          network_title: "Bravo Renamed",
+        },
+      },
+      {
+        ...sources[0],
+        metadata: {
+          network_set_id: "peacock-network",
+          network_title: "Peacock Renamed",
+        },
+      },
+    ];
+    const secondPayload = await getSocialLandingPayload();
+
+    expect(firstPayload.network_sets.map((set) => set.key)).toEqual([
+      "bravo-network",
+      "peacock-network",
+    ]);
+    expect(secondPayload.network_sets.map((set) => set.key)).toEqual([
+      "bravo-network",
+      "peacock-network",
+    ]);
+    expect(
+      firstPayload.shared_source_sets
+        .filter((set) => set.source_scope === "network")
+        .map((set) => set.key),
+    ).toEqual(["bravo-network", "peacock-network"]);
+    expect(
+      secondPayload.shared_source_sets
+        .filter((set) => set.source_scope === "network")
+        .map((set) => set.key),
+    ).toEqual(["bravo-network", "peacock-network"]);
   });
 
   it("marks landing payloads not cacheable when show external-id handles fail to load", async () => {
@@ -959,7 +1455,7 @@ describe("social landing repository", () => {
     expect(sql).not.toContain("ltrim(account_handle");
     expect(sql).not.toContain("lower(account_handle");
     expect(sql).not.toContain("concat(");
-    expect(params[0]).toEqual(["instagram", "youtube", "facebook"]);
+    expect(params[0]).toEqual(["instagram", "tiktok", "youtube", "facebook"]);
     expect(params[2]).toContain("andycohen");
     expect(params[2]).toContain("@andycohen");
     expect(params[2]).toContain("user/andycohen");
@@ -1102,6 +1598,9 @@ describe("social landing repository", () => {
       },
     ];
     queryMock.mockImplementation(async (_sql: string, params: unknown[]) => {
+      if (String(_sql).includes("landing_social_progress")) {
+        return { rows: [] };
+      }
       const accountHandleCandidates = params[2] as string[];
       return {
         rows: storedRows.filter((row) =>
@@ -1361,6 +1860,9 @@ describe("social landing repository", () => {
       },
     ];
     queryMock.mockImplementation(async (_sql: string, params: unknown[]) => {
+      if (String(_sql).includes("landing_social_progress")) {
+        return { rows: [] };
+      }
       const accountHandleCandidates = params[2] as string[];
       return {
         rows: storedRows.filter((row) =>
@@ -1636,7 +2138,7 @@ describe("social landing repository", () => {
       rows: [
         {
           person_id: "person-heather",
-          platform: "tiktok",
+          platform: "twitter",
           account_handle: "heathergay",
           scraped_at: "2026-04-22T12:00:00.000Z",
           updated_at: "2026-04-22T12:05:00.000Z",

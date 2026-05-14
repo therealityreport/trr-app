@@ -33,7 +33,7 @@ describe("social account SocialBlade refresh proxy route", () => {
   it("forwards refresh payloads to the backend helper", async () => {
     const request = new NextRequest("http://localhost/api/admin/trr-api/social/profiles/youtube/bravo/socialblade/refresh", {
       method: "POST",
-      body: JSON.stringify({ force: true }),
+      body: JSON.stringify({ force: true, source_scope: "news" }),
       headers: { "content-type": "application/json" },
     });
 
@@ -47,7 +47,7 @@ describe("social account SocialBlade refresh proxy route", () => {
     expect(fetchSocialBackendJsonMock).toHaveBeenCalledWith("/profiles/youtube/bravo/socialblade/refresh", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ force: true }),
+      body: JSON.stringify({ force: true, source_scope: "news" }),
       fallbackError: "Failed to refresh social account SocialBlade data",
       retries: 0,
       timeoutMs: 210_000,

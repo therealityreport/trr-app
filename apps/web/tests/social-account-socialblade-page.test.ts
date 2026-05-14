@@ -30,6 +30,20 @@ describe("social account SocialBlade page", () => {
     expect(element.props.activeTab).toBe("socialblade");
   });
 
+  it("supports TikTok SocialBlade profile pages", async () => {
+    const page = await import("@/app/social/[platform]/[handle]/socialblade/page");
+    const element = await page.default({
+      params: Promise.resolve({
+        platform: "tiktok",
+        handle: "bravotv",
+      }),
+    });
+
+    expect(element.props.platform).toBe("tiktok");
+    expect(element.props.handle).toBe("bravotv");
+    expect(element.props.activeTab).toBe("socialblade");
+  });
+
   it("rejects unsupported socialblade platforms", async () => {
     const page = await import("@/app/social/[platform]/[handle]/socialblade/page");
 

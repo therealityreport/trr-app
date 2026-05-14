@@ -163,44 +163,59 @@ export default function NYTArticlesSection() {
               gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
               gap: 8,
             }}>
-              {article.chartTypes.map((chart, i) => {
-                const typeColors: Record<string, string> = {
-                  "report-card": "#121212",
-                  "line-chart": "#fdba58",
-                  "bar-chart": "#c44127",
-                  "stacked-area": "#569adc",
-                };
-                const color = typeColors[chart.type] || "#727272";
-                return (
-                  <div key={i} style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
-                    padding: "8px 12px",
-                    background: "var(--dd-paper-warm)",
-                    borderRadius: 4,
-                    borderLeft: `3px solid ${color}`,
-                  }}>
-                    <div>
-                      <div style={{
-                        fontFamily: "var(--dd-font-sans)",
-                        fontSize: 11,
-                        fontWeight: 600,
-                        color: "var(--dd-ink-black)",
-                      }}>
-                        {chart.topic}
-                      </div>
-                      <div style={{
-                        fontFamily: "var(--dd-font-mono)",
-                        fontSize: 9,
-                        color: "var(--dd-ink-faint)",
-                      }}>
-                        {chart.type} · {chart.tool}
+              {article.chartTypes.length > 0 ? (
+                article.chartTypes.map((chart, i) => {
+                  const typeColors: Record<string, string> = {
+                    "report-card": "#121212",
+                    "line-chart": "#fdba58",
+                    "bar-chart": "#c44127",
+                    "stacked-area": "#569adc",
+                  };
+                  const color = typeColors[chart.type] || "#727272";
+                  return (
+                    <div key={i} style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      padding: "8px 12px",
+                      background: "var(--dd-paper-warm)",
+                      borderRadius: 4,
+                      borderLeft: `3px solid ${color}`,
+                    }}>
+                      <div>
+                        <div style={{
+                          fontFamily: "var(--dd-font-sans)",
+                          fontSize: 11,
+                          fontWeight: 600,
+                          color: "var(--dd-ink-black)",
+                        }}>
+                          {chart.topic}
+                        </div>
+                        <div style={{
+                          fontFamily: "var(--dd-font-mono)",
+                          fontSize: 9,
+                          color: "var(--dd-ink-faint)",
+                        }}>
+                          {chart.type} · {chart.tool}
+                        </div>
                       </div>
                     </div>
-                  </div>
-                );
-              })}
+                  );
+                })
+              ) : (
+                <div style={{
+                  gridColumn: "1 / -1",
+                  padding: "10px 12px",
+                  background: "var(--dd-paper-warm)",
+                  borderRadius: 4,
+                  border: "1px solid var(--dd-paper-grey)",
+                  fontFamily: "var(--dd-font-sans)",
+                  fontSize: 12,
+                  color: "var(--dd-ink-faint)",
+                }}>
+                  No graphs/charts documented for this page. Stack note: {article.tools.charts}
+                </div>
+              )}
             </div>
           </div>
 

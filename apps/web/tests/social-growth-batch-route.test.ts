@@ -47,6 +47,7 @@ describe("social growth batch proxy route", () => {
       method: "POST",
       body: JSON.stringify({
         source: "cast_comparison",
+        source_scope: "creator",
         force: true,
         items: [{ personId: "person-1", handle: "lisabarlow14" }],
       }),
@@ -61,6 +62,7 @@ describe("social growth batch proxy route", () => {
     expect(init.method).toBe("POST");
     expect(JSON.parse(String(init.body))).toEqual({
       source: "cast_comparison",
+      source_scope: "creator",
       force: true,
       items: [{ personId: "person-1", handle: "lisabarlow14" }],
     });

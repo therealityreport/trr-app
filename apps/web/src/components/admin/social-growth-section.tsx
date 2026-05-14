@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { ListIcon, XIcon } from "lucide-react";
 import { fetchAdminWithAuth } from "@/lib/admin/client-auth";
 import { buildPersonExternalIdUrl } from "@/lib/admin/person-external-ids";
 import {
@@ -10,13 +11,54 @@ import {
   SOCIAL_ACCOUNT_PLATFORM_LABELS,
 } from "@/lib/admin/social-account-profile";
 
-type SupportedSocialBladePlatform = Extract<SocialPlatformSlug, "instagram" | "facebook" | "youtube">;
+type SupportedSocialBladePlatform = Extract<SocialPlatformSlug, "instagram" | "facebook" | "tiktok" | "youtube">;
 
 type SocialGrowthSectionProps = {
   platform: SupportedSocialBladePlatform;
   handle: string | null;
   personId?: string | null;
+  sourceScope?: string | null;
+  avatarUrl?: string | null;
+  avatarAlt?: string | null;
 };
+
+type InstagramFollowingUser = {
+  id?: string | null;
+  username?: string | null;
+  normalized_username?: string | null;
+  full_name?: string | null;
+  is_private?: boolean | null;
+  is_verified?: boolean | null;
+  profile_pic_url?: string | null;
+  hosted_profile_pic_url?: string | null;
+};
+
+type InstagramFollowingItem = {
+  id: string;
+  relationship_type?: "following";
+  user?: InstagramFollowingUser | null;
+  source_rank?: number | null;
+  source_page_ordinal?: number | null;
+  last_seen_at?: string | null;
+};
+
+type InstagramFollowingResponse = {
+  owner?: {
+    id?: string | null;
+    username?: string | null;
+    row_id?: string | null;
+  };
+  relationship_type?: "following";
+  items?: InstagramFollowingItem[];
+  pagination?: {
+    page?: number;
+    page_size?: number;
+    total?: number;
+    total_pages?: number;
+  };
+};
+
+const FOLLOWING_PAGE_SIZE = 100;
 
 const DEFAULT_PROFILE_STATS_LABELS: Record<SupportedSocialBladePlatform, SocialBladeProfileStatsLabels> = {
   instagram: {
@@ -37,6 +79,15 @@ const DEFAULT_PROFILE_STATS_LABELS: Record<SupportedSocialBladePlatform, SocialB
     average_comments: "Avg Comments",
     chart_metric_label: "Likes",
   },
+  tiktok: {
+    followers: "Followers",
+    following: "Following",
+    media_count: "Likes",
+    engagement_rate: "Engagement",
+    average_likes: "Avg Likes",
+    average_comments: "Avg Comments",
+    chart_metric_label: "Followers",
+  },
   youtube: {
     followers: "Subscribers",
     following: "Views",
@@ -51,12 +102,14 @@ const DEFAULT_PROFILE_STATS_LABELS: Record<SupportedSocialBladePlatform, SocialB
 const PLATFORM_BADGE_TONES: Record<SupportedSocialBladePlatform, string> = {
   instagram: "from-fuchsia-500 via-rose-500 to-amber-400",
   facebook: "from-sky-500 via-blue-600 to-indigo-700",
+  tiktok: "from-cyan-400 via-zinc-900 to-rose-500",
   youtube: "from-red-500 via-rose-600 to-orange-500",
 };
 
 const PLATFORM_BADGE_LABELS: Record<SupportedSocialBladePlatform, string> = {
   instagram: "IG",
   facebook: "FB",
+  tiktok: "TT",
   youtube: "YT",
 };
 
@@ -134,6 +187,90 @@ function parseErrorMessage(payload: unknown, status: number): string {
     return detail || error || `HTTP ${status}`;
   }
   return `HTTP ${status}`;
+}
+
+function readRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function readString(value: unknown): string | null {
+  const normalized = String(value ?? "").trim();
+  return normalized || null;
+}
+
+function readPositiveInteger(value: unknown, fallback: number): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
+}
+
+function readNestedRecord(root: unknown, path: string[]): Record<string, unknown> | null {
+  let current: unknown = root;
+  for (const key of path) {
+    const record = readRecord(current);
+    if (!record) return null;
+    current = record[key];
+  }
+  return readRecord(current);
+}
+
+function resolveSocialBladeAvatarUrl(data: SocialBladeGrowthData): string | null {
+  const retrievalMeta = data.instagram_following_scrape?.retrieval_meta ?? null;
+  const profileUser = readNestedRecord(retrievalMeta, ["profile_payload", "data", "user"]);
+  return (
+    readString(readNestedRecord(profileUser, ["hd_profile_pic_url_info"])?.url) ||
+    readString(profileUser?.profile_pic_url_hd) ||
+    readString(profileUser?.profile_pic_url)
+  );
+}
+
+function initialAvatarFallback(platform: SupportedSocialBladePlatform): string {
+  return PLATFORM_BADGE_LABELS[platform];
+}
+
+function followingDisplayName(item: InstagramFollowingItem): string {
+  const user = item.user ?? {};
+  return user.username || user.normalized_username || user.full_name || "unknown";
+}
+
+function followingAvatarUrl(item: InstagramFollowingItem): string | null {
+  const user = item.user ?? {};
+  return user.hosted_profile_pic_url || user.profile_pic_url || null;
+}
+
+function mergeInstagramFollowingPages(
+  current: InstagramFollowingResponse | null,
+  next: InstagramFollowingResponse,
+  requestedPage: number,
+): InstagramFollowingResponse {
+  if (!current || requestedPage <= 1) {
+    return {
+      ...next,
+      pagination: {
+        ...next.pagination,
+        page: next.pagination?.page ?? requestedPage,
+      },
+    };
+  }
+
+  const seen = new Set<string>();
+  const items = [...(current.items ?? []), ...(next.items ?? [])].filter((item) => {
+    const key = item.id || `${item.user?.username ?? item.user?.normalized_username ?? ""}:${item.source_rank ?? ""}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  return {
+    ...current,
+    ...next,
+    items,
+    pagination: {
+      ...current.pagination,
+      ...next.pagination,
+      page: next.pagination?.page ?? requestedPage,
+    },
+  };
 }
 
 function FollowerGrowthChart({
@@ -340,16 +477,32 @@ function FollowerGrowthChart({
   );
 }
 
-export default function SocialGrowthSection({ platform, handle, personId = null }: SocialGrowthSectionProps) {
+export default function SocialGrowthSection({
+  platform,
+  handle,
+  personId = null,
+  sourceScope = null,
+  avatarUrl = null,
+  avatarAlt = null,
+}: SocialGrowthSectionProps) {
   const [data, setData] = useState<SocialBladeGrowthData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [refreshNotice, setRefreshNotice] = useState<string | null>(null);
+  const [followingOpen, setFollowingOpen] = useState(false);
+  const [followingLoadingPage, setFollowingLoadingPage] = useState<number | null>(null);
+  const [followingError, setFollowingError] = useState<string | null>(null);
+  const [followingData, setFollowingData] = useState<InstagramFollowingResponse | null>(null);
 
   const platformLabel = SOCIAL_ACCOUNT_PLATFORM_LABELS[platform];
   const canonicalHandle = handle?.trim() || null;
+  const effectiveSourceScope = useMemo(() => {
+    const normalized = String(sourceScope ?? "network").trim();
+    return normalized || "network";
+  }, [sourceScope]);
+  const followingLoading = followingLoadingPage !== null;
   const useLegacyPersonInstagramRoutes = Boolean(personId && platform === "instagram");
 
   const readUrl = useMemo(() => {
@@ -367,6 +520,18 @@ export default function SocialGrowthSection({ platform, handle, personId = null 
     }
     return `/api/admin/trr-api/social/profiles/${platform}/${encodeURIComponent(canonicalHandle)}/socialblade/refresh`;
   }, [canonicalHandle, personId, platform, useLegacyPersonInstagramRoutes]);
+
+  const relationshipsAvailable = Boolean(canonicalHandle && platform === "instagram");
+  const buildRelationshipsUrl = useCallback((page: number) => {
+    if (!canonicalHandle || platform !== "instagram") return null;
+    const params = new URLSearchParams({
+      type: "following",
+      source_scope: effectiveSourceScope,
+      page: String(page),
+      page_size: String(FOLLOWING_PAGE_SIZE),
+    });
+    return `/api/admin/trr-api/social/profiles/${platform}/${encodeURIComponent(canonicalHandle)}/relationships?${params.toString()}`;
+  }, [canonicalHandle, effectiveSourceScope, platform]);
 
   const fetchData = useCallback(
     async (options?: { silent?: boolean }) => {
@@ -407,8 +572,8 @@ export default function SocialGrowthSection({ platform, handle, personId = null 
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(
             useLegacyPersonInstagramRoutes
-              ? { handle: canonicalHandle }
-              : { force: false },
+              ? { handle: canonicalHandle, source_scope: effectiveSourceScope }
+              : { force: false, source_scope: effectiveSourceScope },
           ),
         },
         { allowDevAdminBypass: true },
@@ -433,7 +598,67 @@ export default function SocialGrowthSection({ platform, handle, personId = null 
     } finally {
       setRefreshing(false);
     }
-  }, [canonicalHandle, fetchData, refreshUrl, refreshing, useLegacyPersonInstagramRoutes]);
+  }, [canonicalHandle, effectiveSourceScope, fetchData, refreshUrl, refreshing, useLegacyPersonInstagramRoutes]);
+
+  const loadFollowingPage = useCallback(async (page: number) => {
+    const relationshipsUrl = buildRelationshipsUrl(page);
+    if (!relationshipsUrl || followingLoading) return;
+    setFollowingLoadingPage(page);
+    setFollowingError(null);
+    try {
+      const res = await fetchAdminWithAuth(relationshipsUrl, undefined, { allowDevAdminBypass: true });
+      const body = (await res.json().catch(() => null)) as InstagramFollowingResponse | Record<string, unknown> | null;
+      if (!res.ok) {
+        throw new Error(parseErrorMessage(body, res.status));
+      }
+      setFollowingData((current) =>
+        mergeInstagramFollowingPages(current, body as InstagramFollowingResponse, page),
+      );
+    } catch (err) {
+      setFollowingError(err instanceof Error ? err.message : "Failed to load following list");
+    } finally {
+      setFollowingLoadingPage(null);
+    }
+  }, [buildRelationshipsUrl, followingLoading]);
+
+  const openFollowing = useCallback(() => {
+    setFollowingOpen(true);
+    if (!followingData && !followingLoading) {
+      void loadFollowingPage(1);
+    }
+  }, [followingData, followingLoading, loadFollowingPage]);
+
+  const followingPagination = followingData?.pagination ?? null;
+  const followingCurrentPage = readPositiveInteger(followingPagination?.page, followingData ? 1 : 0);
+  const followingPageSize = readPositiveInteger(followingPagination?.page_size, FOLLOWING_PAGE_SIZE);
+  const followingTotalPages =
+    typeof followingPagination?.total_pages === "number" && followingPagination.total_pages > 0
+      ? Math.floor(followingPagination.total_pages)
+      : null;
+  const followingTotal =
+    typeof followingPagination?.total === "number" && followingPagination.total >= 0
+      ? Math.floor(followingPagination.total)
+      : null;
+  const followingLoadedCount = followingData?.items?.length ?? 0;
+  const followingHasNextPage = Boolean(
+    followingData &&
+      (followingTotalPages !== null
+        ? followingCurrentPage < followingTotalPages
+        : followingTotal !== null
+          ? followingLoadedCount < followingTotal
+          : followingLoadedCount >= followingPageSize),
+  );
+
+  const loadNextFollowingPage = useCallback(() => {
+    if (!followingHasNextPage || followingLoading) return;
+    void loadFollowingPage(Math.max(1, followingCurrentPage) + 1);
+  }, [followingCurrentPage, followingHasNextPage, followingLoading, loadFollowingPage]);
+
+  useEffect(() => {
+    setFollowingData(null);
+    setFollowingError(null);
+    setFollowingLoadingPage(null);
+  }, [canonicalHandle, effectiveSourceScope, platform]);
 
   useEffect(() => {
     void fetchData();
@@ -525,9 +750,11 @@ export default function SocialGrowthSection({ platform, handle, personId = null 
 
   const { profile_stats: stats, rankings, daily_total_followers_chart: chart, daily_channel_metrics_60day: metrics } = data;
   const freshnessChip = getFreshnessChip(data);
+  const effectiveAvatarUrl = avatarUrl || resolveSocialBladeAvatarUrl(data);
   const chartPoints = chart?.data ?? [];
   const statsCards = [
     {
+      key: "followers",
       label: statsLabels.followers || "Followers",
       value: formatCompactNumber(stats.followers),
       raw: stats.followers.toLocaleString(),
@@ -540,6 +767,7 @@ export default function SocialGrowthSection({ platform, handle, personId = null 
           : null,
     },
     {
+      key: "following",
       label: statsLabels.following || "Following",
       value: formatCompactNumber(stats.following),
       raw: stats.following.toLocaleString(),
@@ -552,6 +780,7 @@ export default function SocialGrowthSection({ platform, handle, personId = null 
           : null,
     },
     {
+      key: "media_count",
       label: statsLabels.media_count || "Posts",
       value: formatCompactNumber(stats.media_count),
       raw: stats.media_count.toLocaleString(),
@@ -564,6 +793,7 @@ export default function SocialGrowthSection({ platform, handle, personId = null 
           : null,
     },
     {
+      key: "engagement_rate",
       label: statsLabels.engagement_rate || "Engagement",
       value: stats.engagement_rate,
       raw: stats.engagement_rate,
@@ -576,6 +806,7 @@ export default function SocialGrowthSection({ platform, handle, personId = null 
       })(),
     },
     {
+      key: "average_likes",
       label: statsLabels.average_likes || "Avg Likes",
       value: formatCompactNumber(Math.round(stats.average_likes)),
       raw: Math.round(stats.average_likes).toLocaleString(),
@@ -590,6 +821,7 @@ export default function SocialGrowthSection({ platform, handle, personId = null 
           : null,
     },
     {
+      key: "average_comments",
       label: statsLabels.average_comments || "Avg Comments",
       value: formatCompactNumber(Math.round(stats.average_comments)),
       raw: Math.round(stats.average_comments).toLocaleString(),
@@ -618,8 +850,20 @@ export default function SocialGrowthSection({ platform, handle, personId = null 
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
-        <div className={`flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br ${PLATFORM_BADGE_TONES[platform]}`}>
-          <span className="text-sm font-black text-white">{PLATFORM_BADGE_LABELS[platform]}</span>
+        <div className={`flex h-10 w-10 overflow-hidden rounded-full bg-gradient-to-br ${PLATFORM_BADGE_TONES[platform]}`}>
+          {effectiveAvatarUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={effectiveAvatarUrl}
+              alt={avatarAlt || `${platformLabel} profile picture`}
+              className="h-full w-full object-cover"
+              referrerPolicy="no-referrer"
+            />
+          ) : (
+            <span className="flex h-full w-full items-center justify-center text-sm font-black text-white">
+              {initialAvatarFallback(platform)}
+            </span>
+          )}
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
@@ -635,9 +879,6 @@ export default function SocialGrowthSection({ platform, handle, personId = null 
             ) : (
               <p className="text-sm font-bold text-zinc-900">@{data.account_handle ?? data.username}</p>
             )}
-            <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-zinc-600">
-              {platformLabel}
-            </span>
             {socialbladeHref ? (
               <a
                 href={socialbladeHref}
@@ -698,9 +939,24 @@ export default function SocialGrowthSection({ platform, handle, personId = null 
       ) : null}
 
       <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-6">
-        {statsCards.map((stat) => (
-          <div key={stat.label} className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm" title={stat.raw}>
-            <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-zinc-400">{stat.label}</p>
+        {statsCards.map((stat) => {
+          const canOpenFollowing = stat.key === "following" && relationshipsAvailable;
+          return (
+          <div key={stat.label} className="relative rounded-xl border border-zinc-200 bg-white p-4 shadow-sm" title={stat.raw}>
+            <div className="flex items-start justify-between gap-2">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-zinc-400">{stat.label}</p>
+              {canOpenFollowing ? (
+                <button
+                  type="button"
+                  onClick={openFollowing}
+                  className="-mr-1 -mt-1 inline-flex h-7 w-7 items-center justify-center rounded-full border border-zinc-200 bg-white text-zinc-500 transition hover:border-zinc-300 hover:bg-zinc-50 hover:text-zinc-900"
+                  aria-label="Open following list"
+                  title="Open following list"
+                >
+                  <ListIcon className="h-3.5 w-3.5" aria-hidden="true" />
+                </button>
+              ) : null}
+            </div>
             <p className="mt-1 text-lg font-bold text-zinc-900">{stat.value}</p>
             {stat.delta ? (
               <p className={`mt-1 text-xs font-semibold ${stat.delta.value >= 0 ? "text-emerald-600" : "text-red-600"}`}>
@@ -708,8 +964,92 @@ export default function SocialGrowthSection({ platform, handle, personId = null 
               </p>
             ) : null}
           </div>
-        ))}
+          );
+        })}
       </div>
+
+      {followingOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/35 px-4 py-6" role="dialog" aria-modal="true">
+          <div className="flex max-h-[85vh] w-full max-w-xl flex-col rounded-2xl border border-zinc-200 bg-white shadow-xl">
+            <div className="flex items-center justify-between gap-3 border-b border-zinc-200 px-5 py-4">
+              <div>
+                <h3 className="text-sm font-bold text-zinc-900">@{data.account_handle ?? data.username} following</h3>
+                <p className="mt-0.5 text-xs text-zinc-500">
+                  {formatCompactNumber(followingData?.pagination?.total ?? stats.following)} stored accounts
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setFollowingOpen(false)}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-zinc-200 text-zinc-500 transition hover:bg-zinc-50 hover:text-zinc-900"
+                aria-label="Close following list"
+              >
+                <XIcon className="h-4 w-4" aria-hidden="true" />
+              </button>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+              {followingLoading ? <p className="text-sm text-zinc-500">Loading following list...</p> : null}
+              {followingError ? (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                  {followingError}
+                </div>
+              ) : null}
+              {!followingLoading && !followingError && (followingData?.items ?? []).length === 0 ? (
+                <p className="text-sm text-zinc-500">No following users are stored for this account yet.</p>
+              ) : null}
+              <div className="space-y-2">
+                {(followingData?.items ?? []).map((item) => {
+                  const user = item.user ?? {};
+                  const username = followingDisplayName(item);
+                  const userAvatarUrl = followingAvatarUrl(item);
+                  return (
+                    <div key={item.id} className="flex items-center gap-3 rounded-xl border border-zinc-100 bg-zinc-50 px-3 py-2.5">
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-zinc-200 text-xs font-bold uppercase text-zinc-600">
+                        {userAvatarUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={userAvatarUrl}
+                            alt={`${username} profile picture`}
+                            className="h-full w-full object-cover"
+                            referrerPolicy="no-referrer"
+                          />
+                        ) : (
+                          username.slice(0, 2)
+                        )}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-semibold text-zinc-900">@{username}</p>
+                        {user.full_name ? <p className="truncate text-xs text-zinc-500">{user.full_name}</p> : null}
+                      </div>
+                      <div className="flex shrink-0 items-center gap-1.5">
+                        {user.is_verified ? (
+                          <span className="rounded-full bg-sky-50 px-2 py-0.5 text-[10px] font-semibold text-sky-700">Verified</span>
+                        ) : null}
+                        {user.is_private ? (
+                          <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-semibold text-zinc-600">Private</span>
+                        ) : null}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              {followingData && followingHasNextPage ? (
+                <div className="mt-4 flex justify-center">
+                  <button
+                    type="button"
+                    onClick={loadNextFollowingPage}
+                    disabled={followingLoading}
+                    className="inline-flex items-center justify-center rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 transition hover:border-zinc-300 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
+                    aria-label="Load next following page"
+                  >
+                    {followingLoading ? "Loading..." : "Load more"}
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <div className="grid gap-3 sm:grid-cols-3">
         {[

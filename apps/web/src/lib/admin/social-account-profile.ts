@@ -55,6 +55,7 @@ export const SOCIAL_ACCOUNT_CATALOG_ENABLED_PLATFORMS: ReadonlyArray<SocialPlatf
 
 export const SOCIAL_ACCOUNT_SOCIALBLADE_ENABLED_PLATFORMS: ReadonlyArray<SocialPlatformSlug> = [
   "instagram",
+  "tiktok",
   "youtube",
   "facebook",
 ];
@@ -141,6 +142,21 @@ export type SocialBladeGrowthData = {
   history_source?: string | null;
   chart_metric_label?: string | null;
   socialblade_url?: string | null;
+  instagram_following_scrape?: {
+    enabled?: boolean;
+    status?: "completed" | "failed" | "skipped";
+    reason?: string;
+    error?: string;
+    stage?: string;
+    platform?: string;
+    handle?: string;
+    source?: string;
+    relationship_type?: "following";
+    relationships_fetched?: number | null;
+    relationships_upserted?: number | null;
+    relationship_mismatches?: Array<Record<string, unknown>>;
+    retrieval_meta?: Record<string, unknown>;
+  } | null;
   profile_stats_labels?: SocialBladeProfileStatsLabels;
   previous_run?: {
     scraped_at?: string | null;
