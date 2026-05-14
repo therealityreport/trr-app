@@ -281,6 +281,42 @@ describe("SocialAccountProfilePage", () => {
     });
   });
 
+  it("does not let a stale persisted catalog run id block another profile backfill", async () => {
+    window.sessionStorage.setItem("trr-social-catalog-progress-run:tiktok:bravotv", "stale-run-id");
+    const tiktokSummary = {
+      ...baseSummary,
+      platform: "tiktok",
+      profile_url: "https://www.tiktok.com/@bravotv",
+      catalog_recent_runs: [],
+      comments_coverage: null,
+    };
+
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse(tiktokSummary);
+      }
+      if (url.includes("/snapshot")) {
+        return jsonResponse({
+          summary: tiktokSummary,
+          catalog_run_progress: null,
+          generated_at: "2026-04-09T03:00:00.000Z",
+        });
+      }
+      if (url.includes("/cookies/health")) {
+        return jsonResponse(healthyCookieHealth("tiktok"));
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="tiktok" handle="bravotv" activeTab="catalog" />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Backfill Posts" })).toBeEnabled();
+    });
+    expect(screen.queryByRole("button", { name: "Cancel Run" })).not.toBeInTheDocument();
+  });
+
   it("renders comment-row and media-file totals in the top summary tiles", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
@@ -1244,7 +1280,13 @@ describe("SocialAccountProfilePage", () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes("/summary")) {
-        return jsonResponse({ ...baseSummary, platform: url.includes("/facebook/") ? "facebook" : "tiktok" });
+        if (url.includes("/facebook/")) {
+          return jsonResponse({ ...baseSummary, platform: "facebook" });
+        }
+        if (url.includes("/tiktok/")) {
+          return jsonResponse({ ...baseSummary, platform: "tiktok" });
+        }
+        return jsonResponse({ ...baseSummary, platform: "twitter" });
       }
       throw new Error(`Unhandled request: ${url}`);
     });
@@ -1256,6 +1298,12 @@ describe("SocialAccountProfilePage", () => {
     });
 
     rerender(<SocialAccountProfilePage platform="tiktok" handle="bravotv" activeTab="stats" />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("link", { name: "SocialBlade" })).toBeInTheDocument();
+    });
+
+    rerender(<SocialAccountProfilePage platform="twitter" handle="bravotv" activeTab="stats" />);
 
     await waitFor(() => {
       expect(screen.queryByRole("link", { name: "SocialBlade" })).not.toBeInTheDocument();
@@ -2342,7 +2390,9 @@ describe("SocialAccountProfilePage", () => {
     fireEvent.mouseEnter(mediaLink, { clientX: 100, clientY: 100 });
     expect(within(dialog).getByRole("tooltip", { name: "Comment media preview" })).toBeInTheDocument();
     fireEvent.mouseLeave(mediaLink);
-    expect(within(dialog).queryByRole("tooltip", { name: "Comment media preview" })).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(within(dialog).queryByRole("tooltip", { name: "Comment media preview" })).not.toBeInTheDocument();
+    });
     expect(within(dialog).getByText("14 Instagram rows")).toBeInTheDocument();
   });
 
@@ -2988,6 +3038,85 @@ describe("SocialAccountProfilePage", () => {
     await waitFor(() => {
       expect(screen.getByText("SocialBlade data refreshed.")).toBeInTheDocument();
     });
+  });
+
+  it("preserves the active source scope across SocialBlade refresh and following pagination", async () => {
+    const refreshBodies: unknown[] = [];
+    const relationshipUrls: string[] = [];
+    const scopedSummary = {
+      ...baseSummary,
+      source_status: [{ source_scope: "creator" }],
+    };
+
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse(scopedSummary);
+      }
+      if (url.includes("/socialblade/refresh")) {
+        refreshBodies.push(JSON.parse(String(init?.body ?? "{}")));
+        return jsonResponse({ ...baseSocialBladeResponse, refresh_status: "refreshed" });
+      }
+      if (url.includes("/relationships")) {
+        relationshipUrls.push(url);
+        const searchParams = new URL(url, "http://localhost").searchParams;
+        const page = Number(searchParams.get("page") ?? "1");
+        return jsonResponse({
+          owner: { username: "bravotv" },
+          relationship_type: "following",
+          items: [
+            {
+              id: `relationship-${page}`,
+              relationship_type: "following",
+              user: {
+                username: page === 1 ? "first_creator" : "second_creator",
+                full_name: page === 1 ? "First Creator" : "Second Creator",
+              },
+            },
+          ],
+          pagination: {
+            page,
+            page_size: Number(searchParams.get("page_size") ?? "100"),
+            total: 2,
+            total_pages: 2,
+          },
+        });
+      }
+      if (url.includes("/socialblade")) {
+        return jsonResponse(baseSocialBladeResponse);
+      }
+      throw new Error(`Unhandled request: ${url} (${init?.method ?? "GET"})`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="socialblade" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Followers Growth")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+
+    await waitFor(() => {
+      expect(refreshBodies).toContainEqual({ force: false, source_scope: "creator" });
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Open following list" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("@first_creator")).toBeInTheDocument();
+    });
+    expect(new URL(relationshipUrls[0], "http://localhost").searchParams.toString()).toBe(
+      "type=following&source_scope=creator&page=1&page_size=100",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Load next following page" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("@second_creator")).toBeInTheDocument();
+    });
+    expect(new URL(relationshipUrls[1], "http://localhost").searchParams.toString()).toBe(
+      "type=following&source_scope=creator&page=2&page_size=100",
+    );
   });
 
   it("surfaces SocialBlade refresh errors on the account tab", async () => {
@@ -3659,6 +3788,51 @@ describe("SocialAccountProfilePage", () => {
 
     await waitFor(() => {
       expect(screen.getByText("TikTok backfill queued for Post Details, Comments, Media. Catalog catalog-.")).toBeInTheDocument();
+    });
+  });
+
+  it("starts Threads backfill without cookie preflight", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      expect(url).not.toContain("/cookies/health");
+      expect(url).not.toContain("/cookies/refresh");
+      if (url.includes("/summary")) {
+        return jsonResponse({
+          ...baseSummary,
+          platform: "threads",
+          account_handle: "bravotv",
+          profile_url: "https://www.threads.com/@bravotv",
+        });
+      }
+      if (url.includes("/catalog/backfill")) {
+        expect(init?.method).toBe("POST");
+        expect(init?.body).toBe(JSON.stringify({ source_scope: "network", backfill_scope: "full_history" }));
+        return jsonResponse({
+          run_id: "catalog-run-threads-public",
+          status: "queued",
+          catalog_run_id: "catalog-run-threads-public",
+        });
+      }
+      if (url.includes("/snapshot")) {
+        return jsonResponse({
+          summary: {
+            ...baseSummary,
+            platform: "threads",
+            account_handle: "bravotv",
+            profile_url: "https://www.threads.com/@bravotv",
+          },
+          catalog_run_progress: null,
+        });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="threads" handle="bravotv" activeTab="catalog" />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Backfill Posts" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Post backfill queued (catalog-).")).toBeInTheDocument();
     });
   });
 
@@ -5841,7 +6015,7 @@ describe("SocialAccountProfilePage", () => {
     });
 
     expect(screen.getByRole("button", { name: "Open caption search" })).toBeInTheDocument();
-    expect(screen.getByText("Search Posts")).toBeInTheDocument();
+    expect(screen.queryByText("Search Posts")).not.toBeInTheDocument();
   });
 
   it("renders separate collaborator, tagged account, and mention columns", async () => {

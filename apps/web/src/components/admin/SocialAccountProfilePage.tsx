@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ChevronDownIcon, SearchIcon, XIcon } from "lucide-react";
 import type { Route } from "next";
 import Link from "next/link";
 import ClientOnly from "@/components/ClientOnly";
@@ -111,6 +112,25 @@ type HashtagTimelineResponse = SocialAccountProfileHashtagTimeline & {
 
 type CatalogReviewQueueResponse = {
   items: SocialAccountCatalogReviewItem[];
+};
+
+type SharedAccountSource = {
+  id?: string | null;
+  platform?: SocialPlatformSlug | string | null;
+  source_scope?: string | null;
+  account_handle?: string | null;
+  is_active?: boolean | null;
+  scrape_priority?: number | null;
+  metadata?: Record<string, unknown> | null;
+  display_name?: string | null;
+  network_name?: string | null;
+  profile_kind?: string | null;
+};
+
+type SharedAccountSourcesResponse = {
+  source_scope?: string | null;
+  sources?: SharedAccountSource[];
+  using_defaults?: boolean;
 };
 
 type ShowOption = {
@@ -364,6 +384,86 @@ const formatInteger = (value: number | null | undefined): string => {
 const readFiniteNumber = (value: unknown): number | null => {
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : null;
+};
+
+const asRecord = (value: unknown): Record<string, unknown> | null => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+};
+
+const readString = (value: unknown): string | null => {
+  const normalized = String(value ?? "").trim();
+  return normalized || null;
+};
+
+const readNestedRecord = (root: unknown, path: string[]): Record<string, unknown> | null => {
+  let current: unknown = root;
+  for (const key of path) {
+    const record = asRecord(current);
+    if (!record) return null;
+    current = record[key];
+  }
+  return asRecord(current);
+};
+
+const resolveSummarySourceMetadata = (
+  summary: SocialAccountProfileSummary | null,
+  platform: SocialPlatformSlug,
+  handle: string,
+): Record<string, unknown> | null => {
+  const normalizedHandle = handle.trim().toLowerCase();
+  for (const source of summary?.source_status ?? []) {
+    const sourcePlatform = readString(source.platform)?.toLowerCase();
+    const sourceHandle = readString(source.account_handle)?.toLowerCase();
+    if (sourcePlatform === platform && sourceHandle === normalizedHandle) {
+      return asRecord(source.metadata);
+    }
+  }
+  return asRecord(summary?.source_status?.[0]?.metadata);
+};
+
+const resolveSummaryAvatarUrl = (
+  summary: SocialAccountProfileSummary | null,
+  platform: SocialPlatformSlug,
+  handle: string,
+): string | null => {
+  const direct = readString(summary?.avatar_url);
+  if (direct) return direct;
+  const metadata = resolveSummarySourceMetadata(summary, platform, handle);
+  const profilePayloadUser = readNestedRecord(metadata, [
+    "profile_following",
+    "retrieval_meta",
+    "profile_payload",
+    "data",
+    "user",
+  ]);
+  return (
+    readString(readNestedRecord(profilePayloadUser, ["hd_profile_pic_url_info"])?.url) ||
+    readString(profilePayloadUser?.profile_pic_url_hd) ||
+    readString(profilePayloadUser?.profile_pic_url) ||
+    readString(readNestedRecord(metadata, ["profile_snapshot"])?.avatar_url) ||
+    readString(readNestedRecord(metadata, ["profile_snapshot"])?.profile_pic_url)
+  );
+};
+
+const socialSourceMetadataValue = (source: SharedAccountSource, key: string): string | null => {
+  return readString(source.metadata?.[key]);
+};
+
+const socialSourceDisplayName = (source: SharedAccountSource): string => {
+  return (
+    readString(source.display_name) ||
+    socialSourceMetadataValue(source, "display_name") ||
+    readString(source.account_handle) ||
+    "Unknown account"
+  );
+};
+
+const normalizeComparable = (value: string | null | undefined): string => String(value ?? "").trim().toLowerCase();
+
+const socialPlatformLabel = (value: string | null | undefined): string => {
+  const normalized = normalizeComparable(value);
+  return SOCIAL_ACCOUNT_PLATFORM_LABELS[normalized as SocialPlatformSlug] ?? (readString(value) || "Social");
 };
 
 const formatDateTime = (value?: string | null): string => {
@@ -2447,6 +2547,10 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   const [summaryError, setSummaryError] = useState<string | null>(null);
   const [summarySaturationActive, setSummarySaturationActive] = useState(false);
   const [dashboardFreshness, setDashboardFreshness] = useState<SocialAccountDashboardFreshness | null>(null);
+  const [accountSwitcherOpen, setAccountSwitcherOpen] = useState(false);
+  const [sharedAccountSources, setSharedAccountSources] = useState<SharedAccountSource[]>([]);
+  const [sharedAccountSourcesLoading, setSharedAccountSourcesLoading] = useState(false);
+  const [sharedAccountSourcesError, setSharedAccountSourcesError] = useState<string | null>(null);
 
   const [posts, setPosts] = useState<PostsResponse | null>(null);
   const [postsLoading, setPostsLoading] = useState(false);
@@ -2488,6 +2592,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   const [reviewQueue, setReviewQueue] = useState<SocialAccountCatalogReviewItem[]>([]);
   const [reviewQueueLoading, setReviewQueueLoading] = useState(false);
   const [reviewQueueError, setReviewQueueError] = useState<string | null>(null);
+  const [pendingReviewOpen, setPendingReviewOpen] = useState(false);
   const [resolvingReviewItemId, setResolvingReviewItemId] = useState<string | null>(null);
   const [reviewDrafts, setReviewDrafts] = useState<Record<string, ReviewResolutionDraft>>({});
 
@@ -2547,7 +2652,6 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     "tiktok",
     "twitter",
     "facebook",
-    "threads",
   ];
   const platformRequiresCookies = COOKIE_REQUIRED_PLATFORMS.includes(platform);
   const [cookieHealth, setCookieHealth] = useState<SocialProfileCookieHealth | null>(null);
@@ -2571,6 +2675,75 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   const shouldShowCatalogRunProgressCard = selectedTab !== "comments";
   const hasSummary = summary !== null;
   const summaryInitialStatePending = !hasSummary && !summaryError && !summaryUninitialized;
+  const summarySourceMetadata = useMemo(
+    () => resolveSummarySourceMetadata(summary, platform, handle),
+    [handle, platform, summary],
+  );
+  const summaryAvatarUrl = useMemo(
+    () => resolveSummaryAvatarUrl(summary, platform, handle),
+    [handle, platform, summary],
+  );
+  const currentSourceOption = useMemo<SharedAccountSource>(
+    () => ({
+      platform,
+      account_handle: handle,
+      is_active: true,
+      metadata: summarySourceMetadata,
+      display_name: readString(summary?.display_name) || readString(summarySourceMetadata?.display_name) || handle,
+      network_name: readString(summary?.network_name) || readString(summarySourceMetadata?.network_name),
+      profile_kind: readString(summarySourceMetadata?.profile_kind),
+    }),
+    [handle, platform, summary?.display_name, summary?.network_name, summarySourceMetadata],
+  );
+  const accountSwitcherSources = useMemo(() => {
+    const normalizedCurrentPlatform = normalizeComparable(platform);
+    const normalizedCurrentHandle = normalizeComparable(handle);
+    const showId = readString(summarySourceMetadata?.assigned_show_id);
+    const networkName = normalizeComparable(
+      readString(summary?.network_name) || readString(summarySourceMetadata?.network_name),
+    );
+    const matches = sharedAccountSources.filter((source) => {
+      const sourcePlatform = normalizeComparable(readString(source.platform));
+      const sourceHandle = normalizeComparable(readString(source.account_handle));
+      if (!sourcePlatform || !sourceHandle) return false;
+      if (sourcePlatform === normalizedCurrentPlatform && sourceHandle === normalizedCurrentHandle) return true;
+      const sourceShowId = socialSourceMetadataValue(source, "assigned_show_id");
+      if (showId && sourceShowId === showId) return true;
+      const sourceNetworkName = normalizeComparable(readString(source.network_name) || socialSourceMetadataValue(source, "network_name"));
+      const sourceKind = normalizeComparable(readString(source.profile_kind) || socialSourceMetadataValue(source, "profile_kind"));
+      return Boolean(networkName && sourceNetworkName === networkName && sourceKind === "show_official");
+    });
+    const seen = new Set<string>();
+    return [currentSourceOption, ...matches].filter((source) => {
+      const sourcePlatform = normalizeComparable(readString(source.platform));
+      const sourceHandle = normalizeComparable(readString(source.account_handle));
+      const key = `${sourcePlatform}:${sourceHandle}`;
+      if (!sourcePlatform || !sourceHandle || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [currentSourceOption, handle, platform, sharedAccountSources, summary?.network_name, summarySourceMetadata]);
+  const loadSharedAccountSources = useCallback(async () => {
+    if (sharedAccountSourcesLoading || sharedAccountSources.length > 0) return;
+    setSharedAccountSourcesLoading(true);
+    setSharedAccountSourcesError(null);
+    try {
+      const response = await fetchAdminWithAuth(
+        "/api/admin/trr-api/social/shared/sources?source_scope=network&include_inactive=false",
+        undefined,
+        { preferredUser: user },
+      );
+      const payload = (await response.json().catch(() => ({}))) as SharedAccountSourcesResponse & { error?: string };
+      if (!response.ok) {
+        throw new Error(payload.error || "Failed to load social account sources");
+      }
+      setSharedAccountSources(payload.sources ?? []);
+    } catch (error) {
+      setSharedAccountSourcesError(error instanceof Error ? error.message : "Failed to load social account sources");
+    } finally {
+      setSharedAccountSourcesLoading(false);
+    }
+  }, [fetchAdminWithAuth, sharedAccountSources.length, sharedAccountSourcesLoading, user]);
   const shouldDeferSecondaryCatalogReads =
     !hasSummary || summaryLoading || summarySaturationActive || catalogProgressSaturationActive;
   const hashtagsRequestKey = `hashtags:${platform}:${handle}:${hashtagWindow}`;
@@ -2733,6 +2906,34 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     setCatalogProgressRunId((current) => String(current || "").trim() || storedRunId);
     setCatalogRunProgressLoading(true);
   }, [catalogProgressStorageKey, supportsCatalog]);
+
+  useEffect(() => {
+    if (!supportsCatalog || !selectedCatalogRunId || summaryInitialStatePending || summaryLoading) return;
+    const matchingRun = visibleCatalogRecentRuns.find((run) => run.run_id === selectedCatalogRunId) ?? null;
+    const matchingStatus = normalizeCatalogRunStatus(matchingRun?.status);
+    const progressStatus =
+      catalogRunProgress?.run_id === selectedCatalogRunId ? normalizeCatalogRunStatus(catalogRunProgress.run_status) : "";
+    const selectedRunIsActive =
+      ACTIVE_CATALOG_RUN_STATUSES.has(matchingStatus || "") ||
+      ACTIVE_CATALOG_RUN_STATUSES.has(progressStatus || "");
+    if (selectedRunIsActive) return;
+    const selectedRunIsStale = !matchingRun && !progressStatus;
+    if (!selectedRunIsStale) return;
+
+    storeCatalogProgressRunId(catalogProgressStorageKey, null);
+    setCatalogProgressRunId((current) => (current === selectedCatalogRunId ? null : current));
+    setCatalogRunProgress((current) => (current?.run_id === selectedCatalogRunId ? null : current));
+    setCatalogRunProgressLoading(false);
+  }, [
+    catalogProgressStorageKey,
+    catalogRunProgress?.run_id,
+    catalogRunProgress?.run_status,
+    selectedCatalogRunId,
+    summaryInitialStatePending,
+    summaryLoading,
+    supportsCatalog,
+    visibleCatalogRecentRuns,
+  ]);
 
   useEffect(() => {
     if (!supportsCatalog) return;
@@ -3516,7 +3717,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       !hasAccess ||
       !supportsCatalog ||
       summaryUninitialized ||
-      (selectedTab !== "hashtags" && selectedTab !== "catalog")
+      (selectedTab !== "hashtags" && selectedTab !== "catalog" && !pendingReviewOpen)
     ) {
       return;
     }
@@ -3549,7 +3750,18 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     return () => {
       cancelled = true;
     };
-  }, [checking, fetchAdminWithAuth, handle, hasAccess, platform, selectedTab, summaryUninitialized, supportsCatalog, user]);
+  }, [
+    checking,
+    fetchAdminWithAuth,
+    handle,
+    hasAccess,
+    pendingReviewOpen,
+    platform,
+    selectedTab,
+    summaryUninitialized,
+    supportsCatalog,
+    user,
+  ]);
 
   useEffect(() => {
     if (checking || !user || !hasAccess || selectedTab !== "collaborators-tags" || summaryUninitialized) return;
@@ -4065,10 +4277,13 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       selectedRunId && catalogRunProgress?.run_id === selectedRunId ? catalogRunProgress.run_status : null;
     const summaryStatus =
       selectedRunId && displayedCatalogRunSummary?.run_id === selectedRunId ? displayedCatalogRunSummary.status : null;
+    const hasProvisionalSelectedRun =
+      Boolean(selectedRunId) &&
+      catalogRunProgress?.run_id === selectedRunId;
     const candidates = [
       progressStatus,
       summaryStatus,
-      selectedRunId && catalogProgressRunId === selectedRunId ? "queued" : null,
+      hasProvisionalSelectedRun && catalogProgressRunId === selectedRunId ? "queued" : null,
     ];
     for (const candidate of candidates) {
       const normalized = normalizeCatalogRunStatus(candidate);
@@ -6427,14 +6642,90 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                   <span className="rounded-full bg-zinc-900 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-white">
                     Official Social Profile
                   </span>
-                  <span className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-zinc-600">
-                    All shows / all seasons
-                  </span>
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const nextOpen = !accountSwitcherOpen;
+                        setAccountSwitcherOpen(nextOpen);
+                        if (nextOpen) {
+                          void loadSharedAccountSources();
+                        }
+                      }}
+                      className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-white px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-zinc-600 transition hover:border-zinc-300 hover:bg-zinc-50"
+                      aria-haspopup="menu"
+                      aria-expanded={accountSwitcherOpen}
+                    >
+                      <span className="inline-flex h-4 w-4 items-center justify-center rounded-[4px] bg-gradient-to-br from-fuchsia-500 via-rose-500 to-amber-400">
+                        <span className="h-1.5 w-1.5 rounded-full border border-white" />
+                      </span>
+                      {socialPlatformLabel(platform)}
+                      <ChevronDownIcon className="h-3.5 w-3.5" aria-hidden="true" />
+                    </button>
+                    {accountSwitcherOpen ? (
+                      <div className="absolute left-0 top-full z-30 mt-2 w-72 overflow-hidden rounded-xl border border-zinc-200 bg-white text-left shadow-xl">
+                        <div className="max-h-80 overflow-y-auto py-1">
+                          {accountSwitcherSources.map((source) => {
+                            const sourcePlatform = readString(source.platform) || platform;
+                            const sourceHandle = readString(source.account_handle) || handle;
+                            const isCurrent =
+                              normalizeComparable(sourcePlatform) === normalizeComparable(platform) &&
+                              normalizeComparable(sourceHandle) === normalizeComparable(handle);
+                            const href = buildSocialAccountProfileUrl({
+                              platform: sourcePlatform,
+                              handle: sourceHandle,
+                              tab: selectedTab,
+                            }) as Route;
+                            const content = (
+                              <>
+                                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-zinc-100 text-[10px] font-bold uppercase text-zinc-600">
+                                  {socialPlatformLabel(sourcePlatform).slice(0, 2)}
+                                </span>
+                                <span className="min-w-0 flex-1">
+                                  <span className="block truncate text-sm font-semibold text-zinc-900">
+                                    {socialSourceDisplayName(source)}
+                                  </span>
+                                  <span className="block truncate text-xs text-zinc-500">
+                                    {socialPlatformLabel(sourcePlatform)} @{sourceHandle}
+                                  </span>
+                                </span>
+                                {isCurrent ? (
+                                  <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-semibold text-zinc-600">
+                                    Current
+                                  </span>
+                                ) : null}
+                              </>
+                            );
+                            return isCurrent ? (
+                              <div key={`${sourcePlatform}:${sourceHandle}`} className="flex items-center gap-3 px-3 py-2">
+                                {content}
+                              </div>
+                            ) : (
+                              <Link
+                                key={`${sourcePlatform}:${sourceHandle}`}
+                                href={href}
+                                prefetch={false}
+                                className="flex items-center gap-3 px-3 py-2 hover:bg-zinc-50"
+                              >
+                                {content}
+                              </Link>
+                            );
+                          })}
+                          {sharedAccountSourcesLoading ? (
+                            <p className="px-3 py-2 text-sm text-zinc-500">Loading accounts...</p>
+                          ) : null}
+                          {sharedAccountSourcesError ? (
+                            <p className="px-3 py-2 text-sm text-amber-700">{sharedAccountSourcesError}</p>
+                          ) : null}
+                          {!sharedAccountSourcesLoading && accountSwitcherSources.length <= 1 ? (
+                            <p className="px-3 py-2 text-xs text-zinc-500">No other show handles are configured.</p>
+                          ) : null}
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
                 </div>
                 <h1 className="mt-3 text-3xl font-bold text-zinc-900">{headerTitle}</h1>
-                <p className="mt-2 max-w-2xl text-sm text-zinc-500">
-                  Cross-show account view for materialized posts, catalog backfills, hashtags, collaborators, and tags.
-                </p>
                 <div className="mt-3 flex flex-wrap items-center gap-3">
                   {summary?.profile_url ? (
                     <a
@@ -6702,18 +6993,95 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                     </p>
                   </div>
                   {supportsCatalog ? (
-                    <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
+                    <button
+                      type="button"
+                      onClick={() => setPendingReviewOpen(true)}
+                      className="rounded-2xl border border-zinc-200 bg-white p-4 text-left shadow-sm transition hover:border-zinc-300 hover:bg-zinc-50"
+                    >
                       <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Pending Review</p>
                       {summaryInitialStatePending ? (
                         <p className="mt-2 text-sm font-semibold text-zinc-500">Loading…</p>
                       ) : (
-                        <p className="mt-2 text-2xl font-bold text-zinc-900">
-                          {formatInteger(summary?.catalog_pending_review_posts)}
-                        </p>
+                        <>
+                          <p className="mt-2 text-2xl font-bold text-zinc-900">
+                            {formatInteger(summary?.catalog_pending_review_posts)}
+                          </p>
+                          <p className="mt-1 text-xs text-zinc-500">Unknown hashtag review queue</p>
+                        </>
                       )}
-                    </div>
+                    </button>
                   ) : null}
                 </div>
+                {pendingReviewOpen ? (
+                  <div
+                    className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/35 px-4 py-6"
+                    role="dialog"
+                    aria-modal="true"
+                  >
+                    <div className="flex max-h-[85vh] w-full max-w-2xl flex-col rounded-2xl border border-zinc-200 bg-white shadow-xl">
+                      <div className="flex items-start justify-between gap-4 border-b border-zinc-200 px-5 py-4">
+                        <div>
+                          <h2 className="text-base font-bold text-zinc-900">Pending Review</h2>
+                          <p className="mt-1 text-sm text-zinc-500">
+                            {formatInteger(summary?.catalog_pending_review_posts)} unknown hashtag assignments are waiting.
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setPendingReviewOpen(false)}
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-zinc-200 text-zinc-500 transition hover:bg-zinc-50 hover:text-zinc-900"
+                          aria-label="Close pending review details"
+                        >
+                          <XIcon className="h-4 w-4" aria-hidden="true" />
+                        </button>
+                      </div>
+                      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+                        {reviewQueueLoading ? <p className="text-sm text-zinc-500">Loading review queue...</p> : null}
+                        {reviewQueueError ? <p className="text-sm text-red-700">{reviewQueueError}</p> : null}
+                        {!reviewQueueLoading && !reviewQueueError && reviewQueue.length === 0 ? (
+                          <p className="text-sm text-zinc-500">No unknown hashtags are waiting for review.</p>
+                        ) : null}
+                        <div className="space-y-2">
+                          {reviewQueue.slice(0, 25).map((item) => (
+                            <div key={item.id} className="rounded-xl border border-zinc-100 bg-zinc-50 px-3 py-3">
+                              <div className="flex flex-wrap items-start justify-between gap-2">
+                                <div>
+                                  <p className="text-sm font-semibold text-zinc-900">
+                                    {item.display_hashtag ?? `#${item.hashtag}`}
+                                  </p>
+                                  <p className="mt-0.5 text-xs text-zinc-500">
+                                    {formatInteger(item.usage_count)} uses · Last seen {formatDateTime(item.last_seen_at)}
+                                  </p>
+                                </div>
+                                <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-amber-700">
+                                  {item.review_status}
+                                </span>
+                              </div>
+                              <p className="mt-2 text-xs text-zinc-500">
+                                Suggested shows:{" "}
+                                {item.suggested_shows?.map((show) => show.show_name).filter(Boolean).join(", ") ||
+                                  "No suggestions yet"}
+                              </p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between gap-3 border-t border-zinc-200 px-5 py-4">
+                        <span className="text-xs text-zinc-500">
+                          Showing {formatInteger(Math.min(reviewQueue.length, 25))} of {formatInteger(reviewQueue.length)} loaded items.
+                        </span>
+                        <Link
+                          href={buildSocialAccountProfileUrl({ platform, handle, tab: "hashtags" }) as Route}
+                          prefetch={false}
+                          onClick={() => setPendingReviewOpen(false)}
+                          className="rounded-lg border border-zinc-900 bg-zinc-900 px-3 py-2 text-sm font-semibold text-white"
+                        >
+                          Open Hashtags
+                        </Link>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
                 {platform === "instagram" && activeCommentsRunId ? (
                   <div className="mt-3 rounded-lg border border-zinc-200 bg-white px-3 py-3 text-sm shadow-sm">
                     <div className="flex flex-wrap items-center justify-between gap-2">
@@ -6938,17 +7306,18 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                   type="button"
                   aria-label={postSearchExpanded ? "Close caption search" : "Open caption search"}
                   onClick={() => setPostSearchExpanded((current) => !current)}
-                  className={`inline-flex h-10 items-center gap-2 rounded-full border px-4 text-sm font-semibold transition ${
+                  className={`inline-flex h-10 items-center justify-center gap-2 rounded-full border text-sm font-semibold transition ${
                     postSearchExpanded
-                      ? "border-zinc-900 bg-zinc-900 text-white"
-                      : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-100"
+                      ? "border-zinc-900 bg-zinc-900 px-4 text-white"
+                      : "w-10 border-zinc-200 bg-white px-0 text-zinc-700 hover:bg-zinc-100"
                   }`}
                 >
-                  <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-4 w-4" aria-hidden="true">
-                    <circle cx="8.5" cy="8.5" r="5.5" />
-                    <path d="M12.5 12.5 17 17" strokeLinecap="round" />
-                  </svg>
-                  <span>{postSearchExpanded ? "Close Search" : "Search Posts"}</span>
+                  {postSearchExpanded ? (
+                    <XIcon className="h-4 w-4" aria-hidden="true" />
+                  ) : (
+                    <SearchIcon className="h-4 w-4" aria-hidden="true" />
+                  )}
+                  {postSearchExpanded ? <span>Close Search</span> : <span className="sr-only">Open caption search</span>}
                 </button>
               </div>
             </nav>
@@ -7518,8 +7887,11 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
 
           {selectedTab === "socialblade" ? (
             <SocialGrowthSection
-              platform={platform as Extract<SocialPlatformSlug, "instagram" | "facebook" | "youtube">}
+              platform={platform as Extract<SocialPlatformSlug, "instagram" | "facebook" | "tiktok" | "youtube">}
               handle={handle}
+              sourceScope={activeCatalogSourceScope}
+              avatarUrl={summaryAvatarUrl}
+              avatarAlt={`${headerTitle} profile picture`}
             />
           ) : null}
 

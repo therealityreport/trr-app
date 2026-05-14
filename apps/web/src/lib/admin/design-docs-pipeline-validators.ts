@@ -313,6 +313,8 @@ function getInteractiveBlockCount(contentBlocks: readonly ContentBlock[]) {
     "datawrapper-table",
     "datawrapper-chart",
     "filter-card-tracker",
+    "static-chart-image",
+    "nyt-chart-facsimile",
     "tariff-rate-arrow-chart",
     "tariff-rate-table",
     "tariff-country-table",

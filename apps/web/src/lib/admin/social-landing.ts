@@ -12,6 +12,36 @@ export interface SocialHandleSummary {
   display_label: string;
   href: string | null;
   external: boolean;
+  progress?: SocialAccountProgressSummary | null;
+}
+
+export interface SocialAccountProgressSummary {
+  saved_count: number;
+  scraped_count: number;
+  total_count: number;
+  saved_percent: number;
+  scraped_percent: number;
+  last_catalog_run_at?: string | null;
+  last_catalog_run_status?: string | null;
+  lanes?: SocialAccountProgressLaneSummary[] | null;
+}
+
+export type SocialAccountProgressLaneKey =
+  | "socialblade"
+  | "posts"
+  | "comments"
+  | "media";
+
+export interface SocialAccountProgressLaneSummary {
+  key: SocialAccountProgressLaneKey;
+  label: string;
+  saved_count: number;
+  scraped_count: number;
+  total_count: number;
+  saved_percent: number;
+  scraped_percent: number;
+  status?: "ready" | "unsupported" | "missing" | "partial" | null;
+  detail?: string | null;
 }
 
 export interface SharedAccountSourceSummary {
@@ -25,6 +55,7 @@ export interface SharedAccountSourceSummary {
   last_scrape_status?: string | null;
   last_scrape_at?: string | null;
   last_classified_at?: string | null;
+  progress?: SocialAccountProgressSummary | null;
 }
 
 export type SharedAccountSourceSetScope = "network" | "creator" | "news";
@@ -73,6 +104,12 @@ export interface NetworkProfileSet {
   handles: SocialHandleSummary[];
 }
 
+export interface ShowHashtagSummary {
+  hashtag: string;
+  account_handle: string;
+  platform: SocialLandingPlatform;
+}
+
 export interface ShowProfileSet {
   show_id: string;
   show_name: string;
@@ -80,6 +117,7 @@ export interface ShowProfileSet {
   alternative_names: string[] | null;
   handles: SocialHandleSummary[];
   fallback_note: string | null;
+  hashtag_suggestions?: ShowHashtagSummary[] | null;
 }
 
 export interface PersonProfileShowSummary {
@@ -103,7 +141,7 @@ export interface PersonTargetSummary {
 
 export type CastSocialBladePlatform = Extract<
   SocialLandingPlatform,
-  "instagram" | "youtube" | "facebook"
+  "instagram" | "tiktok" | "youtube" | "facebook"
 >;
 
 export interface CastSocialBladeAccountSummary {

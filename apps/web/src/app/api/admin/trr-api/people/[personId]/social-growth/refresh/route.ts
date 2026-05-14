@@ -28,6 +28,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const body = await request.json().catch(() => ({}));
     const handle = (typeof body.handle === "string" ? body.handle : "").trim();
     const force = Boolean(body.force);
+    const sourceScope = typeof body.source_scope === "string" ? body.source_scope : undefined;
     if (!handle) {
       return NextResponse.json({ error: "handle is required in request body" }, { status: 400 });
     }
@@ -55,7 +56,11 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const upstream = await fetch(backendUrl, {
       method: "POST",
       headers,
-      body: JSON.stringify({ handle, force }),
+      body: JSON.stringify({
+        handle,
+        force,
+        ...(sourceScope !== undefined ? { source_scope: sourceScope } : {}),
+      }),
     });
     const data = await upstream.json().catch(() => ({ error: "Invalid response from backend" }));
 

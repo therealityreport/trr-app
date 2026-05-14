@@ -459,6 +459,8 @@ function getArticleBlockBaseLabel(block: ContentBlock) {
   switch (block.type) {
     case "site-header-shell":
       return block.title;
+    case "sticky-header":
+      return block.title;
     case "header":
       return "Header";
     case "byline":
@@ -471,6 +473,7 @@ function getArticleBlockBaseLabel(block: ContentBlock) {
     case "datawrapper-table":
     case "showcase-link":
     case "related-link":
+    case "site-footer":
     case "tariff-country-table":
     case "tariff-rate-arrow-chart":
     case "tariff-rate-table":
@@ -482,6 +485,12 @@ function getArticleBlockBaseLabel(block: ContentBlock) {
     case "body-copy":
       return "Body Copy";
     case "birdkit-chart":
+      return block.title;
+    case "static-chart-image":
+      return block.title;
+    case "nyt-chart-facsimile":
+      return block.title;
+    case "component-inventory":
       return block.title;
     case "twitter-embed":
       return `Tweet: ${block.author}`;
@@ -1163,7 +1172,9 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
     article.id === TRUMP_TARIFFS_REACTION_ARTICLE_ID;
   const isTrumpTariffsImports =
     article.id === TRUMP_TARIFFS_US_IMPORTS_ARTICLE_ID;
-  const showBlockStructure = isTrumpTariffsReaction;
+  const showBlockStructure =
+    isTrumpTariffsReaction ||
+    contentBlocks.some((block) => block.type === "component-inventory");
   const socialImages: readonly ArticleSocialImage[] =
     publicAssets?.socialImages && publicAssets.socialImages.length > 0
       ? publicAssets.socialImages
@@ -2130,6 +2141,170 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
             );
           }
 
+          if (block.type === "sticky-header") {
+            return (
+              <ArticleBlockSection
+                key={`cb-${bi}`}
+                id={section.id}
+                label={section.label}
+                showHeading={showBlockStructure}
+              >
+                <BlockAnnotation
+                  type="sticky-header"
+                  css={[
+                    "position: sticky; top: 0; height: 48px; white background; bottom border #DFDFDF",
+                    "Compact article title plus NYT action controls appears after the reader scrolls past the masthead",
+                    block.behavior,
+                  ]}
+                  show={showCss}
+                >
+                  <div
+                    style={{
+                      maxWidth: 860,
+                      border: "1px solid #dfdfdf",
+                      background: "#ffffff",
+                      boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
+                    }}
+                  >
+                    <div
+                      style={{
+                        height: 48,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        gap: 16,
+                        padding: "0 16px",
+                        borderBottom: "1px solid #dfdfdf",
+                      }}
+                    >
+                      <div
+                        style={{
+                          minWidth: 0,
+                          fontFamily: '"nyt-cheltenham-small", georgia, "times new roman", serif',
+                          fontSize: 13,
+                          fontWeight: 400,
+                          letterSpacing: "0.015em",
+                          color: "#121212",
+                          whiteSpace: "nowrap",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                        }}
+                      >
+                        {article.title}
+                      </div>
+                      <BirdkitShareTools
+                        buttons={[
+                          { kind: "gift", label: "Share full article" },
+                          { kind: "share", label: "Share article" },
+                          { kind: "save", label: "Save article" },
+                          { kind: "more", label: "More sharing options" },
+                        ]}
+                      />
+                    </div>
+                    <ul
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                        gap: 8,
+                        margin: 0,
+                        padding: 14,
+                        listStyle: "none",
+                        fontFamily: '"nyt-franklin", arial, helvetica, sans-serif',
+                        fontSize: 12,
+                        lineHeight: "16px",
+                        color: "#363636",
+                      }}
+                    >
+                      {block.elements.map((element) => (
+                        <li key={element} style={{ borderTop: "1px solid #eeeeee", paddingTop: 8 }}>
+                          {element}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </BlockAnnotation>
+              </ArticleBlockSection>
+            );
+          }
+
+          if (block.type === "component-inventory") {
+            return (
+              <ArticleBlockSection
+                key={`cb-${bi}`}
+                id={section.id}
+                label={section.label}
+                showHeading={showBlockStructure}
+              >
+                <BlockAnnotation
+                  type="component-inventory"
+                  css={[
+                    "Coverage checklist generated from the NYT article shell and source-observed component families",
+                    "Each group is a required recreation slot; degraded evidence is represented instead of omitted",
+                  ]}
+                  show={showCss}
+                >
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+                      gap: 12,
+                      maxWidth: 900,
+                    }}
+                  >
+                    {block.groups.map((group) => (
+                      <section
+                        key={group.label}
+                        style={{
+                          border: "1px solid #dfdfdf",
+                          borderRadius: 4,
+                          padding: 14,
+                          background: "#ffffff",
+                        }}
+                      >
+                        <h3
+                          style={{
+                            fontFamily: '"nyt-franklin", arial, helvetica, sans-serif',
+                            fontSize: 12,
+                            fontWeight: 700,
+                            lineHeight: "15px",
+                            letterSpacing: "0.04em",
+                            textTransform: "uppercase",
+                            color: "#121212",
+                            margin: "0 0 10px",
+                          }}
+                        >
+                          {group.label}
+                        </h3>
+                        <ul
+                          style={{
+                            margin: 0,
+                            padding: 0,
+                            listStyle: "none",
+                            display: "grid",
+                            gap: 7,
+                            fontFamily: '"nyt-franklin", arial, helvetica, sans-serif',
+                            fontSize: 12,
+                            lineHeight: "16px",
+                            color: "#363636",
+                          }}
+                        >
+                          {group.items.map((item) => (
+                            <li key={item} style={{ display: "flex", gap: 8 }}>
+                              <span aria-hidden="true" style={{ color: "#687d84", fontWeight: 700 }}>
+                                -
+                              </span>
+                              <span>{item}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </section>
+                    ))}
+                  </div>
+                </BlockAnnotation>
+              </ArticleBlockSection>
+            );
+          }
+
           if (block.type === "sharetools-bar") {
             return (
               <ArticleBlockSection
@@ -2327,6 +2502,247 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
                   <InteractiveHorizontalBarChart data={STATE_TAX_GAMBLING_DATA} />
                 </div>
               </BlockAnnotation>
+            );
+          }
+
+          if (block.type === "static-chart-image") {
+            return (
+              <BlockAnnotation
+                key={`cb-${bi}`}
+                type="static-chart-image"
+                css={[
+                  "Static NYT chart image — captured as an image asset, not a live Datawrapper or Birdkit component",
+                  "Reading-column chart layout with direct labels, source credit, and no iframe runtime",
+                ]}
+                show={showCss}
+              >
+                <div style={{ maxWidth: 620, margin: "8px 0 24px" }}>
+                  <h3
+                    style={{
+                      fontFamily:
+                        'nyt-cheltenham, georgia, "times new roman", serif',
+                      fontSize: 27,
+                      fontWeight: 700,
+                      lineHeight: "31px",
+                      color: "#121212",
+                      margin: "0 0 8px",
+                    }}
+                  >
+                    {block.title}
+                  </h3>
+                  <img
+                    src={block.url}
+                    alt={block.title}
+                    style={{
+                      width: "100%",
+                      height: "auto",
+                      border: "1px solid #dfdfdf",
+                      borderRadius: 4,
+                      background: "#fff",
+                    }}
+                  />
+                  <p
+                    style={{
+                      fontFamily: "var(--dd-font-ui)",
+                      fontSize: 12,
+                      lineHeight: "16px",
+                      color: "#727272",
+                      margin: "8px 0 2px",
+                    }}
+                  >
+                    {block.caption}
+                  </p>
+                  <div
+                    style={{
+                      fontFamily: "var(--dd-font-ui)",
+                      fontSize: 11,
+                      lineHeight: "15px",
+                      color: "#727272",
+                    }}
+                  >
+                    {block.credit}
+                  </div>
+                </div>
+              </BlockAnnotation>
+            );
+          }
+
+          if (block.type === "nyt-chart-facsimile") {
+            const maxAbsValue = Math.max(
+              1,
+              ...(block.rows?.map((row) => Math.abs(row.value)) ?? []),
+            );
+
+            return (
+              <ArticleBlockSection
+                key={`cb-${bi}`}
+                id={section.id}
+                label={section.label}
+                showHeading={showBlockStructure}
+              >
+                <BlockAnnotation
+                  type="nyt-chart-facsimile"
+                  css={[
+                    `Chart slot: ${block.chartKind}`,
+                    `Evidence: ${block.evidence}`,
+                    "NYT Upshot chart typography: Cheltenham title, Franklin labels/source, slate data marks",
+                  ]}
+                  show={showCss}
+                >
+                  <figure style={{ maxWidth: 620, margin: "8px 0 28px" }}>
+                    <figcaption>
+                      <h3
+                        style={{
+                          fontFamily:
+                            'nyt-cheltenham, georgia, "times new roman", serif',
+                          fontSize: 27,
+                          fontWeight: 700,
+                          lineHeight: "31px",
+                          color: "#121212",
+                          margin: "0 0 6px",
+                        }}
+                      >
+                        {block.title}
+                      </h3>
+                      {block.subtitle ? (
+                        <p
+                          style={{
+                            fontFamily: '"nyt-franklin", arial, helvetica, sans-serif',
+                            fontSize: 14,
+                            lineHeight: "18px",
+                            color: "#363636",
+                            margin: "0 0 14px",
+                          }}
+                        >
+                          {block.subtitle}
+                        </p>
+                      ) : null}
+                    </figcaption>
+                    {block.imageUrl ? (
+                      <img
+                        src={block.imageUrl}
+                        alt={block.title}
+                        style={{
+                          width: "100%",
+                          height: "auto",
+                          border: "1px solid #dfdfdf",
+                          borderRadius: 4,
+                          background: "#fff",
+                          marginBottom: block.rows?.length ? 18 : 10,
+                        }}
+                      />
+                    ) : null}
+                    {block.rows?.length ? (
+                      <div
+                        aria-label={`${block.title} data rows`}
+                        style={{
+                          display: "grid",
+                          gap: 8,
+                          fontFamily: '"nyt-franklin", arial, helvetica, sans-serif',
+                          fontSize: 13,
+                          color: "#121212",
+                        }}
+                      >
+                        {block.rows.map((row) => {
+                          const barWidth = `${Math.max(4, (Math.abs(row.value) / maxAbsValue) * 48)}%`;
+
+                          return (
+                            <div
+                              key={row.label}
+                              style={{
+                                display: "grid",
+                                gridTemplateColumns: "64px minmax(160px, 1fr) 54px",
+                                gap: 10,
+                                alignItems: "center",
+                              }}
+                            >
+                              <span style={{ fontWeight: 600 }}>{row.label}</span>
+                              <div
+                                style={{
+                                  position: "relative",
+                                  height: 24,
+                                  background: "#f4f4f4",
+                                  borderLeft: "1px solid transparent",
+                                }}
+                              >
+                                <span
+                                  aria-hidden="true"
+                                  style={{
+                                    position: "absolute",
+                                    left: "50%",
+                                    top: 0,
+                                    bottom: 0,
+                                    width: 1,
+                                    background: "#555555",
+                                  }}
+                                />
+                                <span
+                                  aria-hidden="true"
+                                  style={{
+                                    position: "absolute",
+                                    top: 6,
+                                    height: 12,
+                                    width: barWidth,
+                                    left: row.value >= 0 ? "50%" : "auto",
+                                    right: row.value < 0 ? "50%" : "auto",
+                                    background: "#687d84",
+                                  }}
+                                />
+                              </div>
+                              <span style={{ fontWeight: 700, textAlign: "right" }}>
+                                {row.valueLabel}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : null}
+                    {block.callouts?.length ? (
+                      <div
+                        style={{
+                          display: "grid",
+                          gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+                          gap: 10,
+                          marginTop: 12,
+                        }}
+                      >
+                        {block.callouts.map((callout) => (
+                          <div
+                            key={`${callout.label}-${callout.value}`}
+                            style={{
+                              borderTop: "2px solid #121212",
+                              paddingTop: 8,
+                              fontFamily: '"nyt-franklin", arial, helvetica, sans-serif',
+                            }}
+                          >
+                            <div style={{ fontSize: 28, fontWeight: 700, lineHeight: "32px", color: "#121212" }}>
+                              {callout.value}
+                            </div>
+                            <div style={{ fontSize: 12, fontWeight: 700, lineHeight: "15px", color: "#121212", marginTop: 2 }}>
+                              {callout.label}
+                            </div>
+                            <div style={{ fontSize: 12, lineHeight: "16px", color: "#727272", marginTop: 4 }}>
+                              {callout.note}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                    <p
+                      style={{
+                        fontFamily: '"nyt-franklin", arial, helvetica, sans-serif',
+                        fontSize: 11,
+                        lineHeight: "15px",
+                        color: "#727272",
+                        margin: "10px 0 0",
+                      }}
+                    >
+                      Source: {block.source}. {block.credit}
+                      {block.note ? ` Note: ${block.note}` : ""}
+                    </p>
+                  </figure>
+                </BlockAnnotation>
+              </ArticleBlockSection>
             );
           }
 
@@ -2995,6 +3411,91 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
                   </div>
                 </div>
               </BlockAnnotation>
+            );
+          }
+
+          if (block.type === "site-footer") {
+            return (
+              <ArticleBlockSection
+                key={`cb-${bi}`}
+                id={section.id}
+                label={section.label}
+                showHeading={showBlockStructure}
+              >
+                <BlockAnnotation
+                  type="site-footer"
+                  css={[
+                    "NYT global footer link matrix with product/company/legal columns",
+                    "Franklin labels, #DFDFDF dividers, compact utility links below article content",
+                  ]}
+                  show={showCss}
+                >
+                  <footer
+                    style={{
+                      borderTop: "1px solid #dfdfdf",
+                      borderBottom: "1px solid #dfdfdf",
+                      padding: "18px 0",
+                      maxWidth: 960,
+                      background: "#ffffff",
+                    }}
+                  >
+                    <h3
+                      style={{
+                        fontFamily:
+                          'nyt-cheltenham, georgia, "times new roman", serif',
+                        fontSize: 18,
+                        fontWeight: 700,
+                        lineHeight: "22px",
+                        color: "#121212",
+                        margin: "0 0 14px",
+                      }}
+                    >
+                      {block.title}
+                    </h3>
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
+                        gap: 18,
+                      }}
+                    >
+                      {block.columns.map((column) => (
+                        <div key={column.label}>
+                          <h4
+                            style={{
+                              fontFamily: '"nyt-franklin", arial, helvetica, sans-serif',
+                              fontSize: 11,
+                              fontWeight: 700,
+                              lineHeight: "14px",
+                              letterSpacing: "0.04em",
+                              textTransform: "uppercase",
+                              color: "#121212",
+                              margin: "0 0 8px",
+                            }}
+                          >
+                            {column.label}
+                          </h4>
+                          <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: 6 }}>
+                            {column.links.map((link) => (
+                              <li
+                                key={link}
+                                style={{
+                                  fontFamily: '"nyt-franklin", arial, helvetica, sans-serif',
+                                  fontSize: 12,
+                                  lineHeight: "16px",
+                                  color: "#363636",
+                                }}
+                              >
+                                {link}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      ))}
+                    </div>
+                  </footer>
+                </BlockAnnotation>
+              </ArticleBlockSection>
             );
           }
 
@@ -4532,6 +5033,49 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
                 ))}
               </tbody>
             </table>
+          </div>
+        </BlockAnnotation>
+      )}
+
+      {!hasChartTypes && (
+        <BlockAnnotation
+          type="graphs-charts"
+          css={[
+            "Graphs/charts empty state — keeps standard article pages explicit when no visual data component exists",
+          ]}
+          show={showCss}
+        >
+          <h3
+            style={{
+              fontFamily: "var(--dd-font-headline, Georgia, serif)",
+              fontSize: 22,
+              fontWeight: 700,
+              color: "var(--dd-brand-text-primary)",
+              borderTop: "1px solid var(--dd-brand-border)",
+              paddingTop: 24,
+              marginTop: 0,
+              marginBottom: 16,
+            }}
+          >
+            Graphs / Charts
+          </h3>
+          <div
+            style={{
+              border: "1px solid var(--dd-brand-border)",
+              borderRadius: 6,
+              padding: 14,
+              fontFamily: "var(--dd-font-ui, sans-serif)",
+              fontSize: 13,
+              lineHeight: 1.5,
+              color: "var(--dd-brand-text-muted)",
+              background: "var(--dd-brand-surface)",
+              marginBottom: 24,
+            }}
+          >
+            No graph or chart components are documented for this page.
+            <span style={{ display: "block", marginTop: 4 }}>
+              Production stack note: {article.tools.charts}
+            </span>
           </div>
         </BlockAnnotation>
       )}

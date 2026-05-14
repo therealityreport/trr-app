@@ -4862,6 +4862,7 @@ export default function SeasonSocialAnalyticsSection({
           },
           body: JSON.stringify({
             source: "season_run",
+            source_scope: scope,
             items,
           }),
         },
@@ -4870,7 +4871,7 @@ export default function SeasonSocialAnalyticsSection({
     } catch (error) {
       console.warn("[season-social-analytics] SocialBlade sidecar refresh failed", error);
     }
-  }, [getAuthHeaders, seasonNumber, showId]);
+  }, [getAuthHeaders, scope, seasonNumber, showId]);
 
   const runIngest = useCallback(async (override?: {
     week?: number;

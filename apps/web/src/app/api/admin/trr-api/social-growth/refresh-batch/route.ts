@@ -19,6 +19,7 @@ export async function POST(request: NextRequest) {
     const items = Array.isArray(body.items) ? (body.items as BatchRefreshItem[]) : [];
     const source = typeof body.source === "string" ? body.source.trim() : "";
     const force = Boolean(body.force);
+    const sourceScope = typeof body.source_scope === "string" ? body.source_scope : undefined;
 
     if (items.length === 0) {
       return NextResponse.json({ error: "items are required" }, { status: 400 });
@@ -46,7 +47,12 @@ export async function POST(request: NextRequest) {
         "Content-Type": "application/json",
         Authorization: `Bearer ${serviceRoleKey}`,
       },
-      body: JSON.stringify({ items, source, force }),
+      body: JSON.stringify({
+        items,
+        source,
+        force,
+        ...(sourceScope !== undefined ? { source_scope: sourceScope } : {}),
+      }),
     });
 
     const data = await upstream.json().catch(() => ({ error: "Invalid response from backend" }));

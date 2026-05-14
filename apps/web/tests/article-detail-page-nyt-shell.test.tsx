@@ -65,3 +65,110 @@ describe("NYT shell facsimile for trump tariffs reaction", () => {
     expect(screen.queryByRole("dialog", { name: "Account Information" })).not.toBeInTheDocument();
   });
 });
+
+describe("NYT standard article inventory", () => {
+  const article = ARTICLES.find((entry) => entry.id === "fertility-rates-decline");
+  const upshotArticle = ARTICLES.find((entry) => entry.id === "births-decline-older-mothers");
+
+  it("documents the article shell, action chrome, icon assets, and explicit no-chart state", () => {
+    expect(article).toBeDefined();
+
+    const fertilityArticle = article as NonNullable<typeof article> & {
+      tools: Record<string, string>;
+      chartTypes: readonly unknown[];
+      contentBlocks: readonly { type: string }[];
+      architecture: { publicAssets: { icons: readonly unknown[] } };
+    };
+    expect(fertilityArticle.tools).toMatchObject({
+      topper: "lead news photo",
+      charts: "none",
+      framework: "NYT standard article shell",
+    });
+    expect(fertilityArticle.tools.components).toContain("article header");
+    expect(fertilityArticle.chartTypes).toHaveLength(0);
+    expect(fertilityArticle.contentBlocks.map((block: { type: string }) => block.type)).toEqual([
+      "header",
+      "byline",
+      "sharetools-bar",
+      "featured-image",
+      "author-bio",
+    ]);
+    expect(fertilityArticle.architecture.publicAssets.icons).toHaveLength(5);
+  });
+
+  it("renders the icon inventory and Graphs / Charts empty state", () => {
+    render(<ArticleDetailPage articleId="fertility-rates-decline" />);
+
+    expect(screen.getByRole("heading", { level: 3, name: "Icons & SVGs" })).toBeInTheDocument();
+    expect(screen.getByText("listen-play")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 3, name: "Graphs / Charts" })).toBeInTheDocument();
+    expect(screen.getByText(/No graph or chart components are documented for this page/)).toBeInTheDocument();
+  });
+
+  it("documents the Upshot births article with complete shell, sticky header, footer, and chart inventory", () => {
+    expect(upshotArticle).toBeDefined();
+
+    const birthsArticle = upshotArticle as NonNullable<typeof upshotArticle> & {
+      tools: Record<string, string>;
+      chartTypes: readonly unknown[];
+      contentBlocks: readonly { type: string }[];
+      cssInfo: { styleRules: string };
+      architecture: {
+        dataArchitecture: {
+          chromeExtensionInventory: {
+            blueButton: {
+              openGraph: number;
+              scripts: number;
+              article: number;
+            };
+          };
+        };
+      };
+    };
+
+    expect(birthsArticle.tools).toMatchObject({
+      topper: "none",
+      framework: "NYT standard article shell + Upshot graphics package",
+    });
+    expect(birthsArticle.tools.components).toContain("sticky site header");
+    expect(birthsArticle.tools.components).toContain("comment/more actions");
+    expect(birthsArticle.chartTypes).toHaveLength(5);
+    expect(birthsArticle.contentBlocks.map((block) => block.type)).toEqual(
+      expect.arrayContaining([
+        "site-header-shell",
+        "sticky-header",
+        "component-inventory",
+        "static-chart-image",
+        "nyt-chart-facsimile",
+        "ad-container",
+        "related-link",
+        "site-footer",
+      ]),
+    );
+    expect(birthsArticle.cssInfo.styleRules).toContain("Open Graph 6");
+    expect(birthsArticle.architecture.dataArchitecture.chromeExtensionInventory.blueButton).toMatchObject({
+      openGraph: 6,
+      scripts: 42,
+      article: 12,
+    });
+  });
+
+  it("renders the Upshot article title, sticky header, component checklist, and all documented chart slots", () => {
+    render(<ArticleDetailPage articleId="births-decline-older-mothers" />);
+
+    expect(
+      screen.getAllByText("Women in Their 20s May Not Be Having Babies, but by 45 Most Probably Will").length,
+    ).toBeGreaterThan(0);
+    expect(screen.getByRole("heading", { level: 2, name: "Site Header Shell" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "Sticky Article Header" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "Complete Article Component Inventory" })).toBeInTheDocument();
+    expect(screen.getAllByText("Women are postponing pregnancy").length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("img", { name: "Women are postponing pregnancy" }).length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Change in the U.S. birth rate by age group since 2007").length).toBeGreaterThan(0);
+    expect(screen.getByText("-72%")).toBeInTheDocument();
+    expect(screen.getAllByText("Births to women over 40 have surpassed teen births").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Most women are mothers by 45").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Young women's intentions to have children").length).toBeGreaterThan(0);
+    expect(screen.getByRole("heading", { level: 2, name: "The New York Times" })).toBeInTheDocument();
+  });
+});

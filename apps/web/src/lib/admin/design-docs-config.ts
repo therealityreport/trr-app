@@ -541,6 +541,7 @@ export type ContentBlock =
       searchPanel?: SiteHeaderShellSearchPanel;
       accountPanel?: SiteHeaderShellAccountPanel;
     }
+  | { type: "sticky-header"; title: string; behavior: string; elements: readonly string[] }
   | { type: "header" }
   | { type: "byline" }
   | {
@@ -568,6 +569,21 @@ export type ContentBlock =
       title: string;
       source: string;
     }
+  | { type: "static-chart-image"; title: string; url: string; caption: string; credit: string }
+  | {
+      type: "nyt-chart-facsimile";
+      title: string;
+      subtitle?: string;
+      chartKind: "diverging-bars" | "line-crossover" | "cohort-lines" | "survey-bars" | "callout";
+      source: string;
+      credit: string;
+      evidence: "direct-image" | "secondary-source" | "inferred-pending-capture";
+      note?: string;
+      imageUrl?: string;
+      rows?: readonly { label: string; value: number; valueLabel: string }[];
+      callouts?: readonly { label: string; value: string; note: string }[];
+    }
+  | { type: "component-inventory"; title: string; groups: readonly { label: string; items: readonly string[] }[] }
   | { type: "birdkit-table"; title: string; route: string }
   | { type: "birdkit-table-interactive"; title: string; route: string }
   | { type: "datawrapper-table"; id: string; title: string; note: string; source: string; url: string }
@@ -579,6 +595,7 @@ export type ContentBlock =
   | { type: "storyline"; primitiveId?: string; title?: string; links?: readonly { label: string; href: string }[] }
   | { type: "author-bio" }
   | { type: "related-link"; title: string; url: string; imageUrl: string; summary: string }
+  | { type: "site-footer"; title: string; columns: readonly { label: string; links: readonly string[] }[] }
   | { type: "quote"; section: string; badge: string; badgeColor: string; text?: string; citation?: string }
   | { type: "datawrapper-chart"; id: string; title: string; chartType: string; url: string; source?: string; note?: string }
   | { type: "birdkit-countdown"; label: string; daysLeft: number }
@@ -598,6 +615,7 @@ export type ContentBlock =
 
 export const CONTENT_BLOCK_TYPE_IDS = [
   "site-header-shell",
+  "sticky-header",
   "header",
   "byline",
   "sharetools-bar",
@@ -605,6 +623,9 @@ export const CONTENT_BLOCK_TYPE_IDS = [
   "body-copy",
   "subhed",
   "birdkit-chart",
+  "static-chart-image",
+  "nyt-chart-facsimile",
+  "component-inventory",
   "birdkit-table",
   "birdkit-table-interactive",
   "datawrapper-table",
@@ -616,6 +637,7 @@ export const CONTENT_BLOCK_TYPE_IDS = [
   "storyline",
   "author-bio",
   "related-link",
+  "site-footer",
   "quote",
   "datawrapper-chart",
   "birdkit-countdown",
@@ -636,6 +658,855 @@ export const CONTENT_BLOCK_TYPE_IDS = [
 
 /* ── Article References ──────────────────────────── */
 export const ARTICLES = [
+  /* -- NYT News Article - Fertility Rates Record Low ---------------- */
+  {
+    id: "fertility-rates-decline",
+    title: "U.S. Fertility Rates Drop to Another Record Low",
+    url: "https://www.nytimes.com/2026/04/09/us/fertility-rates-decline.html",
+    authors: ["Sabrina Tavernise"],
+    date: "2026-04-09",
+    section: "U.S.",
+    type: "article" as const,
+    description: "A standard NYT news article on 2025 fertility data, built around a lead news photo, article-shell typography, and a federal data reference from the National Center for Health Statistics.",
+    ogImage: "https://static01.nyt.com/images/2026/04/09/multimedia/09nat-us-census-pchv/09nat-us-census-pchv-facebookJumbo.jpg",
+    featuredImage: {
+      name: "leadImageArticleLarge",
+      url: "https://static01.nyt.com/images/2026/04/09/multimedia/09nat-us-census-pchv/09nat-us-census-pchv-articleLarge.jpg",
+      category: "Lead photo",
+      ratio: "1.5:1",
+      desc: "Adult hand holding a baby's hand, used as the article's lead news image",
+      sectionLabel: "Lead Image",
+    },
+    tags: ["Birth Rates", "Fertility", "Teenagers and Adolescence", "Demographics", "National Center for Health Statistics", "Centers for Disease Control and Prevention", "United States"],
+    graphicsCount: 0,
+    figuresCount: 1,
+    tools: {
+      topper: "lead news photo",
+      charts: "none",
+      components: "site header, masthead, article header, action bar, lead-image figure, reading column, author bio",
+      framework: "NYT standard article shell",
+      hosting: "nytimes.com article shell + static01.nyt.com image CDN",
+    },
+    chartTypes: [],
+    quoteSections: [],
+    cssInfo: {
+      styleRules: "standard article shell",
+      cssFile: "NYT article shell CSS modules",
+      stylesheets: "NYT web fonts + article shell styles",
+      loadTime: "not captured",
+    },
+    typographyGroups: [
+      {
+        label: "Header",
+        families: ["nyt-cheltenham", "georgia"],
+        weightCount: 3,
+        styleCount: 2,
+        samples: [
+          {
+            label: "Headline",
+            text: "U.S. Fertility Rates Drop to Another Record Low",
+            fontFamily: 'nyt-cheltenham, cheltenham-fallback-georgia, cheltenham-fallback-noto, georgia, "times new roman", times, serif',
+            fontSize: 42,
+            fontWeight: 700,
+            lineHeight: "48px",
+            color: "#121212",
+          },
+          {
+            label: "Summary deck",
+            text: "The fertility rate has been falling since 2007, in large part because of a plunge among teenagers.",
+            fontFamily: 'nyt-cheltenham, cheltenham-fallback-georgia, cheltenham-fallback-noto, georgia, "times new roman", times, serif',
+            fontSize: 23,
+            fontWeight: 300,
+            lineHeight: "28px",
+            color: "#363636",
+          },
+        ],
+      },
+      {
+        label: "Article Chrome",
+        families: ["nyt-franklin", "arial"],
+        weightCount: 3,
+        styleCount: 6,
+        samples: [
+          {
+            label: "Masthead",
+            text: "The New York Times",
+            fontFamily: '"nyt-franklin", arial, helvetica, sans-serif',
+            fontSize: 15,
+            fontWeight: 700,
+            lineHeight: "18px",
+            color: "#121212",
+          },
+          {
+            label: "Action row",
+            text: "Listen · 3:19 min · Share full article · 608",
+            fontFamily: '"nyt-franklin", arial, helvetica, sans-serif',
+            fontSize: 12,
+            fontWeight: 500,
+            lineHeight: "15px",
+            color: "#121212",
+          },
+        ],
+      },
+      {
+        label: "Body and Media",
+        families: ["nyt-imperial", "georgia"],
+        weightCount: 2,
+        styleCount: 3,
+        samples: [
+          {
+            label: "Body text",
+            text: "Standard NYT reading column body copy",
+            fontFamily: '"nyt-imperial", georgia, "times new roman", times, serif',
+            fontSize: 20,
+            fontWeight: 400,
+            lineHeight: "30px",
+            color: "#121212",
+          },
+          {
+            label: "Image caption",
+            text: "The fertility rate has been falling since 2007.",
+            fontFamily: '"nyt-imperial", georgia, "times new roman", times, serif',
+            fontSize: 14,
+            fontWeight: 400,
+            lineHeight: "19px",
+            color: "#363636",
+          },
+        ],
+      },
+    ],
+    fonts: [
+      {
+        name: "nyt-cheltenham",
+        cssVar: "--g-chelt",
+        fullStack: 'nyt-cheltenham, cheltenham-fallback-georgia, cheltenham-fallback-noto, georgia, "times new roman", times, serif',
+        weights: [300, 500, 700],
+        role: "Display serif for headline and article summary treatment",
+        usedIn: [
+          "h1.Headline: NYT Cheltenham display headline",
+          "p.Summary: NYT Cheltenham deck/summary",
+        ],
+      },
+      {
+        name: "nyt-franklin",
+        cssVar: "--g-franklin",
+        fullStack: '"nyt-franklin", arial, helvetica, sans-serif',
+        weights: [400, 500, 700],
+        role: "Sans-serif UI chrome, byline, timestamp, image credit, and action controls",
+        usedIn: [
+          "p.Byline: Franklin byline link treatment",
+          "time.Timestamp: Franklin timestamp text",
+          "button.ShareButton / save controls: compact Franklin UI",
+          "span.ImageCredit: small Franklin credit line",
+        ],
+      },
+      {
+        name: "nyt-imperial",
+        cssVar: "--g-imperial",
+        fullStack: '"nyt-imperial", georgia, "times new roman", times, serif',
+        weights: [400, 500],
+        role: "Article body text and image caption serif",
+        usedIn: [
+          "p.BodyText: standard NYT reading column body copy",
+          "span.ImageCaption: lead-image caption text",
+        ],
+      },
+    ],
+    brandFonts: {
+      editorial: ["nyt-cheltenham", "nyt-imperial"],
+      graphics: ["nyt-franklin"],
+      games: [],
+    },
+    colors: {
+      editorial: {
+        primary: "#121212",
+        secondary: "#363636",
+        faint: "#727272",
+        nytBlue: "#326891",
+        background: "#FFFFFF",
+        divider: "#DFDFDF",
+      },
+    },
+    colorCategories: [
+      {
+        label: "Article Shell",
+        colors: [
+          { name: "Headline and masthead ink", hex: "#121212", note: "Headline, logo, and primary action icons" },
+          { name: "Deck and caption text", hex: "#363636", note: "Summary deck, caption, and secondary editorial copy" },
+          { name: "Muted UI text", hex: "#727272", note: "Section labels, timestamps, and auxiliary metadata" },
+          { name: "NYT link blue", hex: "#326891", note: "Inline article links and article action affordances" },
+          { name: "Hairline border", hex: "#DFDFDF", note: "Header divider and circular action button borders" },
+        ],
+      },
+    ],
+    architecture: {
+      framework: "NYT standard article template",
+      projectId: "nyt-standard-news-article",
+      hydrationId: "not-applicable-standard-article",
+      hosting: "nytimes.com + static01.nyt.com/images/",
+      hierarchy: [
+        "main#story (standard NYT article shell)",
+        "  site header (masthead row, section navigation, subscribe/account controls)",
+        "  article header (headline, summary deck, byline, timestamp)",
+        "  action row (Listen control, share full article, share, save, comments)",
+        "  figure.lead-image (articleLarge image with caption and credit)",
+        "  article body (Imperial reading column with inline source links)",
+        "  footer.author-bio (writer-at-large bio and profile link)",
+      ],
+      layoutTokens: {
+        bodyWidth: "600px article reading column",
+        marginInline: "20px mobile gutters",
+        siteHeader: "NYT masthead centered above a thin #DFDFDF rule",
+        headlineFont: "nyt-cheltenham display serif",
+        headlineStyle: "left-aligned Cheltenham bold italic display headline",
+        deckStyle: "Cheltenham light summary deck below the headline",
+        bodyFont: "nyt-imperial 20px/30px reading text",
+        bylineFont: "nyt-franklin compact byline",
+        imageCaptionFont: "nyt-imperial caption with Franklin credit",
+        actionBar: "share/save/listen controls in compact Franklin chrome",
+        graphsCharts: "none; this standard article uses a lead photo and inline federal-data reference instead of embedded charts",
+      },
+      cssFiles: [
+        "NYT web-fonts CSS",
+        "NYT standard article shell CSS modules",
+        "NYT sharetools/action-bar CSS modules",
+      ],
+      dataArchitecture: {
+        charts: "none",
+        primaryDataReference: "National Center for Health Statistics provisional fertility data",
+        pageType: "standard news article, not bespoke interactive",
+      },
+      publicAssets: {
+        icons: [
+          { name: "listen-play", file: "/design-docs/nyt/article-shell/icons/listen-play.svg", size: "32x32", fill: "#121212", usage: "Listen control play icon", element: "button" },
+          { name: "gift", file: "/design-docs/nyt/article-shell/icons/gift.svg", size: "19x19", fill: "#121212", usage: "Share full article icon", element: "button" },
+          { name: "share", file: "/design-docs/nyt/article-shell/icons/share.svg", size: "18x18", fill: "#121212", usage: "Share action icon", element: "button" },
+          { name: "save", file: "/design-docs/nyt/article-shell/icons/save.svg", size: "12x18", fill: "#121212", usage: "Save/bookmark action icon", element: "button" },
+          { name: "comments", file: "/design-docs/nyt/article-shell/icons/comments.svg", size: "20x18", fill: "#121212", usage: "Article comments count icon", element: "button" },
+        ],
+        images: [
+          {
+            name: "leadImageArticleLarge",
+            url: "https://static01.nyt.com/images/2026/04/09/multimedia/09nat-us-census-pchv/09nat-us-census-pchv-articleLarge.jpg",
+            category: "lead-image",
+            ratio: "1.5:1",
+            desc: "Adult hand holding a baby's hand",
+          },
+          {
+            name: "leadImageSuperJumbo",
+            url: "https://static01.nyt.com/images/2026/04/09/multimedia/09nat-us-census-pchv/09nat-us-census-pchv-superJumbo.jpg",
+            category: "lead-image",
+            width: 2048,
+            desc: "High-resolution lead image",
+          },
+        ],
+        socialImages: [
+          { name: "facebookJumbo", url: "https://static01.nyt.com/images/2026/04/09/multimedia/09nat-us-census-pchv/09nat-us-census-pchv-facebookJumbo.jpg", ratio: "1.91:1", desc: "Facebook/OG share image" },
+          { name: "video16x9-1600", url: "https://static01.nyt.com/images/2026/04/09/multimedia/09nat-us-census-pchv/09nat-us-census-pchv-videoSixteenByNineJumbo1600.jpg", ratio: "16:9", width: 1600, desc: "Wide social/video image" },
+          { name: "google4x3", url: "https://static01.nyt.com/images/2026/04/09/multimedia/09nat-us-census-pchv/09nat-us-census-pchv-googleFourByThree.jpg", ratio: "4:3", width: 800, desc: "Google Discover image" },
+          { name: "square3x", url: "https://static01.nyt.com/images/2026/04/09/multimedia/09nat-us-census-pchv/09nat-us-census-pchv-mediumSquareAt3X.jpg", ratio: "1:1", width: 1000, desc: "Square thumbnail" },
+        ],
+      },
+    },
+    contentBlocks: [
+      { type: "header" },
+      { type: "byline" },
+      {
+        type: "sharetools-bar",
+        tier: "tier-2-facsimile",
+        buttons: [
+          { label: "Share full article", kind: "gift" },
+          { label: "Share article", kind: "share" },
+          { label: "Save article", kind: "save" },
+        ],
+      },
+      {
+        type: "featured-image",
+        url: "https://static01.nyt.com/images/2026/04/09/multimedia/09nat-us-census-pchv/09nat-us-census-pchv-articleLarge.jpg",
+        caption: "The fertility rate has been falling since 2007.",
+        credit: "Markus Scholz/picture alliance, via Getty Images",
+      },
+      { type: "author-bio" },
+    ],
+  },
+  /* -- NYT Upshot Article - Births Decline / Older Mothers ---------- */
+  {
+    id: "births-decline-older-mothers",
+    title: "Women in Their 20s May Not Be Having Babies, but by 45 Most Probably Will",
+    url: "https://www.nytimes.com/2026/04/09/upshot/births-decline-older-mothers.html",
+    authors: ["Claire Cain Miller"],
+    date: "2026-04-09",
+    section: "The Upshot",
+    type: "article" as const,
+    description: "The record-low U.S. birthrate could be temporary as today's young women postpone pregnancy.",
+    ogImage: "https://substackcdn.com/image/fetch/%24s_%21oIg_%21%2Cw_1456%2Cc_limit%2Cf_auto%2Cq_auto%3Agood%2Cfl_progressive%3Asteep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F75c9406f-5dbb-48a0-b3f8-af8553c0181c_1236x552.png",
+    featuredImage: {
+      name: "women-postponing-pregnancy-chart",
+      url: "https://substackcdn.com/image/fetch/%24s_%21oIg_%21%2Cw_1456%2Cc_limit%2Cf_auto%2Cq_auto%3Agood%2Cfl_progressive%3Asteep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F75c9406f-5dbb-48a0-b3f8-af8553c0181c_1236x552.png",
+      category: "Chart image",
+      ratio: "2.24:1",
+      desc: "Horizontal bar chart titled 'Women are postponing pregnancy'",
+      sectionLabel: "Main Chart",
+    },
+    tags: ["Birth Rates", "Fertility", "Demographics", "Mothers", "Pregnancy", "Teenagers and Adolescence", "Centers for Disease Control and Prevention", "The Upshot"],
+    graphicsCount: 5,
+    figuresCount: 5,
+    tools: {
+      topper: "none",
+      charts: "NYT Upshot graphics package: diverging age-group bar chart, births-over-40 vs teen crossover chart, completed-motherhood by age 45 callout/cohort chart, fertility-intentions survey bars, source/credit footers; exact DOM capture still degraded where Chrome extension source was unavailable",
+      components: "sticky site header, masthead, hamburger menu, search panel, account drawer, subscribe/login controls, section label, article header, byline/timestamp, audio/listen control, gift/share/save/comment/more actions, body paragraph clusters, ad slots, chart figures, related coverage card, author bio, global footer",
+      framework: "NYT standard article shell + Upshot graphics package",
+      hosting: "nytimes.com article shell + static/media image CDN",
+    },
+    chartTypes: [
+      {
+        type: "diverging-bar",
+        tool: "NYT static graphic",
+        topic: "Change in the U.S. birth rate by age group since 2007",
+        source: "Centers for Disease Control and Prevention data",
+      },
+      {
+        type: "line-crossover",
+        tool: "NYT Upshot graphic",
+        topic: "Babies born to women over 40 compared with babies born to teenagers",
+        source: "secondary article discussion; exact NYT chart payload pending authenticated source capture",
+      },
+      {
+        type: "cohort-callout",
+        tool: "NYT Upshot graphic",
+        topic: "Share of women who are mothers by age 45",
+        source: "secondary article discussion; exact NYT chart payload pending authenticated source capture",
+      },
+      {
+        type: "survey-bars",
+        tool: "NYT Upshot graphic",
+        topic: "Young women's stated intentions to have children",
+        source: "secondary article discussion; exact NYT chart payload pending authenticated source capture",
+      },
+      {
+        type: "source-credit-strip",
+        tool: "NYT graphics annotation",
+        topic: "Chart source, credit, notes, and responsive chart metadata",
+        source: "Blue Button counts supplied by user; source bundle capture pending",
+      },
+    ],
+    quoteSections: [],
+    cssInfo: {
+      styleRules: "Blue Button inventory reported by user: Open Graph 6, Facebook 1, Twitter 10, stylesheets 3, scripts 42, content images 1, icons/banners 6, mobile 2, on-page SEO 8, misc meta 9, article 12, application 1",
+      cssFile: "NYT article shell CSS modules; CSS Peeper text/colors/assets capture required for final exact selectors",
+      stylesheets: "3 stylesheets reported by Blue Button",
+      loadTime: "not captured in Codex; BuiltWith/Wappalyzer stack capture required for exact production technology labels",
+    },
+    typographyGroups: [
+      {
+        label: "Header",
+        families: ["nyt-cheltenham", "georgia"],
+        weightCount: 3,
+        styleCount: 2,
+        samples: [
+          {
+            label: "Headline",
+            text: "Women in Their 20s May Not Be Having Babies, but by 45 Most Probably Will",
+            fontFamily: 'nyt-cheltenham, cheltenham-fallback-georgia, cheltenham-fallback-noto, georgia, "times new roman", times, serif',
+            fontSize: 40,
+            fontWeight: 700,
+            lineHeight: "46px",
+            color: "#121212",
+            fontStyle: "italic",
+          },
+          {
+            label: "Summary deck",
+            text: "The record-low U.S. birthrate could be temporary as today's young women postpone pregnancy.",
+            fontFamily: 'nyt-cheltenham, cheltenham-fallback-georgia, cheltenham-fallback-noto, georgia, "times new roman", times, serif',
+            fontSize: 23,
+            fontWeight: 300,
+            lineHeight: "30px",
+            color: "#363636",
+          },
+        ],
+      },
+      {
+        label: "Article Chrome",
+        families: ["nyt-franklin", "arial"],
+        weightCount: 4,
+        styleCount: 6,
+        samples: [
+          {
+            label: "Byline",
+            text: "By Claire Cain Miller",
+            fontFamily: '"nyt-franklin", arial, helvetica, sans-serif',
+            fontSize: 14,
+            fontWeight: 700,
+            lineHeight: "18px",
+            color: "#363636",
+          },
+          {
+            label: "Action row",
+            text: "Listen, share, save and comment controls",
+            fontFamily: '"nyt-franklin", arial, helvetica, sans-serif',
+            fontSize: 12,
+            fontWeight: 500,
+            lineHeight: "15px",
+            color: "#121212",
+          },
+        ],
+      },
+      {
+        label: "Charts and Graphs",
+        families: ["nyt-cheltenham", "nyt-franklin"],
+        weightCount: 5,
+        styleCount: 8,
+        samples: [
+          {
+            label: "Chart title",
+            text: "Women are postponing pregnancy",
+            fontFamily: 'nyt-cheltenham, georgia, "times new roman", serif',
+            fontSize: 27,
+            fontWeight: 700,
+            lineHeight: "31px",
+            color: "#121212",
+          },
+          {
+            label: "Chart labels",
+            text: "15-19, 20-24, 25-29, 30-34, 35-39, 40-44, 45-54",
+            fontFamily: '"nyt-franklin", arial, helvetica, sans-serif',
+            fontSize: 18,
+            fontWeight: 500,
+            lineHeight: "23px",
+            color: "#121212",
+          },
+          {
+            label: "Chart source",
+            text: "Source: Centers for Disease Control and Prevention data",
+            fontFamily: '"nyt-franklin", arial, helvetica, sans-serif',
+            fontSize: 11,
+            fontWeight: 400,
+            lineHeight: "15px",
+            color: "#727272",
+          },
+        ],
+      },
+      {
+        label: "Sticky Header and Footer",
+        families: ["nyt-cheltenham-small", "nyt-franklin"],
+        weightCount: 4,
+        styleCount: 5,
+        samples: [
+          {
+            label: "Sticky article breadcrumb",
+            text: "Women in Their 20s May Not Be Having Babies, but by 45 Most Probably Will",
+            fontFamily: 'nyt-cheltenham-small, georgia, "times new roman", serif',
+            fontSize: 13,
+            fontWeight: 400,
+            lineHeight: "16px",
+            color: "#121212",
+          },
+          {
+            label: "Footer utility links",
+            text: "Contact Us, Accessibility, Work with us, Advertise, T Brand Studio",
+            fontFamily: '"nyt-franklin", arial, helvetica, sans-serif',
+            fontSize: 11,
+            fontWeight: 500,
+            lineHeight: "15px",
+            color: "#666666",
+          },
+        ],
+      },
+    ],
+    fonts: [
+      {
+        name: "nyt-cheltenham",
+        cssVar: "--g-chelt",
+        fullStack: 'nyt-cheltenham, cheltenham-fallback-georgia, cheltenham-fallback-noto, georgia, "times new roman", times, serif',
+        weights: [300, 500, 700],
+        role: "Display headline, deck, and chart title serif",
+        usedIn: [
+          "h1.Headline: 40px/700/46px italic",
+          "p.Summary: 23px/300/30px",
+          "h2.ChartTitle: chart title treatment",
+        ],
+      },
+      {
+        name: "nyt-cheltenham-small",
+        cssVar: "--g-chelt-small",
+        fullStack: 'nyt-cheltenham-small, georgia, "times new roman", serif',
+        weights: [400],
+        role: "Sticky masthead breadcrumb and compact section navigation serif",
+        usedIn: [
+          "span.StickyArticleTitle: compact sticky article title",
+          "span.MastheadBreadcrumb: section/article breadcrumb",
+        ],
+      },
+      {
+        name: "nyt-franklin",
+        cssVar: "--g-franklin",
+        fullStack: '"nyt-franklin", arial, helvetica, sans-serif',
+        weights: [400, 500, 600, 700],
+        role: "UI chrome, byline, chart labels, source credit, action controls, footer links",
+        usedIn: [
+          "p.Byline: Franklin byline link treatment",
+          "button.ShareButton: compact Franklin UI",
+          "span.ChartLabel: age-group labels and value callouts",
+          "p.ChartSource: chart source and credit",
+          "footer.UtilityLinks: global footer link matrix",
+        ],
+      },
+      {
+        name: "nyt-imperial",
+        cssVar: "--g-imperial",
+        fullStack: '"nyt-imperial", georgia, "times new roman", times, serif',
+        weights: [400, 500],
+        role: "Article body text",
+        usedIn: [
+          "p.BodyText: standard NYT reading column body copy",
+        ],
+      },
+    ],
+    brandFonts: {
+      editorial: ["nyt-cheltenham", "nyt-imperial"],
+      graphics: ["nyt-franklin"],
+      games: [],
+    },
+    colors: {
+      chartPalette: [
+        { name: "Bar slate", hex: "#687D84" },
+        { name: "Axis ink", hex: "#555555" },
+        { name: "Chart source gray", hex: "#727272" },
+        { name: "Pending chart placeholder", hex: "#F4F4F4" },
+      ],
+      editorial: {
+        primary: "#121212",
+        secondary: "#363636",
+        faint: "#727272",
+        nytBlue: "#326891",
+        background: "#FFFFFF",
+        divider: "#DFDFDF",
+      },
+    },
+    colorCategories: [
+      {
+        label: "Article Shell",
+        colors: [
+          { name: "Headline and masthead ink", hex: "#121212", note: "Headline, logo, and action icons" },
+          { name: "Deck and body secondary", hex: "#363636", note: "Deck, byline text, and reading column copy" },
+          { name: "Muted metadata", hex: "#727272", note: "Timestamp, chart source, and auxiliary metadata" },
+          { name: "NYT link blue", hex: "#326891", note: "Inline article links and action affordances" },
+          { name: "Hairline border", hex: "#DFDFDF", note: "Masthead divider and circular action borders" },
+        ],
+      },
+      {
+        label: "Charts and Graphs",
+        colors: [
+          { name: "Horizontal bar fill", hex: "#687D84", note: "Slate data bars in the age-group chart" },
+          { name: "Zero axis", hex: "#555555", note: "Vertical baseline separating negative and positive change" },
+          { name: "Chart placeholder rail", hex: "#F4F4F4", note: "Used for reconstructed slots whose exact NYT SVG/div geometry is pending capture" },
+        ],
+      },
+    ],
+    architecture: {
+      framework: "NYT standard article shell with Upshot graphics package",
+      projectId: "births-decline-older-mothers",
+      hydrationId: "not-captured-authenticated-chrome-source-pending",
+      hosting: "nytimes.com article shell; chart evidence recovered from public reference image plus secondary article discussion",
+      hierarchy: [
+        "main#story (NYT article shell)",
+        "  sticky site header shell (hamburger, search, masthead, subscribe, account drawer)",
+        "  hidden/scroll sticky article header (article title, gift/share/save/more controls)",
+        "  article header (Upshot headline, summary deck, byline, timestamp)",
+        "  action row (Listen, share full article, share, save, comments, more)",
+        "  article body cluster 1 (Imperial reading column)",
+        "  figure.chart-1 (diverging age-group birth-rate change bars)",
+        "  ad slot after initial graphic cluster",
+        "  article body cluster 2 (postponed motherhood / cohort framing)",
+        "  figure.chart-2 (40+ births vs teen births crossover)",
+        "  figure.chart-3 (motherhood by age 45 callout/cohort graphic)",
+        "  article body cluster 3 (intentions and timing discussion)",
+        "  figure.chart-4 (fertility intentions survey bars)",
+        "  related coverage card",
+        "  footer.author-bio",
+        "  global NYT footer utility matrix",
+      ],
+      layoutTokens: {
+        bodyWidth: "600px article reading column",
+        marginInline: "20px mobile gutters",
+        siteHeader: "sticky NYT shell with centered masthead and left hamburger/search controls",
+        stickyArticleHeader: "48px compact article-title row with share/save controls after masthead scroll threshold",
+        headlineFont: "nyt-cheltenham display serif",
+        headlineStyle: "left-aligned Cheltenham bold italic display headline",
+        deckStyle: "Cheltenham light summary deck below headline",
+        bodyFont: "nyt-imperial 20px/30px reading text",
+        bylineFont: "nyt-franklin compact byline",
+        chartWidth: "approximately 600px reading-column chart on desktop",
+        chartStyle: "Upshot reading-column graphics with Cheltenham titles, Franklin labels/source, slate data marks, inline callouts",
+        graphsCharts: "five documented chart/graphic slots: one direct chart image with extracted values, three secondary-source chart slots pending exact capture, one source/annotation strip",
+        footer: "global NYT utility footer with company, legal, help, subscription, and product links",
+      },
+      cssFiles: [
+        "3 stylesheets reported by Blue Button",
+        "NYT standard article shell CSS modules",
+        "NYT sharetools/action-bar CSS modules",
+        "NYT Upshot graphics CSS modules",
+      ],
+      dataArchitecture: {
+        charts: "direct-image chart rows captured for the age-group diverging bar chart; remaining chart slots represented from secondary evidence and marked pending exact source capture",
+        primaryDataReference: "Centers for Disease Control and Prevention birth-rate data",
+        pageType: "Upshot article with multiple static/responsive graphics embedded in standard NYT article shell",
+        sourceAuthority: "NYT authenticated Chrome source capture still required for exact page-source bundle; Blue Button counts were supplied by the user; first chart rows were extracted from a public reference image",
+        degradedSourceCoverage: [
+          "CSS Peeper exact text/color/asset dump pending",
+          "BuiltWith/Wappalyzer exact stack capture pending",
+          "Exact SVG/div geometry for three non-public chart slots pending",
+          "No full article body text is copied into design docs; body clusters are summarized for copyright safety",
+        ],
+        chromeExtensionInventory: {
+          blueButton: {
+            openGraph: 6,
+            facebook: 1,
+            twitter: 10,
+            stylesheets: 3,
+            scripts: 42,
+            contentImages: 1,
+            iconsAndBanners: 6,
+            mobile: 2,
+            onPageSeo: 8,
+            miscMeta: 9,
+            article: 12,
+            application: 1,
+          },
+          cssPeeper: "required for final text/assets/colors; pending authenticated Chrome extension extraction",
+          builtWithWappalyzer: "required for production stack confirmation; pending authenticated Chrome extension extraction",
+        },
+      },
+      publicAssets: {
+        icons: [
+          { name: "hamburger-menu", file: "/design-docs/nyt/article-shell/icons/menu.svg", size: "17x15", fill: "#121212", usage: "Open section navigation", element: "button" },
+          { name: "search", file: "/design-docs/nyt/article-shell/icons/search.svg", size: "16x16", fill: "#121212", usage: "Open search panel", element: "button" },
+          { name: "listen-play", file: "/design-docs/nyt/article-shell/icons/listen-play.svg", size: "32x32", fill: "#121212", usage: "Listen control play icon", element: "button" },
+          { name: "gift", file: "/design-docs/nyt/article-shell/icons/gift.svg", size: "19x19", fill: "#121212", usage: "Share full article icon", element: "button" },
+          { name: "share", file: "/design-docs/nyt/article-shell/icons/share.svg", size: "18x18", fill: "#121212", usage: "Share action icon", element: "button" },
+          { name: "save", file: "/design-docs/nyt/article-shell/icons/save.svg", size: "12x18", fill: "#121212", usage: "Save/bookmark action icon", element: "button" },
+          { name: "comments", file: "/design-docs/nyt/article-shell/icons/comments.svg", size: "20x18", fill: "#121212", usage: "Article comments icon", element: "button" },
+        ],
+        images: [
+          {
+            name: "women-postponing-pregnancy-chart",
+            url: "https://substackcdn.com/image/fetch/%24s_%21oIg_%21%2Cw_1456%2Cc_limit%2Cf_auto%2Cq_auto%3Agood%2Cfl_progressive%3Asteep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F75c9406f-5dbb-48a0-b3f8-af8553c0181c_1236x552.png",
+            category: "chart-image",
+            width: 1236,
+            ratio: "2.24:1",
+            desc: "Public reference image of NYT horizontal bar chart",
+          },
+          {
+            name: "reader-counterchart-reference",
+            url: "https://substackcdn.com/image/fetch/%24s_%21mEUV%21%2Cw_1456%2Cc_limit%2Cf_auto%2Cq_auto%3Agood%2Cfl_progressive%3Asteep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F0bfa4b63-4c04-4564-a015-0305771e43a9_680x521.jpeg",
+            category: "external-reference",
+            width: 680,
+            ratio: "1.31:1",
+            desc: "External reader chart comparing implied birth-count shifts; kept as critique context, not NYT page asset",
+          },
+        ],
+        socialImages: [
+          { name: "og-image", url: "https://substackcdn.com/image/fetch/%24s_%21oIg_%21%2Cw_1456%2Cc_limit%2Cf_auto%2Cq_auto%3Agood%2Cfl_progressive%3Asteep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F75c9406f-5dbb-48a0-b3f8-af8553c0181c_1236x552.png", ratio: "2.24:1", desc: "Recovered public chart image; original NYT social image not captured" },
+        ],
+      },
+    },
+    contentBlocks: [
+      {
+        type: "site-header-shell",
+        title: "Site Header Shell",
+        primitiveId: "nyt.interactive.header-shell.standard",
+      },
+      {
+        type: "sticky-header",
+        title: "Sticky Article Header",
+        behavior: "Appears as a compact persistent article row after the reader scrolls beyond the masthead/article header.",
+        elements: [
+          "Compact article title breadcrumb",
+          "Gift/share full article button",
+          "Share icon button",
+          "Save/bookmark icon button",
+          "More actions icon button",
+          "Hairline bottom divider and white sticky surface",
+        ],
+      },
+      {
+        type: "component-inventory",
+        title: "Complete Article Component Inventory",
+        groups: [
+          {
+            label: "Header and Menu",
+            items: [
+              "Sticky site header with hamburger menu, search button, centered NYT masthead, subscribe button, account drawer",
+              "Section navigation modal with grouped U.S., World, Business, Arts, Lifestyle, Opinion, Audio, Games, Cooking, Wirecutter, The Athletic links",
+              "Search modal with query input and section/article suggestion links",
+              "Account drawer for admin@thereality.report profile state",
+              "Sticky article-title header that appears on scroll",
+            ],
+          },
+          {
+            label: "Article Header and Actions",
+            items: [
+              "Upshot section label",
+              "Cheltenham italic headline",
+              "Cheltenham light summary deck",
+              "Franklin byline and timestamp",
+              "Listen/audio duration control",
+              "Gift, share, save/bookmark, comment count, and more action icons",
+            ],
+          },
+          {
+            label: "Body Sections",
+            items: [
+              "Imperial article paragraph clusters",
+              "Inline editorial links",
+              "Mid-article ad slot",
+              "Related fertility coverage card",
+              "Author bio and reporting credit/footer metadata",
+            ],
+          },
+          {
+            label: "Charts and Graphs",
+            items: [
+              "Chart 1: Women are postponing pregnancy, age-group diverging bars with direct values",
+              "Chart 2: Births to women over 40 have surpassed teen births, crossover/line slot",
+              "Chart 3: Most women are mothers by 45, cohort/callout slot",
+              "Chart 4: Young women's intentions to have children, survey bar slot",
+              "Chart source, credit, note, labels, responsive image/SVG asset behavior",
+            ],
+          },
+          {
+            label: "Footer and Production",
+            items: [
+              "Global NYT footer links: contact, accessibility, work with us, advertise, T Brand Studio, ad choices, privacy, terms, site map, help, subscriptions",
+              "Blue Button metadata counts from prompt",
+              "CSS Peeper text/assets/colors capture requirement",
+              "BuiltWith/Wappalyzer stack verification requirement",
+            ],
+          },
+        ],
+      },
+      { type: "header" },
+      { type: "byline" },
+      {
+        type: "sharetools-bar",
+        tier: "tier-2-facsimile",
+        buttons: [
+          { label: "Share full article", kind: "gift" },
+          { label: "Share article", kind: "share" },
+          { label: "Save article", kind: "save" },
+          { label: "More sharing options", kind: "more" },
+        ],
+      },
+      {
+        type: "featured-image",
+        url: "https://substackcdn.com/image/fetch/%24s_%21oIg_%21%2Cw_1456%2Cc_limit%2Cf_auto%2Cq_auto%3Agood%2Cfl_progressive%3Asteep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F75c9406f-5dbb-48a0-b3f8-af8553c0181c_1236x552.png",
+        caption: "Change in the U.S. birth rate by age group since 2007.",
+        credit: "The New York Times; public reference image via Curated Compositions",
+      },
+      {
+        type: "body-copy",
+        html: "<p>The opening article body frames the record-low birthrate as a timing question, distinguishing delayed childbearing from permanent childlessness.</p>",
+      },
+      {
+        type: "static-chart-image",
+        title: "Women are postponing pregnancy",
+        url: "https://substackcdn.com/image/fetch/%24s_%21oIg_%21%2Cw_1456%2Cc_limit%2Cf_auto%2Cq_auto%3Agood%2Cfl_progressive%3Asteep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F75c9406f-5dbb-48a0-b3f8-af8553c0181c_1236x552.png",
+        caption: "Change in the U.S. birth rate by age group since 2007.",
+        credit: "The New York Times; source: Centers for Disease Control and Prevention data",
+      },
+      {
+        type: "nyt-chart-facsimile",
+        title: "Women are postponing pregnancy",
+        subtitle: "Change in the U.S. birth rate by age group since 2007",
+        chartKind: "diverging-bars",
+        source: "Centers for Disease Control and Prevention data",
+        credit: "By The New York Times",
+        evidence: "direct-image",
+        imageUrl: "https://substackcdn.com/image/fetch/%24s_%21oIg_%21%2Cw_1456%2Cc_limit%2Cf_auto%2Cq_auto%3Agood%2Cfl_progressive%3Asteep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F75c9406f-5dbb-48a0-b3f8-af8553c0181c_1236x552.png",
+        rows: [
+          { label: "15-19", value: -72, valueLabel: "-72%" },
+          { label: "20-24", value: -51, valueLabel: "-51%" },
+          { label: "25-29", value: -27, valueLabel: "-27%" },
+          { label: "30-34", value: -4, valueLabel: "-4%" },
+          { label: "35-39", value: 16, valueLabel: "16%" },
+          { label: "40-44", value: 35, valueLabel: "35%" },
+          { label: "45-54", value: 83, valueLabel: "83%" },
+        ],
+      },
+      { type: "ad-container", position: "mid-article-after-first-chart" },
+      {
+        type: "body-copy",
+        html: "<p>The next body section explains the demographic shift: fewer births among younger women, more births among older women, and a changed timing curve across cohorts.</p>",
+      },
+      {
+        type: "nyt-chart-facsimile",
+        title: "Births to women over 40 have surpassed teen births",
+        subtitle: "Crossover chart slot documented from secondary article discussion; exact NYT SVG/div payload pending capture.",
+        chartKind: "line-crossover",
+        source: "Secondary discussion of the NYT Upshot article; underlying NYT chart source pending authenticated capture",
+        credit: "The New York Times chart slot; exact geometry pending",
+        evidence: "secondary-source",
+        note: "Represented as a required article chart slot because source capture was blocked; do not treat as final measured chart data.",
+        callouts: [
+          { label: "Chart role", value: "Crossover", note: "Compares babies born to women over 40 with babies born to teenagers." },
+          { label: "Observed claim", value: "40+ > teens", note: "Secondary source says births to women over 40 now surpass teenagers." },
+        ],
+      },
+      {
+        type: "nyt-chart-facsimile",
+        title: "Most women are mothers by 45",
+        subtitle: "Completed-motherhood callout/cohort slot.",
+        chartKind: "callout",
+        source: "Secondary discussion of the NYT Upshot article; exact NYT chart source pending authenticated capture",
+        credit: "The New York Times chart slot; exact geometry pending",
+        evidence: "secondary-source",
+        note: "The 88% value is documented in secondary discussion and should be rechecked against the authenticated page source.",
+        callouts: [
+          { label: "45-year-old women", value: "88%", note: "Share described as mothers by age 45." },
+          { label: "Component", value: "Callout", note: "Large-number cohort/callout graphic in the article flow." },
+        ],
+      },
+      {
+        type: "body-copy",
+        html: "<p>A later section shifts from measured births to intent, separating delayed timing from stated plans to have or not have children.</p>",
+      },
+      {
+        type: "nyt-chart-facsimile",
+        title: "Young women's intentions to have children",
+        subtitle: "Survey bar chart slot for stated fertility intentions.",
+        chartKind: "survey-bars",
+        source: "Secondary discussion of the NYT Upshot article; exact NYT chart source pending authenticated capture",
+        credit: "The New York Times chart slot; exact geometry pending",
+        evidence: "secondary-source",
+        note: "The 62% and 35% values are secondary-source values and require final extension/page-source verification.",
+        callouts: [
+          { label: "Intended to have a child", value: "62%", note: "Secondary-source value from discussion of the article." },
+          { label: "Did not intend to have a child", value: "35%", note: "Secondary-source value from discussion of the article." },
+        ],
+      },
+      {
+        type: "related-link",
+        title: "U.S. Fertility Rates Drop to Another Record Low",
+        url: "https://www.nytimes.com/2026/04/09/us/fertility-rates-decline.html",
+        imageUrl: "https://static01.nyt.com/images/2026/04/09/multimedia/09nat-us-census-pchv/09nat-us-census-pchv-articleLarge.jpg",
+        summary: "Related standard news article documenting the annual fertility-rate decline.",
+      },
+      { type: "author-bio" },
+      {
+        type: "reporting-credit",
+        text: "Design-doc recreation uses public chart evidence plus user-supplied extension inventory; exact NYT source bundle is marked pending where capture was unavailable.",
+      },
+      {
+        type: "site-footer",
+        title: "The New York Times",
+        columns: [
+          { label: "Company", links: ["NYTCo", "Contact Us", "Accessibility", "Work with us", "Advertise", "T Brand Studio"] },
+          { label: "Legal", links: ["Your Ad Choices", "Privacy Policy", "Terms of Service", "Terms of Sale"] },
+          { label: "Support", links: ["Site Map", "Help", "Subscriptions"] },
+        ],
+      },
+    ],
+  },
   {
     id: "trump-economy-year-1",
     title: "Trump Said He'd Unleash the Economy in Year 1. Here's How He Did.",

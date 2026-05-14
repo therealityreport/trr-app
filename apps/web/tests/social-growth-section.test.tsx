@@ -157,4 +157,75 @@ describe("SocialGrowthSection", () => {
       { allowDevAdminBypass: true },
     );
   });
+
+  it("renders TikTok SocialBlade labels and routes through the account endpoint", async () => {
+    mocks.fetchAdminWithAuth.mockResolvedValue(
+      jsonResponse({
+        username: "bravotv",
+        account_handle: "bravotv",
+        platform: "tiktok",
+        scraped_at: "2026-05-13T16:00:00.000Z",
+        freshness_status: "fresh",
+        is_stale: false,
+        age_hours: 0.2,
+        profile_stats_labels: {
+          followers: "Followers",
+          following: "Following",
+          media_count: "Likes",
+          chart_metric_label: "Followers",
+        },
+        profile_stats: {
+          followers: 4200000,
+          following: 432,
+          media_count: 122500000,
+          engagement_rate: "4.12%",
+          average_likes: 12345,
+          average_comments: 678,
+        },
+        rankings: {
+          sb_rank: "120th",
+          followers_rank: "650th",
+          engagement_rate_rank: "88th",
+          grade: "A-",
+        },
+        daily_channel_metrics_60day: {
+          period: "Last 60 Days",
+          row_count: 1,
+          headers: ["Date", "Followers Delta", "Followers Total", "Likes Delta", "Likes Total"],
+          data: [
+            {
+              Date: "2026-05-13",
+              "Followers Delta": "500",
+              "Followers Total": "4,200,000",
+              "Likes Delta": "2000",
+              "Likes Total": "122,500,000",
+            },
+          ],
+        },
+        daily_total_followers_chart: {
+          frequency: "daily",
+          metric: "total_followers",
+          total_data_points: 2,
+          date_range: { from: "2026-05-12", to: "2026-05-13" },
+          data: [
+            { date: "2026-05-12", followers: 4199500 },
+            { date: "2026-05-13", followers: 4200000 },
+          ],
+        },
+      }),
+    );
+
+    render(<SocialGrowthSection platform="tiktok" handle="bravotv" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Likes")).toBeInTheDocument();
+    });
+
+    expect(screen.getByText("122.5M")).toBeInTheDocument();
+    expect(mocks.fetchAdminWithAuth).toHaveBeenCalledWith(
+      "/api/admin/trr-api/social/profiles/tiktok/bravotv/socialblade",
+      undefined,
+      { allowDevAdminBypass: true },
+    );
+  });
 });

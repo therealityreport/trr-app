@@ -12,7 +12,7 @@
     "build": "next build --webpack",
     "build:turbo": "next build --turbopack",
     "start": "next start",
-    "typecheck": "tsc -p tsconfig.typecheck.json --noEmit",
+    "typecheck": "rm -rf .next/dev/types .next/types && tsc -p tsconfig.typecheck.json --noEmit",
     "typecheck:fandom": "tsc -p tsconfig.typecheck.fandom.json --noEmit",
     "lint": "eslint",
     "clean": "rm -rf .next",

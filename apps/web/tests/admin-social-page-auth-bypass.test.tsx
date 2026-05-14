@@ -94,6 +94,13 @@ const buildInitialLandingPayload = () => ({
           display_label: "@bravotv",
           href: "/social/instagram/bravotv",
           external: false,
+          progress: {
+            saved_count: 442,
+            scraped_count: 400,
+            total_count: 500,
+            saved_percent: 88.4,
+            scraped_percent: 80,
+          },
         },
         {
           platform: "instagram",
@@ -101,6 +108,13 @@ const buildInitialLandingPayload = () => ({
           display_label: "@bravowwhl",
           href: "/social/instagram/bravowwhl",
           external: false,
+          progress: {
+            saved_count: 275,
+            scraped_count: 250,
+            total_count: 300,
+            saved_percent: 91.7,
+            scraped_percent: 83.3,
+          },
         },
       ],
     },
@@ -112,7 +126,7 @@ const buildInitialLandingPayload = () => ({
       canonical_slug: "the-traitors",
       alternative_names: [],
       handles: [],
-      fallback_note: "Shared coverage via Bravo TV",
+      fallback_note: null,
     },
     {
       show_id: "show-2",
@@ -126,6 +140,13 @@ const buildInitialLandingPayload = () => ({
           display_label: "@bravowwhl",
           href: "/social/instagram/bravowwhl",
           external: false,
+          progress: {
+            saved_count: 275,
+            scraped_count: 250,
+            total_count: 300,
+            saved_percent: 91.7,
+            scraped_percent: 83.3,
+          },
         },
       ],
       fallback_note: null,
@@ -264,6 +285,13 @@ const buildInitialLandingPayload = () => ({
           is_active: true,
           scrape_priority: 10,
           metadata: { display_name: "Bravo TV" },
+          progress: {
+            saved_count: 442,
+            scraped_count: 400,
+            total_count: 500,
+            saved_percent: 88.4,
+            scraped_percent: 80,
+          },
         },
       ],
     },
@@ -281,6 +309,13 @@ const buildInitialLandingPayload = () => ({
           is_active: true,
           scrape_priority: 20,
           metadata: { display_name: "Bravo Daily" },
+          progress: {
+            saved_count: 1200,
+            scraped_count: 900,
+            total_count: 1500,
+            saved_percent: 80,
+            scraped_percent: 60,
+          },
         },
       ],
     },
@@ -298,6 +333,13 @@ const buildInitialLandingPayload = () => ({
           is_active: true,
           scrape_priority: 20,
           metadata: { display_name: "Queens of Bravo" },
+          progress: {
+            saved_count: 90,
+            scraped_count: 75,
+            total_count: 100,
+            saved_percent: 90,
+            scraped_percent: 75,
+          },
         },
       ],
     },
@@ -336,8 +378,37 @@ const buildUpdatedLandingPayload = () => ({
   ],
 });
 
+const openAddHandleDialog = async (): Promise<HTMLElement> => {
+  fireEvent.click(screen.getByRole("button", { name: "Add social handle" }));
+  return screen.findByRole("dialog", { name: "Add Social Handle" });
+};
+
+const saveProducerThreadsHandle = async (): Promise<void> => {
+  const dialog = await openAddHandleDialog();
+  fireEvent.change(
+    within(dialog).getByRole("combobox", {
+      name: /Network, show, or cast member/i,
+    }),
+    {
+      target: { value: "person:person-2" },
+    },
+  );
+  fireEvent.change(within(dialog).getByRole("combobox", { name: "Platform" }), {
+    target: { value: "threads" },
+  });
+  fireEvent.change(
+    within(dialog).getByRole("textbox", {
+      name: "Username, handle, or URL",
+    }),
+    {
+      target: { value: "https://www.threads.net/@producerhandles" },
+    },
+  );
+  fireEvent.click(within(dialog).getByRole("button", { name: "Save Handle" }));
+};
+
 describe("admin social page auth bypass", () => {
-  const landingCacheKey = "trr-admin-social-landing:v4";
+  const landingCacheKey = "trr-admin-social-landing:v5";
 
   beforeEach(() => {
     window.localStorage.clear();
@@ -383,7 +454,7 @@ describe("admin social page auth bypass", () => {
     );
   });
 
-  it("updates the cached landing payload after running shared ingest", async () => {
+  it("updates the cached landing payload after saving a social handle", async () => {
     let landingLoadCount = 0;
     const refreshedPayload = buildUpdatedLandingPayload();
 
@@ -393,25 +464,19 @@ describe("admin social page auth bypass", () => {
       }
 
       const url = String(input);
-      if (url.startsWith("/api/admin/social/landing")) {
-        landingLoadCount += 1;
-        if (landingLoadCount === 2) {
-          expect(url).toBe("/api/admin/social/landing?refresh=1");
-        }
-        return jsonResponse(
-          landingLoadCount === 1 ? buildInitialLandingPayload() : refreshedPayload,
-        );
+      if (url === "/api/admin/social/landing" && init?.method === "POST") {
+        expect(JSON.parse(String(init.body))).toMatchObject({
+          target_type: "person",
+          target_id: "person-2",
+          platform: "threads",
+          value: "https://www.threads.net/@producerhandles",
+        });
+        return jsonResponse(refreshedPayload);
       }
 
-      if (url.includes("/social/shared/ingest")) {
-        expect(init?.method).toBe("POST");
-        expect(JSON.parse(String(init?.body))).toMatchObject({
-          source_scope: "network",
-        });
-        return jsonResponse({
-          message: "Shared ingest queued",
-          run_id: "run-queued-1",
-        });
+      if (url.startsWith("/api/admin/social/landing")) {
+        landingLoadCount += 1;
+        return jsonResponse(buildInitialLandingPayload());
       }
 
       throw new Error(`Unhandled request: ${url}`);
@@ -425,8 +490,9 @@ describe("admin social page auth bypass", () => {
       ) as { payload?: ReturnType<typeof buildInitialLandingPayload> } | null;
       expect(cached?.payload?.people_profiles).toHaveLength(1);
     });
+    expect(landingLoadCount).toBeGreaterThan(0);
 
-    fireEvent.click(screen.getByRole("button", { name: "Run Shared Ingest" }));
+    await saveProducerThreadsHandle();
 
     await waitFor(() => {
       const cached = JSON.parse(
@@ -501,7 +567,7 @@ describe("admin social page auth bypass", () => {
     expect(stored?.payload?.cast_socialblade_shows).toHaveLength(1);
   });
 
-  it("uses the dev-admin bypass for landing loads and shared ingest actions", async () => {
+  it("uses the dev-admin bypass for landing loads and add-handle actions", async () => {
     render(<AdminSocialPage />);
 
     await waitFor(() => {
@@ -513,9 +579,28 @@ describe("admin social page auth bypass", () => {
       expect(screen.getByRole("heading", { name: "CREATORS" })).toBeInTheDocument();
       expect(screen.getByRole("heading", { name: "Bravo TV" })).toBeInTheDocument();
       expect(screen.getAllByText("The Traitors").length).toBeGreaterThan(0);
-      expect(screen.getAllByText("Andy Cohen").length).toBeGreaterThan(0);
+      expect(screen.getByRole("button", { name: "Add social handle" })).toBeInTheDocument();
       expect(screen.getByText("Bravo Daily")).toBeInTheDocument();
       expect(screen.getByText("Queens of Bravo")).toBeInTheDocument();
+      expect(screen.getAllByText("Social Blade + Following List").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("Posts").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("Comments").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("Media").length).toBeGreaterThan(0);
+      expect(
+        screen.getByRole("progressbar", {
+          name: "Overall collection progress for Instagram @bravotv: 22.1%",
+        }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("progressbar", {
+          name: "Posts progress for Instagram @bravotv: 442 / 500",
+        }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("progressbar", {
+          name: "Posts progress for Instagram @bravodaily: 1,200 / 1,500",
+        }),
+      ).toBeInTheDocument();
     });
 
     expect(
@@ -529,10 +614,27 @@ describe("admin social page auth bypass", () => {
     expect(screen.queryByText("Bravo account inventory")).not.toBeInTheDocument();
     expect(screen.queryByText("Ambiguous or unmatched posts")).not.toBeInTheDocument();
     expect(screen.queryByText("No open shared review items.")).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Open Reddit Dashboard" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Reddit Dashboard" })).toHaveAttribute(
       "href",
       "/admin/social/reddit",
     );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Collapse Bravo TV profile set" }),
+    );
+    expect(
+      screen.queryByRole("progressbar", {
+        name: "Posts progress for Instagram @bravotv: 442 / 500",
+      }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Expand Bravo TV profile set" }),
+    );
+    expect(
+      screen.getByRole("progressbar", {
+        name: "Posts progress for Instagram @bravotv: 442 / 500",
+      }),
+    ).toBeInTheDocument();
 
     expect(mocks.fetchAdminWithAuth.mock.calls[0]?.[0]).toBe(
       "/api/admin/social/landing",
@@ -542,16 +644,13 @@ describe("admin social page auth bypass", () => {
       preferredUser: mocks.guardState.user,
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Run Shared Ingest" }));
+    await saveProducerThreadsHandle();
 
-    await waitFor(() => {
-      expect(screen.getByText("Shared ingest queued")).toBeInTheDocument();
-    });
-
-    const ingestCall = mocks.fetchAdminWithAuth.mock.calls.find(([input]) =>
-      String(input).includes("/social/shared/ingest"),
+    const saveCall = mocks.fetchAdminWithAuth.mock.calls.find(
+      ([input, init]) =>
+        String(input) === "/api/admin/social/landing" && init?.method === "POST",
     );
-    expect(ingestCall?.[2]).toMatchObject({
+    expect(saveCall?.[2]).toMatchObject({
       allowDevAdminBypass: true,
       preferredUser: mocks.guardState.user,
     });
@@ -603,10 +702,7 @@ describe("admin social page auth bypass", () => {
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "PEOPLE" })).toBeInTheDocument();
       expect(screen.queryByRole("heading", { name: "CAST SOCIALBLADE" })).not.toBeInTheDocument();
-      const rhoslcButton = screen.getByRole("button", { name: /RHOSLC/ });
-      const rhonyButton = screen.getByRole("button", { name: /RHONY/ });
-      expect(rhoslcButton).toHaveAttribute("aria-pressed", "true");
-      expect(rhonyButton).toHaveAttribute("aria-pressed", "false");
+      expect(screen.getByRole("button", { name: /RHOSLC/ })).toBeInTheDocument();
     });
 
     expect(screen.getByText("Heather Gay")).toBeInTheDocument();
@@ -622,17 +718,11 @@ describe("admin social page auth bypass", () => {
       "/social/instagram/heathergay",
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /RHONY/ }));
+    fireEvent.click(screen.getByRole("button", { name: /RHOSLC/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /RHONY/ }));
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /RHOSLC/ })).toHaveAttribute(
-        "aria-pressed",
-        "false",
-      );
-      expect(screen.getByRole("button", { name: /RHONY/ })).toHaveAttribute(
-        "aria-pressed",
-        "true",
-      );
+      expect(screen.getByRole("button", { name: /RHONY/ })).toBeInTheDocument();
       expect(screen.getByText("Meredith Marks")).toBeInTheDocument();
       expect(screen.queryByText("Heather Gay")).not.toBeInTheDocument();
     });
@@ -678,6 +768,25 @@ describe("admin social page auth bypass", () => {
       }
 
       const url = String(input);
+      if (url === "/api/admin/social/landing" && init?.method === "POST") {
+        return jsonResponse({
+          ...landingPayload,
+          people_profiles: buildUpdatedLandingPayload().people_profiles,
+          cast_socialblade_shows: [
+            ...landingPayload.cast_socialblade_shows,
+            {
+              ...rhonyShow,
+              members: [
+                {
+                  ...rhonyShow.members[0],
+                  full_name: "Meredith Marks Refreshed",
+                },
+              ],
+            },
+          ],
+        });
+      }
+
       if (url.startsWith("/api/admin/social/landing")) {
         landingLoadCount += 1;
         return jsonResponse({
@@ -700,17 +809,6 @@ describe("admin social page auth bypass", () => {
         });
       }
 
-      if (url.includes("/social/shared/ingest")) {
-        expect(init?.method).toBe("POST");
-        expect(JSON.parse(String(init?.body))).toMatchObject({
-          source_scope: "network",
-        });
-        return jsonResponse({
-          message: "Shared ingest queued",
-          run_id: "run-queued-1",
-        });
-      }
-
       throw new Error(`Unhandled request: ${url}`);
     });
 
@@ -718,44 +816,23 @@ describe("admin social page auth bypass", () => {
 
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "PEOPLE" })).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: /RHOSLC/ })).toHaveAttribute(
-        "aria-pressed",
-        "true",
-      );
-      expect(screen.getByRole("button", { name: /RHONY/ })).toHaveAttribute(
-        "aria-pressed",
-        "false",
-      );
+      expect(screen.getByRole("button", { name: /RHOSLC/ })).toBeInTheDocument();
       expect(screen.getByText("Heather Gay")).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole("button", { name: /RHONY/ }));
+    fireEvent.click(screen.getByRole("button", { name: /RHOSLC/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /RHONY/ }));
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /RHOSLC/ })).toHaveAttribute(
-        "aria-pressed",
-        "false",
-      );
-      expect(screen.getByRole("button", { name: /RHONY/ })).toHaveAttribute(
-        "aria-pressed",
-        "true",
-      );
+      expect(screen.getByRole("button", { name: /RHONY/ })).toBeInTheDocument();
       expect(screen.getByText("Meredith Marks")).toBeInTheDocument();
       expect(screen.queryByText("Heather Gay")).not.toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Run Shared Ingest" }));
+    await saveProducerThreadsHandle();
 
     await waitFor(() => {
-      expect(screen.getByText("Shared ingest queued")).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: /RHOSLC/ })).toHaveAttribute(
-        "aria-pressed",
-        "false",
-      );
-      expect(screen.getByRole("button", { name: /RHONY/ })).toHaveAttribute(
-        "aria-pressed",
-        "true",
-      );
+      expect(screen.getByRole("button", { name: /RHONY/ })).toBeInTheDocument();
       expect(screen.getByText("Meredith Marks Refreshed")).toBeInTheDocument();
       expect(screen.queryByText("Heather Gay")).not.toBeInTheDocument();
     });
@@ -801,25 +878,19 @@ describe("admin social page auth bypass", () => {
       }
 
       const url = String(input);
+      if (url === "/api/admin/social/landing" && init?.method === "POST") {
+        return jsonResponse({
+          ...landingPayload,
+          people_profiles: buildUpdatedLandingPayload().people_profiles,
+          cast_socialblade_shows: landingPayload.cast_socialblade_shows,
+        });
+      }
+
       if (url.startsWith("/api/admin/social/landing")) {
         landingLoadCount += 1;
         return jsonResponse({
           ...landingPayload,
-          cast_socialblade_shows:
-            landingLoadCount === 2
-              ? landingPayload.cast_socialblade_shows
-              : [...landingPayload.cast_socialblade_shows, rhonyShow],
-        });
-      }
-
-      if (url.includes("/social/shared/ingest")) {
-        expect(init?.method).toBe("POST");
-        expect(JSON.parse(String(init?.body))).toMatchObject({
-          source_scope: "network",
-        });
-        return jsonResponse({
-          message: "Shared ingest queued",
-          run_id: "run-queued-1",
+          cast_socialblade_shows: [...landingPayload.cast_socialblade_shows, rhonyShow],
         });
       }
 
@@ -829,57 +900,24 @@ describe("admin social page auth bypass", () => {
     render(<AdminSocialPage />);
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /RHOSLC/ })).toHaveAttribute(
-        "aria-pressed",
-        "true",
-      );
-      expect(screen.getByRole("button", { name: /RHONY/ })).toHaveAttribute(
-        "aria-pressed",
-        "false",
-      );
+      expect(screen.getByRole("button", { name: /RHOSLC/ })).toBeInTheDocument();
       expect(screen.getByText("Heather Gay")).toBeInTheDocument();
     });
+    expect(landingLoadCount).toBeGreaterThan(0);
 
-    fireEvent.click(screen.getByRole("button", { name: /RHONY/ }));
+    fireEvent.click(screen.getByRole("button", { name: /RHOSLC/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /RHONY/ }));
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /RHOSLC/ })).toHaveAttribute(
-        "aria-pressed",
-        "false",
-      );
-      expect(screen.getByRole("button", { name: /RHONY/ })).toHaveAttribute(
-        "aria-pressed",
-        "true",
-      );
+      expect(screen.getByRole("button", { name: /RHONY/ })).toBeInTheDocument();
       expect(screen.getByText("Meredith Marks")).toBeInTheDocument();
       expect(screen.queryByText("Heather Gay")).not.toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Run Shared Ingest" }));
+    await saveProducerThreadsHandle();
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /RHOSLC/ })).toHaveAttribute(
-        "aria-pressed",
-        "true",
-      );
-      expect(
-        screen.queryByRole("button", { name: /RHONY/ }),
-      ).not.toBeInTheDocument();
-      expect(screen.getByText("Heather Gay")).toBeInTheDocument();
-      expect(screen.queryByText("Meredith Marks")).not.toBeInTheDocument();
-    });
-
-    fireEvent.click(screen.getByRole("button", { name: "Run Shared Ingest" }));
-
-    await waitFor(() => {
-      expect(screen.getByRole("button", { name: /RHOSLC/ })).toHaveAttribute(
-        "aria-pressed",
-        "true",
-      );
-      expect(screen.getByRole("button", { name: /RHONY/ })).toHaveAttribute(
-        "aria-pressed",
-        "false",
-      );
+      expect(screen.getByRole("button", { name: /RHOSLC/ })).toBeInTheDocument();
       expect(screen.getByText("Heather Gay")).toBeInTheDocument();
       expect(screen.queryByText("Meredith Marks")).not.toBeInTheDocument();
     });
@@ -998,13 +1036,15 @@ describe("admin social page auth bypass", () => {
       expect(section).not.toBeNull();
       return section as HTMLElement;
     });
-    fireEvent.change(within(newsSection).getByRole("textbox", { name: "Handle or URL" }), {
+    fireEvent.click(within(newsSection).getByRole("button", { name: "Add News source" }));
+    let dialog = await screen.findByRole("dialog", { name: "Add News Source" });
+    fireEvent.change(within(dialog).getByRole("textbox", { name: "Handle or URL" }), {
       target: { value: "@realityblurb" },
     });
-    fireEvent.change(within(newsSection).getByRole("textbox", { name: "Display name" }), {
+    fireEvent.change(within(dialog).getByRole("textbox", { name: "Display name" }), {
       target: { value: "Reality Blurb" },
     });
-    fireEvent.click(within(newsSection).getByRole("button", { name: "Add Source" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Add Source" }));
 
     await waitFor(() => {
       expect(screen.getByText("Reality Blurb")).toBeInTheDocument();
@@ -1013,13 +1053,15 @@ describe("admin social page auth bypass", () => {
     const creatorSection = screen
       .getByRole("heading", { name: "CREATORS" })
       .closest("section") as HTMLElement;
-    fireEvent.change(within(creatorSection).getByRole("textbox", { name: "Handle or URL" }), {
+    fireEvent.click(within(creatorSection).getByRole("button", { name: "Add Creators source" }));
+    dialog = await screen.findByRole("dialog", { name: "Add Creators Source" });
+    fireEvent.change(within(dialog).getByRole("textbox", { name: "Handle or URL" }), {
       target: { value: "@bravobravoduckingbravo" },
     });
-    fireEvent.change(within(creatorSection).getByRole("textbox", { name: "Display name" }), {
+    fireEvent.change(within(dialog).getByRole("textbox", { name: "Display name" }), {
       target: { value: "Bravo Bravo Ducking Bravo" },
     });
-    fireEvent.click(within(creatorSection).getByRole("button", { name: "Add Source" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Add Source" }));
 
     await waitFor(() => {
       expect(screen.getByText("Bravo Bravo Ducking Bravo")).toBeInTheDocument();
@@ -1030,29 +1072,11 @@ describe("admin social page auth bypass", () => {
     render(<AdminSocialPage />);
 
     await waitFor(() => {
-      expect(screen.getByText("ADD SOCIAL HANDLE")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Add social handle" })).toBeInTheDocument();
       expect(screen.queryByText("@producerhandles")).not.toBeInTheDocument();
     });
 
-    fireEvent.change(
-      screen.getByRole("combobox", { name: /NETWORK SHOW or CAST MEMBER/i }),
-      {
-        target: { value: "person:person-2" },
-      },
-    );
-    fireEvent.change(screen.getByRole("combobox", { name: "THE PLATFORM" }), {
-      target: { value: "threads" },
-    });
-    fireEvent.change(screen.getByRole("textbox", { name: "USERNAME/HANDLE (or URL)" }), {
-      target: { value: "https://www.threads.net/@producerhandles" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Submit" }));
-
-    await waitFor(() => {
-      expect(
-        screen.getByText("Saved Threads for Producer Without Handles."),
-      ).toBeInTheDocument();
-    });
+    await saveProducerThreadsHandle();
 
     const saveCall = mocks.fetchAdminWithAuth.mock.calls.find(
       ([input, init]) =>
@@ -1061,6 +1085,18 @@ describe("admin social page auth bypass", () => {
     expect(saveCall?.[2]).toMatchObject({
       allowDevAdminBypass: true,
       preferredUser: mocks.guardState.user,
+    });
+    await waitFor(() => {
+      const stored = JSON.parse(
+        window.localStorage.getItem(landingCacheKey) || "null",
+      ) as { payload?: ReturnType<typeof buildUpdatedLandingPayload> } | null;
+      expect(stored?.payload?.people_profiles).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            person_id: "person-2",
+          }),
+        ]),
+      );
     });
   });
 
@@ -1106,28 +1142,13 @@ describe("admin social page auth bypass", () => {
     render(<AdminSocialPage />);
 
     await waitFor(() => {
-      expect(screen.getByText("ADD SOCIAL HANDLE")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Add social handle" })).toBeInTheDocument();
       expect(screen.queryByText("@producerhandles")).not.toBeInTheDocument();
     });
 
-    fireEvent.change(
-      screen.getByRole("combobox", { name: /NETWORK SHOW or CAST MEMBER/i }),
-      {
-        target: { value: "person:person-2" },
-      },
-    );
-    fireEvent.change(screen.getByRole("combobox", { name: "THE PLATFORM" }), {
-      target: { value: "threads" },
-    });
-    fireEvent.change(screen.getByRole("textbox", { name: "USERNAME/HANDLE (or URL)" }), {
-      target: { value: "https://www.threads.net/@producerhandles" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Submit" }));
+    await saveProducerThreadsHandle();
 
     await waitFor(() => {
-      expect(
-        screen.getByText("Saved Threads for Producer Without Handles."),
-      ).toBeInTheDocument();
       expect(
         screen.getByText("No people SocialBlade rows are available yet."),
       ).toBeInTheDocument();
