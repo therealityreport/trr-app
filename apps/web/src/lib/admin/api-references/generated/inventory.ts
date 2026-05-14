@@ -4,8 +4,8 @@ import type { AdminApiReferenceInventory } from "@/lib/admin/api-references/type
 export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
   "inventorySchemaVersion": "1.0.0",
   "generatorVersion": "1.0.0",
-  "generatedAt": "2026-05-12T20:09:06.431Z",
-  "sourceCommitSha": "b4198ec471d55204af3f5bbeca194ac0a9706ab7",
+  "generatedAt": "2026-05-14T04:04:48.345Z",
+  "sourceCommitSha": "7619cf4bffaa39f75bf119133742a406ebc4e2bd",
   "overrideDigest": "ddca008fc34e0b3820391e86a4d0620aa57e942244342eab2e4b94e2bcfdb211",
   "nodes": [
     {
@@ -2412,7 +2412,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "POST",
       "sourceFile": "src/app/api/admin/trr-api/people/[personId]/social-growth/refresh/route.ts",
       "sourceLocator": {
-        "line": 35,
+        "line": 36,
         "matchedText": "`/admin/people/${personId}/socialblade/refresh`"
       },
       "provenance": "static_scan",
@@ -2446,7 +2446,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "POST",
       "sourceFile": "src/app/api/admin/trr-api/social-growth/refresh-batch/route.ts",
       "sourceLocator": {
-        "line": 30,
+        "line": 31,
         "matchedText": "\"/admin/people/socialblade/refresh-batch\""
       },
       "provenance": "static_scan",
@@ -4907,9 +4907,9 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "polls": false,
       "pollCadenceMs": null,
       "automatic": false,
-      "loadsLargeDatasets": true,
-      "usesPagination": true,
-      "returnsWideRowsOrBlobsOrRawJson": false,
+      "loadsLargeDatasets": false,
+      "usesPagination": false,
+      "returnsWideRowsOrBlobsOrRawJson": true,
       "fansOutQueries": false,
       "postgresAccess": "none",
       "viewKinds": [
@@ -12525,6 +12525,39 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       ],
       "staticOnly": false,
       "payloadRisk": "high",
+      "fanoutRisk": "low"
+    },
+    {
+      "id": "route:GET:/api/admin/trr-api/social/profiles/[platform]/[handle]/relationships",
+      "kind": "api_route",
+      "title": "GET /api/admin/trr-api/social/profiles/[platform]/[handle]/relationships",
+      "pathPattern": "/api/admin/trr-api/social/profiles/[platform]/[handle]/relationships",
+      "symbol": "GET",
+      "sourceFile": "src/app/api/admin/trr-api/social/profiles/[platform]/[handle]/relationships/route.ts",
+      "sourceLocator": {
+        "line": 14,
+        "symbol": "GET"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:app_api_route"
+      ],
+      "usageTier": "manual",
+      "polls": false,
+      "pollCadenceMs": null,
+      "automatic": false,
+      "loadsLargeDatasets": false,
+      "usesPagination": false,
+      "returnsWideRowsOrBlobsOrRawJson": false,
+      "fansOutQueries": false,
+      "postgresAccess": "none",
+      "viewKinds": [
+        "detail"
+      ],
+      "staticOnly": false,
+      "payloadRisk": "low",
       "fanoutRisk": "low"
     },
     {
@@ -21353,7 +21386,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/api/admin/trr-api/people/[personId]/social-growth/refresh/route.ts",
       "sourceLocator": {
-        "line": 35,
+        "line": 36,
         "matchedText": "`/admin/people/${personId}/socialblade/refresh`"
       },
       "provenance": "static_scan",
@@ -21803,7 +21836,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/api/admin/trr-api/social-growth/refresh-batch/route.ts",
       "sourceLocator": {
-        "line": 30,
+        "line": 31,
         "matchedText": "\"/admin/people/socialblade/refresh-batch\""
       },
       "provenance": "static_scan",
@@ -22167,6 +22200,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
         "route:GET:/api/admin/trr-api/social/profiles/[platform]/[handle]/hashtags/timeline",
         "route:GET:/api/admin/trr-api/social/profiles/[platform]/[handle]/live-profile-total",
         "route:GET:/api/admin/trr-api/social/profiles/[platform]/[handle]/posts",
+        "route:GET:/api/admin/trr-api/social/profiles/[platform]/[handle]/relationships",
         "route:GET:/api/admin/trr-api/social/profiles/[platform]/[handle]/snapshot",
         "route:GET:/api/admin/trr-api/social/profiles/[platform]/[handle]/socialblade",
         "route:GET:/api/admin/trr-api/social/profiles/[platform]/[handle]/summary",
@@ -22671,11 +22705,11 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "renders_view": []
     },
     "summary": {
-      "totalNodes": 548,
+      "totalNodes": 549,
       "totalEdges": 187,
       "nodesByKind": {
         "ui_surface": 58,
-        "api_route": 372,
+        "api_route": 373,
         "backend_endpoint": 112,
         "repository_surface": 2,
         "polling_loop": 4
