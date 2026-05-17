@@ -159,6 +159,10 @@ describe("social landing repository", () => {
     ]);
 
     fetchSocialBackendJsonMock.mockImplementation(async (path: string) => {
+      if (path === "/landing-socialblade-progress-counts") {
+        return { rows: [] };
+      }
+
       if (path === "/landing-socialblade-rows") {
         const options = fetchSocialBackendJsonMock.mock.calls.at(-1)?.[1] as
           | { body?: string }
@@ -660,6 +664,81 @@ describe("social landing repository", () => {
     expect(sql).toContain("coalesce(materialized_counts.comments_total_count, 0)");
   });
 
+  it("loads SocialBlade progress counts through the backend instead of direct app SQL", async () => {
+    const defaultSocialBackend = fetchSocialBackendJsonMock.getMockImplementation();
+    if (!defaultSocialBackend) throw new Error("Missing default social backend mock");
+    fetchSocialBackendJsonMock.mockImplementation(async (path: string, options?: unknown) => {
+      if (path === "/landing-socialblade-progress-counts") {
+        return {
+          rows: [
+            {
+              platform: "instagram",
+              account_handle: "bravotv",
+              socialblade_supported: true,
+              socialblade_scraped_count: 1,
+              socialblade_saved_count: 1,
+            },
+          ],
+        };
+      }
+      return defaultSocialBackend(path, options);
+    });
+    queryMock.mockImplementation(async (sql: string) => {
+      if (String(sql).includes("landing_social_progress")) {
+        return {
+          rows: [
+            {
+              platform: "instagram",
+              account_handle: "bravotv",
+              saved_count: 0,
+              scraped_count: 0,
+              socialblade_supported: true,
+            },
+          ],
+        };
+      }
+      return { rows: [] };
+    });
+
+    const payload = await getSocialLandingPayload();
+
+    const landingCall = queryMock.mock.calls.find(([sql]) =>
+      String(sql).includes("landing_social_progress"),
+    );
+    const sql = String(landingCall?.[0] ?? "");
+    const progressCall = fetchSocialBackendJsonMock.mock.calls.find(
+      ([path]) => path === "/landing-socialblade-progress-counts",
+    );
+    const progressOptions = progressCall?.[1] as { body?: string; method?: string } | undefined;
+    const progressBody = JSON.parse(progressOptions?.body ?? "{}") as {
+      platforms?: string[];
+      account_handles?: string[];
+    };
+
+    expect(sql).not.toContain("pipeline.socialblade_growth_data");
+    expect(progressOptions?.method).toBe("POST");
+    expect(progressBody.platforms?.length).toBe(progressBody.account_handles?.length);
+    expect(progressBody.account_handles).toEqual(expect.arrayContaining(["bravotv"]));
+    expect(payload.network_sets[0]?.handles).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          platform: "instagram",
+          handle: "bravotv",
+          progress: expect.objectContaining({
+            lanes: expect.arrayContaining([
+              expect.objectContaining({
+                key: "socialblade",
+                status: "ready",
+                saved_count: 1,
+                scraped_count: 1,
+              }),
+            ]),
+          }),
+        }),
+      ]),
+    );
+  });
+
   it("labels assigned YouTube playlist show handles with playlist metadata", async () => {
     const defaultSocialBackend = fetchSocialBackendJsonMock.getMockImplementation();
     if (!defaultSocialBackend) throw new Error("Missing default social backend mock");
@@ -728,6 +807,9 @@ describe("social landing repository", () => {
         return { items: [] };
       }
       if (path === "/landing-socialblade-rows") {
+        return { rows: [] };
+      }
+      if (path === "/landing-socialblade-progress-counts") {
         return { rows: [] };
       }
       if (path.startsWith("/profiles/") && path.endsWith("/summary")) {
@@ -842,6 +924,7 @@ describe("social landing repository", () => {
       }
       if (path.startsWith("/shared/ingest/runs")) return [];
       if (path.startsWith("/shared/review-queue")) return { items: [] };
+      if (path === "/landing-socialblade-progress-counts") return { rows: [] };
       if (path.startsWith("/profiles/") && path.endsWith("/summary")) {
         const [platform, rawHandle] = path
           .replace(/^\/profiles\//, "")
@@ -1114,6 +1197,7 @@ describe("social landing repository", () => {
         }
         if (path.startsWith("/shared/ingest/runs")) return [];
         if (path.startsWith("/shared/review-queue")) return { items: [] };
+        if (path === "/landing-socialblade-progress-counts") return { rows: [] };
         if (path.startsWith("/profiles/") && path.endsWith("/summary")) {
           return {
             summary_detail: "lite",
@@ -1215,6 +1299,7 @@ describe("social landing repository", () => {
         }
         if (path.startsWith("/shared/ingest/runs")) return [];
         if (path.startsWith("/shared/review-queue")) return { items: [] };
+        if (path === "/landing-socialblade-progress-counts") return { rows: [] };
         if (path.startsWith("/profiles/") && path.endsWith("/summary")) {
           return {
             summary_detail: "lite",

@@ -560,6 +560,16 @@ export default function InstagramCommentsPostModal({
       y: Math.min(rect.top, window.innerHeight - 300),
     });
   };
+  const hideMediaPreview = () => {
+    setMediaPreview(null);
+  };
+  const hideMediaPreviewWhenLeavingTarget = (event: React.MouseEvent<HTMLElement>) => {
+    const relatedTarget = event.relatedTarget;
+    if (relatedTarget instanceof Node && event.currentTarget.contains(relatedTarget)) {
+      return;
+    }
+    hideMediaPreview();
+  };
   const renderInstagramCommentMedia = (item: AdminCommentThreadItem): React.ReactNode => {
     const previewMediaUrl = item.mediaUrls?.[0] ?? null;
     if (!previewMediaUrl) return null;
@@ -572,9 +582,10 @@ export default function InstagramCommentsPostModal({
           aria-label="Open comment media"
           onMouseEnter={(event) => updateMediaPreview(previewMediaUrl, event)}
           onMouseMove={(event) => updateMediaPreview(previewMediaUrl, event)}
-          onMouseLeave={() => setMediaPreview(null)}
+          onMouseLeave={hideMediaPreview}
+          onMouseOut={hideMediaPreviewWhenLeavingTarget}
           onFocus={(event) => showMediaPreviewFromElement(previewMediaUrl, event.currentTarget)}
-          onBlur={() => setMediaPreview(null)}
+          onBlur={hideMediaPreview}
           className="group relative block size-12 overflow-hidden rounded-md border border-border bg-muted"
         >
           {isLikelyVideoUrl(previewMediaUrl) ? (

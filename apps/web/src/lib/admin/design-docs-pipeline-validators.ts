@@ -9,7 +9,7 @@ import {
   CONTENT_BLOCK_TYPE_IDS,
   type ContentBlock,
 } from "./design-docs-config.ts";
-import { getReusableUiPrimitive } from "./design-docs-ui-primitives";
+import { getReusableUiPrimitive } from "./design-docs-ui-primitives.ts";
 import type {
   A11yAuditFinding,
   A11yAuditResult,

@@ -1762,8 +1762,12 @@ function buildMirrorScopeLabel(post: AnyPost): string {
   const sourceCount = getStrArr(post, "source_media_urls").length || getStrArr(post, "media_urls").length;
   const hostedCount = getStrArr(post, "hosted_media_urls").length;
   const hasHostedThumbnail = Boolean(getStr(post, "hosted_thumbnail_url"));
-  if (hostedCount > 0 && sourceCount > 0 && hostedCount >= sourceCount) return "Media + thumbnail mirrored";
-  if (hostedCount > 0 && sourceCount > 0) return `Partial media mirrored (${hostedCount}/${sourceCount})`;
+  if (hostedCount > 0 && sourceCount > 0 && hostedCount >= sourceCount && hasHostedThumbnail) {
+    return "Media + thumbnail mirrored";
+  }
+  if (hostedCount > 0 && sourceCount > 0 && hostedCount < sourceCount) {
+    return `Partial media mirrored (${hostedCount}/${sourceCount})`;
+  }
   if (hostedCount > 0) return "Media mirrored";
   if (hasHostedThumbnail) return "Thumbnail mirrored only";
   return "Platform-hosted media";

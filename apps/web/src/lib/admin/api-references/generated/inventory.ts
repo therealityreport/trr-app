@@ -4,8 +4,8 @@ import type { AdminApiReferenceInventory } from "@/lib/admin/api-references/type
 export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
   "inventorySchemaVersion": "1.0.0",
   "generatorVersion": "1.0.0",
-  "generatedAt": "2026-05-14T04:04:48.345Z",
-  "sourceCommitSha": "7619cf4bffaa39f75bf119133742a406ebc4e2bd",
+  "generatedAt": "2026-05-17T18:35:30.656Z",
+  "sourceCommitSha": "b4198ec471d55204af3f5bbeca194ac0a9706ab7",
   "overrideDigest": "ddca008fc34e0b3820391e86a4d0620aa57e942244342eab2e4b94e2bcfdb211",
   "nodes": [
     {
@@ -1973,14 +1973,14 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "POST",
       "sourceFile": "src/app/api/admin/trr-api/cast-photos/[photoId]/auto-count/route.ts",
       "sourceLocator": {
-        "line": 44,
-        "matchedText": "`/admin/cast-photos/${photoId}/auto-count`"
+        "line": 21,
+        "matchedText": "`/admin/cast-photos/${params.photoId}/auto-count`"
       },
       "provenance": "static_scan",
       "confidence": "high",
       "verificationStatus": "verified",
       "basis": [
-        "static_scan:getBackendApiUrl"
+        "static_scan:createAdminBackendProxyRoute"
       ],
       "usageTier": "manual",
       "polls": false,
@@ -1988,7 +1988,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "automatic": false,
       "loadsLargeDatasets": false,
       "usesPagination": false,
-      "returnsWideRowsOrBlobsOrRawJson": true,
+      "returnsWideRowsOrBlobsOrRawJson": false,
       "fansOutQueries": false,
       "postgresAccess": "indirect",
       "viewKinds": [
@@ -1996,7 +1996,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
         "detail"
       ],
       "staticOnly": false,
-      "payloadRisk": "high",
+      "payloadRisk": "low",
       "fanoutRisk": "low"
     },
     {
@@ -2007,14 +2007,14 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "POST",
       "sourceFile": "src/app/api/admin/trr-api/cast-photos/[photoId]/detect-text-overlay/route.ts",
       "sourceLocator": {
-        "line": 47,
-        "matchedText": "`/admin/cast-photos/${photoId}/detect-text-overlay`"
+        "line": 21,
+        "matchedText": "`/admin/cast-photos/${params.photoId}/detect-text-overlay`"
       },
       "provenance": "static_scan",
       "confidence": "high",
       "verificationStatus": "verified",
       "basis": [
-        "static_scan:getBackendApiUrl"
+        "static_scan:createAdminBackendProxyRoute"
       ],
       "usageTier": "manual",
       "polls": false,
@@ -2022,7 +2022,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "automatic": false,
       "loadsLargeDatasets": false,
       "usesPagination": false,
-      "returnsWideRowsOrBlobsOrRawJson": true,
+      "returnsWideRowsOrBlobsOrRawJson": false,
       "fansOutQueries": false,
       "postgresAccess": "indirect",
       "viewKinds": [
@@ -2030,7 +2030,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
         "detail"
       ],
       "staticOnly": false,
-      "payloadRisk": "high",
+      "payloadRisk": "low",
       "fanoutRisk": "low"
     },
     {
@@ -2041,14 +2041,14 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "POST",
       "sourceFile": "src/app/api/admin/trr-api/cast-photos/[photoId]/mirror/route.ts",
       "sourceLocator": {
-        "line": 44,
-        "matchedText": "`/admin/cast-photos/${photoId}/mirror`"
+        "line": 17,
+        "matchedText": "`/admin/cast-photos/${params.photoId}/mirror`"
       },
       "provenance": "static_scan",
       "confidence": "high",
       "verificationStatus": "verified",
       "basis": [
-        "static_scan:getBackendApiUrl"
+        "static_scan:createAdminBackendProxyRoute"
       ],
       "usageTier": "manual",
       "polls": false,
@@ -2056,7 +2056,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "automatic": false,
       "loadsLargeDatasets": false,
       "usesPagination": false,
-      "returnsWideRowsOrBlobsOrRawJson": true,
+      "returnsWideRowsOrBlobsOrRawJson": false,
       "fansOutQueries": false,
       "postgresAccess": "indirect",
       "viewKinds": [
@@ -2064,7 +2064,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
         "detail"
       ],
       "staticOnly": false,
-      "payloadRisk": "high",
+      "payloadRisk": "low",
       "fanoutRisk": "low"
     },
     {
@@ -2075,14 +2075,14 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "POST",
       "sourceFile": "src/app/api/admin/trr-api/cast-photos/[photoId]/variants/route.ts",
       "sourceLocator": {
-        "line": 44,
-        "matchedText": "`/admin/cast-photos/${photoId}/variants`"
+        "line": 17,
+        "matchedText": "`/admin/cast-photos/${params.photoId}/variants`"
       },
       "provenance": "static_scan",
       "confidence": "high",
       "verificationStatus": "verified",
       "basis": [
-        "static_scan:getBackendApiUrl"
+        "static_scan:createAdminBackendProxyRoute"
       ],
       "usageTier": "manual",
       "polls": false,
@@ -2090,7 +2090,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "automatic": false,
       "loadsLargeDatasets": false,
       "usesPagination": false,
-      "returnsWideRowsOrBlobsOrRawJson": true,
+      "returnsWideRowsOrBlobsOrRawJson": false,
       "fansOutQueries": false,
       "postgresAccess": "indirect",
       "viewKinds": [
@@ -2098,7 +2098,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
         "detail"
       ],
       "staticOnly": false,
-      "payloadRisk": "high",
+      "payloadRisk": "low",
       "fanoutRisk": "low"
     },
     {
@@ -2109,14 +2109,14 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "POST",
       "sourceFile": "src/app/api/admin/trr-api/media-assets/[assetId]/auto-count/route.ts",
       "sourceLocator": {
-        "line": 44,
-        "matchedText": "`/admin/media-assets/${assetId}/auto-count`"
+        "line": 21,
+        "matchedText": "`/admin/media-assets/${params.assetId}/auto-count`"
       },
       "provenance": "static_scan",
       "confidence": "high",
       "verificationStatus": "verified",
       "basis": [
-        "static_scan:getBackendApiUrl"
+        "static_scan:createAdminBackendProxyRoute"
       ],
       "usageTier": "manual",
       "polls": false,
@@ -2124,7 +2124,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "automatic": false,
       "loadsLargeDatasets": true,
       "usesPagination": false,
-      "returnsWideRowsOrBlobsOrRawJson": true,
+      "returnsWideRowsOrBlobsOrRawJson": false,
       "fansOutQueries": false,
       "postgresAccess": "indirect",
       "viewKinds": [
@@ -2143,14 +2143,14 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "POST",
       "sourceFile": "src/app/api/admin/trr-api/media-assets/[assetId]/detect-text-overlay/route.ts",
       "sourceLocator": {
-        "line": 44,
-        "matchedText": "`/admin/media-assets/${assetId}/detect-text-overlay`"
+        "line": 21,
+        "matchedText": "`/admin/media-assets/${params.assetId}/detect-text-overlay`"
       },
       "provenance": "static_scan",
       "confidence": "high",
       "verificationStatus": "verified",
       "basis": [
-        "static_scan:getBackendApiUrl"
+        "static_scan:createAdminBackendProxyRoute"
       ],
       "usageTier": "manual",
       "polls": false,
@@ -2158,7 +2158,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "automatic": false,
       "loadsLargeDatasets": true,
       "usesPagination": false,
-      "returnsWideRowsOrBlobsOrRawJson": true,
+      "returnsWideRowsOrBlobsOrRawJson": false,
       "fansOutQueries": false,
       "postgresAccess": "indirect",
       "viewKinds": [
@@ -2177,14 +2177,14 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "POST",
       "sourceFile": "src/app/api/admin/trr-api/media-assets/[assetId]/mirror/route.ts",
       "sourceLocator": {
-        "line": 44,
-        "matchedText": "`/admin/media-assets/${assetId}/mirror`"
+        "line": 17,
+        "matchedText": "`/admin/media-assets/${params.assetId}/mirror`"
       },
       "provenance": "static_scan",
       "confidence": "high",
       "verificationStatus": "verified",
       "basis": [
-        "static_scan:getBackendApiUrl"
+        "static_scan:createAdminBackendProxyRoute"
       ],
       "usageTier": "manual",
       "polls": false,
@@ -2192,7 +2192,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "automatic": false,
       "loadsLargeDatasets": true,
       "usesPagination": false,
-      "returnsWideRowsOrBlobsOrRawJson": true,
+      "returnsWideRowsOrBlobsOrRawJson": false,
       "fansOutQueries": false,
       "postgresAccess": "indirect",
       "viewKinds": [
@@ -2211,14 +2211,14 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "POST",
       "sourceFile": "src/app/api/admin/trr-api/media-assets/[assetId]/replace-from-url/route.ts",
       "sourceLocator": {
-        "line": 44,
-        "matchedText": "`/admin/media-assets/${assetId}/replace-from-url`"
+        "line": 17,
+        "matchedText": "`/admin/media-assets/${params.assetId}/replace-from-url`"
       },
       "provenance": "static_scan",
       "confidence": "high",
       "verificationStatus": "verified",
       "basis": [
-        "static_scan:getBackendApiUrl"
+        "static_scan:createAdminBackendProxyRoute"
       ],
       "usageTier": "manual",
       "polls": false,
@@ -2226,7 +2226,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "automatic": false,
       "loadsLargeDatasets": true,
       "usesPagination": false,
-      "returnsWideRowsOrBlobsOrRawJson": true,
+      "returnsWideRowsOrBlobsOrRawJson": false,
       "fansOutQueries": false,
       "postgresAccess": "indirect",
       "viewKinds": [
@@ -2245,14 +2245,14 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "POST",
       "sourceFile": "src/app/api/admin/trr-api/media-assets/[assetId]/reverse-image-search/route.ts",
       "sourceLocator": {
-        "line": 44,
-        "matchedText": "`/admin/media-assets/${assetId}/reverse-image-search`"
+        "line": 14,
+        "matchedText": "`/admin/media-assets/${params.assetId}/reverse-image-search`"
       },
       "provenance": "static_scan",
       "confidence": "high",
       "verificationStatus": "verified",
       "basis": [
-        "static_scan:getBackendApiUrl"
+        "static_scan:createAdminBackendProxyRoute"
       ],
       "usageTier": "manual",
       "polls": false,
@@ -2260,7 +2260,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "automatic": false,
       "loadsLargeDatasets": true,
       "usesPagination": false,
-      "returnsWideRowsOrBlobsOrRawJson": true,
+      "returnsWideRowsOrBlobsOrRawJson": false,
       "fansOutQueries": false,
       "postgresAccess": "indirect",
       "viewKinds": [
@@ -2279,14 +2279,14 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "POST",
       "sourceFile": "src/app/api/admin/trr-api/media-assets/[assetId]/variants/route.ts",
       "sourceLocator": {
-        "line": 44,
-        "matchedText": "`/admin/media-assets/${assetId}/variants`"
+        "line": 17,
+        "matchedText": "`/admin/media-assets/${params.assetId}/variants`"
       },
       "provenance": "static_scan",
       "confidence": "high",
       "verificationStatus": "verified",
       "basis": [
-        "static_scan:getBackendApiUrl"
+        "static_scan:createAdminBackendProxyRoute"
       ],
       "usageTier": "manual",
       "polls": false,
@@ -2294,7 +2294,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "automatic": false,
       "loadsLargeDatasets": true,
       "usesPagination": false,
-      "returnsWideRowsOrBlobsOrRawJson": true,
+      "returnsWideRowsOrBlobsOrRawJson": false,
       "fansOutQueries": false,
       "postgresAccess": "indirect",
       "viewKinds": [
@@ -5863,7 +5863,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "set-interval",
       "sourceFile": "src/components/admin/social-week/WeekDetailPageView.tsx",
       "sourceLocator": {
-        "line": 7126,
+        "line": 7130,
         "matchedText": "setInterval"
       },
       "provenance": "static_scan",
@@ -5894,7 +5894,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "set-interval",
       "sourceFile": "src/components/admin/social-week/WeekDetailPageView.tsx",
       "sourceLocator": {
-        "line": 7134,
+        "line": 7138,
         "matchedText": "setInterval"
       },
       "provenance": "static_scan",
@@ -14828,7 +14828,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "POST",
       "sourceFile": "src/app/api/admin/trr-api/cast-photos/[photoId]/auto-count/route.ts",
       "sourceLocator": {
-        "line": 35,
+        "line": 17,
         "symbol": "POST"
       },
       "provenance": "static_scan",
@@ -14843,7 +14843,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "automatic": false,
       "loadsLargeDatasets": false,
       "usesPagination": false,
-      "returnsWideRowsOrBlobsOrRawJson": true,
+      "returnsWideRowsOrBlobsOrRawJson": false,
       "fansOutQueries": false,
       "postgresAccess": "none",
       "viewKinds": [
@@ -14851,7 +14851,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
         "detail"
       ],
       "staticOnly": false,
-      "payloadRisk": "high",
+      "payloadRisk": "low",
       "fanoutRisk": "low"
     },
     {
@@ -14862,7 +14862,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "POST",
       "sourceFile": "src/app/api/admin/trr-api/cast-photos/[photoId]/detect-text-overlay/route.ts",
       "sourceLocator": {
-        "line": 38,
+        "line": 17,
         "symbol": "POST"
       },
       "provenance": "static_scan",
@@ -14877,7 +14877,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "automatic": false,
       "loadsLargeDatasets": false,
       "usesPagination": false,
-      "returnsWideRowsOrBlobsOrRawJson": true,
+      "returnsWideRowsOrBlobsOrRawJson": false,
       "fansOutQueries": false,
       "postgresAccess": "none",
       "viewKinds": [
@@ -14885,7 +14885,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
         "detail"
       ],
       "staticOnly": false,
-      "payloadRisk": "high",
+      "payloadRisk": "low",
       "fanoutRisk": "low"
     },
     {
@@ -14896,7 +14896,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "POST",
       "sourceFile": "src/app/api/admin/trr-api/cast-photos/[photoId]/mirror/route.ts",
       "sourceLocator": {
-        "line": 35,
+        "line": 13,
         "symbol": "POST"
       },
       "provenance": "static_scan",
@@ -14911,7 +14911,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "automatic": false,
       "loadsLargeDatasets": false,
       "usesPagination": false,
-      "returnsWideRowsOrBlobsOrRawJson": true,
+      "returnsWideRowsOrBlobsOrRawJson": false,
       "fansOutQueries": false,
       "postgresAccess": "none",
       "viewKinds": [
@@ -14919,7 +14919,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
         "detail"
       ],
       "staticOnly": false,
-      "payloadRisk": "high",
+      "payloadRisk": "low",
       "fanoutRisk": "low"
     },
     {
@@ -14930,7 +14930,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "POST",
       "sourceFile": "src/app/api/admin/trr-api/cast-photos/[photoId]/variants/route.ts",
       "sourceLocator": {
-        "line": 35,
+        "line": 13,
         "symbol": "POST"
       },
       "provenance": "static_scan",
@@ -14945,7 +14945,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "automatic": false,
       "loadsLargeDatasets": false,
       "usesPagination": false,
-      "returnsWideRowsOrBlobsOrRawJson": true,
+      "returnsWideRowsOrBlobsOrRawJson": false,
       "fansOutQueries": false,
       "postgresAccess": "none",
       "viewKinds": [
@@ -14953,7 +14953,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
         "detail"
       ],
       "staticOnly": false,
-      "payloadRisk": "high",
+      "payloadRisk": "low",
       "fanoutRisk": "low"
     },
     {
@@ -14997,7 +14997,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "POST",
       "sourceFile": "src/app/api/admin/trr-api/media-assets/[assetId]/auto-count/route.ts",
       "sourceLocator": {
-        "line": 35,
+        "line": 17,
         "symbol": "POST"
       },
       "provenance": "static_scan",
@@ -15012,7 +15012,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "automatic": false,
       "loadsLargeDatasets": true,
       "usesPagination": false,
-      "returnsWideRowsOrBlobsOrRawJson": true,
+      "returnsWideRowsOrBlobsOrRawJson": false,
       "fansOutQueries": false,
       "postgresAccess": "none",
       "viewKinds": [
@@ -15031,7 +15031,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "POST",
       "sourceFile": "src/app/api/admin/trr-api/media-assets/[assetId]/detect-text-overlay/route.ts",
       "sourceLocator": {
-        "line": 35,
+        "line": 17,
         "symbol": "POST"
       },
       "provenance": "static_scan",
@@ -15046,7 +15046,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "automatic": false,
       "loadsLargeDatasets": true,
       "usesPagination": false,
-      "returnsWideRowsOrBlobsOrRawJson": true,
+      "returnsWideRowsOrBlobsOrRawJson": false,
       "fansOutQueries": false,
       "postgresAccess": "none",
       "viewKinds": [
@@ -15065,7 +15065,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "POST",
       "sourceFile": "src/app/api/admin/trr-api/media-assets/[assetId]/mirror/route.ts",
       "sourceLocator": {
-        "line": 35,
+        "line": 13,
         "symbol": "POST"
       },
       "provenance": "static_scan",
@@ -15080,7 +15080,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "automatic": false,
       "loadsLargeDatasets": true,
       "usesPagination": false,
-      "returnsWideRowsOrBlobsOrRawJson": true,
+      "returnsWideRowsOrBlobsOrRawJson": false,
       "fansOutQueries": false,
       "postgresAccess": "none",
       "viewKinds": [
@@ -15099,7 +15099,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "POST",
       "sourceFile": "src/app/api/admin/trr-api/media-assets/[assetId]/replace-from-url/route.ts",
       "sourceLocator": {
-        "line": 32,
+        "line": 13,
         "symbol": "POST"
       },
       "provenance": "static_scan",
@@ -15114,7 +15114,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "automatic": false,
       "loadsLargeDatasets": true,
       "usesPagination": false,
-      "returnsWideRowsOrBlobsOrRawJson": true,
+      "returnsWideRowsOrBlobsOrRawJson": false,
       "fansOutQueries": false,
       "postgresAccess": "none",
       "viewKinds": [
@@ -15133,7 +15133,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "POST",
       "sourceFile": "src/app/api/admin/trr-api/media-assets/[assetId]/reverse-image-search/route.ts",
       "sourceLocator": {
-        "line": 32,
+        "line": 10,
         "symbol": "POST"
       },
       "provenance": "static_scan",
@@ -15148,7 +15148,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "automatic": false,
       "loadsLargeDatasets": true,
       "usesPagination": false,
-      "returnsWideRowsOrBlobsOrRawJson": true,
+      "returnsWideRowsOrBlobsOrRawJson": false,
       "fansOutQueries": false,
       "postgresAccess": "none",
       "viewKinds": [
@@ -15167,7 +15167,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "POST",
       "sourceFile": "src/app/api/admin/trr-api/media-assets/[assetId]/variants/route.ts",
       "sourceLocator": {
-        "line": 35,
+        "line": 13,
         "symbol": "POST"
       },
       "provenance": "static_scan",
@@ -15182,7 +15182,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "automatic": false,
       "loadsLargeDatasets": true,
       "usesPagination": false,
-      "returnsWideRowsOrBlobsOrRawJson": true,
+      "returnsWideRowsOrBlobsOrRawJson": false,
       "fansOutQueries": false,
       "postgresAccess": "none",
       "viewKinds": [
@@ -18632,7 +18632,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/components/admin/social-week/WeekDetailPageView.tsx",
       "sourceLocator": {
-        "line": 7126,
+        "line": 7130,
         "matchedText": "setInterval"
       },
       "provenance": "static_scan",
@@ -18650,7 +18650,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/components/admin/social-week/WeekDetailPageView.tsx",
       "sourceLocator": {
-        "line": 7134,
+        "line": 7138,
         "matchedText": "setInterval"
       },
       "provenance": "static_scan",
@@ -19208,7 +19208,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/components/admin/social-week/WeekDetailPageView.tsx",
       "sourceLocator": {
-        "line": 5051,
+        "line": 5055,
         "matchedText": "`/api/admin/trr-api/shows/resolve-slug?slug=${encodeURIComponent(raw)}`"
       },
       "provenance": "static_scan",
@@ -21026,14 +21026,14 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/api/admin/trr-api/cast-photos/[photoId]/auto-count/route.ts",
       "sourceLocator": {
-        "line": 44,
-        "matchedText": "`/admin/cast-photos/${photoId}/auto-count`"
+        "line": 21,
+        "matchedText": "`/admin/cast-photos/${params.photoId}/auto-count`"
       },
       "provenance": "static_scan",
       "confidence": "high",
       "verificationStatus": "verified",
       "basis": [
-        "static_scan:getBackendApiUrl"
+        "static_scan:createAdminBackendProxyRoute"
       ]
     },
     {
@@ -21044,14 +21044,14 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/api/admin/trr-api/cast-photos/[photoId]/detect-text-overlay/route.ts",
       "sourceLocator": {
-        "line": 47,
-        "matchedText": "`/admin/cast-photos/${photoId}/detect-text-overlay`"
+        "line": 21,
+        "matchedText": "`/admin/cast-photos/${params.photoId}/detect-text-overlay`"
       },
       "provenance": "static_scan",
       "confidence": "high",
       "verificationStatus": "verified",
       "basis": [
-        "static_scan:getBackendApiUrl"
+        "static_scan:createAdminBackendProxyRoute"
       ]
     },
     {
@@ -21062,14 +21062,14 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/api/admin/trr-api/cast-photos/[photoId]/mirror/route.ts",
       "sourceLocator": {
-        "line": 44,
-        "matchedText": "`/admin/cast-photos/${photoId}/mirror`"
+        "line": 17,
+        "matchedText": "`/admin/cast-photos/${params.photoId}/mirror`"
       },
       "provenance": "static_scan",
       "confidence": "high",
       "verificationStatus": "verified",
       "basis": [
-        "static_scan:getBackendApiUrl"
+        "static_scan:createAdminBackendProxyRoute"
       ]
     },
     {
@@ -21080,14 +21080,14 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/api/admin/trr-api/cast-photos/[photoId]/variants/route.ts",
       "sourceLocator": {
-        "line": 44,
-        "matchedText": "`/admin/cast-photos/${photoId}/variants`"
+        "line": 17,
+        "matchedText": "`/admin/cast-photos/${params.photoId}/variants`"
       },
       "provenance": "static_scan",
       "confidence": "high",
       "verificationStatus": "verified",
       "basis": [
-        "static_scan:getBackendApiUrl"
+        "static_scan:createAdminBackendProxyRoute"
       ]
     },
     {
@@ -21098,14 +21098,14 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/api/admin/trr-api/media-assets/[assetId]/auto-count/route.ts",
       "sourceLocator": {
-        "line": 44,
-        "matchedText": "`/admin/media-assets/${assetId}/auto-count`"
+        "line": 21,
+        "matchedText": "`/admin/media-assets/${params.assetId}/auto-count`"
       },
       "provenance": "static_scan",
       "confidence": "high",
       "verificationStatus": "verified",
       "basis": [
-        "static_scan:getBackendApiUrl"
+        "static_scan:createAdminBackendProxyRoute"
       ]
     },
     {
@@ -21116,14 +21116,14 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/api/admin/trr-api/media-assets/[assetId]/detect-text-overlay/route.ts",
       "sourceLocator": {
-        "line": 44,
-        "matchedText": "`/admin/media-assets/${assetId}/detect-text-overlay`"
+        "line": 21,
+        "matchedText": "`/admin/media-assets/${params.assetId}/detect-text-overlay`"
       },
       "provenance": "static_scan",
       "confidence": "high",
       "verificationStatus": "verified",
       "basis": [
-        "static_scan:getBackendApiUrl"
+        "static_scan:createAdminBackendProxyRoute"
       ]
     },
     {
@@ -21134,14 +21134,14 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/api/admin/trr-api/media-assets/[assetId]/mirror/route.ts",
       "sourceLocator": {
-        "line": 44,
-        "matchedText": "`/admin/media-assets/${assetId}/mirror`"
+        "line": 17,
+        "matchedText": "`/admin/media-assets/${params.assetId}/mirror`"
       },
       "provenance": "static_scan",
       "confidence": "high",
       "verificationStatus": "verified",
       "basis": [
-        "static_scan:getBackendApiUrl"
+        "static_scan:createAdminBackendProxyRoute"
       ]
     },
     {
@@ -21152,14 +21152,14 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/api/admin/trr-api/media-assets/[assetId]/replace-from-url/route.ts",
       "sourceLocator": {
-        "line": 44,
-        "matchedText": "`/admin/media-assets/${assetId}/replace-from-url`"
+        "line": 17,
+        "matchedText": "`/admin/media-assets/${params.assetId}/replace-from-url`"
       },
       "provenance": "static_scan",
       "confidence": "high",
       "verificationStatus": "verified",
       "basis": [
-        "static_scan:getBackendApiUrl"
+        "static_scan:createAdminBackendProxyRoute"
       ]
     },
     {
@@ -21170,14 +21170,14 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/api/admin/trr-api/media-assets/[assetId]/reverse-image-search/route.ts",
       "sourceLocator": {
-        "line": 44,
-        "matchedText": "`/admin/media-assets/${assetId}/reverse-image-search`"
+        "line": 14,
+        "matchedText": "`/admin/media-assets/${params.assetId}/reverse-image-search`"
       },
       "provenance": "static_scan",
       "confidence": "high",
       "verificationStatus": "verified",
       "basis": [
-        "static_scan:getBackendApiUrl"
+        "static_scan:createAdminBackendProxyRoute"
       ]
     },
     {
@@ -21188,14 +21188,14 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/api/admin/trr-api/media-assets/[assetId]/variants/route.ts",
       "sourceLocator": {
-        "line": 44,
-        "matchedText": "`/admin/media-assets/${assetId}/variants`"
+        "line": 17,
+        "matchedText": "`/admin/media-assets/${params.assetId}/variants`"
       },
       "provenance": "static_scan",
       "confidence": "high",
       "verificationStatus": "verified",
       "basis": [
-        "static_scan:getBackendApiUrl"
+        "static_scan:createAdminBackendProxyRoute"
       ]
     },
     {

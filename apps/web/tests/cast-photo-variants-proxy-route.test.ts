@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
-const { requireAdminMock, getBackendApiUrlMock, getInternalAdminBearerTokenMock } = vi.hoisted(() => ({
+const { requireAdminMock, getBackendApiUrlMock, buildInternalAdminHeadersMock } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
   getBackendApiUrlMock: vi.fn(),
-  getInternalAdminBearerTokenMock: vi.fn(),
+  buildInternalAdminHeadersMock: vi.fn(),
 }));
 
 vi.mock("@/lib/server/auth", () => ({
@@ -16,7 +16,7 @@ vi.mock("@/lib/server/trr-api/backend", () => ({
 }));
 
 vi.mock("@/lib/server/trr-api/internal-admin-auth", () => ({
-  getInternalAdminBearerToken: getInternalAdminBearerTokenMock,
+  buildInternalAdminHeaders: buildInternalAdminHeadersMock,
 }));
 
 import { POST } from "@/app/api/admin/trr-api/cast-photos/[photoId]/variants/route";
@@ -32,14 +32,18 @@ describe("cast photo variants proxy route", () => {
   beforeEach(() => {
     requireAdminMock.mockReset();
     getBackendApiUrlMock.mockReset();
-    getInternalAdminBearerTokenMock.mockReset();
+    buildInternalAdminHeadersMock.mockReset();
     vi.restoreAllMocks();
 
     requireAdminMock.mockResolvedValue(undefined);
     getBackendApiUrlMock.mockReturnValue(
       "https://backend.example.com/api/v1/admin/cast-photos/photo-1/variants",
     );
-    getInternalAdminBearerTokenMock.mockReturnValue("internal-admin-token");
+    buildInternalAdminHeadersMock.mockImplementation((headers?: HeadersInit) => {
+      const out = new Headers(headers);
+      out.set("Authorization", "Bearer internal-admin-token");
+      return out;
+    });
   });
 
   it("forwards POST with auth headers", async () => {
@@ -64,10 +68,9 @@ describe("cast photo variants proxy route", () => {
     );
     const options = fetchMock.mock.calls[0][1] as RequestInit;
     expect(options.method).toBe("POST");
-    expect(options.headers).toMatchObject({
-      Authorization: "Bearer internal-admin-token",
-      "Content-Type": "application/json",
-    });
+    const headers = options.headers as Headers;
+    expect(headers.get("Authorization")).toBe("Bearer internal-admin-token");
+    expect(headers.get("Content-Type")).toBe("application/json");
     expect(options.body).toBe(JSON.stringify({ force: true }));
   });
 

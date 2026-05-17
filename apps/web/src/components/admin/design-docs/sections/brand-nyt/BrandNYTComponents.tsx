@@ -74,7 +74,7 @@ const COMPONENT_TYPE_DESCRIPTIONS: Record<string, string> = {
   "datawrapper-table":
     "Datawrapper iframe embed rendering a styled data table (heatmap, sortable, paginated)",
   "datawrapper-chart":
-    "Datawrapper iframe embed rendering a chart (line, bar, area, stacked) with postMessage protocol",
+    "Datawrapper-sourced chart rendered either as an editable local SVG replica or an iframe fallback with postMessage protocol",
   "showcase-link":
     "Inline recommendation card with image, title, excerpt, and border-top/bottom dividers",
   "twitter-embed":

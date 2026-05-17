@@ -4592,6 +4592,86 @@ describe("SocialAccountProfilePage", () => {
     expect(screen.getByText("Facebook ID fb-post-1")).toBeInTheDocument();
   });
 
+  it("renders catalog detail media from media_urls and thumbnail-only assets", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse(baseSummary);
+      }
+      if (url.includes("/cookies/health")) {
+        return jsonResponse(healthyCookieHealth("instagram"));
+      }
+      if (url.includes("/catalog/posts/source-1/detail")) {
+        return jsonResponse({
+          platform: "instagram",
+          account_handle: "bravotv",
+          source_id: "source-1",
+          title: "Legacy media row",
+          content: "Catalog row with legacy media fields.",
+          permalink: "https://www.instagram.com/p/source-1/",
+          posted_at: "2026-04-01T12:00:00Z",
+          saved_metrics: {
+            likes: 11,
+            comments_count: 2,
+            views: 140,
+            engagement: 13,
+          },
+          thumbnail_url: "https://images.example/catalog-thumbnail.jpg",
+          media_urls: ["https://images.example/catalog-media-1.jpg"],
+          hosted_media_urls: [],
+          source_media_urls: [],
+        });
+      }
+      if (url.includes("/catalog/posts")) {
+        return jsonResponse({
+          items: [
+            {
+              id: "catalog-1",
+              source_id: "source-1",
+              platform: "instagram",
+              account_handle: "bravotv",
+              title: "Legacy media row",
+              content: "Caption preview",
+              assignment_status: "unassigned",
+              posted_at: "2026-04-01T12:00:00Z",
+              metrics: {
+                likes: 11,
+                comments_count: 2,
+              },
+            },
+          ],
+          pagination: {
+            page: 1,
+            page_size: 25,
+            total: 1,
+            total_pages: 1,
+          },
+        });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
+
+    const rowTitle = await screen.findByText("Legacy media row");
+    fireEvent.click(rowTitle);
+
+    await waitFor(() => {
+      expect(screen.getByText("Catalog Detail")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("No saved media URLs are available for this catalog row yet.")).not.toBeInTheDocument();
+    expect(document.querySelector("img[src='https://images.example/catalog-thumbnail.jpg']")).not.toBeNull();
+    expect(document.querySelector("img[src='https://images.example/catalog-media-1.jpg']")).not.toBeNull();
+    expect(screen.getByRole("link", { name: "https://images.example/catalog-thumbnail.jpg" })).toHaveAttribute(
+      "href",
+      "https://images.example/catalog-thumbnail.jpg",
+    );
+    expect(screen.getByRole("link", { name: "https://images.example/catalog-media-1.jpg" })).toHaveAttribute(
+      "href",
+      "https://images.example/catalog-media-1.jpg",
+    );
+  });
+
   it("renders saved discussion inside catalog detail for supported non-instagram platforms", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);

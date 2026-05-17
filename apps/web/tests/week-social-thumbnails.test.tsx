@@ -2570,6 +2570,107 @@ describe("WeekDetailPage thumbnails", () => {
     expect(screen.getAllByText("Hosted Media File").length).toBeGreaterThan(0);
   });
 
+  it("does not claim thumbnail mirroring when only the media URL is hosted", async () => {
+    const payload = JSON.parse(JSON.stringify(weekPayload)) as typeof weekPayload;
+    const sourceVideoUrl = "https://instagram.fcdn.net/reel-video.mp4";
+    const hostedVideoUrl = "https://d111111abcdef8.cloudfront.net/social/ig/reel-video.mp4";
+    const sourceThumbUrl = "https://images.test/ig-source-thumb.jpg";
+    payload.platforms.instagram.posts[0].media_urls = [sourceVideoUrl];
+    payload.platforms.instagram.posts[0].thumbnail_url = sourceThumbUrl;
+    (
+      payload.platforms.instagram.posts[0] as typeof payload.platforms.instagram.posts[0] & {
+        source_media_urls?: string[];
+        hosted_media_urls?: string[];
+        source_thumbnail_url?: string;
+        hosted_thumbnail_url?: string | null;
+      }
+    ).source_media_urls = [sourceVideoUrl];
+    (
+      payload.platforms.instagram.posts[0] as typeof payload.platforms.instagram.posts[0] & {
+        source_media_urls?: string[];
+        hosted_media_urls?: string[];
+        source_thumbnail_url?: string;
+        hosted_thumbnail_url?: string | null;
+      }
+    ).hosted_media_urls = [hostedVideoUrl];
+    (
+      payload.platforms.instagram.posts[0] as typeof payload.platforms.instagram.posts[0] & {
+        source_media_urls?: string[];
+        hosted_media_urls?: string[];
+        source_thumbnail_url?: string;
+        hosted_thumbnail_url?: string | null;
+      }
+    ).source_thumbnail_url = sourceThumbUrl;
+    (
+      payload.platforms.instagram.posts[0] as typeof payload.platforms.instagram.posts[0] & {
+        source_media_urls?: string[];
+        hosted_media_urls?: string[];
+        source_thumbnail_url?: string;
+        hosted_thumbnail_url?: string | null;
+      }
+    ).hosted_thumbnail_url = null;
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/social/analytics/week/1")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => payload,
+        } as Response;
+      }
+      if (url.includes("/social/analytics/posts/instagram/ig-1")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            platform: "instagram",
+            source_id: "ig-1",
+            author: "bravotv",
+            text: "IG post",
+            url: "https://instagram.com/p/abc",
+            posted_at: "2026-01-01T00:00:00.000Z",
+            thumbnail_url: sourceThumbUrl,
+            media_urls: [sourceVideoUrl],
+            source_media_urls: [sourceVideoUrl],
+            hosted_media_urls: [hostedVideoUrl],
+            source_thumbnail_url: sourceThumbUrl,
+            hosted_thumbnail_url: null,
+            stats: {
+              likes: 50,
+              comments_count: 10,
+              views: 1000,
+              engagement: 1060,
+            },
+            total_comments_in_db: 0,
+            comments: [],
+          }),
+        } as Response;
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(<WeekDetailPage />);
+
+    await waitForWeekDetailReady();
+    await clickPostDetailCardByThumbnailAlt("Instagram post thumbnail");
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Post Details" })).toBeInTheDocument();
+    });
+    const openLightboxButton = await screen.findByRole("button", {
+      name: /open post media lightbox from details/i,
+    });
+    fireEvent.click(openLightboxButton);
+    const metadataToggle = await screen.findByRole("button", {
+      name: /show metadata|hide metadata/i,
+    });
+    fireEvent.click(metadataToggle);
+
+    expect(screen.getByText("Media mirrored")).toBeInTheDocument();
+    expect(screen.queryByText("Media + thumbnail mirrored")).not.toBeInTheDocument();
+  });
+
   it("renders Twitter/X thumbnails when media is available", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
