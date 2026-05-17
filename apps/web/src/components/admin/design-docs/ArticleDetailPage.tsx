@@ -19,6 +19,7 @@ import Ai2htmlArtboard, {
 import InteractiveBarChart from "./InteractiveBarChart";
 import InteractiveLineChart from "./InteractiveLineChart";
 import InteractiveHorizontalBarChart from "./InteractiveHorizontalBarChart";
+import EditableDatawrapperChart from "./EditableDatawrapperChart";
 import {
   MedalTable,
   MedalTableGrid,
@@ -200,6 +201,242 @@ function BirdkitShareTools({ buttons }: { buttons: readonly ShareToolButton[] })
   );
 }
 
+function NytUpshotLogoSvg() {
+  return (
+    <svg className="css-2ov6oh" width="122" height="24" viewBox="0 0 285 54" aria-label="The Upshot">
+      <title>The Upshot</title>
+      <path d="M8.444 21.889c4.664 0 8.444-3.78 8.444-8.444a8.444 8.444 0 1 0-16.888 0 8.443 8.443 0 0 0 8.444 8.444M8.444 43a8.444 8.444 0 0 0 8.444-8.444 8.444 8.444 0 1 0-16.888 0A8.444 8.444 0 0 0 8.444 43" fill="#bad62d" />
+      <path d="M57.971 20.687h-6.528v-6.145h-2.784v18.865h3.888V40.8H32.385v-7.393h3.84V14.542h-2.736v6.145h-6.576V7.148h31.059v13.539zM90.371 40.8h-12.77V27.263c0-2.112-1.008-3.265-2.592-3.265-1.873 0-2.593 1.633-2.593 3.937v6.625h1.92v6.24H59.744v-6.24h1.824V13.39h-1.824V7.148h12.673v13.346c3.024-2.208 4.944-3.217 7.776-3.217 4.177 0 8.257 2.305 8.257 7.585v9.697h1.921V40.8zM116.818 31.631h-15.121c.336 2.305 1.488 3.889 3.984 3.889 1.632 0 2.64-.769 3.6-2.017h7.537c-.528 1.681-1.393 3.169-2.641 4.417-2.399 2.399-6.048 3.36-9.36 3.36-3.456 0-7.297-.721-9.985-3.121-2.64-2.352-3.984-5.472-3.984-8.977 0-7.536 6.001-11.905 13.153-11.905 3.12 0 5.856.769 8.353 2.688 2.833 2.16 4.561 5.904 4.561 9.409-.001.769-.049 1.489-.097 2.257zm-9.457-3.552v-.576c0-1.969-.479-3.984-2.832-3.984-1.248 0-2.16.672-2.592 1.824-.336.815-.24 1.872-.24 2.736h5.664zM151.187 14.542h-2.64v15.265c0 3.12-.864 5.473-2.784 7.489-2.688 2.784-6.577 4.128-11.569 4.128-6.769 0-11.089-2.448-12.961-7.488-.672-1.776-.864-3.648-.864-7.537V14.542h-2.977V7.148h18.338v7.394h-2.929v13.201c0 1.68.24 2.784.769 3.696.72 1.199 2.16 1.92 3.792 1.92 2.257 0 3.841-1.584 3.841-3.984V14.542h-2.641V7.148h12.625v7.394zM177.634 37.92c-1.92 2.112-4.656 3.36-7.152 3.36-2.064 0-4.032-.673-6.961-2.448V43.2h2.593v6.24h-15.361V43.2h1.92V23.998h-1.92v-6.24h12.769v2.16c2.784-1.92 4.849-2.641 7.297-2.641 2.352 0 4.416.816 6.048 2.353 2.353 2.256 3.841 5.952 3.841 9.648-.002 3.41-1.106 6.53-3.074 8.642zm-10.993-14.401c-2.064 0-3.12 1.776-3.12 5.376 0 3.841.912 5.856 3.12 5.856 2.641 0 3.217-2.784 3.217-5.28-.001-2.208-.097-5.952-3.217-5.952zM195.775 41.28c-2.399 0-4.08-.385-7.488-1.633V40.8h-5.185v-7.681h5.137c.624 2.017 1.44 3.072 3.408 3.072 1.488 0 2.4-.624 2.4-1.776 0-.815-.528-1.439-1.536-1.872l-4.992-2.112c-2.545-1.104-3.889-3.36-3.889-5.76 0-3.937 3.889-7.394 8.785-7.394 2.016 0 3.696.433 5.952 1.44v-.96h5.232v7.393H198.8c-.432-2.304-1.296-3.552-3.024-3.552-1.248 0-2.208.768-2.208 1.775 0 .864.576 1.584 1.776 2.064l4.896 1.92c3.216 1.248 4.704 3.312 4.704 6.097 0 4.417-3.744 7.826-9.169 7.826zM236.145 40.8h-12.769V27.263c0-2.112-1.008-3.265-2.593-3.265-1.872 0-2.592 1.633-2.592 3.937v6.625h1.92v6.24h-14.593v-6.24h1.824V13.39h-1.824V7.148h12.673v13.346c3.024-2.208 4.944-3.217 7.776-3.217 4.177 0 8.257 2.305 8.257 7.585v9.697h1.92V40.8zM251.551 41.28c-7.152 0-13.969-4.177-13.969-11.953 0-7.825 6.672-12.05 13.921-12.05 7.345 0 13.873 4.177 13.873 12.098 0 7.776-6.673 11.905-13.825 11.905zm-.145-17.761c-2.592 0-2.976 3.36-2.976 5.28s.24 5.952 2.976 5.952c2.736 0 3.121-3.216 3.121-5.28 0-2.16-.144-5.952-3.121-5.952zM283.855 40.8H269.79V23.998h-2.16v-6.24h2.16v-7.2h10.849v7.2h3.217v6.24h-3.217V34.56h3.217v6.24z" fill="currentColor" />
+    </svg>
+  );
+}
+
+function NytListenControl({ duration, audioSrc }: { duration: string; audioSrc?: string }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+      {audioSrc ? <audio preload="metadata" src={audioSrc} /> : null}
+      <button
+        type="button"
+        aria-label="Listen to article"
+        style={{
+          width: 32,
+          height: 32,
+          border: "none",
+          borderRadius: "50%",
+          background: "#ffffff",
+          padding: 0,
+          cursor: "default",
+          display: "grid",
+          placeItems: "center",
+        }}
+      >
+        <svg aria-hidden="true" id="playIcon" width="32" height="32" viewBox="0 0 55 55" fill="none">
+          <path fillRule="evenodd" clipRule="evenodd" d="M22 38L37 28L22 18V38Z" fill="#121212" />
+          <path d="M54.25 27.5C54.25 42.2736 42.2736 54.25 27.5 54.25C12.7264 54.25 0.75 42.2736 0.75 27.5C0.75 12.7264 12.7264 0.75 27.5 0.75C42.2736 0.75 54.25 12.7264 54.25 27.5Z" stroke="#DFDFDF" strokeWidth="1.5" />
+        </svg>
+      </button>
+      <div
+        style={{
+          fontFamily: '"nyt-franklin", helvetica, arial, sans-serif',
+          fontSize: 12,
+          fontWeight: 500,
+          lineHeight: "15px",
+          color: "#121212",
+          whiteSpace: "nowrap",
+        }}
+      >
+        Listen · {duration}
+      </div>
+    </div>
+  );
+}
+
+function NytArticleHeaderCapture({
+  capture,
+  article,
+}: {
+  capture: ArticleHeaderCapture;
+  article: (typeof ARTICLES)[number];
+}) {
+  return (
+    <header
+      className={capture.headerClass}
+      style={{
+        width: "100%",
+        maxWidth: 600,
+        color: "#121212",
+      }}
+    >
+      <div className="css-10zpvha" data-testid="brand-bar" style={{ marginBottom: 22 }}>
+        <a
+          href={capture.sectionHref}
+          data-testid="story-section"
+          className="css-11ux3av"
+          style={{ color: "#121212", display: "inline-block" }}
+        >
+          <NytUpshotLogoSvg />
+        </a>
+      </div>
+      <div
+        id="sponsor-wrapper"
+        className="css-1hyfx7x"
+        style={{ height: 24, marginBottom: 16, display: "flex", alignItems: "center", gap: 12 }}
+      >
+        <div id="sponsor-slug" className="css-19vbshk">
+          <p
+            style={{
+              margin: 0,
+              fontFamily: '"nyt-franklin", helvetica, arial, sans-serif',
+              fontSize: 9,
+              fontWeight: 300,
+              lineHeight: "9px",
+              color: "#cccccc",
+            }}
+          >
+            {capture.sponsorLabel ?? "Supported by"}
+          </p>
+        </div>
+        <a
+          href="#after-sponsor"
+          className="css-777zgl"
+          style={{
+            fontFamily: '"nyt-franklin", helvetica, arial, sans-serif',
+            fontSize: 10,
+            fontWeight: 700,
+            color: "#727272",
+            textDecoration: "none",
+            letterSpacing: "0.02em",
+          }}
+        >
+          {capture.skipAdLabel ?? "SKIP ADVERTISEMENT"}
+        </a>
+        <div className="ad sponsor-wrapper css-rfqw0c" id="sponsor" style={{ flex: 1, height: 1 }} />
+        <div id="after-sponsor" />
+      </div>
+      <div className="css-hme5ai euiyums0" style={{ height: 1, marginBottom: 12 }} />
+      <div className="css-1vkm6nb ehdk2mb0">
+        <h1
+          id={capture.headlineId}
+          className={capture.headlineClass}
+          data-testid="headline"
+          style={{
+            fontFamily:
+              'nyt-cheltenham, cheltenham-fallback-georgia, cheltenham-fallback-noto, georgia, "times new roman", times, serif',
+            fontSize: 40,
+            fontWeight: 700,
+            fontStyle: "italic",
+            lineHeight: "46px",
+            color: "#121212",
+            margin: 0,
+            textWrap: "balance",
+          }}
+        >
+          {article.title}
+        </h1>
+      </div>
+      <p
+        id={capture.summaryId ?? "article-summary"}
+        className={capture.summaryClass}
+        style={{
+          fontFamily:
+            'nyt-cheltenham, cheltenham-fallback-georgia, cheltenham-fallback-noto, georgia, "times new roman", times, serif',
+          fontSize: 23,
+          fontWeight: 300,
+          lineHeight: "30px",
+          color: "#363636",
+          margin: "10px 0 24px",
+        }}
+      >
+        {article.description}
+      </p>
+      <div className="css-qznc1j" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, borderTop: "1px solid #dfdfdf", paddingTop: 20, marginBottom: 24 }}>
+        {capture.listen ? (
+          <NytListenControl duration={capture.listen.duration} audioSrc={capture.listen.audioSrc} />
+        ) : null}
+        <div role="toolbar" data-testid="share-tools" aria-label="Social Media Share buttons, Save button, and Comments Panel with current comment count">
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <BirdkitShareTools buttons={capture.shareTools?.buttons ?? []} />
+            {typeof capture.shareTools?.commentCount === "number" ? (
+              <button
+                type="button"
+                aria-label={`Read ${capture.shareTools.commentCount} comments`}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 5,
+                  height: 32,
+                  border: "1px solid #dfdfdf",
+                  borderRadius: 999,
+                  padding: "0 10px",
+                  background: "#ffffff",
+                  color: "#121212",
+                  fontFamily: '"nyt-franklin", helvetica, arial, sans-serif',
+                  fontSize: 12,
+                  fontWeight: 500,
+                  cursor: "default",
+                }}
+              >
+                <svg aria-hidden="true" width="21" height="18" viewBox="0 0 21 18">
+                  <path d="m14.52 17.831-5.715-4.545H2.4a1.468 1.468 0 0 1-1.468-1.469V1.894A1.471 1.471 0 0 1 2.4.405h16.583a1.469 1.469 0 0 1 1.469 1.469v9.923a1.469 1.469 0 0 1-1.47 1.47H14.58l-.06 4.564ZM2.4 1.645a.228.228 0 0 0-.228.229v9.923a.228.228 0 0 0 .228.229h6.811l4.06 3.235v-3.235h5.652a.228.228 0 0 0 .229-.229V1.874a.228.228 0 0 0-.229-.229H2.4Z" fill="#121212" fillRule="nonzero" />
+                </svg>
+                <span>{capture.shareTools.commentCount}</span>
+              </button>
+            ) : null}
+          </div>
+        </div>
+      </div>
+      {capture.byline ? (
+        <div className="css-p6m5rf" style={{ marginBottom: 8 }}>
+          <div className="byline-container css-1u5onbp epjyd6m2" style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            {capture.byline.headshotUrl ? (
+              <a href={capture.byline.href} aria-hidden="true" className="css-uwwqev">
+                <img
+                  alt={capture.byline.author}
+                  title={capture.byline.author}
+                  src={capture.byline.headshotUrl}
+                  className="css-dc6zx6 ey68jwv2"
+                  style={{ width: 48, height: 48, borderRadius: "50%", objectFit: "cover" }}
+                />
+              </a>
+            ) : null}
+            <p
+              className="css-4anu6l e1jsehar1"
+              style={{
+                margin: 0,
+                fontFamily: '"nyt-franklin", helvetica, arial, sans-serif',
+                fontSize: 15,
+                fontWeight: 700,
+                lineHeight: "20px",
+                color: "#363636",
+              }}
+            >
+              <span className="byline-prefix">{capture.byline.prefix} </span>
+              <a href={capture.byline.href} className="last-byline css-ojhyzr e1jsehar0" itemProp="name" style={{ color: "#363636", textDecoration: "none" }}>
+                {capture.byline.author}
+              </a>
+            </p>
+          </div>
+        </div>
+      ) : null}
+      <div className="css-1c72mta">
+        <time
+          className="css-kx0gap e16638kd0"
+          dateTime={capture.datetime}
+          style={{
+            fontFamily: '"nyt-franklin", helvetica, arial, sans-serif',
+            fontSize: 13,
+            fontWeight: 500,
+            lineHeight: "18px",
+            color: "#727272",
+          }}
+        >
+          {capture.dateLabel}
+        </time>
+      </div>
+    </header>
+  );
+}
+
 /* ------------------------------------------------------------------ */
 /*  ArticleDetailPage — Data-driven component showcase                 */
 /*  Renders each content block based on the article's config data.     */
@@ -222,7 +459,12 @@ type ArticleIconAsset = {
   name: string;
   file?: string;
   url?: string;
+  localPath?: string;
   size?: string;
+  width?: string;
+  height?: string;
+  viewBox?: string;
+  status?: string;
   fill?: string;
   usage?: string;
   element?: string;
@@ -233,8 +475,68 @@ type ArticleImageAsset = {
   url: string;
   category?: string;
   width?: number;
+  height?: number;
   ratio?: string;
   desc?: string;
+  localPath?: string;
+  status?: string;
+};
+
+type ArticleInlineSvgAsset = ArticleIconAsset & {
+  title?: string;
+  id?: string;
+  className?: string;
+  pathCount?: number;
+};
+
+type ArticleAudioAsset = {
+  name: string;
+  url: string;
+  type?: string;
+  localPath?: string;
+  status?: string;
+  bytes?: number;
+};
+
+type ArticleAssetInventory = {
+  manifestPath?: string;
+  counts?: {
+    images?: number;
+    inlineSvgs?: number;
+    linkedIcons?: number;
+    audio?: number;
+    figures?: number;
+    scripts?: number;
+    stylesheets?: number;
+  };
+};
+
+type ArticleHeaderCapture = {
+  headerClass: string;
+  sectionHref: string;
+  sectionLabel: string;
+  sponsorLabel?: string;
+  skipAdLabel?: string;
+  headlineId?: string;
+  headlineClass?: string;
+  summaryId?: string;
+  summaryClass?: string;
+  listen?: {
+    duration: string;
+    audioSrc?: string;
+  };
+  shareTools?: {
+    commentCount?: number;
+    buttons: readonly ShareToolButton[];
+  };
+  byline?: {
+    prefix: string;
+    author: string;
+    href: string;
+    headshotUrl?: string;
+  };
+  dateLabel: string;
+  datetime: string;
 };
 
 type ArticleCssInfo = {
@@ -484,6 +786,8 @@ function getArticleBlockBaseLabel(block: ContentBlock) {
       return block.text;
     case "body-copy":
       return "Body Copy";
+    case "body-section-outline":
+      return block.title;
     case "birdkit-chart":
       return block.title;
     case "static-chart-image":
@@ -1134,6 +1438,9 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
   /* Cast once so we can access deeply nested readonly properties freely */
   const a = article as any; // eslint-disable-line @typescript-eslint/no-explicit-any
   const publicAssets = a.architecture?.publicAssets;
+  const articleHeaderCapture =
+    (a.architecture?.articleHeaderCapture as ArticleHeaderCapture | undefined) ??
+    null;
   const quoteSections: readonly { section: string; badge: string; badgeColor: string }[] =
     article.quoteSections;
 
@@ -1155,6 +1462,14 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
     (a.architecture?.publicAssets?.icons as
       | readonly ArticleIconAsset[]
       | undefined) ?? [];
+  const articleInlineSvgs: readonly ArticleInlineSvgAsset[] =
+    (publicAssets?.inlineSvgs as readonly ArticleInlineSvgAsset[] | undefined) ?? [];
+  const articleLinkedIcons: readonly ArticleIconAsset[] =
+    (publicAssets?.linkedIcons as readonly ArticleIconAsset[] | undefined) ?? [];
+  const articleAudioAssets: readonly ArticleAudioAsset[] =
+    (publicAssets?.audio as readonly ArticleAudioAsset[] | undefined) ?? [];
+  const articleAssetInventory =
+    (publicAssets?.assetInventory as ArticleAssetInventory | undefined) ?? null;
   const articleCssInfo =
     (a.cssInfo as ArticleCssInfo | undefined) ?? null;
   const articleTypographyGroups: readonly ArticleTypographyGroup[] =
@@ -1636,6 +1951,8 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
           css={[
             isAthletic
               ? `h1.Article_Headline__ou0D2.Article_Featured__tTXwK: nyt-cheltenham 40px/400/44px italic #121212`
+              : articleHeaderCapture
+                ? `${articleHeaderCapture.headerClass}: source-observed NYT story header with brand bar, sponsor slot, headline, deck, listen, actionbar, byline, and timestamp`
               : isDebateSpeakingTimeArticle
                 ? "#interactive-heading: centered nyt-cheltenham 27/38/47px 500 with no visible deck in the saved source"
               : isTrumpTariffsReaction
@@ -1643,6 +1960,8 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
                 : `text-align: ${isInteractive ? "center" : "left"} (${isInteractive ? "Birdkit g-header inherits to g-heading" : "standard vi-story layout"})`,
             isAthletic
               ? `div.Article_HeadlineContainer__PR98W.Article_FeaturedHeadlineContainer__WPinJ`
+              : articleHeaderCapture
+                ? "brand-bar data-testid=story-section, sponsor-wrapper, actionbar share-tools, author headshot, and time.css-kx0gap are all rendered from captured source fields"
               : isDebateSpeakingTimeArticle
                 ? "header max-width follows the interactive shell; title balances over two lines in the saved capture"
               : isTrumpTariffsReaction
@@ -1652,6 +1971,8 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
                   : `font-family: nyt-cheltenham; font-size: ${isInteractive ? "45px" : "31px (1.9375rem)"}; font-weight: ${isInteractive ? "800" : "700"}; font-style: ${isInteractive ? "normal" : "italic"}`,
             isAthletic
               ? `p (description): nyt-imperial 20px/400/30px #121212 (inside .Article_ContentContainer)`
+              : articleHeaderCapture
+                ? "Headline: Cheltenham 40px/700/46px italic; deck: Cheltenham 23px/300/30px; action chrome: Franklin 12px/500/15px"
               : isDebateSpeakingTimeArticle
                 ? "No visible deck under the headline; the original summary copy only exists in metadata/share surfaces"
               : isTrumpTariffsReaction
@@ -1662,7 +1983,9 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
           ]}
           show={showCss}
         >
-          {isTrumpTariffsReaction ? (
+          {articleHeaderCapture ? (
+            <NytArticleHeaderCapture capture={articleHeaderCapture} article={article} />
+          ) : isTrumpTariffsReaction ? (
             <div style={{ maxWidth: 600 }}>
               <h1
                 style={{
@@ -1862,7 +2185,7 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
       </ArticleBlockSection>
 
       {/* ── 3. Extended Byline Block (always) ── */}
-      {!isTrumpTariffsImports ? (
+      {!isTrumpTariffsImports && !articleHeaderCapture ? (
         <ArticleBlockSection
           id={sectionForType("byline")?.id ?? "byline"}
           label={sectionForType("byline")?.label ?? "Byline"}
@@ -2246,59 +2569,78 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
                   <div
                     style={{
                       display: "grid",
-                      gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
                       gap: 12,
                       maxWidth: 900,
                     }}
                   >
-                    {block.groups.map((group) => (
-                      <section
-                        key={group.label}
-                        style={{
-                          border: "1px solid #dfdfdf",
-                          borderRadius: 4,
-                          padding: 14,
-                          background: "#ffffff",
-                        }}
-                      >
-                        <h3
+                    <h2
+                      style={{
+                        fontFamily: '"nyt-cheltenham", georgia, "times new roman", times, serif',
+                        fontSize: 22,
+                        fontWeight: 700,
+                        lineHeight: "27px",
+                        color: "#121212",
+                        margin: 0,
+                      }}
+                    >
+                      {block.title}
+                    </h2>
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+                        gap: 12,
+                      }}
+                    >
+                      {block.groups.map((group) => (
+                        <section
+                          key={group.label}
                           style={{
-                            fontFamily: '"nyt-franklin", arial, helvetica, sans-serif',
-                            fontSize: 12,
-                            fontWeight: 700,
-                            lineHeight: "15px",
-                            letterSpacing: "0.04em",
-                            textTransform: "uppercase",
-                            color: "#121212",
-                            margin: "0 0 10px",
+                            border: "1px solid #dfdfdf",
+                            borderRadius: 4,
+                            padding: 14,
+                            background: "#ffffff",
                           }}
                         >
-                          {group.label}
-                        </h3>
-                        <ul
-                          style={{
-                            margin: 0,
-                            padding: 0,
-                            listStyle: "none",
-                            display: "grid",
-                            gap: 7,
-                            fontFamily: '"nyt-franklin", arial, helvetica, sans-serif',
-                            fontSize: 12,
-                            lineHeight: "16px",
-                            color: "#363636",
-                          }}
-                        >
-                          {group.items.map((item) => (
-                            <li key={item} style={{ display: "flex", gap: 8 }}>
-                              <span aria-hidden="true" style={{ color: "#687d84", fontWeight: 700 }}>
-                                -
-                              </span>
-                              <span>{item}</span>
-                            </li>
-                          ))}
-                        </ul>
-                      </section>
-                    ))}
+                          <h3
+                            style={{
+                              fontFamily: '"nyt-franklin", arial, helvetica, sans-serif',
+                              fontSize: 12,
+                              fontWeight: 700,
+                              lineHeight: "15px",
+                              letterSpacing: "0.04em",
+                              textTransform: "uppercase",
+                              color: "#121212",
+                              margin: "0 0 10px",
+                            }}
+                          >
+                            {group.label}
+                          </h3>
+                          <ul
+                            style={{
+                              margin: 0,
+                              padding: 0,
+                              listStyle: "none",
+                              display: "grid",
+                              gap: 7,
+                              fontFamily: '"nyt-franklin", arial, helvetica, sans-serif',
+                              fontSize: 12,
+                              lineHeight: "16px",
+                              color: "#363636",
+                            }}
+                          >
+                            {group.items.map((item) => (
+                              <li key={item} style={{ display: "flex", gap: 8 }}>
+                                <span aria-hidden="true" style={{ color: "#687d84", fontWeight: 700 }}>
+                                  -
+                                </span>
+                                <span>{item}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        </section>
+                      ))}
+                    </div>
                   </div>
                 </BlockAnnotation>
               </ArticleBlockSection>
@@ -2328,6 +2670,109 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
                     }}
                   >
                     <BirdkitShareTools buttons={block.buttons} />
+                  </div>
+                </BlockAnnotation>
+              </ArticleBlockSection>
+            );
+          }
+
+          if (block.type === "body-section-outline") {
+            return (
+              <ArticleBlockSection
+                key={`cb-${bi}`}
+                id={section.id}
+                label={section.label}
+                showHeading={showBlockStructure}
+              >
+                <BlockAnnotation
+                  type="body-section-outline"
+                  css={[
+                    "Source paragraph outline: every source paragraph/chart lead-in is reduced to first sentence or lead text",
+                    "Preserves article structure without copying full story body",
+                    `Source: ${block.source}`,
+                  ]}
+                  show={showCss}
+                >
+                  <div style={{ maxWidth: 900 }}>
+                    <h2
+                      style={{
+                        fontFamily: '"nyt-cheltenham", georgia, "times new roman", times, serif',
+                        fontSize: 22,
+                        fontWeight: 700,
+                        lineHeight: "27px",
+                        color: "#121212",
+                        margin: "0 0 12px",
+                      }}
+                    >
+                      {block.title}
+                    </h2>
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
+                        gap: 10,
+                      }}
+                    >
+                      {block.sections.map((entry) => (
+                        <div
+                          key={`${entry.sourceIndex}-${entry.role}`}
+                          style={{
+                            border: "1px solid #dfdfdf",
+                            borderRadius: 4,
+                            background: "#ffffff",
+                            padding: 12,
+                            minHeight: 120,
+                          }}
+                        >
+                          <div
+                            style={{
+                              display: "flex",
+                              justifyContent: "space-between",
+                              gap: 8,
+                              marginBottom: 8,
+                              fontFamily: '"nyt-franklin", helvetica, arial, sans-serif',
+                              fontSize: 10,
+                              fontWeight: 700,
+                              lineHeight: "13px",
+                              letterSpacing: "0.04em",
+                              textTransform: "uppercase",
+                              color: "#727272",
+                            }}
+                          >
+                            <span>{entry.role}</span>
+                            <span>p{entry.sourceIndex}</span>
+                          </div>
+                          <p
+                            style={{
+                              margin: 0,
+                              fontFamily:
+                                entry.role.includes("chart")
+                                  ? '"nyt-franklin", helvetica, arial, sans-serif'
+                                  : '"nyt-imperial", georgia, "times new roman", times, serif',
+                              fontSize: entry.role.includes("chart") ? 13 : 16,
+                              fontWeight: entry.role.includes("chart") ? 500 : 400,
+                              lineHeight: entry.role.includes("chart") ? "18px" : "23px",
+                              color: "#363636",
+                            }}
+                          >
+                            {entry.firstSentence}
+                          </p>
+                          {entry.className ? (
+                            <div
+                              style={{
+                                marginTop: 8,
+                                fontFamily: "var(--dd-font-mono, monospace)",
+                                fontSize: 10,
+                                lineHeight: "14px",
+                                color: "#727272",
+                              }}
+                            >
+                              {entry.className}
+                            </div>
+                          ) : null}
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 </BlockAnnotation>
               </ArticleBlockSection>
@@ -3564,12 +4009,23 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
 
           /* ── datawrapper-chart: Datawrapper iframe chart embed ── */
           if (block.type === "datawrapper-chart") {
+            const chartSrc = block.url.includes("?")
+              ? block.url
+              : `${block.url}${block.url.endsWith("/") ? "" : "/"}?plain=1`;
+            const chartHeight = block.height ?? 360;
+            const isEditable = Boolean(block.editableChart);
+
             return (
               <BlockAnnotation
                 key={`cb-${bi}`}
                 type="datawrapper-chart"
                 css={[
-                  `Datawrapper ${block.chartType} — iframe embed (${block.id})`,
+                  isEditable
+                    ? `Editable Datawrapper ${block.chartType} replica — config-driven SVG marks (${block.id})`
+                    : `Datawrapper ${block.chartType} — iframe embed (${block.id})`,
+                  isEditable
+                    ? `series/bars/axes/source/credit stored in contentBlocks[].editableChart`
+                    : `iframe[src="${chartSrc}"] height=${chartHeight}px width=100% border=0`,
                   `Title: nyt-cheltenham 21px/600 | Source: nyt-franklin 12px/300 #727272`,
                 ]}
                 show={showCss}
@@ -3586,30 +4042,35 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
                   >
                     {block.title}
                   </div>
-                  <div
-                    style={{
-                      background: "#f9f9f9",
-                      border: "1px solid #e8e5e0",
-                      borderRadius: 4,
-                      padding: "24px 16px",
-                      textAlign: "center" as const,
-                    }}
-                  >
-                    <div style={{ fontFamily: '"nyt-franklin", sans-serif', fontSize: 12, color: "#727272", marginBottom: 4 }}>
-                      {block.chartType.replace(/-/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase())} — Datawrapper
-                    </div>
-                    <a
-                      href={block.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      style={{ fontFamily: '"nyt-franklin", sans-serif', fontSize: 12, color: "#326891", textDecoration: "underline" }}
+                  {block.editableChart ? (
+                    <EditableDatawrapperChart chart={block.editableChart} />
+                  ) : (
+                    <div
+                      style={{
+                        background: "#ffffff",
+                        borderRadius: 4,
+                        overflow: "hidden",
+                      }}
                     >
-                      View chart ({block.id})
-                    </a>
-                  </div>
-                  {block.source && (
+                      <iframe
+                        id={`datawrapper-chart-${block.id}`}
+                        title={block.title}
+                        src={chartSrc}
+                        width="100%"
+                        height={chartHeight}
+                        loading="lazy"
+                        style={{ border: 0, display: "block", width: "100%" }}
+                      />
+                    </div>
+                  )}
+                  {!block.editableChart && block.source && (
                     <div style={{ fontFamily: '"nyt-franklin", sans-serif', fontSize: 11, color: "#727272", marginTop: 4 }}>
                       Source: {block.source}
+                    </div>
+                  )}
+                  {!block.editableChart && block.note && (
+                    <div style={{ fontFamily: '"nyt-franklin", sans-serif', fontSize: 11, color: "#727272", marginTop: 2 }}>
+                      {block.note}
                     </div>
                   )}
                 </div>
@@ -5080,8 +5541,8 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
         </BlockAnnotation>
       )}
 
-      {/* ── 8. Images — ai2html comparisons + Social/OG + article assets ── */}
-      {(socialImages.length > 0 || articleImageAssets.length > 0 || hasReportCard || hasAi2htmlArtboards) && (
+      {/* ── 8. Assets — mirrored/source images, icons, audio, ai2html, and social assets ── */}
+      {(socialImages.length > 0 || articleImageAssets.length > 0 || articleIcons.length > 0 || articleInlineSvgs.length > 0 || articleLinkedIcons.length > 0 || articleAudioAssets.length > 0 || articleAssetInventory || hasReportCard || hasAi2htmlArtboards) && (
         <div style={{ borderTop: "1px solid var(--dd-brand-border)", paddingTop: 24, marginTop: 16 }}>
           <h3
             style={{
@@ -5093,8 +5554,60 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
               marginBottom: 20,
             }}
           >
-            Images
+            Assets
           </h3>
+
+          {articleAssetInventory?.counts && (
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))",
+                gap: 8,
+                marginBottom: 20,
+                maxWidth: 820,
+              }}
+            >
+              {Object.entries(articleAssetInventory.counts).map(([key, value]) => (
+                typeof value === "number" ? (
+                  <div
+                    key={key}
+                    style={{
+                      border: "1px solid var(--dd-brand-border)",
+                      borderRadius: 4,
+                      background: "var(--dd-brand-surface)",
+                      padding: "10px 12px",
+                      fontFamily: "var(--dd-font-ui, sans-serif)",
+                    }}
+                  >
+                    <div style={{ fontSize: 20, fontWeight: 700, lineHeight: "24px", color: "var(--dd-brand-text-primary)" }}>
+                      {value}
+                    </div>
+                    <div style={{ fontSize: 10, fontWeight: 700, lineHeight: "13px", letterSpacing: "0.05em", textTransform: "uppercase", color: "var(--dd-brand-text-muted)" }}>
+                      {key}
+                    </div>
+                  </div>
+                ) : null
+              ))}
+            </div>
+          )}
+
+          {articleAssetInventory?.manifestPath && (
+            <div
+              style={{
+                marginBottom: 20,
+                padding: 10,
+                border: "1px solid var(--dd-brand-border)",
+                borderRadius: 4,
+                background: "var(--dd-brand-surface)",
+                fontFamily: "var(--dd-font-mono, monospace)",
+                fontSize: 11,
+                lineHeight: "16px",
+                color: "var(--dd-brand-text-muted)",
+              }}
+            >
+              Manifest: {articleAssetInventory.manifestPath}
+            </div>
+          )}
 
           {articleImageAssets.length > 0 && (
             <div style={{ marginBottom: 24 }}>
@@ -5149,9 +5662,12 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
                         </span>
                         {img.category ? ` · ${img.category}` : ""}
                         {img.width ? ` · ${img.width}px` : ""}
+                        {img.height ? ` × ${img.height}px` : ""}
                         {img.ratio ? ` · ${img.ratio}` : ""}
+                        {img.status ? ` · ${img.status}` : ""}
                         {" · "}
                         <span style={{ textTransform: "uppercase" as const }}>{ext}</span>
+                        {img.localPath ? <><br />{img.localPath}</> : null}
                         {img.desc ? <><br />{img.desc}</> : null}
                       </div>
                     </div>
@@ -5246,6 +5762,140 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
                 )}
               </div>
               {/* Overlays are now on the content block artboards above — Images section just shows raw assets */}
+            </div>
+          )}
+
+          {(articleIcons.length > 0 || articleInlineSvgs.length > 0 || articleLinkedIcons.length > 0) && (
+            <div style={{ marginBottom: 24 }}>
+              <div style={{
+                fontFamily: "var(--dd-font-ui, sans-serif)",
+                fontSize: 11,
+                fontWeight: 700,
+                color: "var(--dd-brand-accent)",
+                textTransform: "uppercase" as const,
+                letterSpacing: "0.05em",
+                marginBottom: 10,
+              }}>
+                Icons &amp; Inline SVGs
+              </div>
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
+                  gap: 10,
+                }}
+              >
+                {[...articleIcons, ...articleInlineSvgs, ...articleLinkedIcons].map((icon, index) => {
+                  const source = icon.localPath || icon.file || icon.url || "";
+                  return (
+                    <div
+                      key={`${icon.name}-${index}-${source}`}
+                      style={{
+                        border: "1px solid var(--dd-brand-border)",
+                        borderRadius: 4,
+                        background: "var(--dd-brand-surface)",
+                        padding: 10,
+                        minHeight: 110,
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          gap: 8,
+                          marginBottom: 6,
+                          fontFamily: "var(--dd-font-ui, sans-serif)",
+                          fontSize: 12,
+                          fontWeight: 700,
+                          lineHeight: "15px",
+                          color: "var(--dd-brand-text-primary)",
+                        }}
+                      >
+                        <span>{icon.name}</span>
+                        {icon.status ? (
+                          <span style={{ fontSize: 10, color: "var(--dd-brand-text-muted)", textTransform: "uppercase" }}>
+                            {icon.status}
+                          </span>
+                        ) : null}
+                      </div>
+                      <div
+                        style={{
+                          fontFamily: "var(--dd-font-mono, monospace)",
+                          fontSize: 10,
+                          lineHeight: "14px",
+                          color: "var(--dd-brand-text-muted)",
+                          overflowWrap: "anywhere",
+                        }}
+                      >
+                        {icon.size ? <div>size: {icon.size}</div> : null}
+                        {icon.width || icon.height ? <div>dimensions: {icon.width || "auto"} × {icon.height || "auto"}</div> : null}
+                        {icon.viewBox ? <div>viewBox: {icon.viewBox}</div> : null}
+                        {"pathCount" in icon && typeof icon.pathCount === "number" ? <div>paths: {icon.pathCount}</div> : null}
+                        {icon.usage ? <div>usage: {icon.usage}</div> : null}
+                        {source ? <div>{source}</div> : null}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {articleAudioAssets.length > 0 && (
+            <div style={{ marginBottom: 24 }}>
+              <div style={{
+                fontFamily: "var(--dd-font-ui, sans-serif)",
+                fontSize: 11,
+                fontWeight: 700,
+                color: "var(--dd-brand-accent)",
+                textTransform: "uppercase" as const,
+                letterSpacing: "0.05em",
+                marginBottom: 10,
+              }}>
+                Audio
+              </div>
+              <div style={{ display: "grid", gap: 10, maxWidth: 820 }}>
+                {articleAudioAssets.map((asset) => (
+                  <div
+                    key={asset.url}
+                    style={{
+                      border: "1px solid var(--dd-brand-border)",
+                      borderRadius: 4,
+                      background: "var(--dd-brand-surface)",
+                      padding: 12,
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontFamily: "var(--dd-font-ui, sans-serif)",
+                        fontSize: 13,
+                        fontWeight: 700,
+                        lineHeight: "17px",
+                        color: "var(--dd-brand-text-primary)",
+                        marginBottom: 4,
+                      }}
+                    >
+                      {asset.name}
+                    </div>
+                    <div
+                      style={{
+                        fontFamily: "var(--dd-font-mono, monospace)",
+                        fontSize: 10,
+                        lineHeight: "15px",
+                        color: "var(--dd-brand-text-muted)",
+                        overflowWrap: "anywhere",
+                      }}
+                    >
+                      {asset.type ? <div>{asset.type}</div> : null}
+                      {asset.status ? <div>status: {asset.status}</div> : null}
+                      {asset.bytes ? <div>bytes: {asset.bytes}</div> : null}
+                      {asset.localPath ? <div>{asset.localPath}</div> : null}
+                      <div>{asset.url}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 

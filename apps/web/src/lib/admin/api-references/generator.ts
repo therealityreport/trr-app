@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join, relative, sep } from "node:path";
 import {
   ADMIN_API_REFERENCES_GENERATOR_VERSION,
@@ -9,14 +9,12 @@ import {
   type AdminApiReferenceConfidence,
   type AdminApiReferenceEdge,
   type AdminApiReferenceEdgeKind,
-  type AdminApiReferenceEdgeOverride,
   type AdminApiReferenceIgnoreEntry,
   type AdminApiReferenceIndexes,
   type AdminApiReferenceInventory,
   type AdminApiReferenceNode,
   type AdminApiReferenceNodeKind,
   type AdminApiReferenceNodeOverride,
-  type AdminApiReferencePostgresAccess,
   type AdminApiReferenceProvenance,
   type AdminApiReferenceRisk,
   type AdminApiReferenceSourceLocator,
@@ -61,7 +59,6 @@ type SourceFileRecord = {
 };
 
 const PROJECT_ROOT_SENTINEL = "apps/web";
-const METHOD_RE = /\b(GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD)\b/g;
 const UI_REQUEST_FUNCTIONS = ["fetch", "adminFetch", "adminGetJson", "adminMutation", "adminStream", "withAuthFetch"];
 const UI_QUERY_HOOKS = ["useSWR", "useQuery", "useInfiniteQuery"];
 const SERVER_IMPORT_PREFIXES = ["@/lib/server/admin/", "@/lib/server/trr-api/", "@/lib/server/postgres"];
@@ -113,10 +110,6 @@ function posixify(value: string): string {
 
 function hashValue(value: string): string {
   return createHash("sha256").update(value).digest("hex");
-}
-
-function buildProjectRelative(projectRoot: string, absolutePath: string): string {
-  return posixify(relative(projectRoot, absolutePath));
 }
 
 function readSourceFile(projectRoot: string, relativePath: string): SourceFileRecord {
@@ -502,6 +495,33 @@ function discoverRequestTargets(source: string): DiscoveredRequestTarget[] {
         basis: [`heuristic:${helperName}`],
       });
     }
+  }
+
+  for (const match of source.matchAll(/export\s+const\s+(GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD)\s*=\s*createAdminBackendProxyRoute\b/g)) {
+    const exportedMethod = match[1]?.toUpperCase() ?? "GET";
+    const helperSource = source.slice(match.index ?? 0, (match.index ?? 0) + 5000);
+    const method =
+      helperSource.match(/method\s*:\s*["'](GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD)["']/i)?.[1]?.toUpperCase() ??
+      exportedMethod;
+    const backendPathMatch = helperSource.match(
+      /backendPath\s*:\s*(?:async\s*)?(?:\([^)]*\)|[A-Za-z_$][A-Za-z0-9_$]*)\s*=>\s*([`'"][\s\S]*?[`'"])/,
+    );
+    const literal = backendPathMatch?.[1];
+    const suffix = literal ? normalizeStringPathPattern(literal) : null;
+    if (!suffix) continue;
+    addTarget({
+      kind: "backend_endpoint",
+      method,
+      pathPattern: normalizePathPattern(`/api/v1${suffix}`),
+      sourceLocator: {
+        line: lineFromIndex(source, (match.index ?? 0) + (backendPathMatch?.index ?? 0)),
+        matchedText: literal,
+      },
+      provenance: "static_scan",
+      confidence: "high",
+      verificationStatus: "verified",
+      basis: ["static_scan:createAdminBackendProxyRoute"],
+    });
   }
 
   for (const match of source.matchAll(/new\s+EventSource\s*\(\s*([`'"][\s\S]*?[`'"])/g)) {

@@ -528,6 +528,47 @@ export type SiteHeaderShellAccountPanel = {
   logoutHref: string;
 };
 
+export type EditableChartPoint = {
+  x: string | number;
+  y: number;
+  label?: string;
+};
+
+export type EditableChartSeries = {
+  label: string;
+  color: string;
+  strokeWidth?: number;
+  points: readonly EditableChartPoint[];
+};
+
+export type EditableChartBar = {
+  label: string;
+  value: number;
+  valueLabel?: string;
+  color?: string;
+};
+
+export type EditableDatawrapperChartSpec = {
+  mode: "line" | "multi-line" | "diverging-bars";
+  subtitle?: string;
+  height?: number;
+  unit?: string;
+  unitPosition?: "prefix" | "suffix";
+  decimals?: number;
+  xAxisLabel?: string;
+  yAxisLabel?: string;
+  xTicks?: readonly (string | number)[];
+  yTicks?: readonly number[];
+  yDomain?: readonly [number, number];
+  series?: readonly EditableChartSeries[];
+  bars?: readonly EditableChartBar[];
+  source?: string;
+  credit?: string;
+  note?: string;
+  originalUrl?: string;
+  editableElements?: readonly string[];
+};
+
 export type ContentBlock =
   | {
       type: "site-header-shell";
@@ -562,6 +603,17 @@ export type ContentBlock =
       artboards: { mobile: Ai2htmlArtboard; desktop: Ai2htmlArtboard };
     }
   | { type: "body-copy"; html: string }
+  | {
+      type: "body-section-outline";
+      title: string;
+      source: string;
+      sections: readonly {
+        sourceIndex: number;
+        role: string;
+        className?: string;
+        firstSentence: string;
+      }[];
+    }
   | { type: "subhed"; text: string }
   | {
       type: "birdkit-chart";
@@ -597,7 +649,7 @@ export type ContentBlock =
   | { type: "related-link"; title: string; url: string; imageUrl: string; summary: string }
   | { type: "site-footer"; title: string; columns: readonly { label: string; links: readonly string[] }[] }
   | { type: "quote"; section: string; badge: string; badgeColor: string; text?: string; citation?: string }
-  | { type: "datawrapper-chart"; id: string; title: string; chartType: string; url: string; source?: string; note?: string }
+  | { type: "datawrapper-chart"; id: string; title: string; chartType: string; url: string; source?: string; note?: string; height?: number; editableChart?: EditableDatawrapperChartSpec }
   | { type: "birdkit-countdown"; label: string; daysLeft: number }
   | { type: "birdkit-animated-headline"; variants: readonly string[] }
   | { type: "birdkit-state-selector"; stateCount: number; defaultState: string }
@@ -621,6 +673,7 @@ export const CONTENT_BLOCK_TYPE_IDS = [
   "sharetools-bar",
   "ai2html",
   "body-copy",
+  "body-section-outline",
   "subhed",
   "birdkit-chart",
   "static-chart-image",
@@ -877,6 +930,18 @@ export const ARTICLES = [
         pageType: "standard news article, not bespoke interactive",
       },
       publicAssets: {
+        assetInventory: {
+          manifestPath: "config-only: existing NYT article-shell asset list; full source bundle not available",
+          counts: {
+            images: 6,
+            inlineSvgs: 0,
+            linkedIcons: 5,
+            audio: 0,
+            figures: 1,
+            scripts: 0,
+            stylesheets: 0,
+          },
+        },
         icons: [
           { name: "listen-play", file: "/design-docs/nyt/article-shell/icons/listen-play.svg", size: "32x32", fill: "#121212", usage: "Listen control play icon", element: "button" },
           { name: "gift", file: "/design-docs/nyt/article-shell/icons/gift.svg", size: "19x19", fill: "#121212", usage: "Share full article icon", element: "button" },
@@ -909,6 +974,47 @@ export const ARTICLES = [
       },
     },
     contentBlocks: [
+      {
+        type: "component-inventory",
+        title: "NYT Standard Article Component Inventory",
+        groups: [
+          {
+            label: "Header, Menu, Headline, Icons",
+            items: [
+              "Standard NYT article shell with centered masthead, article headline, summary deck, listen control, share full article, share, save, and comments actions",
+              "Article-shell icon set from config evidence: listen play, gift/share-full-article, share arrow, save bookmark, and comments bubble",
+              "No article-specific saved full source bundle is available for this entry; component coverage is marked config-backed instead of source-bundle-backed",
+            ],
+          },
+          {
+            label: "Components and Assets",
+            items: [
+              "Lead article image, high-resolution lead image, and four social/OG image crops are enumerated in publicAssets",
+              "Lead-image figure preserves caption and Getty credit",
+              "Author-bio slot is retained as the near-final article component",
+            ],
+          },
+          {
+            label: "Graphs/Charts and Production Stack",
+            items: [
+              "Charts: none; the article references federal fertility data in article copy rather than embedding a chart component",
+              "Framework: NYT standard article shell",
+              "Hosting: nytimes.com story route plus static01.nyt.com image CDN",
+            ],
+          },
+        ],
+      },
+      {
+        type: "body-section-outline",
+        title: "Body Paragraph and Section First Sentences",
+        source: "Existing design-doc config and user-provided NYT article screenshot; no full saved source bundle available",
+        sections: [
+          { sourceIndex: 1, role: "headline", firstSentence: "U.S. Fertility Rates Drop to Another Record Low" },
+          { sourceIndex: 2, role: "summary deck", firstSentence: "The fertility rate has been falling since 2007, in large part because of a plunge among teenagers." },
+          { sourceIndex: 3, role: "lead image caption", firstSentence: "The fertility rate has been falling since 2007." },
+          { sourceIndex: 4, role: "data reference", firstSentence: "National Center for Health Statistics provisional fertility data." },
+        ],
+      },
       { type: "header" },
       { type: "byline" },
       {
@@ -938,64 +1044,63 @@ export const ARTICLES = [
     date: "2026-04-09",
     section: "The Upshot",
     type: "article" as const,
-    description: "The record-low U.S. birthrate could be temporary as today's young women postpone pregnancy.",
-    ogImage: "https://substackcdn.com/image/fetch/%24s_%21oIg_%21%2Cw_1456%2Cc_limit%2Cf_auto%2Cq_auto%3Agood%2Cfl_progressive%3Asteep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F75c9406f-5dbb-48a0-b3f8-af8553c0181c_1236x552.png",
+    description: "There are reasons to believe the record-low U.S. birthrate could be only temporary as today's young women postpone pregnancy.",
+    ogImage: "https://static01.nyt.com/images/2026/04/09/multimedia/2026-04-09-fert-promo-index/2026-04-09-fert-promo-index-facebookJumbo-v8.png",
     featuredImage: {
-      name: "women-postponing-pregnancy-chart",
-      url: "https://substackcdn.com/image/fetch/%24s_%21oIg_%21%2Cw_1456%2Cc_limit%2Cf_auto%2Cq_auto%3Agood%2Cfl_progressive%3Asteep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F75c9406f-5dbb-48a0-b3f8-af8553c0181c_1236x552.png",
-      category: "Chart image",
-      ratio: "2.24:1",
-      desc: "Horizontal bar chart titled 'Women are postponing pregnancy'",
-      sectionLabel: "Main Chart",
+      name: "fertility-postponement-nyt-social-image",
+      url: "https://static01.nyt.com/images/2026/04/09/multimedia/2026-04-09-fert-promo-index/2026-04-09-fert-promo-index-facebookJumbo-v8.png",
+      category: "NYT social image",
+      ratio: "1.91:1",
+      desc: "NYT Open Graph image from the authenticated rendered page; the in-story charts are Datawrapper embeds rather than this promo image.",
+      sectionLabel: "Promo Image",
     },
-    tags: ["Birth Rates", "Fertility", "Demographics", "Mothers", "Pregnancy", "Teenagers and Adolescence", "Centers for Disease Control and Prevention", "The Upshot"],
-    graphicsCount: 5,
-    figuresCount: 5,
+    tags: ["Birth Rates", "Women and Girls", "Population", "Age, Chronological", "United States", "Teenage Pregnancy", "The Upshot", "Datawrapper", "vis-design", "data-vis", "Data Visualization"],
+    graphicsCount: 4,
+    figuresCount: 21,
     tools: {
       topper: "none",
-      charts: "NYT Upshot graphics package: diverging age-group bar chart, births-over-40 vs teen crossover chart, completed-motherhood by age 45 callout/cohort chart, fertility-intentions survey bars, source/credit footers; exact DOM capture still degraded where Chrome extension source was unavailable",
-      components: "sticky site header, masthead, hamburger menu, search panel, account drawer, subscribe/login controls, section label, article header, byline/timestamp, audio/listen control, gift/share/save/comment/more actions, body paragraph clusters, ad slots, chart figures, related coverage card, author bio, global footer",
-      framework: "NYT standard article shell + Upshot graphics package",
-      hosting: "nytimes.com article shell + static/media image CDN",
+      charts: "Editable Datawrapper-style chart replicas from source CSVs: LPtw8 v7 annual fertility line, ywEMI v9 completed-fertility line, IWlRs v12 age-group diverging bars, qz8fa v11 age-30/age-45 motherhood cohort lines",
+      components: "sticky site header, masthead, hamburger menu, search panel, account drawer, give/subscribe controls, section label, supported-by ad label, article header, byline/timestamp, audio/listen control, gift/share/save/comment/more actions, body paragraph clusters, ad slots, Datawrapper chart figures, related coverage cards, author bio, comments CTA, site index, global footer",
+      framework: "NYT vi-story standard article shell + Datawrapper source charts recreated as editable React/SVG chart primitives; Datadog RUM is analytics/observability, not the chart renderer",
+      hosting: "nytimes.com article shell; static01.nyt.com media; datawrapper.dwcdn.net chart embeds",
+      productionStack: "NYT vi-story route, Samizdat GraphQL, NYT Webpack chunks, static01 CDN, Datawrapper global-v1.js, GTM, Chartbeat, Datadog RUM",
     },
     chartTypes: [
       {
+        type: "line-chart",
+        tool: "Datawrapper LPtw8 v7",
+        topic: "Even as annual fertility falls ... Number of U.S. births per 1,000 women ages 15 to 44",
+        source: "Philip Cohen analysis of Centers for Disease Control and Prevention data",
+        url: "https://datawrapper.dwcdn.net/LPtw8/7/",
+      },
+      {
+        type: "line-chart",
+        tool: "Datawrapper ywEMI v9",
+        topic: "... most women eventually have two children, on average; average number of children ever born to women age 45",
+        source: "Philip Cohen analysis of Centers for Disease Control and Prevention data",
+        url: "https://datawrapper.dwcdn.net/ywEMI/9/",
+      },
+      {
         type: "diverging-bar",
-        tool: "NYT static graphic",
-        topic: "Change in the U.S. birth rate by age group since 2007",
+        tool: "Datawrapper IWlRs v12",
+        topic: "Women are postponing pregnancy; change in the U.S. birth rate by age group since 2007",
         source: "Centers for Disease Control and Prevention data",
+        url: "https://datawrapper.dwcdn.net/IWlRs/12/",
       },
       {
-        type: "line-crossover",
-        tool: "NYT Upshot graphic",
-        topic: "Babies born to women over 40 compared with babies born to teenagers",
-        source: "secondary article discussion; exact NYT chart payload pending authenticated source capture",
-      },
-      {
-        type: "cohort-callout",
-        tool: "NYT Upshot graphic",
-        topic: "Share of women who are mothers by age 45",
-        source: "secondary article discussion; exact NYT chart payload pending authenticated source capture",
-      },
-      {
-        type: "survey-bars",
-        tool: "NYT Upshot graphic",
-        topic: "Young women's stated intentions to have children",
-        source: "secondary article discussion; exact NYT chart payload pending authenticated source capture",
-      },
-      {
-        type: "source-credit-strip",
-        tool: "NYT graphics annotation",
-        topic: "Chart source, credit, notes, and responsive chart metadata",
-        source: "Blue Button counts supplied by user; source bundle capture pending",
+        type: "cohort-line-chart",
+        tool: "Datawrapper qz8fa v11",
+        topic: "Fewer women give birth by 30, but most catch up; share of women in the U.S. who are mothers by age",
+        source: "Philip Cohen analysis of Centers for Disease Control and Prevention data",
+        url: "https://datawrapper.dwcdn.net/qz8fa/11/",
       },
     ],
     quoteSections: [],
     cssInfo: {
-      styleRules: "Blue Button inventory reported by user: Open Graph 6, Facebook 1, Twitter 10, stylesheets 3, scripts 42, content images 1, icons/banners 6, mobile 2, on-page SEO 8, misc meta 9, article 12, application 1",
-      cssFile: "NYT article shell CSS modules; CSS Peeper text/colors/assets capture required for final exact selectors",
-      stylesheets: "3 stylesheets reported by Blue Button",
-      loadTime: "not captured in Codex; BuiltWith/Wappalyzer stack capture required for exact production technology labels",
+      styleRules: "Authenticated Chrome Profile 11 CDP capture: meta 65, Open Graph 6, Twitter 4, stylesheets 10, scripts 93, DOM images 28, SVGs 29, canvases 0, figures 21; mirrored asset manifest adds OG/Twitter media for 30 saved images, 29 inline SVGs, 5 linked icons, and 1 audio file; Blue Button prompt reported OG 6, Facebook 1, Twitter 10, stylesheets 3, scripts 42, content images 1, icons/banners 6, mobile 2, on-page SEO 8, misc meta 9, article 12, application 1",
+      cssFile: "NYT vi-story CSS modules plus static01.nytimes.com/newsgraphics/datawrapper/scripts/global-v1.js for iframe resizing/embedding",
+      stylesheets: "10 stylesheet/link stylesheet entries observed in the authenticated rendered source",
+      loadTime: "Captured through Chrome DevTools Protocol on Profile 11 admin@thereality.report; BuiltWith/Wappalyzer-equivalent stack recorded from script/link inventory",
     },
     typographyGroups: [
       {
@@ -1061,9 +1166,9 @@ export const ARTICLES = [
             label: "Chart title",
             text: "Women are postponing pregnancy",
             fontFamily: 'nyt-cheltenham, georgia, "times new roman", serif',
-            fontSize: 27,
-            fontWeight: 700,
-            lineHeight: "31px",
+            fontSize: 21,
+            fontWeight: 600,
+            lineHeight: "24px",
             color: "#121212",
           },
           {
@@ -1123,7 +1228,7 @@ export const ARTICLES = [
         usedIn: [
           "h1.Headline: 40px/700/46px italic",
           "p.Summary: 23px/300/30px",
-          "h2.ChartTitle: chart title treatment",
+          "h2.interactive-headline: Datawrapper chart title, 21px/600/24px",
         ],
       },
       {
@@ -1172,7 +1277,7 @@ export const ARTICLES = [
         { name: "Bar slate", hex: "#687D84" },
         { name: "Axis ink", hex: "#555555" },
         { name: "Chart source gray", hex: "#727272" },
-        { name: "Pending chart placeholder", hex: "#F4F4F4" },
+        { name: "Datawrapper background", hex: "#FFFFFF" },
       ],
       editorial: {
         primary: "#121212",
@@ -1199,67 +1304,77 @@ export const ARTICLES = [
         colors: [
           { name: "Horizontal bar fill", hex: "#687D84", note: "Slate data bars in the age-group chart" },
           { name: "Zero axis", hex: "#555555", note: "Vertical baseline separating negative and positive change" },
-          { name: "Chart placeholder rail", hex: "#F4F4F4", note: "Used for reconstructed slots whose exact NYT SVG/div geometry is pending capture" },
+          { name: "Datawrapper canvas", hex: "#FFFFFF", note: "Iframe chart background in the embedded Datawrapper charts" },
         ],
       },
     ],
     architecture: {
-      framework: "NYT standard article shell with Upshot graphics package",
-      projectId: "births-decline-older-mothers",
-      hydrationId: "not-captured-authenticated-chrome-source-pending",
-      hosting: "nytimes.com article shell; chart evidence recovered from public reference image plus secondary article discussion",
+      framework: "NYT vi-story standard article shell with four Datawrapper charts recreated as editable interactive SVG primitives",
+      projectId: "births-decline-older-mothers / NYT article 100000010827733",
+      hydrationId: "nyt://article/b3cab499-94db-599c-9dee-157050fa290e; Datawrapper source ids 100000010830379, 100000010830538, 100000010830585, 100000010830177",
+      hosting: "nytimes.com vi-story route; static01.nyt.com assets; datawrapper.dwcdn.net chart iframes",
       hierarchy: [
         "main#story (NYT article shell)",
-        "  sticky site header shell (hamburger, search, masthead, subscribe, account drawer)",
-        "  hidden/scroll sticky article header (article title, gift/share/save/more controls)",
-        "  article header (Upshot headline, summary deck, byline, timestamp)",
-        "  action row (Listen, share full article, share, save, comments, more)",
+        "  sticky site header shell .kyt-wufmy/.kyt-yAURx (skip links, hamburger, search, centered masthead, Give the Times, Account, date, Today's Paper)",
+        "  scroll sticky article header (compact title plus gift/share/save/comment/more controls)",
+        "  article header .css-1qv3lay (The Upshot, Supported by, SKIP ADVERTISEMENT, headline, deck, Listen 5:47, byline, timestamp)",
+        "  action row (Listen, Share full article, share icon, save/bookmark, Read 76 comments)",
         "  article body cluster 1 (Imperial reading column)",
-        "  figure.chart-1 (diverging age-group birth-rate change bars)",
-        "  ad slot after initial graphic cluster",
-        "  article body cluster 2 (postponed motherhood / cohort framing)",
-        "  figure.chart-2 (40+ births vs teen births crossover)",
-        "  figure.chart-3 (motherhood by age 45 callout/cohort graphic)",
-        "  article body cluster 3 (intentions and timing discussion)",
-        "  figure.chart-4 (fertility intentions survey bars)",
-        "  related coverage card",
+        "  InteractiveBlock datawrapper_LPtw8 (annual fertility line, iframe height 333)",
+        "  InteractiveBlock datawrapper_ywEMI (completed fertility age-45 line, iframe height 333)",
+        "  article body cluster 2 (postponement transition and demographic timing)",
+        "  InteractiveBlock datawrapper_IWlRs (age-group diverging bar chart, iframe height 164)",
+        "  article body cluster 3 (education, age 30, age 45, teen pregnancy, survey intent paragraphs)",
+        "  InteractiveBlock datawrapper_qz8fa (age 30 vs age 45 motherhood cohort lines, iframe height 335)",
+        "  ad slots / story body companion columns",
+        "  related fertility coverage cards",
+        "  comments CTA (Read 76 comments)",
         "  footer.author-bio",
-        "  global NYT footer utility matrix",
+        "  site index navigation and global NYT footer utility matrix",
       ],
       layoutTokens: {
         bodyWidth: "600px article reading column",
         marginInline: "20px mobile gutters",
-        siteHeader: "sticky NYT shell with centered masthead and left hamburger/search controls",
+        siteHeader: "43px sticky NYT shell with centered masthead and left hamburger/search controls",
         stickyArticleHeader: "48px compact article-title row with share/save controls after masthead scroll threshold",
         headlineFont: "nyt-cheltenham display serif",
         headlineStyle: "left-aligned Cheltenham bold italic display headline",
         deckStyle: "Cheltenham light summary deck below headline",
         bodyFont: "nyt-imperial 20px/30px reading text",
         bylineFont: "nyt-franklin compact byline",
-        chartWidth: "approximately 600px reading-column chart on desktop",
-        chartStyle: "Upshot reading-column graphics with Cheltenham titles, Franklin labels/source, slate data marks, inline callouts",
-        graphsCharts: "five documented chart/graphic slots: one direct chart image with extracted values, three secondary-source chart slots pending exact capture, one source/annotation strip",
+        chartWidth: "600px reading-column editable SVG chart on desktop",
+        chartStyle: "Editable Datawrapper-style React/SVG charts with NYT Cheltenham 21px/600 interactive headlines, Franklin labels, hover crosshairs/tooltips, and source/credit footers",
+        graphsCharts: "Four authenticated Datawrapper charts are recreated from public data.csv endpoints as editable local chart primitives; original iframe IDs remain in source metadata for traceability. The survey-intent point appears as article copy, not a separate chart in the captured rendered source",
         footer: "global NYT utility footer with company, legal, help, subscription, and product links",
       },
       cssFiles: [
-        "3 stylesheets reported by Blue Button",
-        "NYT standard article shell CSS modules",
+        "10 stylesheet/link stylesheet entries observed in authenticated rendered source",
+        "NYT vi-story CSS modules and Webpack chunks",
         "NYT sharetools/action-bar CSS modules",
-        "NYT Upshot graphics CSS modules",
+        "static01.nytimes.com/newsgraphics/datawrapper/scripts/global-v1.js",
       ],
       dataArchitecture: {
-        charts: "direct-image chart rows captured for the age-group diverging bar chart; remaining chart slots represented from secondary evidence and marked pending exact source capture",
-        primaryDataReference: "Centers for Disease Control and Prevention birth-rate data",
-        pageType: "Upshot article with multiple static/responsive graphics embedded in standard NYT article shell",
-        sourceAuthority: "NYT authenticated Chrome source capture still required for exact page-source bundle; Blue Button counts were supplied by the user; first chart rows were extracted from a public reference image",
+        charts: "Source-backed Datawrapper embeds recovered from authenticated Chrome Profile 11/admin@thereality.report rendered HTML and MHTML capture",
+        primaryDataReference: "Centers for Disease Control and Prevention data; Philip Cohen analysis for annual fertility, completed fertility, and motherhood-by-age charts",
+        pageType: "Upshot article on NYT vi-story route with Datawrapper iframes embedded in the standard article shell",
+        sourceAuthority: "Saved source bundle: .agents/skills/design-docs-agent/source-bundles/nyt-births-decline-older-mothers-2026/rendered.html, snapshot.mhtml, desktop-full.png, extracted-inventory.json",
+        chartExtractionAttempts: [
+          { chartId: "LPtw8", version: 7, provider: "Datawrapper", sourceId: "100000010830379", iframe: "https://datawrapper.dwcdn.net/LPtw8/7/?plain=1", dataCsv: "https://datawrapper.dwcdn.net/LPtw8/7/data.csv", status: "source-backed embed and public data CSV recovered" },
+          { chartId: "ywEMI", version: 9, provider: "Datawrapper", sourceId: "100000010830538", iframe: "https://datawrapper.dwcdn.net/ywEMI/9/?plain=1", dataCsv: "https://datawrapper.dwcdn.net/ywEMI/9/data.csv", status: "source-backed embed and public data CSV recovered" },
+          { chartId: "IWlRs", version: 12, provider: "Datawrapper", sourceId: "100000010830585", iframe: "https://datawrapper.dwcdn.net/IWlRs/12/?plain=1", dataCsv: "https://datawrapper.dwcdn.net/IWlRs/12/data.csv", status: "source-backed embed and public data CSV recovered" },
+          { chartId: "qz8fa", version: 11, provider: "Datawrapper", sourceId: "100000010830177", iframe: "https://datawrapper.dwcdn.net/qz8fa/11/?plain=1", dataCsv: "https://datawrapper.dwcdn.net/qz8fa/11/data.csv", status: "source-backed embed and public data CSV recovered" },
+        ],
+        confirmedNonChartSections: [
+          "Survey/intent discussion is body copy in the captured source rather than a fifth Datawrapper chart.",
+          "Comments count was 76 at capture time.",
+          "Authenticated account shell was rendered for admin@thereality.report via Chrome Profile 11.",
+        ],
         degradedSourceCoverage: [
-          "CSS Peeper exact text/color/asset dump pending",
-          "BuiltWith/Wappalyzer exact stack capture pending",
-          "Exact SVG/div geometry for three non-public chart slots pending",
-          "No full article body text is copied into design docs; body clusters are summarized for copyright safety",
+          "No full article body text is copied into design docs; body clusters are summarized for copyright safety.",
+          "CSS Peeper UI labels are represented through captured computed styles and asset inventory rather than a separate extension export.",
         ],
         chromeExtensionInventory: {
-          blueButton: {
+          blueButtonPrompt: {
             openGraph: 6,
             facebook: 1,
             twitter: 10,
@@ -1273,11 +1388,72 @@ export const ARTICLES = [
             article: 12,
             application: 1,
           },
-          cssPeeper: "required for final text/assets/colors; pending authenticated Chrome extension extraction",
-          builtWithWappalyzer: "required for production stack confirmation; pending authenticated Chrome extension extraction",
+          authenticatedCdpCapture: {
+            meta: 65,
+            openGraph: 6,
+            twitter: 4,
+            stylesheets: 10,
+            scripts: 93,
+            images: 28,
+            svgs: 29,
+            canvases: 0,
+            figures: 21,
+          },
+          cssPeeper: "Text, color, font, image, and SVG evidence captured from rendered DOM/computed styles.",
+          builtWithWappalyzer: "Production stack inferred from scripts/link inventory: NYT vi-story, Samizdat GraphQL, Datawrapper, GTM, Chartbeat, Datadog RUM, static01 CDN.",
         },
       },
+      articleHeaderCapture: {
+        headerClass: "css-1qv3lay euiyums1",
+        sectionHref: "https://www.nytimes.com/section/upshot",
+        sectionLabel: "The Upshot",
+        sponsorLabel: "Supported by",
+        skipAdLabel: "SKIP ADVERTISEMENT",
+        headlineId: "link-277b3ca0",
+        headlineClass: "css-88wicj e1h9rw200",
+        summaryId: "article-summary",
+        summaryClass: "css-1r45aqf e1wiw3jv0",
+        listen: {
+          duration: "5:47 min",
+          audioSrc: "https://static.nytimes.com/narrated-articles/synthetic/article-b3cab499-94db-599c-9dee-157050fa290e/job-1775759166448/article-b3cab499-94db-599c-9dee-157050fa290e-job-1775759166448.mp3",
+        },
+        shareTools: {
+          commentCount: 76,
+          buttons: [
+            { label: "Share full article", kind: "gift" },
+            { label: "More sharing options", kind: "more" },
+            { label: "Save article", kind: "save" },
+          ],
+        },
+        byline: {
+          prefix: "By",
+          author: "Claire Cain Miller",
+          href: "https://www.nytimes.com/by/claire-cain-miller",
+          headshotUrl: "https://static01.nyt.com/images/2018/06/13/multimedia/author-claire-cain-miller/author-claire-cain-miller-thumbLarge-v2.png",
+        },
+        dateLabel: "April 9, 2026",
+        datetime: "2026-04-09T14:26:04-04:00",
+      },
       publicAssets: {
+        authorHeadshot: {
+          name: "Claire-Cain-Miller",
+          url: "https://static01.nyt.com/images/2018/06/13/multimedia/author-claire-cain-miller/author-claire-cain-miller-thumbLarge-v2.png",
+          localPath: ".agents/skills/design-docs-agent/source-bundles/nyt-births-decline-older-mothers-2026/assets/images/00-Claire-Cain-Miller.png",
+          width: 150,
+          height: 150,
+        },
+        assetInventory: {
+          manifestPath: ".agents/skills/design-docs-agent/source-bundles/nyt-births-decline-older-mothers-2026/assets/asset-inventory.json",
+          counts: {
+            images: 30,
+            inlineSvgs: 29,
+            linkedIcons: 5,
+            audio: 1,
+            figures: 21,
+            scripts: 93,
+            stylesheets: 10,
+          },
+        },
         icons: [
           { name: "hamburger-menu", file: "/design-docs/nyt/article-shell/icons/menu.svg", size: "17x15", fill: "#121212", usage: "Open section navigation", element: "button" },
           { name: "search", file: "/design-docs/nyt/article-shell/icons/search.svg", size: "16x16", fill: "#121212", usage: "Open search panel", element: "button" },
@@ -1288,25 +1464,81 @@ export const ARTICLES = [
           { name: "comments", file: "/design-docs/nyt/article-shell/icons/comments.svg", size: "20x18", fill: "#121212", usage: "Article comments icon", element: "button" },
         ],
         images: [
-          {
-            name: "women-postponing-pregnancy-chart",
-            url: "https://substackcdn.com/image/fetch/%24s_%21oIg_%21%2Cw_1456%2Cc_limit%2Cf_auto%2Cq_auto%3Agood%2Cfl_progressive%3Asteep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F75c9406f-5dbb-48a0-b3f8-af8553c0181c_1236x552.png",
-            category: "chart-image",
-            width: 1236,
-            ratio: "2.24:1",
-            desc: "Public reference image of NYT horizontal bar chart",
-          },
-          {
-            name: "reader-counterchart-reference",
-            url: "https://substackcdn.com/image/fetch/%24s_%21mEUV%21%2Cw_1456%2Cc_limit%2Cf_auto%2Cq_auto%3Agood%2Cfl_progressive%3Asteep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F0bfa4b63-4c04-4564-a015-0305771e43a9_680x521.jpeg",
-            category: "external-reference",
-            width: 680,
-            ratio: "1.31:1",
-            desc: "External reader chart comparing implied birth-count shifts; kept as critique context, not NYT page asset",
-          },
+          { name: "Claire-Cain-Miller", url: "https://static01.nyt.com/images/2018/06/13/multimedia/author-claire-cain-miller/author-claire-cain-miller-thumbLarge-v2.png", category: "author-headshot", width: 150, height: 150, localPath: ".agents/skills/design-docs-agent/source-bundles/nyt-births-decline-older-mothers-2026/assets/images/00-Claire-Cain-Miller.png", status: "saved" },
+          { name: "11Well-TouchGrass-SignUp-thumbLarge", url: "https://static01.nyt.com/images/2026/05/11/well/11Well-TouchGrass-SignUp/11Well-TouchGrass-SignUp-thumbLarge.jpg", category: "content-image", width: 150, height: 150, localPath: ".agents/skills/design-docs-agent/source-bundles/nyt-births-decline-older-mothers-2026/assets/images/01-11Well-TouchGrass-SignUp-thumbLarge.jpg", status: "saved" },
+          { name: "13re-HABITAT-HOUSES-mtqg-thumbLarge", url: "https://static01.nyt.com/images/2026/05/13/multimedia/13re-HABITAT-HOUSES-mtqg/13re-HABITAT-HOUSES-mtqg-thumbLarge.jpg", category: "content-image", width: 150, height: 150, localPath: ".agents/skills/design-docs-agent/source-bundles/nyt-births-decline-older-mothers-2026/assets/images/02-13re-HABITAT-HOUSES-mtqg-thumbLarge.jpg", status: "saved" },
+          { name: "13ModernLove-Ramy-Youssef-thumbLarge", url: "https://static01.nyt.com/images/2026/05/13/podcasts/13ModernLove-Ramy-Youssef/13ModernLove-Ramy-Youssef-thumbLarge.png", category: "content-image", width: 150, height: 150, localPath: ".agents/skills/design-docs-agent/source-bundles/nyt-births-decline-older-mothers-2026/assets/images/03-13ModernLove-Ramy-Youssef-thumbLarge.png", status: "saved" },
+          { name: "09nat-us-census-pchv-threeByTwoSmallAt2X", url: "https://static01.nyt.com/images/2026/04/09/multimedia/09nat-us-census-pchv/09nat-us-census-pchv-threeByTwoSmallAt2X.jpg", category: "content-image", width: 600, height: 400, localPath: ".agents/skills/design-docs-agent/source-bundles/nyt-births-decline-older-mothers-2026/assets/images/04-09nat-us-census-pchv-threeByTwoSmallAt2X.jpg", status: "saved" },
+          { name: "2026-02-12-up-child-care-inflation-inflation-chart-threeByTwoSmallAt2X-v11", url: "https://static01.nyt.com/images/2026/03/02/multimedia/2026-02-12-up-child-care-inflation-inflation-chart/2026-02-12-up-child-care-inflation-inflation-chart-threeByTwoSmallAt2X-v11.png", category: "content-image", width: 600, height: 400, localPath: ".agents/skills/design-docs-agent/source-bundles/nyt-births-decline-older-mothers-2026/assets/images/05-2026-02-12-up-child-care-inflation-inflation-chart-threeByTwoSmallAt2X-v11.png", status: "saved" },
+          { name: "merlin_189047097_12f15041-8689-429f-8d1b-5682bcf4b65b-threeByTwoSmallAt2X", url: "https://static01.nyt.com/images/2021/06/14/us/14births-top1/merlin_189047097_12f15041-8689-429f-8d1b-5682bcf4b65b-threeByTwoSmallAt2X.jpg", category: "content-image", width: 600, height: 400, localPath: ".agents/skills/design-docs-agent/source-bundles/nyt-births-decline-older-mothers-2026/assets/images/06-merlin_189047097_12f15041-8689-429f-8d1b-5682bcf4b65b-threeByTwoSmallAt2X.jpg", status: "saved" },
+          { name: "2026-03-19-school-enrollment-dark-mode-promos-thumbLarge", url: "https://static01.nyt.com/images/2026/05/08/multimedia/2026-03-19-school-enrollment-dark-mode-promos/2026-03-19-school-enrollment-dark-mode-promos-thumbLarge.png?quality=75&auto=webp&disable=upscale", category: "content-image", width: 150, height: 150, localPath: ".agents/skills/design-docs-agent/source-bundles/nyt-births-decline-older-mothers-2026/assets/images/07-2026-03-19-school-enrollment-dark-mode-promos-thumbLarge.png", status: "saved" },
+          { name: "08eks-belluz-image-thumbLarge", url: "https://static01.nyt.com/images/2026/05/08/opinion/08eks-belluz-image/08eks-belluz-image-thumbLarge.jpg?quality=75&auto=webp&disable=upscale", category: "content-image", width: 150, height: 150, localPath: ".agents/skills/design-docs-agent/source-bundles/nyt-births-decline-older-mothers-2026/assets/images/08-08eks-belluz-image-thumbLarge.jpg", status: "saved" },
+          { name: "07sussman-zgwp-thumbLarge-v3", url: "https://static01.nyt.com/images/2026/05/12/multimedia/07sussman-zgwp/07sussman-zgwp-thumbLarge-v3.jpg?quality=75&auto=webp&disable=upscale", category: "content-image", width: 150, height: 150, localPath: ".agents/skills/design-docs-agent/source-bundles/nyt-births-decline-older-mothers-2026/assets/images/09-07sussman-zgwp-thumbLarge-v3.jpg", status: "saved" },
+          { name: "The-U.S.-is-the-only-industrialized-nation-not-to-have-paid-family-leave-as-a-fe", url: "https://static01.nyt.com/images/2026/05/02/multimedia/00up-family-leave2-hfpb/00up-family-leave2-hfpb-square640.jpg?quality=75&auto=webp&disable=upscale", category: "content-image", width: 640, height: 640, localPath: ".agents/skills/design-docs-agent/source-bundles/nyt-births-decline-older-mothers-2026/assets/images/10-The-U.S.-is-the-only-industrialized-nation-not-to-have-paid-family-leave-as-a-fe.jpg", status: "saved" },
+          { name: "2026-05-07-test-scores-story-index-square640-v4", url: "https://static01.nyt.com/images/2026/05/12/multimedia/2026-05-07-test-scores-story-index/2026-05-07-test-scores-story-index-square640-v4.png?quality=75&auto=webp&disable=upscale", category: "content-image", width: 640, height: 640, localPath: ".agents/skills/design-docs-agent/source-bundles/nyt-births-decline-older-mothers-2026/assets/images/11-2026-05-07-test-scores-story-index-square640-v4.png", status: "saved" },
+          { name: "00HS-cancer-kras-stillpromo-gzfw-square640", url: "https://static01.nyt.com/images/2026/05/08/multimedia/00HS-cancer-kras-stillpromo-gzfw/00HS-cancer-kras-stillpromo-gzfw-square640.jpg?quality=75&auto=webp&disable=upscale", category: "content-image", width: 640, height: 640, localPath: ".agents/skills/design-docs-agent/source-bundles/nyt-births-decline-older-mothers-2026/assets/images/12-00HS-cancer-kras-stillpromo-gzfw-square640.jpg", status: "saved" },
+          { name: "2026-04-16-school-score-lookup-index-square640-v3", url: "https://static01.nyt.com/images/2026/05/12/multimedia/2026-04-16-school-score-lookup-index/2026-04-16-school-score-lookup-index-square640-v3.png?quality=75&auto=webp&disable=upscale", category: "content-image", width: 640, height: 640, localPath: ".agents/skills/design-docs-agent/source-bundles/nyt-births-decline-older-mothers-2026/assets/images/13-2026-04-16-school-score-lookup-index-square640-v3.png", status: "saved" },
+          { name: "flashback-promo-2026-05-09-6-square640", url: "https://static01.nyt.com/images/2026/05/08/multimedia/flashback-promo-2026-05-09-6/flashback-promo-2026-05-09-6-square640.jpg?quality=75&auto=webp&disable=upscale", category: "content-image", width: 640, height: 640, localPath: ".agents/skills/design-docs-agent/source-bundles/nyt-births-decline-older-mothers-2026/assets/images/14-flashback-promo-2026-05-09-6-square640.jpg", status: "saved" },
+          { name: "11met-affordingny-perkins--01-khqj-square640", url: "https://static01.nyt.com/images/2026/05/11/multimedia/11met-affordingny-perkins-promo/11met-affordingny-perkins--01-khqj-square640.jpg?quality=75&auto=webp&disable=upscale", category: "content-image", width: 640, height: 640, localPath: ".agents/skills/design-docs-agent/source-bundles/nyt-births-decline-older-mothers-2026/assets/images/15-11met-affordingny-perkins--01-khqj-square640.jpg", status: "saved" },
+          { name: "07FD-DUNZO-DINNERS-creamcheeseramen-hjcw-square640", url: "https://static01.nyt.com/images/2026/05/13/multimedia/13FD-DUNZO-DINNERS-creamcheeseramen-hjcw/07FD-DUNZO-DINNERS-creamcheeseramen-hjcw-square640.jpg?quality=75&auto=webp&disable=upscale", category: "content-image", width: 640, height: 640, localPath: ".agents/skills/design-docs-agent/source-bundles/nyt-births-decline-older-mothers-2026/assets/images/16-07FD-DUNZO-DINNERS-creamcheeseramen-hjcw-square640.jpg", status: "saved" },
+          { name: "The-Strawberry-Breeze-on-the-menu-at-a-Swig-location-in-Utah.-The-brand-has-expa", url: "https://static01.nyt.com/images/2026/05/10/multimedia/10ST-DIRTY-SODA-bjlg/10ST-DIRTY-SODA-bjlg-square640.jpg?quality=75&auto=webp&disable=upscale", category: "content-image", width: 640, height: 640, localPath: ".agents/skills/design-docs-agent/source-bundles/nyt-births-decline-older-mothers-2026/assets/images/17-The-Strawberry-Breeze-on-the-menu-at-a-Swig-location-in-Utah.-The-brand-has-expa.jpg", status: "saved" },
+          { name: "Jonathan-Haidt-at-New-York-University-in-2024.", url: "https://static01.nyt.com/images/2026/05/13/multimedia/13nat-nyu-graduation-jtcg/13nat-nyu-graduation-jtcg-square640.jpg?quality=75&auto=webp&disable=upscale&width=350", category: "content-image", localPath: ".agents/skills/design-docs-agent/source-bundles/nyt-births-decline-older-mothers-2026/assets/images/18-Jonathan-Haidt-at-New-York-University-in-2024..jpg", status: "saved" },
+          { name: "The-host-of-The-Late-Show-called-it-so-satisfying-to-realize-that-no-matter-how-", url: "https://static01.nyt.com/images/2026/05/14/arts/14latenight/14latenight-square640.jpg?quality=75&auto=webp&disable=upscale&width=350", category: "content-image", localPath: ".agents/skills/design-docs-agent/source-bundles/nyt-births-decline-older-mothers-2026/assets/images/19-The-host-of-The-Late-Show-called-it-so-satisfying-to-realize-that-no-matter-how-.jpg", status: "saved" },
+          { name: "13pol-on-politics-newsletter-trump-pcmh-square640-v3", url: "https://static01.nyt.com/images/2026/05/13/multimedia/13pol-on-politics-newsletter-trump-pcmh/13pol-on-politics-newsletter-trump-pcmh-square640-v3.jpg?quality=75&auto=webp&disable=upscale&width=350", category: "content-image", localPath: ".agents/skills/design-docs-agent/source-bundles/nyt-births-decline-older-mothers-2026/assets/images/20-13pol-on-politics-newsletter-trump-pcmh-square640-v3.jpg", status: "saved" },
+          { name: "There-s-no-mixer-required-for-this-olive-oil-cake.", url: "https://static01.nyt.com/images/2025/06/16/multimedia/16FD-SUMMER-100-Blueberry-Spoon-Cake-pmch-copy/16FD-SUMMER-100-Blueberry-Spoon-Cake-pmch-square640.jpg?quality=75&auto=webp&disable=upscale&width=350", category: "content-image", localPath: ".agents/skills/design-docs-agent/source-bundles/nyt-births-decline-older-mothers-2026/assets/images/21-There-s-no-mixer-required-for-this-olive-oil-cake..jpg", status: "saved" },
+          { name: "Corpus-Christi-s-industrial-port-has-been-expanding-but-new-water-sources-have-n", url: "https://static01.nyt.com/images/2026/05/09/multimedia/09nat-corpus-christi-top-option-bmjq/09nat-corpus-christi-top-option-bmjq-square640.jpg?quality=75&auto=webp&disable=upscale&width=350", category: "content-image", localPath: ".agents/skills/design-docs-agent/source-bundles/nyt-births-decline-older-mothers-2026/assets/images/22-Corpus-Christi-s-industrial-port-has-been-expanding-but-new-water-sources-have-n.jpg", status: "saved" },
+          { name: "08aftab-image-square640", url: "https://static01.nyt.com/images/2026/05/08/opinion/08aftab-image/08aftab-image-square640.jpg?quality=75&auto=webp&disable=upscale&width=350", category: "content-image", localPath: ".agents/skills/design-docs-agent/source-bundles/nyt-births-decline-older-mothers-2026/assets/images/23-08aftab-image-square640.jpg", status: "saved" },
+          { name: "13re-WYG-Belfast-03-square640-v2", url: "https://static01.nyt.com/images/2026/05/13/realestate/13re-WYG-Belfast-03/13re-WYG-Belfast-03-square640-v2.jpg?quality=75&auto=webp&disable=upscale&width=350", category: "content-image", localPath: ".agents/skills/design-docs-agent/source-bundles/nyt-births-decline-older-mothers-2026/assets/images/24-13re-WYG-Belfast-03-square640-v2.jpg", status: "saved" },
+          { name: "12epstein-square640", url: "https://static01.nyt.com/images/2026/05/12/opinion/12epstein/12epstein-square640.jpg?quality=75&auto=webp&disable=upscale&width=350", category: "content-image", localPath: ".agents/skills/design-docs-agent/source-bundles/nyt-births-decline-older-mothers-2026/assets/images/25-12epstein-square640.jpg", status: "saved" },
+          { name: "A-Honda-dealership-in-Osaka-Japan.", url: "https://static01.nyt.com/images/2026/05/14/multimedia/14Biz-Honda-pvqw/14Biz-Honda-pvqw-square640.jpg?quality=75&auto=webp&disable=upscale&width=350", category: "content-image", localPath: ".agents/skills/design-docs-agent/source-bundles/nyt-births-decline-older-mothers-2026/assets/images/26-A-Honda-dealership-in-Osaka-Japan..jpg", status: "saved" },
+          { name: "Alex-Murdaugh-convicted-of-killing-his-wife-Maggie-and-younger-son-Paul-in-June-", url: "https://static01.nyt.com/images/2026/05/13/multimedia/13nat-murdaugh-lwmq/13nat-murdaugh-lwmq-square640.jpg?quality=75&auto=webp&disable=upscale&width=350", category: "content-image", localPath: ".agents/skills/design-docs-agent/source-bundles/nyt-births-decline-older-mothers-2026/assets/images/27-Alex-Murdaugh-convicted-of-killing-his-wife-Maggie-and-younger-son-Paul-in-June-.jpg", status: "saved" },
+          { name: "twitter-image", url: "https://static01.nyt.com/images/2026/04/09/multimedia/2026-04-09-fert-promo-index/2026-04-09-fert-promo-index-videoSixteenByNine3000-v4.png", category: "twitter-image", localPath: ".agents/skills/design-docs-agent/source-bundles/nyt-births-decline-older-mothers-2026/assets/images/28-twitter-image.png", status: "saved" },
+          { name: "og-image", url: "https://static01.nyt.com/images/2026/04/09/multimedia/2026-04-09-fert-promo-index/2026-04-09-fert-promo-index-facebookJumbo-v8.png", category: "open-graph-image", localPath: ".agents/skills/design-docs-agent/source-bundles/nyt-births-decline-older-mothers-2026/assets/images/29-og-image.png", status: "saved" },
+        ],
+        inlineSvgs: [
+          { name: "css-1fe7a5q", localPath: ".agents/skills/design-docs-agent/source-bundles/nyt-births-decline-older-mothers-2026/assets/icons/00-css-1fe7a5q.svg", className: "css-1fe7a5q", width: "14", height: "2", viewBox: "0 0 16 16", pathCount: 0 },
+          { name: "css-1fe7a5q", localPath: ".agents/skills/design-docs-agent/source-bundles/nyt-births-decline-older-mothers-2026/assets/icons/01-css-1fe7a5q.svg", className: "css-1fe7a5q", width: "14", height: "2", viewBox: "0 0 16 16", pathCount: 0 },
+          { name: "css-1fe7a5q", localPath: ".agents/skills/design-docs-agent/source-bundles/nyt-births-decline-older-mothers-2026/assets/icons/02-css-1fe7a5q.svg", className: "css-1fe7a5q", viewBox: "0 0 16 16", pathCount: 1 },
+          { name: "inline-svg-3", localPath: ".agents/skills/design-docs-agent/source-bundles/nyt-births-decline-older-mothers-2026/assets/icons/03-inline-svg-3.svg", viewBox: "0 0 184 25", pathCount: 1 },
+          { name: "css-1w4a6s9", localPath: ".agents/skills/design-docs-agent/source-bundles/nyt-births-decline-older-mothers-2026/assets/icons/04-css-1w4a6s9.svg", className: "css-1w4a6s9", viewBox: "0 0 13 8", pathCount: 0 },
+          { name: "css-1p66nw2", localPath: ".agents/skills/design-docs-agent/source-bundles/nyt-births-decline-older-mothers-2026/assets/icons/05-css-1p66nw2.svg", className: "css-1p66nw2", viewBox: "0 0 20 20", pathCount: 2 },
+          { name: "inline-svg-6", localPath: ".agents/skills/design-docs-agent/source-bundles/nyt-births-decline-older-mothers-2026/assets/icons/06-inline-svg-6.svg", viewBox: "0 0 16 22", pathCount: 1 },
+          { name: "css-12fr9lp", localPath: ".agents/skills/design-docs-agent/source-bundles/nyt-births-decline-older-mothers-2026/assets/icons/07-css-12fr9lp.svg", className: "css-12fr9lp", viewBox: "0 0 184 25", pathCount: 1 },
+          { name: "inline-svg-8", localPath: ".agents/skills/design-docs-agent/source-bundles/nyt-births-decline-older-mothers-2026/assets/icons/08-inline-svg-8.svg", width: "19", height: "19", viewBox: "0 0 19 19", pathCount: 1 },
+          { name: "css-zd9juy", localPath: ".agents/skills/design-docs-agent/source-bundles/nyt-births-decline-older-mothers-2026/assets/icons/09-css-zd9juy.svg", className: "css-zd9juy", width: "23", height: "18", viewBox: "0 0 23 18", pathCount: 1 },
+          { name: "css-kdmyog", localPath: ".agents/skills/design-docs-agent/source-bundles/nyt-births-decline-older-mothers-2026/assets/icons/10-css-kdmyog.svg", className: "css-kdmyog", width: "12", height: "18", viewBox: "0 0 12 18", pathCount: 2 },
+          { name: "css-18rar15", localPath: ".agents/skills/design-docs-agent/source-bundles/nyt-births-decline-older-mothers-2026/assets/icons/11-css-18rar15.svg", className: "css-18rar15", width: "21", height: "18", viewBox: "0 0 21 18", pathCount: 1 },
+          { name: "The Upshot", localPath: ".agents/skills/design-docs-agent/source-bundles/nyt-births-decline-older-mothers-2026/assets/icons/12-The-Upshot.svg", title: "The Upshot", className: "css-2ov6oh", width: "122", height: "24", viewBox: "0 0 285 54", pathCount: 2 },
+          { name: "playIcon", localPath: ".agents/skills/design-docs-agent/source-bundles/nyt-births-decline-older-mothers-2026/assets/icons/13-playIcon.svg", id: "playIcon", className: "css-3pg3bk", width: "55", height: "55", viewBox: "0 0 55 55", pathCount: 2 },
+          { name: "inline-svg-14", localPath: ".agents/skills/design-docs-agent/source-bundles/nyt-births-decline-older-mothers-2026/assets/icons/14-inline-svg-14.svg", width: "19", height: "19", viewBox: "0 0 19 19", pathCount: 1 },
+          { name: "css-zd9juy", localPath: ".agents/skills/design-docs-agent/source-bundles/nyt-births-decline-older-mothers-2026/assets/icons/15-css-zd9juy.svg", className: "css-zd9juy", width: "23", height: "18", viewBox: "0 0 23 18", pathCount: 1 },
+          { name: "css-kdmyog", localPath: ".agents/skills/design-docs-agent/source-bundles/nyt-births-decline-older-mothers-2026/assets/icons/16-css-kdmyog.svg", className: "css-kdmyog", width: "12", height: "18", viewBox: "0 0 12 18", pathCount: 2 },
+          { name: "css-18rar15", localPath: ".agents/skills/design-docs-agent/source-bundles/nyt-births-decline-older-mothers-2026/assets/icons/17-css-18rar15.svg", className: "css-18rar15", width: "21", height: "18", viewBox: "0 0 21 18", pathCount: 1 },
+          { name: "inline-svg-18", localPath: ".agents/skills/design-docs-agent/source-bundles/nyt-births-decline-older-mothers-2026/assets/icons/18-inline-svg-18.svg", width: "9", height: "9", viewBox: "0 0 9 9", pathCount: 1 },
+          { name: "inline-svg-19", localPath: ".agents/skills/design-docs-agent/source-bundles/nyt-births-decline-older-mothers-2026/assets/icons/19-inline-svg-19.svg", width: "19", height: "19", viewBox: "0 0 19 19", pathCount: 1 },
+          { name: "css-zd9juy", localPath: ".agents/skills/design-docs-agent/source-bundles/nyt-births-decline-older-mothers-2026/assets/icons/20-css-zd9juy.svg", className: "css-zd9juy", width: "23", height: "18", viewBox: "0 0 23 18", pathCount: 1 },
+          { name: "css-kdmyog", localPath: ".agents/skills/design-docs-agent/source-bundles/nyt-births-decline-older-mothers-2026/assets/icons/21-css-kdmyog.svg", className: "css-kdmyog", width: "12", height: "18", viewBox: "0 0 12 18", pathCount: 2 },
+          { name: "css-18rar15", localPath: ".agents/skills/design-docs-agent/source-bundles/nyt-births-decline-older-mothers-2026/assets/icons/22-css-18rar15.svg", className: "css-18rar15", width: "21", height: "18", viewBox: "0 0 21 18", pathCount: 1 },
+          { name: "css-oylsik", localPath: ".agents/skills/design-docs-agent/source-bundles/nyt-births-decline-older-mothers-2026/assets/icons/23-css-oylsik.svg", className: "css-oylsik", viewBox: "0 0 184 25", pathCount: 1 },
+          { name: "css-1o03u4n", localPath: ".agents/skills/design-docs-agent/source-bundles/nyt-births-decline-older-mothers-2026/assets/icons/24-css-1o03u4n.svg", className: "css-1o03u4n", viewBox: "0 0 10 13", pathCount: 1 },
+          { name: "css-1o03u4n", localPath: ".agents/skills/design-docs-agent/source-bundles/nyt-births-decline-older-mothers-2026/assets/icons/25-css-1o03u4n.svg", className: "css-1o03u4n", viewBox: "0 0 20 20", pathCount: 2 },
+          { name: "css-1o03u4n", localPath: ".agents/skills/design-docs-agent/source-bundles/nyt-births-decline-older-mothers-2026/assets/icons/26-css-1o03u4n.svg", className: "css-1o03u4n", width: "6.1", height: "0.9", viewBox: "0 0 14 13", pathCount: 1 },
+          { name: "css-1o03u4n", localPath: ".agents/skills/design-docs-agent/source-bundles/nyt-births-decline-older-mothers-2026/assets/icons/27-css-1o03u4n.svg", className: "css-1o03u4n", viewBox: "0 0 10 13", pathCount: 1 },
+          { name: "css-wkt2rv", localPath: ".agents/skills/design-docs-agent/source-bundles/nyt-births-decline-older-mothers-2026/assets/icons/28-css-wkt2rv.svg", className: "css-wkt2rv", width: "26", height: "12", viewBox: "0 0 26 12", pathCount: 2 },
+        ],
+        linkedIcons: [
+          { name: "shortcut icon", url: "https://www.nytimes.com/vi-assets/static-assets/favicon-d2483f10ef688e6f89e23806b9700298.ico", localPath: ".agents/skills/design-docs-agent/source-bundles/nyt-births-decline-older-mothers-2026/assets/icons/00-shortcut-icon-0.ico", status: "saved" },
+          { name: "apple-touch-icon", url: "https://www.nytimes.com/vi-assets/static-assets/apple-touch-icon-28865b72953380a40aa43318108876cb.png", localPath: ".agents/skills/design-docs-agent/source-bundles/nyt-births-decline-older-mothers-2026/assets/icons/01-apple-touch-icon-1.png", status: "saved" },
+          { name: "apple-touch-icon-precomposed", url: "https://www.nytimes.com/vi-assets/static-assets/ios-ipad-144x144-28865b72953380a40aa43318108876cb.png", localPath: ".agents/skills/design-docs-agent/source-bundles/nyt-births-decline-older-mothers-2026/assets/icons/02-apple-touch-icon-precomposed-144-144.png", size: "144×144", status: "saved" },
+          { name: "apple-touch-icon-precomposed", url: "https://www.nytimes.com/vi-assets/static-assets/ios-iphone-114x144-080e7ec6514fdc62bcbb7966d9b257d2.png", localPath: ".agents/skills/design-docs-agent/source-bundles/nyt-births-decline-older-mothers-2026/assets/icons/03-apple-touch-icon-precomposed-114-114.png", size: "114×114", status: "saved" },
+          { name: "apple-touch-icon-precomposed", url: "https://www.nytimes.com/vi-assets/static-assets/ios-default-homescreen-57x57-43808a4cd5333b648057a01624d84960.png", localPath: ".agents/skills/design-docs-agent/source-bundles/nyt-births-decline-older-mothers-2026/assets/icons/04-apple-touch-icon-precomposed-4.png", status: "saved" },
+        ],
+        audio: [
+          { name: "narrated-article", url: "https://static.nytimes.com/narrated-articles/synthetic/article-b3cab499-94db-599c-9dee-157050fa290e/job-1775759166448/article-b3cab499-94db-599c-9dee-157050fa290e-job-1775759166448.mp3", type: "audio/mpeg", localPath: ".agents/skills/design-docs-agent/source-bundles/nyt-births-decline-older-mothers-2026/assets/audio/00-narrated-article.mp3", status: "saved", bytes: 1392177 },
         ],
         socialImages: [
-          { name: "og-image", url: "https://substackcdn.com/image/fetch/%24s_%21oIg_%21%2Cw_1456%2Cc_limit%2Cf_auto%2Cq_auto%3Agood%2Cfl_progressive%3Asteep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F75c9406f-5dbb-48a0-b3f8-af8553c0181c_1236x552.png", ratio: "2.24:1", desc: "Recovered public chart image; original NYT social image not captured" },
+          { name: "og-image", url: "https://static01.nyt.com/images/2026/04/09/multimedia/2026-04-09-fert-promo-index/2026-04-09-fert-promo-index-facebookJumbo-v8.png", ratio: "1.91:1", desc: "NYT Open Graph image" },
+          { name: "twitter-image", url: "https://static01.nyt.com/images/2026/04/09/multimedia/2026-04-09-fert-promo-index/2026-04-09-fert-promo-index-videoSixteenByNine3000-v4.png", ratio: "16:9", desc: "NYT Twitter image" },
         ],
       },
     },
@@ -1319,13 +1551,16 @@ export const ARTICLES = [
       {
         type: "sticky-header",
         title: "Sticky Article Header",
-        behavior: "Appears as a compact persistent article row after the reader scrolls beyond the masthead/article header.",
+        behavior: "The NYT shell stays at the top of the viewport; after the story header scrolls away, the compact article row preserves the headline context and action buttons.",
         elements: [
-          "Compact article title breadcrumb",
-          "Gift/share full article button",
-          "Share icon button",
-          "Save/bookmark icon button",
-          "More actions icon button",
+          "Skip to content and skip to site index links",
+          "Section Navigation hamburger button (#desktop-sections-button)",
+          "Search button (.css-tkwi90)",
+          "Centered New York Times masthead link",
+          "GIVE THE TIMES button",
+          "Account button/drawer for admin@thereality.report profile state",
+          "Compact article-title row on scroll",
+          "Share full article, share icon, save/bookmark, comment count, and more controls",
           "Hairline bottom divider and white sticky surface",
         ],
       },
@@ -1334,55 +1569,107 @@ export const ARTICLES = [
         title: "Complete Article Component Inventory",
         groups: [
           {
-            label: "Header and Menu",
+            label: "Header, Menu, Search, Account",
             items: [
-              "Sticky site header with hamburger menu, search button, centered NYT masthead, subscribe button, account drawer",
-              "Section navigation modal with grouped U.S., World, Business, Arts, Lifestyle, Opinion, Audio, Games, Cooking, Wirecutter, The Athletic links",
-              "Search modal with query input and section/article suggestion links",
-              "Account drawer for admin@thereality.report profile state",
-              "Sticky article-title header that appears on scroll",
+              "Top NYT vi-story shell: .kyt-wufmy/.kyt-yAURx, 43px high on the desktop capture",
+              "Desktop section menu button: #desktop-sections-button, 34x33, text/aria 'Section Navigation'",
+              "Search button: .css-tkwi90, 34x33, opens search UI",
+              "Centered masthead link: 195x26, aria 'New York Times homepage'",
+              "GIVE THE TIMES and Account controls on the right side of the shell",
+              "Date/Today Paper line included in the authenticated shell state",
             ],
           },
           {
-            label: "Article Header and Actions",
+            label: "Article Header and Action Icons",
             items: [
-              "Upshot section label",
-              "Cheltenham italic headline",
-              "Cheltenham light summary deck",
-              "Franklin byline and timestamp",
-              "Listen/audio duration control",
-              "Gift, share, save/bookmark, comment count, and more action icons",
+              "The Upshot section bug and supported-by/ad label",
+              "Exact story header capture: header.css-1qv3lay.euiyums1, brand-bar data-testid=story-section, sponsor-wrapper, css-hme5ai spacer, headline, summary, audio/listen, share-tools, byline, and time.css-kx0gap",
+              "Headline: Cheltenham bold italic, 40px/46px, #121212",
+              "Deck: Cheltenham light, 23px/30px, #363636",
+              "Byline: By Claire Cain Miller; Franklin compact link treatment",
+              "Listen control: circular play button with 5:47 duration",
+              "Actionbar buttons: Share full article, share icon, save role=switch, comment button with 76, more sharing options",
             ],
           },
           {
-            label: "Body Sections",
+            label: "Body, Ads, Recirculation, Footer",
             items: [
-              "Imperial article paragraph clusters",
-              "Inline editorial links",
-              "Mid-article ad slot",
-              "Related fertility coverage card",
-              "Author bio and reporting credit/footer metadata",
+              "Imperial 20px reading-column body clusters with inline editorial links",
+              "Body outline block displays every captured body paragraph/chart lead-in as first-sentence evidence from extracted-inventory.json",
+              "StoryBodyCompanionColumn ad/reserved slots after interactive clusters",
+              "Related fertility coverage card/chunk near the lower article body",
+              "Author bio: Claire Cain Miller is a Times reporter covering gender, families and education",
+              "Read 76 comments CTA",
+              "Site index navigation and global footer utility links",
             ],
           },
           {
             label: "Charts and Graphs",
             items: [
-              "Chart 1: Women are postponing pregnancy, age-group diverging bars with direct values",
-              "Chart 2: Births to women over 40 have surpassed teen births, crossover/line slot",
-              "Chart 3: Most women are mothers by 45, cohort/callout slot",
-              "Chart 4: Young women's intentions to have children, survey bar slot",
-              "Chart source, credit, note, labels, responsive image/SVG asset behavior",
+              "Chart 1: editable LPtw8 v7 line chart replica from Datawrapper CSV",
+              "Chart 2: editable ywEMI v9 line chart replica from Datawrapper CSV, including completed-fertility note",
+              "Chart 3: editable IWlRs v12 diverging bar chart with directly editable age labels and values",
+              "Chart 4: editable qz8fa v11 two-series cohort line chart with age 30 and age 45 series",
+              "Each chart has config-driven title, subtitle, axes, ticks, series/bars, hover states, source, credit, note, and original Datawrapper URL",
+              "The survey-intent material appears as body copy in the authenticated source, not a separate chart component",
             ],
           },
           {
-            label: "Footer and Production",
+            label: "Production Stack",
             items: [
-              "Global NYT footer links: contact, accessibility, work with us, advertise, T Brand Studio, ad choices, privacy, terms, site map, help, subscriptions",
-              "Blue Button metadata counts from prompt",
-              "CSS Peeper text/assets/colors capture requirement",
-              "BuiltWith/Wappalyzer stack verification requirement",
+              "Route: NYT vi-story",
+              "Framework/runtime: NYT Webpack story shell with Samizdat GraphQL article data",
+              "Charts: Datawrapper source charts recreated locally as editable React/SVG chart primitives; original Datawrapper URLs retained as evidence",
+              "Analytics/observability: Google Tag Manager, Chartbeat, Datadog RUM",
+              "Captured source bundle: rendered HTML, MHTML, full-page screenshot, extracted inventory",
+              "Mirrored asset manifest: 30 images, 29 inline SVGs, 5 linked icons, and 1 narrated-audio file saved under the source bundle",
             ],
           },
+        ],
+      },
+      {
+        type: "body-section-outline",
+        title: "Body Paragraph and Section First Sentences",
+        source: ".agents/skills/design-docs-agent/source-bundles/nyt-births-decline-older-mothers-2026/extracted-inventory.json",
+        sections: [
+          { sourceIndex: 4, role: "body paragraph", className: "css-ac37hb evys1bk0", firstSentence: "Fertility in the United States has been declining since the Great Recession, and reached a new low last year, according to federal data released Thursday, causing some to fear a baby bust." },
+          { sourceIndex: 5, role: "body paragraph", className: "css-ac37hb evys1bk0", firstSentence: "But it’s not clear that will happen." },
+          { sourceIndex: 6, role: "body paragraph", className: "css-ac37hb evys1bk0", firstSentence: "That’s because of a drastic shift among American women who are now of childbearing age: They are waiting longer to have babies." },
+          { sourceIndex: 7, role: "chart lead-in", className: "css-1qa9noj interactive-leadin", firstSentence: "Number of U.S. births per 1,000 women ages 15 to 44" },
+          { sourceIndex: 8, role: "chart source", className: "css-jagbsj interactive-source", firstSentence: "Source: Philip Cohen analysis of Centers for Disease Control and Prevention data." },
+          { sourceIndex: 10, role: "chart lead-in", className: "css-1qa9noj interactive-leadin", firstSentence: "Average number of children in the U.S. ever born to women age 45" },
+          { sourceIndex: 11, role: "chart note", className: "css-jagbsj interactive-notes", firstSentence: "Data on the completed fertility rate is available through 2024." },
+          { sourceIndex: 12, role: "chart source", className: "css-jagbsj interactive-source", firstSentence: "Source: Philip Cohen analysis of Centers for Disease Control and Prevention data." },
+          { sourceIndex: 14, role: "body paragraph", className: "css-ac37hb evys1bk0", firstSentence: "Demographers have a name for this kind of lull in fertility: a “postponement transition.”" },
+          { sourceIndex: 16, role: "body paragraph", className: "css-ac37hb evys1bk0", firstSentence: "“It’s totally real that births are declining,” said Philip Cohen, a sociology professor at the University of Maryland." },
+          { sourceIndex: 17, role: "chart lead-in", className: "css-1qa9noj interactive-leadin", firstSentence: "Change in the U.S. birth rate by age group since 2007" },
+          { sourceIndex: 18, role: "chart source", className: "css-jagbsj interactive-source", firstSentence: "Source: Centers for Disease Control and Prevention data." },
+          { sourceIndex: 20, role: "body paragraph", className: "css-ac37hb evys1bk0", firstSentence: "At first, mostly college-educated women living in cities were delaying childbirth." },
+          { sourceIndex: 21, role: "body paragraph", className: "css-ac37hb evys1bk0", firstSentence: "For women with high school degrees or less in their 20s, the birthrate has declined 36 percent since 2007 — and for those with a high school education or less who are 35 and older, it has increased 58 percent, found Martha Bailey, an economist at the University of California, Los Angeles." },
+          { sourceIndex: 23, role: "body paragraph", className: "css-ac37hb evys1bk0", firstSentence: "In 2024, the most recent year for which there is this data, 49 percent of women who were 30 had given birth to at least one child." },
+          { sourceIndex: 24, role: "body paragraph", className: "css-ac37hb evys1bk0", firstSentence: "Yet today’s 45-year-olds, who are nearing the end of their childbearing years, are more likely to be mothers than women who were that age two decades ago." },
+          { sourceIndex: 25, role: "chart lead-in", className: "css-1qa9noj interactive-leadin", firstSentence: "The share of women in the U.S. who are mothers, by age" },
+          { sourceIndex: 26, role: "chart source", className: "css-jagbsj interactive-source", firstSentence: "Source: Philip Cohen analysis of Centers for Disease Control and Prevention data." },
+          { sourceIndex: 28, role: "body paragraph", className: "css-ac37hb evys1bk0", firstSentence: "It wasn’t a surprise that fertility began falling in the Great Recession of 2007-9, because that’s common during financial crises." },
+          { sourceIndex: 29, role: "body paragraph", className: "css-ac37hb evys1bk0", firstSentence: "In some ways, the delay in pregnancy is a sign of women’s autonomy." },
+          { sourceIndex: 30, role: "body paragraph", className: "css-ac37hb evys1bk0", firstSentence: "It’s also an indicator of anxiety about the future and finances." },
+          { sourceIndex: 31, role: "body paragraph", className: "css-ac37hb evys1bk0", firstSentence: "Young people are increasingly waiting to have children until they feel established in adulthood — with steady careers, a long-term partner and a house." },
+          { sourceIndex: 34, role: "body paragraph", className: "css-ac37hb evys1bk0", firstSentence: "Postponing pregnancy, Professor Cohen said, “is good when it reflects a greater degree of security, stability, but not if they’re lonely or because America has made it so hard.”" },
+          { sourceIndex: 35, role: "body paragraph", className: "css-ac37hb evys1bk0", firstSentence: "One of the biggest drivers of the delay in childbearing is widely considered to be a success story: the decline of teen pregnancy, which had been unusually high in the United States." },
+          { sourceIndex: 36, role: "body paragraph", className: "css-ac37hb evys1bk0", firstSentence: "Since the Great Recession, teenage pregnancy has fallen 72 percent, accounting for nearly a third of recent fertility declines, according to an analysis by Alison Gemmill, an associate professor of epidemiology at the University of California, Los Angeles." },
+          { sourceIndex: 37, role: "body paragraph", className: "css-ac37hb evys1bk0", firstSentence: "In Southern states, where teen pregnancy was highest, the drop accounts for even more of the recent declines, she found: more than half in Kentucky, and nearly 50 percent in Alabama, Louisiana and Mississippi." },
+          { sourceIndex: 39, role: "body paragraph", className: "css-ac37hb evys1bk0", firstSentence: "The question is whether the young women who aren’t having children now will eventually have them." },
+          { sourceIndex: 40, role: "body paragraph", className: "css-ac37hb evys1bk0", firstSentence: "If they follow the pattern of today’s 45-year-olds, the vast majority of them will." },
+          { sourceIndex: 41, role: "body paragraph", className: "css-ac37hb evys1bk0", firstSentence: "Still, demographers say it’s unlikely that fertility will fully catch up to the level of earlier decades." },
+          { sourceIndex: 42, role: "body paragraph", className: "css-ac37hb evys1bk0", firstSentence: "Women who plan to have children at older ages may not be able to, or may have fewer children than they planned, because it becomes harder to get pregnant." },
+          { sourceIndex: 44, role: "body paragraph", className: "css-ac37hb evys1bk0", firstSentence: "Especially among women with less education, some may never feel economically stable enough to have children, said Karen Benjamin Guzzo, a professor of sociology at the University of North Carolina at Chapel Hill." },
+          { sourceIndex: 45, role: "body paragraph", className: "css-ac37hb evys1bk0", firstSentence: "“I worry we get to a point where there are the fertility haves and have-nots,” she said." },
+          { sourceIndex: 49, role: "author bio", firstSentence: "Claire Cain Miller is a Times reporter covering gender, families and education." },
+          { sourceIndex: 50, role: "related card", className: "css-z7qbqf", firstSentence: "Cutting Paid Family Leave: Deloitte and Zoom are among the U.S. employers reducing support for working parents, signaling a retreat from family-friendly benefits." },
+          { sourceIndex: 51, role: "related card", className: "css-z7qbqf", firstSentence: "Unfilled Classrooms: With women having fewer babies each year, many public school districts are confronting new problems, and hard choices about school closures." },
+          { sourceIndex: 52, role: "related card", className: "css-z7qbqf", firstSentence: "U.S. Fertility Rate: Fertility in the United States reached a new low last year, according to federal data, causing some to fear a baby bust." },
+          { sourceIndex: 53, role: "related card", className: "css-z7qbqf", firstSentence: "Betting on Reality TV: Kalshi and Polymarket, the two largest prediction markets, are offering bets on reality television shows that have already been taped, raising the possibility that people involved in the taping could profit from surefire bets before episodes are aired." },
+          { sourceIndex: 54, role: "related card", className: "css-z7qbqf", firstSentence: "Cost of Child Care: It has always been expensive, but recently prices have risen faster than inflation." },
         ],
       },
       { type: "header" },
@@ -1399,90 +1686,172 @@ export const ARTICLES = [
       },
       {
         type: "featured-image",
-        url: "https://substackcdn.com/image/fetch/%24s_%21oIg_%21%2Cw_1456%2Cc_limit%2Cf_auto%2Cq_auto%3Agood%2Cfl_progressive%3Asteep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F75c9406f-5dbb-48a0-b3f8-af8553c0181c_1236x552.png",
-        caption: "Change in the U.S. birth rate by age group since 2007.",
-        credit: "The New York Times; public reference image via Curated Compositions",
+        url: "https://static01.nyt.com/images/2026/04/09/multimedia/2026-04-09-fert-promo-index/2026-04-09-fert-promo-index-facebookJumbo-v8.png",
+        caption: "NYT social promo image for the article; the visible in-story graphics are Datawrapper embeds.",
+        credit: "The New York Times",
       },
       {
         type: "body-copy",
-        html: "<p>The opening article body frames the record-low birthrate as a timing question, distinguishing delayed childbearing from permanent childlessness.</p>",
+        html: "<p>The opening body section frames the record-low birthrate as a timing question: younger women are delaying childbirth, while older age groups account for more births than before.</p>",
       },
       {
-        type: "static-chart-image",
+        type: "datawrapper-chart",
+        id: "LPtw8",
+        title: "Even as annual fertility falls ...",
+        chartType: "line-chart",
+        url: "https://datawrapper.dwcdn.net/LPtw8/7/",
+        height: 333,
+        source: "Philip Cohen analysis of Centers for Disease Control and Prevention data.",
+        note: "Leadin: Number of U.S. births per 1,000 women ages 15 to 44. Credit: By The New York Times. Data CSV: /LPtw8/7/data.csv.",
+        editableChart: {
+          mode: "line",
+          subtitle: "Number of U.S. births per 1,000 women ages 15 to 44",
+          height: 300,
+          yAxisLabel: "Births per 1,000 women",
+          yTicks: [50, 55, 60, 65, 70],
+          yDomain: [50, 72],
+          xTicks: [1980, 1985, 1990, 1995, 2000, 2005, 2010, 2015, 2020, 2025],
+          unit: "",
+          decimals: 1,
+          source: "Philip Cohen analysis of Centers for Disease Control and Prevention data.",
+          credit: "The New York Times",
+          originalUrl: "https://datawrapper.dwcdn.net/LPtw8/7/",
+          editableElements: ["title", "subtitle", "x-axis ticks", "y-axis ticks", "line series", "hover points", "source", "credit", "original Datawrapper URL"],
+          series: [
+            {
+              label: "General fertility rate",
+              color: "#517a8b",
+              points: [
+                { x: 1976, y: 65 }, { x: 1977, y: 66.8 }, { x: 1978, y: 65.5 }, { x: 1979, y: 67.2 }, { x: 1980, y: 68.4 }, { x: 1981, y: 67.3 }, { x: 1982, y: 67.3 }, { x: 1983, y: 65.7 }, { x: 1984, y: 65.5 }, { x: 1985, y: 66.3 }, { x: 1986, y: 65.4 }, { x: 1987, y: 65.8 }, { x: 1988, y: 67.3 }, { x: 1989, y: 69.2 }, { x: 1990, y: 70.9 }, { x: 1991, y: 69.3 }, { x: 1992, y: 68.4 }, { x: 1993, y: 67 }, { x: 1994, y: 65.9 }, { x: 1995, y: 64.6 }, { x: 1996, y: 64.1 }, { x: 1997, y: 63.6 }, { x: 1998, y: 64.3 }, { x: 1999, y: 64.4 }, { x: 2000, y: 65.9 }, { x: 2001, y: 65.1 }, { x: 2002, y: 65 }, { x: 2003, y: 66.1 }, { x: 2004, y: 66.4 }, { x: 2005, y: 66.7 }, { x: 2006, y: 68.6 }, { x: 2007, y: 69.3 }, { x: 2008, y: 68.1 }, { x: 2009, y: 66.2 }, { x: 2010, y: 64.1 }, { x: 2011, y: 63.2 }, { x: 2012, y: 63 }, { x: 2013, y: 62.5 }, { x: 2014, y: 62.9 }, { x: 2015, y: 62.5 }, { x: 2016, y: 62 }, { x: 2017, y: 60.3 }, { x: 2018, y: 59.1 }, { x: 2019, y: 58.26 }, { x: 2020, y: 55.99 }, { x: 2021, y: 56.3 }, { x: 2022, y: 55.96 }, { x: 2023, y: 54.51 }, { x: 2024, y: 53.8 }, { x: 2025, y: 53.1 },
+              ],
+            },
+          ],
+        },
+      },
+      {
+        type: "body-copy",
+        html: "<p>The paired opening charts compare annual fertility decline with completed fertility at age 45, preserving the source article's contrast between current births and lifetime motherhood.</p>",
+      },
+      {
+        type: "datawrapper-chart",
+        id: "ywEMI",
+        title: "... most women eventually have two children, on average",
+        chartType: "line-chart",
+        url: "https://datawrapper.dwcdn.net/ywEMI/9/",
+        height: 333,
+        source: "Philip Cohen analysis of Centers for Disease Control and Prevention data.",
+        note: "Leadin: Average number of children in the U.S. ever born to women age 45. Note: Data on the completed fertility rate is available through 2024. Credit: By The New York Times.",
+        editableChart: {
+          mode: "line",
+          subtitle: "Average number of children in the U.S. ever born to women age 45",
+          height: 300,
+          yAxisLabel: "Children ever born",
+          yTicks: [0, 1, 2, 3],
+          yDomain: [0, 3.5],
+          xTicks: [1980, 1985, 1990, 1995, 2000, 2005, 2010, 2015, 2020],
+          decimals: 2,
+          source: "Philip Cohen analysis of Centers for Disease Control and Prevention data.",
+          credit: "The New York Times",
+          note: "Data on the completed fertility rate is available through 2024.",
+          originalUrl: "https://datawrapper.dwcdn.net/ywEMI/9/",
+          editableElements: ["title", "subtitle", "note", "x-axis ticks", "y-axis ticks", "line series", "hover points", "source", "credit", "original Datawrapper URL"],
+          series: [
+            {
+              label: "Completed fertility rate",
+              color: "#517a8b",
+              points: [
+                { x: 1976, y: 3.24 }, { x: 1977, y: 3.252 }, { x: 1978, y: 3.255 }, { x: 1979, y: 3.253 }, { x: 1980, y: 3.213 }, { x: 1981, y: 3.13 }, { x: 1982, y: 3.058 }, { x: 1983, y: 2.983 }, { x: 1984, y: 2.891 }, { x: 1985, y: 2.794 }, { x: 1986, y: 2.679 }, { x: 1987, y: 2.56 }, { x: 1988, y: 2.463 }, { x: 1989, y: 2.364 }, { x: 1990, y: 2.291 }, { x: 1991, y: 2.214 }, { x: 1992, y: 2.149 }, { x: 1993, y: 2.103 }, { x: 1994, y: 2.056 }, { x: 1995, y: 2.021 }, { x: 1996, y: 1.996 }, { x: 1997, y: 1.979 }, { x: 1998, y: 1.969 }, { x: 1999, y: 1.972 }, { x: 2000, y: 1.978 }, { x: 2001, y: 1.983 }, { x: 2002, y: 1.984 }, { x: 2003, y: 1.988 }, { x: 2004, y: 2.009 }, { x: 2005, y: 2.021 }, { x: 2006, y: 2.02 }, { x: 2007, y: 2.03 }, { x: 2008, y: 2.048 }, { x: 2009, y: 2.063 }, { x: 2010, y: 2.071 }, { x: 2011, y: 2.085 }, { x: 2012, y: 2.105 }, { x: 2013, y: 2.107 }, { x: 2014, y: 2.11 }, { x: 2015, y: 2.132 }, { x: 2016, y: 2.156 }, { x: 2017, y: 2.178 }, { x: 2018, y: 2.199 }, { x: 2019, y: 2.211 }, { x: 2020, y: 2.217 }, { x: 2021, y: 2.224 }, { x: 2022, y: 2.228 }, { x: 2023, y: 2.204 }, { x: 2024, y: 2.176 },
+              ],
+            },
+          ],
+        },
+      },
+      { type: "ad-container", position: "story-body-companion-after-initial-fertility-charts" },
+      {
+        type: "body-copy",
+        html: "<p>The next section identifies the postponement transition and explains the demographic split by age, education, and timing.</p>",
+      },
+      {
+        type: "datawrapper-chart",
+        id: "IWlRs",
         title: "Women are postponing pregnancy",
-        url: "https://substackcdn.com/image/fetch/%24s_%21oIg_%21%2Cw_1456%2Cc_limit%2Cf_auto%2Cq_auto%3Agood%2Cfl_progressive%3Asteep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F75c9406f-5dbb-48a0-b3f8-af8553c0181c_1236x552.png",
-        caption: "Change in the U.S. birth rate by age group since 2007.",
-        credit: "The New York Times; source: Centers for Disease Control and Prevention data",
-      },
-      {
-        type: "nyt-chart-facsimile",
-        title: "Women are postponing pregnancy",
-        subtitle: "Change in the U.S. birth rate by age group since 2007",
-        chartKind: "diverging-bars",
-        source: "Centers for Disease Control and Prevention data",
-        credit: "By The New York Times",
-        evidence: "direct-image",
-        imageUrl: "https://substackcdn.com/image/fetch/%24s_%21oIg_%21%2Cw_1456%2Cc_limit%2Cf_auto%2Cq_auto%3Agood%2Cfl_progressive%3Asteep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F75c9406f-5dbb-48a0-b3f8-af8553c0181c_1236x552.png",
-        rows: [
-          { label: "15-19", value: -72, valueLabel: "-72%" },
-          { label: "20-24", value: -51, valueLabel: "-51%" },
-          { label: "25-29", value: -27, valueLabel: "-27%" },
-          { label: "30-34", value: -4, valueLabel: "-4%" },
-          { label: "35-39", value: 16, valueLabel: "16%" },
-          { label: "40-44", value: 35, valueLabel: "35%" },
-          { label: "45-54", value: 83, valueLabel: "83%" },
-        ],
-      },
-      { type: "ad-container", position: "mid-article-after-first-chart" },
-      {
-        type: "body-copy",
-        html: "<p>The next body section explains the demographic shift: fewer births among younger women, more births among older women, and a changed timing curve across cohorts.</p>",
-      },
-      {
-        type: "nyt-chart-facsimile",
-        title: "Births to women over 40 have surpassed teen births",
-        subtitle: "Crossover chart slot documented from secondary article discussion; exact NYT SVG/div payload pending capture.",
-        chartKind: "line-crossover",
-        source: "Secondary discussion of the NYT Upshot article; underlying NYT chart source pending authenticated capture",
-        credit: "The New York Times chart slot; exact geometry pending",
-        evidence: "secondary-source",
-        note: "Represented as a required article chart slot because source capture was blocked; do not treat as final measured chart data.",
-        callouts: [
-          { label: "Chart role", value: "Crossover", note: "Compares babies born to women over 40 with babies born to teenagers." },
-          { label: "Observed claim", value: "40+ > teens", note: "Secondary source says births to women over 40 now surpass teenagers." },
-        ],
-      },
-      {
-        type: "nyt-chart-facsimile",
-        title: "Most women are mothers by 45",
-        subtitle: "Completed-motherhood callout/cohort slot.",
-        chartKind: "callout",
-        source: "Secondary discussion of the NYT Upshot article; exact NYT chart source pending authenticated capture",
-        credit: "The New York Times chart slot; exact geometry pending",
-        evidence: "secondary-source",
-        note: "The 88% value is documented in secondary discussion and should be rechecked against the authenticated page source.",
-        callouts: [
-          { label: "45-year-old women", value: "88%", note: "Share described as mothers by age 45." },
-          { label: "Component", value: "Callout", note: "Large-number cohort/callout graphic in the article flow." },
-        ],
+        chartType: "diverging-bar-chart",
+        url: "https://datawrapper.dwcdn.net/IWlRs/12/",
+        height: 164,
+        source: "Centers for Disease Control and Prevention data.",
+        note: "Leadin: Change in the U.S. birth rate by age group since 2007. Public data values: 15-19 -72, 20-24 -51, 25-29 -27, 30-34 -4, 35-39 16, 40-44 35, 45-54 83. Credit: By The New York Times.",
+        editableChart: {
+          mode: "diverging-bars",
+          subtitle: "Change in the U.S. birth rate by age group since 2007",
+          height: 260,
+          xAxisLabel: "Percent change since 2007",
+          xTicks: [-75, -50, -25, 0, 25, 50, 75],
+          unit: "%",
+          decimals: 0,
+          source: "Centers for Disease Control and Prevention data.",
+          credit: "The New York Times",
+          originalUrl: "https://datawrapper.dwcdn.net/IWlRs/12/",
+          editableElements: ["title", "subtitle", "age labels", "bar values", "negative bars", "positive bars", "zero axis", "x-axis ticks", "source", "credit", "original Datawrapper URL"],
+          bars: [
+            { label: "15-19", value: -72, valueLabel: "-72%", color: "#687d84" },
+            { label: "20-24", value: -51, valueLabel: "-51%", color: "#687d84" },
+            { label: "25-29", value: -27, valueLabel: "-27%", color: "#687d84" },
+            { label: "30-34", value: -4, valueLabel: "-4%", color: "#687d84" },
+            { label: "35-39", value: 16, valueLabel: "16%", color: "#517a8b" },
+            { label: "40-44", value: 35, valueLabel: "35%", color: "#517a8b" },
+            { label: "45-54", value: 83, valueLabel: "83%", color: "#517a8b" },
+          ],
+        },
       },
       {
         type: "body-copy",
-        html: "<p>A later section shifts from measured births to intent, separating delayed timing from stated plans to have or not have children.</p>",
+        html: "<p>The cohort section compares motherhood by age 30 with motherhood by age 45, then moves into teen pregnancy, delayed adulthood milestones, and survey-intent discussion in body copy.</p>",
       },
       {
-        type: "nyt-chart-facsimile",
-        title: "Young women's intentions to have children",
-        subtitle: "Survey bar chart slot for stated fertility intentions.",
-        chartKind: "survey-bars",
-        source: "Secondary discussion of the NYT Upshot article; exact NYT chart source pending authenticated capture",
-        credit: "The New York Times chart slot; exact geometry pending",
-        evidence: "secondary-source",
-        note: "The 62% and 35% values are secondary-source values and require final extension/page-source verification.",
-        callouts: [
-          { label: "Intended to have a child", value: "62%", note: "Secondary-source value from discussion of the article." },
-          { label: "Did not intend to have a child", value: "35%", note: "Secondary-source value from discussion of the article." },
-        ],
+        type: "datawrapper-chart",
+        id: "qz8fa",
+        title: "Fewer women give birth by 30, but most catch up",
+        chartType: "cohort-line-chart",
+        url: "https://datawrapper.dwcdn.net/qz8fa/11/",
+        height: 335,
+        source: "Philip Cohen analysis of Centers for Disease Control and Prevention data.",
+        note: "Leadin: The share of women in the U.S. who are mothers, by age. Data CSV columns: Year, Age 45, Age 30. Credit: By The New York Times.",
+        editableChart: {
+          mode: "multi-line",
+          subtitle: "The share of women in the U.S. who are mothers, by age",
+          height: 320,
+          yAxisLabel: "Share who are mothers",
+          yTicks: [40, 50, 60, 70, 80, 90, 100],
+          yDomain: [40, 100],
+          xTicks: [1965, 1970, 1975, 1980, 1985, 1990, 1995, 2000, 2005, 2010, 2015, 2020],
+          unit: "%",
+          decimals: 1,
+          source: "Philip Cohen analysis of Centers for Disease Control and Prevention data.",
+          credit: "The New York Times",
+          originalUrl: "https://datawrapper.dwcdn.net/qz8fa/11/",
+          editableElements: ["title", "subtitle", "x-axis ticks", "y-axis ticks", "Age 45 series", "Age 30 series", "hover points", "source", "credit", "original Datawrapper URL"],
+          series: [
+            {
+              label: "Age 45",
+              color: "#517a8b",
+              points: [
+                { x: 1965, y: 85.6 }, { x: 1966, y: 86.5 }, { x: 1967, y: 86.7 }, { x: 1968, y: 87.7 }, { x: 1969, y: 89 }, { x: 1970, y: 89 }, { x: 1971, y: 89.9 }, { x: 1972, y: 91.2 }, { x: 1973, y: 90.4 }, { x: 1974, y: 90.4 }, { x: 1975, y: 91.2 }, { x: 1976, y: 91.5 }, { x: 1977, y: 92.1 }, { x: 1978, y: 92.8 }, { x: 1979, y: 93.7 }, { x: 1980, y: 93.9 }, { x: 1981, y: 93.3 }, { x: 1982, y: 93.4 }, { x: 1983, y: 93.4 }, { x: 1984, y: 93 }, { x: 1985, y: 92.5 }, { x: 1986, y: 92.1 }, { x: 1987, y: 91.5 }, { x: 1988, y: 90.7 }, { x: 1989, y: 89.4 }, { x: 1990, y: 88.8 }, { x: 1991, y: 88.7 }, { x: 1992, y: 88.2 }, { x: 1993, y: 87.2 }, { x: 1994, y: 85.8 }, { x: 1995, y: 84.9 }, { x: 1996, y: 84.4 }, { x: 1997, y: 83.9 }, { x: 1998, y: 83.5 }, { x: 1999, y: 83.5 }, { x: 2000, y: 83.7 }, { x: 2001, y: 83.8 }, { x: 2002, y: 83.7 }, { x: 2003, y: 83.7 }, { x: 2004, y: 84.4 }, { x: 2005, y: 84.7 }, { x: 2006, y: 84.7 }, { x: 2007, y: 85 }, { x: 2008, y: 85.6 }, { x: 2009, y: 86 }, { x: 2010, y: 85.9 }, { x: 2011, y: 86.1 }, { x: 2012, y: 86.7 }, { x: 2013, y: 86.7 }, { x: 2014, y: 87 }, { x: 2015, y: 88 }, { x: 2016, y: 88.7 }, { x: 2017, y: 89.1 }, { x: 2018, y: 89.6 }, { x: 2019, y: 89.9 }, { x: 2020, y: 89.6 }, { x: 2021, y: 89.6 }, { x: 2022, y: 89.5 }, { x: 2023, y: 88.5 }, { x: 2024, y: 87.5 },
+              ],
+            },
+            {
+              label: "Age 30",
+              color: "#c49012",
+              points: [
+                { x: 1965, y: 89.5 }, { x: 1966, y: 88.9 }, { x: 1967, y: 88.9 }, { x: 1968, y: 88.9 }, { x: 1969, y: 88.4 }, { x: 1970, y: 87.9 }, { x: 1971, y: 87.3 }, { x: 1972, y: 86.4 }, { x: 1973, y: 85.3 }, { x: 1974, y: 83.5 }, { x: 1975, y: 82.2 }, { x: 1976, y: 81.3 }, { x: 1977, y: 80 }, { x: 1978, y: 78.3 }, { x: 1979, y: 76.1 }, { x: 1980, y: 74.4 }, { x: 1981, y: 73.1 }, { x: 1982, y: 72 }, { x: 1983, y: 70.9 }, { x: 1984, y: 70.4 }, { x: 1985, y: 70.2 }, { x: 1986, y: 69.9 }, { x: 1987, y: 69.3 }, { x: 1988, y: 68.9 }, { x: 1989, y: 69.2 }, { x: 1990, y: 69.2 }, { x: 1991, y: 68.8 }, { x: 1992, y: 68.6 }, { x: 1993, y: 68.6 }, { x: 1994, y: 68.5 }, { x: 1995, y: 68.1 }, { x: 1996, y: 67.7 }, { x: 1997, y: 67.6 }, { x: 1998, y: 67.1 }, { x: 1999, y: 66.9 }, { x: 2000, y: 67.6 }, { x: 2001, y: 68.2 }, { x: 2002, y: 68.6 }, { x: 2003, y: 69 }, { x: 2004, y: 69.2 }, { x: 2005, y: 69 }, { x: 2006, y: 68.8 }, { x: 2007, y: 68.5 }, { x: 2008, y: 67.4 }, { x: 2009, y: 66.4 }, { x: 2010, y: 65.6 }, { x: 2011, y: 64.9 }, { x: 2012, y: 64.6 }, { x: 2013, y: 64 }, { x: 2014, y: 63.1 }, { x: 2015, y: 62.3 }, { x: 2016, y: 61.5 }, { x: 2017, y: 60.5 }, { x: 2018, y: 59 }, { x: 2019, y: 57 }, { x: 2020, y: 55.1 }, { x: 2021, y: 53.3 }, { x: 2022, y: 51.7 }, { x: 2023, y: 50.2 }, { x: 2024, y: 48.8 },
+              ],
+            },
+          ],
+        },
+      },
+      { type: "ad-container", position: "mid-article-after-cohort-chart" },
+      {
+        type: "body-copy",
+        html: "<p>The closing section asks whether young women who are not having children now will eventually have them, while noting that full catch-up to earlier fertility levels is unlikely.</p>",
       },
       {
         type: "related-link",
@@ -1491,18 +1860,25 @@ export const ARTICLES = [
         imageUrl: "https://static01.nyt.com/images/2026/04/09/multimedia/09nat-us-census-pchv/09nat-us-census-pchv-articleLarge.jpg",
         summary: "Related standard news article documenting the annual fertility-rate decline.",
       },
-      { type: "author-bio" },
+      {
+        type: "showcase-link",
+        title: "The birthrate is falling for American women in their 20s",
+        href: "https://www.nytimes.com/2021/06/16/us/declining-birthrate-motherhood.html",
+        imageUrl: "https://static01.nyt.com/images/2021/06/16/us/16birthrates-print1/merlin_186867969_765d0e3d-c1ee-48d3-87ea-002570651f25-articleLarge.jpg",
+        excerpt: "Related Upshot recirculation item referenced in the captured article data.",
+      },
       {
         type: "reporting-credit",
-        text: "Design-doc recreation uses public chart evidence plus user-supplied extension inventory; exact NYT source bundle is marked pending where capture was unavailable.",
+        text: "Design-doc recreation is based on authenticated Chrome Profile 11/admin@thereality.report capture: rendered HTML, MHTML, full-page screenshot, DOM inventory, Datawrapper iframe IDs, and public chart data.csv endpoints.",
       },
+      { type: "author-bio" },
       {
         type: "site-footer",
         title: "The New York Times",
         columns: [
           { label: "Company", links: ["NYTCo", "Contact Us", "Accessibility", "Work with us", "Advertise", "T Brand Studio"] },
-          { label: "Legal", links: ["Your Ad Choices", "Privacy Policy", "Terms of Service", "Terms of Sale"] },
-          { label: "Support", links: ["Site Map", "Help", "Subscriptions"] },
+          { label: "Legal", links: ["Privacy Policy", "Cookie Policy", "Terms of Service", "Terms of Sale", "Your Privacy Choices"] },
+          { label: "Support", links: ["Site Map", "Help", "Subscriptions", "Canada", "International"] },
         ],
       },
     ],
