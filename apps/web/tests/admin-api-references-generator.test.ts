@@ -33,4 +33,23 @@ describe("admin api references generator", () => {
       ),
     ).toBe(true);
   });
+
+  it("keeps helper-based admin backend proxy routes in the inventory", () => {
+    expect(
+      GENERATED_ADMIN_API_REFERENCE_INVENTORY.edges.some(
+        (edge) =>
+          edge.from === "route:POST:/api/admin/trr-api/media-assets/[assetId]/variants" &&
+          edge.to === "backend:POST:/api/v1/admin/media-assets/[assetId]/variants" &&
+          edge.basis.includes("static_scan:createAdminBackendProxyRoute"),
+      ),
+    ).toBe(true);
+    expect(
+      GENERATED_ADMIN_API_REFERENCE_INVENTORY.edges.some(
+        (edge) =>
+          edge.from === "route:POST:/api/admin/trr-api/cast-photos/[photoId]/variants" &&
+          edge.to === "backend:POST:/api/v1/admin/cast-photos/[photoId]/variants" &&
+          edge.basis.includes("static_scan:createAdminBackendProxyRoute"),
+      ),
+    ).toBe(true);
+  });
 });

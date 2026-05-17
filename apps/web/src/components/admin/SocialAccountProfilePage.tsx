@@ -872,20 +872,7 @@ const isLikelyVideoUrl = (value?: string | null): boolean => {
   return normalized.endsWith(".mp4") || normalized.endsWith(".mov") || normalized.endsWith(".webm") || normalized.includes(".mp4?");
 };
 
-const getDisplayThumbnailVariants = (value: unknown): DisplayThumbnailVariants => {
-  return value && typeof value === "object" && !Array.isArray(value) ? (value as DisplayThumbnailVariants) : null;
-};
-
-const getCatalogPostMediaUrls = (item: SocialAccountCatalogPost | SocialAccountCatalogPostDetail): string[] => {
-  const values = [
-    item.display_thumbnail_url,
-    item.hosted_thumbnail_url,
-    item.thumbnail_url,
-    item.source_thumbnail_url,
-    ...(item.hosted_media_urls ?? []),
-    ...(item.media_urls ?? []),
-    ...(item.source_media_urls ?? []),
-  ];
+const getUniqueMediaUrls = (values: Array<string | null | undefined>): string[] => {
   const seen = new Set<string>();
   const urls: string[] = [];
   for (const value of values) {
@@ -898,6 +885,37 @@ const getCatalogPostMediaUrls = (item: SocialAccountCatalogPost | SocialAccountC
   }
   return urls;
 };
+
+const getDisplayThumbnailVariants = (value: unknown): DisplayThumbnailVariants => {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as DisplayThumbnailVariants) : null;
+};
+
+const getCatalogPostMediaUrls = (item: SocialAccountCatalogPost | SocialAccountCatalogPostDetail): string[] => {
+  return getUniqueMediaUrls([
+    item.display_thumbnail_url,
+    item.hosted_thumbnail_url,
+    item.thumbnail_url,
+    item.source_thumbnail_url,
+    ...(item.hosted_media_urls ?? []),
+    ...(item.media_urls ?? []),
+    ...(item.source_media_urls ?? []),
+  ]);
+};
+
+const buildCatalogDetailUrlGroups = (item: SocialAccountCatalogPostDetail): Array<{ label: string; urls: string[] }> => [
+  {
+    label: "Hosted",
+    urls: getUniqueMediaUrls([item.hosted_thumbnail_url, ...(item.hosted_media_urls ?? [])]),
+  },
+  {
+    label: "Saved",
+    urls: getUniqueMediaUrls([item.display_thumbnail_url, item.thumbnail_url, ...(item.media_urls ?? [])]),
+  },
+  {
+    label: "Source",
+    urls: getUniqueMediaUrls([item.source_thumbnail_url, ...(item.source_media_urls ?? [])]),
+  },
+];
 
 const getCatalogPostPreviewImage = (
   item: SocialAccountCatalogPost | SocialAccountCatalogPostDetail,
@@ -8883,24 +8901,26 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                         ) : null}
 
                         <div className="grid gap-3 sm:grid-cols-2">
-                          {([...(catalogDetail.hosted_media_urls ?? []), ...(catalogDetail.source_media_urls ?? [])].filter(Boolean) as string[]).length === 0 ? (
-                            <div className="rounded-2xl border border-dashed border-zinc-200 bg-zinc-50 p-6 text-sm text-zinc-500">
-                              No saved media URLs are available for this catalog row yet.
-                            </div>
-                          ) : (
-                            ([...(catalogDetail.hosted_media_urls ?? []), ...(catalogDetail.source_media_urls ?? [])].filter(Boolean) as string[])
-                              .slice(0, 8)
-                              .map((mediaUrl, index) => (
-                                <div key={`${mediaUrl}-${index}`} className="overflow-hidden rounded-2xl border border-zinc-200 bg-zinc-50">
-                                  {isLikelyVideoUrl(mediaUrl) ? (
-                                    <video src={mediaUrl} controls className="h-64 w-full bg-black object-cover" />
-                                  ) : (
-                                    // eslint-disable-next-line @next/next/no-img-element
-                                    <img src={mediaUrl} alt="" className="h-64 w-full object-cover" />
-                                  )}
+                          {(() => {
+                            const mediaUrls = getCatalogPostMediaUrls(catalogDetail);
+                            if (mediaUrls.length === 0) {
+                              return (
+                                <div className="rounded-2xl border border-dashed border-zinc-200 bg-zinc-50 p-6 text-sm text-zinc-500">
+                                  No saved media URLs are available for this catalog row yet.
                                 </div>
-                              ))
-                          )}
+                              );
+                            }
+                            return mediaUrls.slice(0, 8).map((mediaUrl, index) => (
+                              <div key={`${mediaUrl}-${index}`} className="overflow-hidden rounded-2xl border border-zinc-200 bg-zinc-50">
+                                {isLikelyVideoUrl(mediaUrl) ? (
+                                  <video src={mediaUrl} controls className="h-64 w-full bg-black object-cover" />
+                                ) : (
+                                  // eslint-disable-next-line @next/next/no-img-element
+                                  <img src={mediaUrl} alt="" className="h-64 w-full object-cover" />
+                                )}
+                              </div>
+                            ));
+                          })()}
                         </div>
 
                         <section className="rounded-2xl border border-zinc-200 bg-white p-4">
@@ -9004,46 +9024,28 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                         <section className="rounded-2xl border border-zinc-200 bg-white p-4">
                           <h3 className="text-sm font-semibold uppercase tracking-[0.16em] text-zinc-500">Media URLs</h3>
                           <div className="mt-3 space-y-3 text-xs text-zinc-600">
-                            <div>
-                              <p className="font-semibold uppercase tracking-[0.14em] text-zinc-500">Hosted</p>
-                              <div className="mt-2 space-y-2">
-                                {(catalogDetail.hosted_media_urls ?? []).length === 0 ? (
-                                  <p>None</p>
-                                ) : (
-                                  (catalogDetail.hosted_media_urls ?? []).map((url) => (
-                                    <a
-                                      key={url}
-                                      href={url}
-                                      target="_blank"
-                                      rel="noreferrer"
-                                      className="block break-all text-blue-600 hover:text-blue-800 hover:underline"
-                                    >
-                                      {url}
-                                    </a>
-                                  ))
-                                )}
+                            {buildCatalogDetailUrlGroups(catalogDetail).map((group) => (
+                              <div key={group.label}>
+                                <p className="font-semibold uppercase tracking-[0.14em] text-zinc-500">{group.label}</p>
+                                <div className="mt-2 space-y-2">
+                                  {group.urls.length === 0 ? (
+                                    <p>None</p>
+                                  ) : (
+                                    group.urls.map((url) => (
+                                      <a
+                                        key={url}
+                                        href={url}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="block break-all text-blue-600 hover:text-blue-800 hover:underline"
+                                      >
+                                        {url}
+                                      </a>
+                                    ))
+                                  )}
+                                </div>
                               </div>
-                            </div>
-                            <div>
-                              <p className="font-semibold uppercase tracking-[0.14em] text-zinc-500">Source</p>
-                              <div className="mt-2 space-y-2">
-                                {(catalogDetail.source_media_urls ?? []).length === 0 ? (
-                                  <p>None</p>
-                                ) : (
-                                  (catalogDetail.source_media_urls ?? []).map((url) => (
-                                    <a
-                                      key={url}
-                                      href={url}
-                                      target="_blank"
-                                      rel="noreferrer"
-                                      className="block break-all text-blue-600 hover:text-blue-800 hover:underline"
-                                    >
-                                      {url}
-                                    </a>
-                                  ))
-                                )}
-                              </div>
-                            </div>
+                            ))}
                           </div>
                         </section>
                       </div>

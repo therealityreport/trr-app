@@ -87,6 +87,8 @@ describe("NYT standard article inventory", () => {
     expect(fertilityArticle.tools.components).toContain("article header");
     expect(fertilityArticle.chartTypes).toHaveLength(0);
     expect(fertilityArticle.contentBlocks.map((block: { type: string }) => block.type)).toEqual([
+      "component-inventory",
+      "body-section-outline",
       "header",
       "byline",
       "sharetools-bar",
@@ -100,7 +102,7 @@ describe("NYT standard article inventory", () => {
     render(<ArticleDetailPage articleId="fertility-rates-decline" />);
 
     expect(screen.getByRole("heading", { level: 3, name: "Icons & SVGs" })).toBeInTheDocument();
-    expect(screen.getByText("listen-play")).toBeInTheDocument();
+    expect(screen.getAllByText("listen-play").length).toBeGreaterThan(0);
     expect(screen.getByRole("heading", { level: 3, name: "Graphs / Charts" })).toBeInTheDocument();
     expect(screen.getByText(/No graph or chart components are documented for this page/)).toBeInTheDocument();
   });
@@ -116,7 +118,7 @@ describe("NYT standard article inventory", () => {
       architecture: {
         dataArchitecture: {
           chromeExtensionInventory: {
-            blueButton: {
+            blueButtonPrompt: {
               openGraph: number;
               scripts: number;
               article: number;
@@ -128,25 +130,25 @@ describe("NYT standard article inventory", () => {
 
     expect(birthsArticle.tools).toMatchObject({
       topper: "none",
-      framework: "NYT standard article shell + Upshot graphics package",
+      framework:
+        "NYT vi-story standard article shell + Datawrapper source charts recreated as editable React/SVG chart primitives; Datadog RUM is analytics/observability, not the chart renderer",
     });
     expect(birthsArticle.tools.components).toContain("sticky site header");
     expect(birthsArticle.tools.components).toContain("comment/more actions");
-    expect(birthsArticle.chartTypes).toHaveLength(5);
+    expect(birthsArticle.chartTypes).toHaveLength(4);
     expect(birthsArticle.contentBlocks.map((block) => block.type)).toEqual(
       expect.arrayContaining([
         "site-header-shell",
         "sticky-header",
         "component-inventory",
-        "static-chart-image",
-        "nyt-chart-facsimile",
+        "datawrapper-chart",
         "ad-container",
         "related-link",
         "site-footer",
       ]),
     );
     expect(birthsArticle.cssInfo.styleRules).toContain("Open Graph 6");
-    expect(birthsArticle.architecture.dataArchitecture.chromeExtensionInventory.blueButton).toMatchObject({
+    expect(birthsArticle.architecture.dataArchitecture.chromeExtensionInventory.blueButtonPrompt).toMatchObject({
       openGraph: 6,
       scripts: 42,
       article: 12,
@@ -161,14 +163,15 @@ describe("NYT standard article inventory", () => {
     ).toBeGreaterThan(0);
     expect(screen.getByRole("heading", { level: 2, name: "Site Header Shell" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 2, name: "Sticky Article Header" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { level: 2, name: "Complete Article Component Inventory" })).toBeInTheDocument();
+    expect(
+      screen.getAllByRole("heading", { level: 2, name: "Complete Article Component Inventory" }).length,
+    ).toBeGreaterThan(0);
     expect(screen.getAllByText("Women are postponing pregnancy").length).toBeGreaterThan(0);
-    expect(screen.getAllByRole("img", { name: "Women are postponing pregnancy" }).length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Datawrapper IWlRs v12").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Change in the U.S. birth rate by age group since 2007").length).toBeGreaterThan(0);
     expect(screen.getByText("-72%")).toBeInTheDocument();
-    expect(screen.getAllByText("Births to women over 40 have surpassed teen births").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Most women are mothers by 45").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Young women's intentions to have children").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("... most women eventually have two children, on average").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Fewer women give birth by 30, but most catch up").length).toBeGreaterThan(0);
     expect(screen.getByRole("heading", { level: 2, name: "The New York Times" })).toBeInTheDocument();
   });
 });

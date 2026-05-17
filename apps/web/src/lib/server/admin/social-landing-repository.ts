@@ -86,6 +86,18 @@ type SocialBladeRowsPayload = {
   rows?: SocialBladeSummaryRow[];
 };
 
+type SocialBladeProgressCountsPayload = {
+  rows?: SocialBladeProgressCountRow[];
+};
+
+type SocialBladeProgressCountRow = {
+  platform: string | null;
+  account_handle: string | null;
+  socialblade_scraped_count: number | string | null;
+  socialblade_saved_count: number | string | null;
+  socialblade_supported?: boolean | null;
+};
+
 type SocialProgressRow = {
   platform: string | null;
   account_handle: string | null;
@@ -622,8 +634,50 @@ const collectSocialProgressTargets = ({
     .slice(0, SOCIAL_LANDING_PROGRESS_MAX_TARGETS);
 };
 
+const safeLoadSocialBladeProgressCounts = async (
+  targets: readonly SocialProgressTarget[],
+  adminContext?: VerifiedAdminContext,
+): Promise<CacheableValue<ReadonlyMap<string, Partial<SocialProgressRow>>>> => {
+  if (targets.length === 0) return cacheableValue(new Map());
+
+  try {
+    const payload = (await fetchSocialBackendJson("/landing-socialblade-progress-counts", {
+      adminContext,
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        platforms: targets.map((target) => target.platform),
+        account_handles: targets.map((target) => target.handle),
+      }),
+      fallbackError: "Failed to fetch social landing SocialBlade progress counts",
+      retries: 0,
+      timeoutMs: ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
+    })) as SocialBladeProgressCountsPayload;
+    const rows = Array.isArray(payload.rows) ? payload.rows : [];
+    const countsByKey = new Map<string, Partial<SocialProgressRow>>();
+    for (const row of rows) {
+      const platform = normalizePlatform(row.platform ?? "");
+      const handle =
+        typeof row.account_handle === "string"
+          ? row.account_handle.trim().replace(/^@+/, "")
+          : "";
+      if (!platform || !handle) continue;
+      countsByKey.set(buildSocialProgressKey(platform, handle), {
+        socialblade_scraped_count: row.socialblade_scraped_count,
+        socialblade_saved_count: row.socialblade_saved_count,
+        socialblade_supported: row.socialblade_supported,
+      });
+    }
+    return cacheableValue(countsByKey);
+  } catch (error) {
+    console.warn("[social-landing] Failed to load SocialBlade progress counts", error);
+    return uncacheableValue(new Map());
+  }
+};
+
 const safeLoadSocialProgressSummaries = async (
   targets: readonly SocialProgressTarget[],
+  adminContext?: VerifiedAdminContext,
 ): Promise<CacheableValue<ReadonlyMap<string, SocialAccountProgressSummary>>> => {
   if (targets.length === 0) return cacheableValue(new Map());
 
@@ -634,7 +688,9 @@ const safeLoadSocialProgressSummaries = async (
   const instagramCatalogReportedCommentsSql = instagramReportedCommentsSql("p");
 
   try {
-    const result = await query<SocialProgressRow>(
+    const [socialBladeCountsResult, result] = await Promise.all([
+      safeLoadSocialBladeProgressCounts(targets, adminContext),
+      query<SocialProgressRow>(
       `
         /* landing_social_progress */
         WITH targets AS (
@@ -835,16 +891,6 @@ const safeLoadSocialProgressSummaries = async (
             AND nullif(rows.comment_id, '') IS NOT NULL
           GROUP BY rows.platform, rows.account_handle
         ),
-        socialblade_counts AS (
-          SELECT
-            lower(coalesce(nullif(platform, ''), 'instagram')) AS platform,
-            lower(regexp_replace(coalesce(nullif(account_handle, ''), instagram_handle, ''), '^@+', '')) AS account_handle,
-            count(*)::int AS socialblade_scraped_count,
-            count(*) filter (where coalesce(stats_refreshed, false) = true)::int AS socialblade_saved_count
-          FROM pipeline.socialblade_growth_data
-          WHERE coalesce(nullif(account_handle, ''), instagram_handle, '') <> ''
-          GROUP BY 1, 2
-        ),
         instagram_profile_targets AS (
           SELECT DISTINCT ON (targets.account_handle)
             targets.account_handle,
@@ -878,8 +924,8 @@ const safeLoadSocialProgressSummaries = async (
           coalesce(materialized_counts.saved_count, 0)::int AS saved_count,
           coalesce(catalog_counts.scraped_count, 0)::int AS scraped_count,
           (targets.platform IN ('instagram', 'youtube', 'tiktok'))::boolean AS socialblade_supported,
-          coalesce(socialblade_counts.socialblade_scraped_count, 0)::int AS socialblade_scraped_count,
-          coalesce(socialblade_counts.socialblade_saved_count, 0)::int AS socialblade_saved_count,
+          0::int AS socialblade_scraped_count,
+          0::int AS socialblade_saved_count,
           coalesce(following_counts.following_saved_count, 0)::int AS following_saved_count,
           coalesce(following_counts.following_total_count, 0)::int AS following_total_count,
           coalesce(comment_counts.comments_saved_count, 0)::int AS comments_saved_count,
@@ -900,17 +946,16 @@ const safeLoadSocialProgressSummaries = async (
         LEFT JOIN comment_counts
           ON comment_counts.platform = targets.platform
          AND comment_counts.account_handle = targets.account_handle
-        LEFT JOIN socialblade_counts
-          ON socialblade_counts.platform = targets.platform
-         AND socialblade_counts.account_handle = targets.account_handle
         LEFT JOIN following_counts
           ON following_counts.platform = targets.platform
          AND following_counts.account_handle = targets.account_handle
       `,
       [platforms, handles],
-    );
+      ),
+    ]);
 
     const progressByKey = new Map<string, SocialAccountProgressSummary>();
+    const socialBladeCountsByKey = socialBladeCountsResult.value;
     for (const row of result.rows) {
       const platform = normalizePlatform(row.platform ?? "");
       const handle =
@@ -918,11 +963,18 @@ const safeLoadSocialProgressSummaries = async (
           ? row.account_handle.trim().replace(/^@+/, "")
           : "";
       if (!platform || !handle) continue;
-      const progress = buildProgressFromCounts(row.saved_count, row.scraped_count, row);
+      const key = buildSocialProgressKey(platform, handle);
+      const progress = buildProgressFromCounts(row.saved_count, row.scraped_count, {
+        ...row,
+        ...(socialBladeCountsByKey.get(key) ?? {}),
+      });
       if (!progress) continue;
-      progressByKey.set(buildSocialProgressKey(platform, handle), progress);
+      progressByKey.set(key, progress);
     }
-    return cacheableValue(progressByKey);
+    return {
+      value: progressByKey,
+      cacheable: socialBladeCountsResult.cacheable,
+    };
   } catch (error) {
     console.warn("[social-landing] Failed to load social progress summaries", error);
     return uncacheableValue(new Map());
@@ -2333,6 +2385,7 @@ export async function getSocialLandingPayloadResult(
       showSets,
       sharedSourceSets,
     }),
+    adminContext,
   );
   const progressByKey = progressResult.value;
   const hydratedNetworkSets = networkSets.map((set) =>
