@@ -46,7 +46,7 @@ describe("NYT debate speaking time article detail page", () => {
       screen.getByRole("heading", { level: 3, name: "Icons & SVGs" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("heading", { level: 3, name: "Images" }),
+      screen.getByRole("heading", { level: 3, name: "Assets" }),
     ).toBeInTheDocument();
     expect(screen.getByText("Article Assets")).toBeInTheDocument();
     expect(screen.getByText("Social & OG Images")).toBeInTheDocument();
