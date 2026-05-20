@@ -601,6 +601,7 @@ describe("people page tab runtime behavior", () => {
 
     await waitForPersonHeading("Andy Cohen");
     expect(screen.queryByText("Loading person data...")).not.toBeInTheDocument();
+    await waitForPrimaryGalleryBootstrap(fetchMock);
 
     const photosRequest = fetchMock.mock.calls.find(([url]) =>
       String(url).includes(`/api/admin/trr-api/people/${PERSON_ID}/photos`),
