@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import RedditSourcesManager, { buildContainerRefreshTimeoutMessage } from "@/components/admin/reddit-sources-manager";
 import { auth } from "@/lib/firebase";
+import { captureExpectedConsoleWarn } from "./helpers/expected-console";
 
 const { usePathnameMock, useSearchParamsMock, useRouterPushMock, useRouterReplaceMock } = vi.hoisted(() => ({
   usePathnameMock: vi.fn(() => "/admin/social"),
@@ -1635,9 +1636,12 @@ describe("RedditSourcesManager", () => {
     await waitFor(() => {
       expect(screen.getAllByText("r/BravoRealHousewives").length).toBeGreaterThan(0);
     });
+    await waitFor(() => {
+      expect(screen.queryByText("Loading reddit communities...")).not.toBeInTheDocument();
+    });
 
     fireEvent.click(screen.getByRole("button", { name: /Bravo RH/i }));
-    fireEvent.click(screen.getByRole("button", { name: "Open community settings" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Open community settings" }));
 
     const displayNameInput = await screen.findByDisplayValue("Bravo RH");
     fireEvent.change(displayNameInput, { target: { value: "Bravo Real Housewives" } });
@@ -1927,6 +1931,12 @@ describe("RedditSourcesManager", () => {
   });
 
   it("falls back to all-periods when social analytics period loading fails", async () => {
+    const expectedContextWarn = captureExpectedConsoleWarn(
+      /^\[reddit_episode_period_context_fetch_failed\]/,
+    );
+    const expectedUnavailableWarn = captureExpectedConsoleWarn(
+      /^\[reddit_period_options_unavailable\]/,
+    );
     const refreshPayload = {
       community: baseCommunity,
       candidates: [],
@@ -1986,6 +1996,8 @@ describe("RedditSourcesManager", () => {
     expect(
       screen.queryByText(/Season social period data is temporarily unavailable/i),
     ).not.toBeInTheDocument();
+    expectedContextWarn.expectCalled();
+    expectedUnavailableWarn.expectCalled();
   });
 
   it("opens canonical community week URLs even from /:show/social/reddit base route", async () => {

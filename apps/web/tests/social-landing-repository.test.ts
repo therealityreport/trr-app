@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { captureExpectedConsoleWarn } from "./helpers/expected-console";
 
 const {
   getCoveredShowsMock,
@@ -57,6 +58,16 @@ const delay = (ms: number) =>
   new Promise<void>((resolve) => {
     setTimeout(resolve, ms);
   });
+
+const findSocialBladeGrowthDataQueryCall = (): [string, unknown[]] => {
+  const call = queryMock.mock.calls.find(([sql]) =>
+    String(sql).includes("FROM pipeline.socialblade_growth_data"),
+  );
+  if (!call) {
+    throw new Error("Expected pipeline.socialblade_growth_data query");
+  }
+  return call as [string, unknown[]];
+};
 
 describe("social landing repository", () => {
   beforeEach(() => {
@@ -525,6 +536,13 @@ describe("social landing repository", () => {
 
     expect(payload.network_sets).toHaveLength(1);
     expect(payload.shared_pipeline.sources).toHaveLength(5);
+    expect(payload.scrape_job_health).toEqual(
+      expect.objectContaining({
+        window_hours: 8,
+        failed_jobs: 0,
+        in_failed_sql_transaction_hits: 0,
+      }),
+    );
 
     const networkSet = payload.network_sets[0];
     expect(networkSet.key).toBe("network");
@@ -737,6 +755,42 @@ describe("social landing repository", () => {
         }),
       ]),
     );
+  });
+
+  it("includes recent scrape job health for the social landing badge", async () => {
+    queryMock.mockImplementation(async (sql: string) => {
+      if (String(sql).includes("landing_social_scrape_job_health")) {
+        return {
+          rows: [
+            {
+              generated_at: "2026-05-18T12:00:00.000Z",
+              window_started_at: "2026-05-18T04:00:00.000Z",
+              total_jobs: "9",
+              active_jobs: "1",
+              failed_jobs: "2",
+              failure_signal_jobs: "3",
+              in_failed_sql_transaction_hits: "1",
+              latest_failure_at: "2026-05-18T11:45:00.000Z",
+            },
+          ],
+        };
+      }
+      return { rows: [] };
+    });
+
+    const payload = await getSocialLandingPayload();
+
+    expect(payload.scrape_job_health).toEqual({
+      window_hours: 8,
+      generated_at: "2026-05-18T12:00:00.000Z",
+      window_started_at: "2026-05-18T04:00:00.000Z",
+      total_jobs: 9,
+      active_jobs: 1,
+      failed_jobs: 2,
+      failure_signal_jobs: 3,
+      in_failed_sql_transaction_hits: 1,
+      latest_failure_at: "2026-05-18T11:45:00.000Z",
+    });
   });
 
   it("labels assigned YouTube playlist show handles with playlist metadata", async () => {
@@ -1353,11 +1407,15 @@ describe("social landing repository", () => {
   });
 
   it("marks landing payloads not cacheable when show external-id handles fail to load", async () => {
+    const expectedWarn = captureExpectedConsoleWarn(
+      /^\[social-landing\] Failed to load show external ids /,
+    );
     listShowExternalIdsByIdsMock.mockRejectedValue(new Error("pool exhausted"));
 
     const result = await getSocialLandingPayloadResult();
 
     expect(result.cacheable).toBe(false);
+    expectedWarn.expectCalled();
   });
 
   it("caps social landing show and people fanout concurrency to avoid saturating local admin reads", async () => {
@@ -1525,7 +1583,7 @@ describe("social landing repository", () => {
     });
 
     const payload = await getSocialLandingPayload();
-    const [sql, params] = queryMock.mock.calls[0] as [string, unknown[]];
+    const [sql, params] = findSocialBladeGrowthDataQueryCall();
 
     expect(sql).toContain("WHERE platform = ANY($1::text[])");
     expect(sql).toContain("person_id = ANY($2::uuid[])");
@@ -1683,7 +1741,10 @@ describe("social landing repository", () => {
       },
     ];
     queryMock.mockImplementation(async (_sql: string, params: unknown[]) => {
-      if (String(_sql).includes("landing_social_progress")) {
+      if (
+        String(_sql).includes("landing_social_progress") ||
+        String(_sql).includes("landing_social_scrape_job_health")
+      ) {
         return { rows: [] };
       }
       const accountHandleCandidates = params[2] as string[];
@@ -1695,7 +1756,7 @@ describe("social landing repository", () => {
     });
 
     const payload = await getSocialLandingPayload();
-    const [sql, params] = queryMock.mock.calls[0] as [string, unknown[]];
+    const [sql, params] = findSocialBladeGrowthDataQueryCall();
 
     expect(sql).toMatch(/\baccount_handle\s*=\s*ANY\(\$3::text\[\]\)/);
     expect(sql).not.toContain("lower(account_handle");
@@ -1945,7 +2006,10 @@ describe("social landing repository", () => {
       },
     ];
     queryMock.mockImplementation(async (_sql: string, params: unknown[]) => {
-      if (String(_sql).includes("landing_social_progress")) {
+      if (
+        String(_sql).includes("landing_social_progress") ||
+        String(_sql).includes("landing_social_scrape_job_health")
+      ) {
         return { rows: [] };
       }
       const accountHandleCandidates = params[2] as string[];
@@ -1957,7 +2021,7 @@ describe("social landing repository", () => {
     });
 
     const payload = await getSocialLandingPayload();
-    const [, params] = queryMock.mock.calls[0] as [string, unknown[]];
+    const [, params] = findSocialBladeGrowthDataQueryCall();
 
     expect(params[2]).toContain("user/AndyCohen");
     expect(payload.cast_socialblade_shows).toEqual([
@@ -2269,6 +2333,9 @@ describe("social landing repository", () => {
   });
 
   it("marks the landing payload as not cacheable when cast summary loading fails closed", async () => {
+    const expectedWarn = captureExpectedConsoleWarn(
+      /^\[social-landing\] Failed to load show cast summary /,
+    );
     fetchAdminBackendJsonMock.mockRejectedValue(new Error("cast summary timeout"));
 
     const result = await getSocialLandingPayloadResult();
@@ -2276,9 +2343,13 @@ describe("social landing repository", () => {
     expect(result.cacheable).toBe(false);
     expect(result.payload.cast_socialblade_shows).toEqual([]);
     expect(result.payload.people_profiles).toEqual([]);
+    expectedWarn.expectCalled();
   });
 
   it("marks the landing payload as not cacheable when SocialBlade storage loading fails closed", async () => {
+    const expectedWarn = captureExpectedConsoleWarn(
+      /^\[social-landing\] Failed to load (scrape job health|cast SocialBlade rows|social progress summaries) /,
+    );
     queryMock.mockRejectedValue(new Error("relation does not exist"));
 
     const result = await getSocialLandingPayloadResult();
@@ -2287,6 +2358,7 @@ describe("social landing repository", () => {
     expect(result.payload.cast_socialblade_shows).toEqual([]);
     expect(result.payload.network_sets).toHaveLength(1);
     expect(result.payload.show_sets).toHaveLength(2);
+    expectedWarn.expectCalled();
   });
 
   it("falls back to local landing summary when the authenticated backend summary times out", async () => {

@@ -64,6 +64,18 @@ const pnpmCommand =
     ? process.env.npm_execpath
     : 'pnpm';
 
+console.log('[test:ci] Checking generated artifacts before Vitest batches.');
+
+const generatedCheck = spawnSync(pnpmCommand, ['run', 'generated:check'], {
+  cwd: process.cwd(),
+  stdio: 'inherit',
+  env: process.env,
+});
+
+if (generatedCheck.status !== 0) {
+  process.exit(generatedCheck.status ?? 1);
+}
+
 for (const [index, batch] of batches.entries()) {
   const batchNumber = index + 1;
   if (onlyBatch !== 0 && batchNumber !== onlyBatch) {

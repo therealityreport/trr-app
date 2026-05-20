@@ -2,6 +2,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { afterEach, describe, expect, it } from "vitest";
+import { captureExpectedConsoleLog } from "./helpers/expected-console";
 
 const modulePath = pathToFileURL(path.resolve(__dirname, "../scripts/run-migrations.mjs")).href;
 
@@ -14,6 +15,7 @@ describe("run-migrations", () => {
   });
 
   it("wraps each app-local migration in a single transaction", async () => {
+    const expectedLogs = captureExpectedConsoleLog(/^\[migrations\] /);
     const executed: string[] = [];
     const client = {
       query: async (sql: string) => {
@@ -33,9 +35,11 @@ describe("run-migrations", () => {
     expect(executed).toContain("create table foo (id int);");
     expect(executed).toContain("INSERT INTO __migrations (name) VALUES ($1)");
     expect(executed[executed.length - 1]).toBe("COMMIT");
+    expectedLogs.expectCalled();
   });
 
   it("rolls back when the SQL body fails", async () => {
+    const expectedLogs = captureExpectedConsoleLog(/^\[migrations\] /);
     const executed: string[] = [];
     const client = {
       query: async (sql: string) => {
@@ -54,9 +58,11 @@ describe("run-migrations", () => {
 
     await expect(script.applyMigration("x.sql", "create table ...")).rejects.toThrow(/syntax/);
     expect(executed).toContain("ROLLBACK");
+    expectedLogs.expectCalled();
   });
 
   it("refuses the removed shared-schema flag even in dry-run mode", async () => {
+    const expectedLogs = captureExpectedConsoleLog(/^\[migrations\] /);
     const script = await loadScript();
 
     await expect(
@@ -65,5 +71,6 @@ describe("run-migrations", () => {
         includeTransitionalSharedSchema: true,
       }),
     ).rejects.toThrow(/Shared-schema migrations belong in TRR-Backend\/supabase\/migrations/);
+    expectedLogs.expectCalled();
   });
 });

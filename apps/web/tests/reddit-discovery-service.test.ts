@@ -1,9 +1,10 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   RedditDiscoveryError,
   discoverEpisodeDiscussionThreads,
   discoverSubredditThreads,
 } from "@/lib/server/admin/reddit-discovery-service";
+import { captureExpectedConsoleInfo, captureExpectedConsoleWarn } from "./helpers/expected-console";
 
 const makeListing = (posts: Array<Record<string, unknown>>) => ({
   data: {
@@ -19,7 +20,17 @@ const makeSearchListing = (posts: Array<Record<string, unknown>>, after: string 
 });
 
 describe("reddit-discovery-service", () => {
+  let expectedInfoLogs: ReturnType<typeof captureExpectedConsoleInfo> | null = null;
+
+  beforeEach(() => {
+    expectedInfoLogs = captureExpectedConsoleInfo(
+      /^\[(?:reddit_discovery_sorts|reddit_discover_threads_complete|reddit_discover_episode_discussions_complete)\]/,
+    );
+  });
+
   afterEach(() => {
+    expectedInfoLogs?.restore();
+    expectedInfoLogs = null;
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
@@ -622,6 +633,9 @@ describe("reddit-discovery-service", () => {
   });
 
   it("falls back to search backfill when exhaustive listing is rate-limited", async () => {
+    const expectedWarn = captureExpectedConsoleWarn(
+      /^\[reddit_discover_threads_exhaustive_listing_rate_limited\]/,
+    );
     const toEpoch = (iso: string): number => Math.floor(new Date(iso).getTime() / 1000);
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
@@ -682,6 +696,7 @@ describe("reddit-discovery-service", () => {
     expect(result.window_exhaustive_complete).toBe(false);
     expect(result.threads.map((thread) => thread.reddit_post_id)).toContain("backfill-only-row");
     expect(result.search_backfill?.queries_run).toBeGreaterThan(0);
+    expectedWarn.expectCalled();
   });
 
   it("forces tracked flair inclusion even when show-match terms are absent", async () => {

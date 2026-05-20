@@ -78,9 +78,7 @@ describe("show detail cast lazy-loading wiring", () => {
     expect(contents).toMatch(
       /const castAnyJobRunning =\s*castRefreshPipelineRunning \|\|\s*castMediaEnriching \|\|\s*castMatrixSyncLoading \|\|\s*Boolean\(refreshingTargets\.cast_credits\) \|\|\s*hasReconnectableCreditsRun \|\|\s*hasPersonRefreshInFlight/s
     );
-    expect(contents).toMatch(
-      /const isCastRefreshBusy =\s*isShowRefreshBusy \|\|\s*castMatrixSyncLoading \|\|\s*castRefreshPipelineRunning \|\|\s*castMediaEnriching \|\|\s*hasReconnectableCreditsRun \|\|\s*hasPersonRefreshInFlight;/s
-    );
+    expect(contents).toMatch(/const isCastRefreshBusy = isShowRefreshBusy \|\| castAnyJobRunning;/);
     expect(contents).not.toMatch(/globalRefreshProgress/);
   });
 

@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import PersonPage from "@/app/admin/trr-shows/people/[personId]/PersonPageClient";
 import { resetAdminGetCoordinatorForTests } from "@/lib/admin/admin-fetch";
+import { captureExpectedConsoleWarn } from "./helpers/expected-console";
 
 const mocks = vi.hoisted(() => {
   const personId = "11111111-2222-3333-4444-555555555555";
@@ -254,7 +255,9 @@ describe("people page tab runtime behavior", () => {
     mocks.guardState.hasAccess = true;
     mocks.fetchAdminWithAuth.mockReset();
     mocks.getClientAuthHeaders.mockReset();
-    mocks.fetchAdminWithAuth.mockResolvedValue(jsonResponse({ seasons: [] }));
+    mocks.fetchAdminWithAuth.mockImplementation(async () =>
+      jsonResponse({ seasons: [], active_operations: [] }),
+    );
     mocks.getClientAuthHeaders.mockResolvedValue({ authorization: "Bearer test-token" });
   });
 
@@ -351,6 +354,13 @@ describe("people page tab runtime behavior", () => {
     expect(screen.getByText("Alternative Names")).toBeInTheDocument();
     expect(screen.getByText("Andrew Cohen")).toBeInTheDocument();
     expect(screen.getByText("Andy C.")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(
+        mocks.fetchAdminWithAuth.mock.calls.some(([url]) =>
+          String(url).includes("/api/admin/trr-api/operations/health"),
+        ),
+      ).toBe(true);
+    });
   });
 
   it("switches the social tab between linked Instagram, Facebook, and YouTube handles", async () => {
@@ -477,6 +487,9 @@ describe("people page tab runtime behavior", () => {
   });
 
   it("shows saved total on the gallery tab and ignores operations-health failures", async () => {
+    const expectedWarn = captureExpectedConsoleWarn(
+      /^Failed to load active admin operations .*"status":500/,
+    );
     mocks.pathname = `/people/${PERSON_ID}/gallery`;
     mocks.searchParams = new URLSearchParams(`showId=${SHOW_ID}&tab=gallery`);
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
@@ -538,6 +551,7 @@ describe("people page tab runtime behavior", () => {
     expect(savedTotal.parentElement).toHaveTextContent(/0 filtered,\s*1\+ loaded/i);
     expect(screen.queryByText(/Import target:/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Failed to load active admin operations/i)).not.toBeInTheDocument();
+    expectedWarn.expectCalled();
   });
 
   it("renders the person shell before gallery completes and uses the exact-count primary slice", async () => {
@@ -587,6 +601,7 @@ describe("people page tab runtime behavior", () => {
 
     await waitForPersonHeading("Andy Cohen");
     expect(screen.queryByText("Loading person data...")).not.toBeInTheDocument();
+    await waitForPrimaryGalleryBootstrap(fetchMock);
 
     const photosRequest = fetchMock.mock.calls.find(([url]) =>
       String(url).includes(`/api/admin/trr-api/people/${PERSON_ID}/photos`),

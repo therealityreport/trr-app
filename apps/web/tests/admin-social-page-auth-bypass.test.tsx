@@ -405,10 +405,13 @@ const saveProducerThreadsHandle = async (): Promise<void> => {
     },
   );
   fireEvent.click(within(dialog).getByRole("button", { name: "Save Handle" }));
+  await waitFor(() => {
+    expect(screen.queryByRole("dialog", { name: "Add Social Handle" })).not.toBeInTheDocument();
+  });
 };
 
 describe("admin social page auth bypass", () => {
-  const landingCacheKey = "trr-admin-social-landing:v5";
+  const landingCacheKey = "trr-admin-social-landing:v6";
 
   beforeEach(() => {
     window.localStorage.clear();
@@ -550,7 +553,7 @@ describe("admin social page auth bypass", () => {
 
     await waitFor(() => {
       expect(mocks.fetchAdminWithAuth).toHaveBeenCalledWith(
-        "/api/admin/social/landing",
+        "/api/admin/social/landing?refresh=1",
         undefined,
         expect.objectContaining({
           allowDevAdminBypass: true,

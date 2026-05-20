@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
-import { makeSocialAccountDashboardPayload, makeSocialAccountSummary } from "./fixtures/social-account-dashboard";
+import { makeSocialAccountSummary } from "./fixtures/social-account-dashboard";
+import { captureExpectedConsoleInfo } from "./helpers/expected-console";
 
 const {
   requireAdminMock,
@@ -56,6 +57,7 @@ vi.mock("@/lib/server/admin/admin-snapshot-route", () => ({
 vi.mock("@/lib/server/trr-api/social-admin-proxy", () => ({
   fetchSocialBackendJson: fetchSocialBackendJsonMock,
   SOCIAL_PROXY_DEFAULT_TIMEOUT_MS: 25_000,
+  SOCIAL_PROXY_LONG_TIMEOUT_MS: 30_000,
   socialProxyErrorResponse: socialProxyErrorResponseMock,
 }));
 
@@ -76,7 +78,7 @@ describe("social account profile snapshot route", () => {
     toVerifiedAdminContextMock.mockReturnValue({ uid: "admin-1" });
     buildAdminAuthPartitionMock.mockReturnValue("firebase:admin-1");
     buildAdminSnapshotCacheKeyMock.mockReturnValue("social-profile-cache-key");
-    fetchSocialBackendJsonMock.mockResolvedValue(makeSocialAccountDashboardPayload());
+    fetchSocialBackendJsonMock.mockResolvedValue(makeSocialAccountSummary());
     socialProxyErrorResponseMock.mockImplementation((error: unknown) =>
       Response.json({ error: String(error), code: "BACKEND_UNREACHABLE" }, { status: 502 }),
     );
@@ -89,6 +91,86 @@ describe("social account profile snapshot route", () => {
           cacheAgeMs: 0,
           stale: false,
         },
+      }),
+    );
+  });
+
+  it("uses the lighter summary endpoint for normal snapshots and avoids the backend dashboard route", async () => {
+    fetchSocialBackendJsonMock.mockResolvedValueOnce(
+      makeSocialAccountSummary({
+        operational_alerts: [{ code: "needs_review" }],
+      }),
+    );
+
+    const response = await GET(
+      new NextRequest("http://localhost/api/admin/trr-api/social/profiles/instagram/thetraitorsus/snapshot?detail=lite"),
+      { params: Promise.resolve({ platform: "instagram", handle: "thetraitorsus" }) },
+    );
+    const body = (await response.json()) as {
+      data: {
+        summary?: { account_handle?: string };
+        catalog_run_progress?: unknown;
+        dashboard_freshness?: { source?: string; status?: string };
+        operational_alerts?: unknown[];
+      };
+    };
+
+    expect(response.status).toBe(200);
+    expect(body.data.summary?.account_handle).toBe("thetraitorsus");
+    expect(body.data.catalog_run_progress).toBeNull();
+    expect(body.data.dashboard_freshness?.status).toBe("fresh");
+    expect(body.data.dashboard_freshness?.source).toBe("summary");
+    expect(body.data.operational_alerts).toEqual([{ code: "needs_review" }]);
+    expect(fetchSocialBackendJsonMock).toHaveBeenCalledTimes(1);
+    expect(fetchSocialBackendJsonMock).toHaveBeenCalledWith(
+      "/profiles/instagram/thetraitorsus/summary",
+      expect.objectContaining({
+        fallbackError: "Failed to fetch social account profile summary",
+        queryString: "detail=lite",
+        retries: 0,
+        timeoutMs: 30_000,
+      }),
+    );
+    expect(fetchSocialBackendJsonMock).not.toHaveBeenCalledWith(
+      expect.stringContaining("/dashboard"),
+      expect.anything(),
+    );
+  });
+
+  it("keeps a normal snapshot usable when inferred active-run progress times out", async () => {
+    fetchSocialBackendJsonMock
+      .mockResolvedValueOnce(
+        makeSocialAccountSummary({
+          catalog_recent_runs: [{ run_id: "run-active", status: "running" }],
+        }),
+      )
+      .mockRejectedValueOnce(new Error("progress timeout"));
+
+    const response = await GET(
+      new NextRequest("http://localhost/api/admin/trr-api/social/profiles/instagram/thetraitorsus/snapshot?detail=lite"),
+      { params: Promise.resolve({ platform: "instagram", handle: "thetraitorsus" }) },
+    );
+    const body = (await response.json()) as {
+      data: {
+        summary?: { account_handle?: string };
+        catalog_run_progress?: { run_id?: string; progress_degraded?: boolean };
+        dashboard_freshness?: { source?: string; status?: string };
+      };
+    };
+
+    expect(response.status).toBe(200);
+    expect(body.data.summary?.account_handle).toBe("thetraitorsus");
+    expect(body.data.catalog_run_progress?.run_id).toBe("run-active");
+    expect(body.data.catalog_run_progress?.progress_degraded).toBe(true);
+    expect(body.data.dashboard_freshness?.status).toBe("degraded");
+    expect(body.data.dashboard_freshness?.source).toBe("direct-progress-degraded");
+    expect(fetchSocialBackendJsonMock).toHaveBeenNthCalledWith(
+      2,
+      "/profiles/instagram/thetraitorsus/catalog/runs/run-active/progress",
+      expect.objectContaining({
+        queryString: "fast=1&recent_log_limit=25",
+        retries: 0,
+        timeoutMs: 12_000,
       }),
     );
   });
@@ -217,6 +299,7 @@ describe("social account profile snapshot route", () => {
   });
 
   it("bypasses cached social profile snapshots while comments coverage has an active run", async () => {
+    const expectedInfo = captureExpectedConsoleInfo(/^social_profile_dashboard_budget/);
     getOrCreateAdminSnapshotMock
       .mockResolvedValueOnce({
         data: {
@@ -301,5 +384,6 @@ describe("social account profile snapshot route", () => {
         forceRefresh: true,
       }),
     );
+    expectedInfo.expectCalled();
   });
 });

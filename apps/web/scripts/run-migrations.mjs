@@ -105,7 +105,7 @@ const migrationManifest = new Map([
 ]);
 
 // Load environment variables from .env.local
-dotenv.config({ path: path.join(__dirname, "../.env.local") });
+dotenv.config({ path: path.join(__dirname, "../.env.local"), quiet: true });
 
 function parseArgs(argv) {
   return {

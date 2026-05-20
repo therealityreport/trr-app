@@ -1,10 +1,26 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest, NextResponse } from "next/server";
 
-const { requireAdminMock, fetchAdminBackendJsonMock } = vi.hoisted(() => ({
-  requireAdminMock: vi.fn(),
-  fetchAdminBackendJsonMock: vi.fn(),
-}));
+const { requireAdminMock, fetchAdminBackendJsonMock, MockAdminReadProxyError } = vi.hoisted(() => {
+  class MockAdminReadProxyError extends Error {
+    status: number;
+    code?: string;
+    retryable?: boolean;
+
+    constructor(message: string, status: number, options?: { code?: string; retryable?: boolean }) {
+      super(message);
+      this.status = status;
+      this.code = options?.code;
+      this.retryable = options?.retryable;
+    }
+  }
+
+  return {
+    requireAdminMock: vi.fn(),
+    fetchAdminBackendJsonMock: vi.fn(),
+    MockAdminReadProxyError,
+  };
+});
 
 vi.mock("@/lib/server/auth", () => ({
   requireAdmin: requireAdminMock,
@@ -13,6 +29,7 @@ vi.mock("@/lib/server/auth", () => ({
 vi.mock("@/lib/server/trr-api/admin-read-proxy", () => ({
   fetchAdminBackendJson: fetchAdminBackendJsonMock,
   ADMIN_READ_PROXY_SHORT_TIMEOUT_MS: 5_000,
+  AdminReadProxyError: MockAdminReadProxyError,
   buildAdminProxyErrorResponse: (error: unknown) =>
     NextResponse.json(
       { error: error instanceof Error ? error.message : "failed" },
@@ -106,6 +123,32 @@ describe("/api/admin/trr-api/shows/[showId]/social-posts route", () => {
 
     expect(response.status).toBe(404);
     expect(payload).toEqual({ error: "Season not found" });
+  });
+
+  it("returns degraded empty posts when the list read times out", async () => {
+    fetchAdminBackendJsonMock.mockRejectedValue(
+      new MockAdminReadProxyError("Admin read request timed out after 5s", 504, {
+        code: "BACKEND_TIMEOUT",
+        retryable: true,
+      }),
+    );
+
+    const request = new NextRequest(`http://localhost/api/admin/trr-api/shows/${SHOW_ID}/social-posts`, {
+      method: "GET",
+    });
+    const response = await GET(request, {
+      params: Promise.resolve({ showId: SHOW_ID }),
+    });
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-trr-social-posts-source")).toBe("backend-timeout-degraded");
+    expect(payload).toEqual({
+      posts: [],
+      count: 0,
+      degraded: true,
+      degraded_reason: "backend_timeout",
+    });
   });
 
   it("creates post through the backend proxy with admin uid", async () => {

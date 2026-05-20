@@ -3,11 +3,12 @@ import { requireAdmin } from "@/lib/server/auth";
 import {
   getShowById,
   getShowByExactSlug,
+  resolveShowSlug,
   updateShowById,
   validateShowImageForField,
 } from "@/lib/server/trr-api/trr-shows-repository";
 import {
-  ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
+  ADMIN_READ_PROXY_PRIMARY_TIMEOUT_MS,
   buildAdminProxyErrorResponse,
   fetchAdminBackendJson,
   invalidateAdminBackendCache,
@@ -68,9 +69,52 @@ const SHOW_SOCIAL_EXTERNAL_ID_KEYS_BY_FIELD: Record<ShowSocialHandleField, reado
   youtube_handle: ["youtube_handle", "youtube"],
 };
 const SHOW_HANDLE_SHARED_SOURCE_SCOPE = "bravo";
+const SHOW_DETAIL_TIMEOUT_MS = Math.max(20_000, ADMIN_READ_PROXY_PRIMARY_TIMEOUT_MS);
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+type ShowDetailRouteSource = "backend" | "local-fallback";
+type ShowDetailRoutePayload = { show: unknown };
+type ShowDetailRouteResult = {
+  payload: ShowDetailRoutePayload;
+  source: ShowDetailRouteSource;
+};
+
+const showDetailResponse = (
+  result: ShowDetailRouteResult,
+  headers: Record<string, string> = {},
+) =>
+  NextResponse.json(result.payload, {
+    headers: {
+      ...headers,
+      "x-trr-show-detail-source": result.source,
+    },
+  });
+
+function shouldForceLocalShowDetailFallback(request: NextRequest): boolean {
+  return (
+    process.env.NODE_ENV !== "production" &&
+    request.nextUrl.searchParams.get("__trr_smoke_force_local_fallback") === "1"
+  );
+}
+
+function shouldUseLocalShowDetailFallback(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const record = error as { status?: unknown; code?: unknown; retryable?: unknown };
+  const status = typeof record.status === "number" ? record.status : null;
+  const code = String(record.code || "").trim().toUpperCase();
+  if (code === "BACKEND_TIMEOUT" || code === "BACKEND_REQUEST_TIMEOUT") return true;
+  return status !== null && status >= 500 && record.retryable === true;
+}
+
+async function getLocalShowDetail(showIdOrSlug: string) {
+  if (UUID_RE.test(showIdOrSlug)) {
+    return getShowById(showIdOrSlug);
+  }
+  const resolved = await resolveShowSlug(showIdOrSlug);
+  return resolved ? getShowById(resolved.show_id) : null;
+}
 
 function normalizeText(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
@@ -345,38 +389,59 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     }
 
     const cacheKey = buildUserScopedRouteCacheKey(user.uid, `show:${showId}`, request.nextUrl.searchParams);
-    const cached = getRouteResponseCache<Record<string, unknown>>(TRR_SHOW_DETAIL_CACHE_NAMESPACE, cacheKey);
+    const cached = getRouteResponseCache<ShowDetailRouteResult>(TRR_SHOW_DETAIL_CACHE_NAMESPACE, cacheKey);
     if (cached) {
-      return NextResponse.json(cached, { headers: { "x-trr-cache": "hit" } });
+      return showDetailResponse(cached, { "x-trr-cache": "hit" });
     }
 
-    const payload = await getOrCreateRouteResponsePromise(
+    const result = await getOrCreateRouteResponsePromise(
       TRR_SHOW_DETAIL_CACHE_NAMESPACE,
       cacheKey,
       async () => {
-        const upstream = await fetchAdminBackendJson(`/admin/trr-api/shows/${showId}`, {
-          timeoutMs: ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
-          routeName: "show-detail",
-        });
-        if (upstream.status === 404) {
-          throw new Error("Show not found");
+        let nextResult: ShowDetailRouteResult;
+        try {
+          if (shouldForceLocalShowDetailFallback(request)) {
+            const localShow = await getLocalShowDetail(showId);
+            if (!localShow) {
+              throw new Error("Show not found");
+            }
+            nextResult = { payload: { show: localShow }, source: "local-fallback" };
+            setRouteResponseCache(TRR_SHOW_DETAIL_CACHE_NAMESPACE, cacheKey, nextResult, TRR_SHOW_DETAIL_CACHE_TTL_MS);
+            return nextResult;
+          }
+          const upstream = await fetchAdminBackendJson(`/admin/trr-api/shows/${showId}`, {
+            timeoutMs: SHOW_DETAIL_TIMEOUT_MS,
+            routeName: "show-detail",
+          });
+          if (upstream.status === 404) {
+            throw new Error("Show not found");
+          }
+          if (upstream.status !== 200) {
+            throw new Error(
+              typeof upstream.data.error === "string"
+                ? upstream.data.error
+                : typeof upstream.data.detail === "string"
+                  ? upstream.data.detail
+                  : "Failed to fetch show",
+            );
+          }
+          nextResult = { payload: { show: upstream.data.show ?? null }, source: "backend" };
+        } catch (error) {
+          if (!shouldUseLocalShowDetailFallback(error)) {
+            throw error;
+          }
+          const localShow = await getLocalShowDetail(showId);
+          if (!localShow) {
+            throw error;
+          }
+          nextResult = { payload: { show: localShow }, source: "local-fallback" };
         }
-        if (upstream.status !== 200) {
-          throw new Error(
-            typeof upstream.data.error === "string"
-              ? upstream.data.error
-              : typeof upstream.data.detail === "string"
-                ? upstream.data.detail
-                : "Failed to fetch show",
-          );
-        }
-        const nextPayload = { show: upstream.data.show ?? null };
-        setRouteResponseCache(TRR_SHOW_DETAIL_CACHE_NAMESPACE, cacheKey, nextPayload, TRR_SHOW_DETAIL_CACHE_TTL_MS);
-        return nextPayload;
+        setRouteResponseCache(TRR_SHOW_DETAIL_CACHE_NAMESPACE, cacheKey, nextResult, TRR_SHOW_DETAIL_CACHE_TTL_MS);
+        return nextResult;
       },
     );
 
-    return NextResponse.json(payload);
+    return showDetailResponse(result);
   } catch (error) {
     console.error("[api] Failed to get TRR show", error);
     if (error instanceof Error && error.message === "Show not found") {

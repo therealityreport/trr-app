@@ -3,9 +3,10 @@ import { NextRequest, NextResponse } from "next/server";
 
 process.env.TRR_ADMIN_ROUTE_CACHE_DISABLED = "1";
 
-const { requireAdminMock, fetchAdminBackendJsonMock, resolveShowSlugMock } = vi.hoisted(() => ({
+const { requireAdminMock, fetchAdminBackendJsonMock, getShowByIdMock, resolveShowSlugMock } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
   fetchAdminBackendJsonMock: vi.fn(),
+  getShowByIdMock: vi.fn(),
   resolveShowSlugMock: vi.fn(),
 }));
 
@@ -14,7 +15,7 @@ vi.mock("@/lib/server/auth", () => ({
 }));
 
 vi.mock("@/lib/server/trr-api/trr-shows-repository", () => ({
-  getShowById: vi.fn(),
+  getShowById: getShowByIdMock,
   getShowByExactSlug: vi.fn(),
   resolveShowSlug: resolveShowSlugMock,
   updateShowById: vi.fn(),
@@ -25,6 +26,7 @@ vi.mock("@/lib/server/trr-api/admin-read-proxy", () => ({
   fetchAdminBackendJson: fetchAdminBackendJsonMock,
   invalidateAdminBackendCache: vi.fn(),
   ADMIN_READ_PROXY_SHORT_TIMEOUT_MS: 5_000,
+  ADMIN_READ_PROXY_PRIMARY_TIMEOUT_MS: 12_000,
   buildAdminProxyErrorResponse: (error: unknown) =>
     NextResponse.json({ error: error instanceof Error ? error.message : "failed" }, { status: 500 }),
 }));
@@ -37,6 +39,7 @@ describe("TRR show route parity", () => {
   beforeEach(() => {
     requireAdminMock.mockReset();
     fetchAdminBackendJsonMock.mockReset();
+    getShowByIdMock.mockReset();
     resolveShowSlugMock.mockReset();
     requireAdminMock.mockResolvedValue({ uid: "admin-user" });
   });
@@ -95,9 +98,10 @@ describe("TRR show route parity", () => {
     const payload = await response.json();
 
     expect(response.status).toBe(200);
+    expect(response.headers.get("x-trr-show-detail-source")).toBe("backend");
     expect(fetchAdminBackendJsonMock).toHaveBeenCalledWith(
       "/admin/trr-api/shows/7782652f-783a-488b-8860-41b97de32e75",
-      expect.objectContaining({ routeName: "show-detail" }),
+      expect.objectContaining({ routeName: "show-detail", timeoutMs: 20_000 }),
     );
     expect(payload.show).toMatchObject({
       slug: "the-real-housewives-of-salt-lake-city",
@@ -147,6 +151,62 @@ describe("TRR show route parity", () => {
     expect(first.headers.get("x-trr-cache")).not.toBe("hit");
     expect(second.headers.get("x-trr-cache")).not.toBe("hit");
     expect(fetchAdminBackendJsonMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("falls back to local show detail when the backend show read times out", async () => {
+    const timeout = Object.assign(new Error("Admin read request timed out after 20s"), {
+      status: 504,
+      code: "BACKEND_TIMEOUT",
+      retryable: true,
+    });
+    fetchAdminBackendJsonMock.mockRejectedValueOnce(timeout);
+    getShowByIdMock.mockResolvedValueOnce({
+      id: "7782652f-783a-488b-8860-41b97de32e75",
+      name: "The Real Housewives of Salt Lake City",
+      slug: "the-real-housewives-of-salt-lake-city",
+      canonical_slug: "the-real-housewives-of-salt-lake-city",
+    });
+
+    const response = await getShowByIdRoute(
+      new NextRequest("http://localhost/api/admin/trr-api/shows/7782652f-783a-488b-8860-41b97de32e75"),
+      { params: Promise.resolve({ showId: "7782652f-783a-488b-8860-41b97de32e75" }) },
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-trr-show-detail-source")).toBe("local-fallback");
+    expect(fetchAdminBackendJsonMock).toHaveBeenCalledTimes(1);
+    expect(getShowByIdMock).toHaveBeenCalledWith("7782652f-783a-488b-8860-41b97de32e75");
+    expect(payload.show).toMatchObject({
+      id: "7782652f-783a-488b-8860-41b97de32e75",
+      name: "The Real Housewives of Salt Lake City",
+    });
+  });
+
+  it("can force local show detail fallback for smoke verification outside production", async () => {
+    getShowByIdMock.mockResolvedValueOnce({
+      id: "7782652f-783a-488b-8860-41b97de32e75",
+      name: "The Traitors",
+      slug: "the-traitors",
+      canonical_slug: "the-traitors",
+    });
+
+    const response = await getShowByIdRoute(
+      new NextRequest(
+        "http://localhost/api/admin/trr-api/shows/7782652f-783a-488b-8860-41b97de32e75?__trr_smoke_force_local_fallback=1",
+      ),
+      { params: Promise.resolve({ showId: "7782652f-783a-488b-8860-41b97de32e75" }) },
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-trr-show-detail-source")).toBe("local-fallback");
+    expect(fetchAdminBackendJsonMock).not.toHaveBeenCalled();
+    expect(getShowByIdMock).toHaveBeenCalledWith("7782652f-783a-488b-8860-41b97de32e75");
+    expect(payload.show).toMatchObject({
+      id: "7782652f-783a-488b-8860-41b97de32e75",
+      name: "The Traitors",
+    });
   });
 
   it("keeps show resolve-slug parity", async () => {

@@ -96,8 +96,23 @@ describe("SystemHealthModal copy snapshot", () => {
             stale_workers: 0,
             stale_hidden_count: 0,
             active_workers: 2,
+            active_invocations: 0,
             total_workers: 2,
             stale_after_seconds: 300,
+            modal_capacity: {
+              total_max_containers: 46,
+              entries: [
+                { modal_function: "run_social_job", max_containers: 18 },
+                { modal_function: "run_social_recovery_sweep", max_containers: 2 },
+                { modal_function: "probe_social_auth", max_containers: 2 },
+                { modal_function: "probe_getty_remote_access", max_containers: 1 },
+                { modal_function: "run_admin_operation", max_containers: 8 },
+                { modal_function: "run_google_news_job", max_containers: 4 },
+                { modal_function: "run_reddit_refresh", max_containers: 4 },
+                { modal_function: "run_admin_vision", max_containers: 3 },
+                { modal_function: "scrape_socialblade", max_containers: 4 },
+              ],
+            },
             by_stage: {
               posts: { total: 2, healthy: 2, fresh: 2 },
             },
@@ -233,6 +248,14 @@ describe("SystemHealthModal copy snapshot", () => {
     });
 
     expect(screen.queryByText("Copied System Jobs Health debug snapshot to clipboard.")).not.toBeInTheDocument();
+  });
+
+  it("shows Modal capacity from the queue health payload", () => {
+    render(<SystemHealthModal isOpen onClose={() => undefined} />);
+
+    expect(screen.getByText("Modal Capacity")).toBeInTheDocument();
+    expect(screen.getByText("0/46")).toBeInTheDocument();
+    expect(screen.getByText("9 deployed worker function limits reported")).toBeInTheDocument();
   });
 
   it("treats queue aggregate timeouts as degraded when workers are otherwise healthy", async () => {

@@ -847,7 +847,7 @@ function shouldRepresentUiSurface(relativePath: string, content: string): boolea
 }
 
 function buildGeneratedTypescriptModule(inventory: AdminApiReferenceInventory): string {
-  return `/* eslint-disable */\nimport type { AdminApiReferenceInventory } from "@/lib/admin/api-references/types";\n\nexport const GENERATED_ADMIN_API_REFERENCE_INVENTORY = ${JSON.stringify(inventory, null, 2)} satisfies AdminApiReferenceInventory;\n`;
+  return `import type { AdminApiReferenceInventory } from "@/lib/admin/api-references/types";\n\nexport const GENERATED_ADMIN_API_REFERENCE_INVENTORY = ${JSON.stringify(inventory, null, 2)} satisfies AdminApiReferenceInventory;\n`;
 }
 
 export function buildAdminApiReferenceInventory(

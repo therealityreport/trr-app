@@ -59,6 +59,32 @@ export type GettyLocalScrapePayload = {
   job_pid?: number;
 };
 
+type CompactGettyPrefetchPayload = Omit<
+  GettyLocalScrapePayload,
+  | "status"
+  | "stage"
+  | "progress_message"
+  | "started_at"
+  | "heartbeat_at"
+  | "completed_at"
+  | "last_error"
+  | "last_error_code"
+  | "active_query"
+  | "query_summaries_live"
+  | "requested_page"
+  | "expected_page"
+  | "current_page"
+  | "response_url"
+  | "fetched_candidates_total"
+  | "page_candidate_count"
+  | "new_unique_count"
+  | "termination_reason"
+  | "page_classification"
+  | "page_signature"
+  | "first_editorial_ids"
+  | "job_pid"
+>;
+
 export type GettyPrefetchState = GettyLocalScrapePayload & {
   revision?: number;
   token_expires_at?: string;
@@ -388,7 +414,7 @@ const normalizeGettyPrefetchExecutionState = (
 
 export const compactGettyPrefetchPayload = (
   payload: GettyLocalScrapePayload
-): GettyLocalScrapePayload => {
+): CompactGettyPrefetchPayload => {
   const merged = Array.isArray(payload.merged)
     ? payload.merged.map((entry) => compactGettyAsset(entry)).filter((entry): entry is JsonRecord => Boolean(entry))
     : [];
@@ -654,27 +680,7 @@ const buildGettyPrefetchState = (
   const now = Date.now();
   const nextRevision = Math.max(1, Number(previous?.revision ?? 0) + 1);
   const executionState = normalizeGettyPrefetchExecutionState(payload);
-  const {
-    status: _payloadStatus,
-    stage: _payloadStage,
-    progress_message: _payloadProgressMessage,
-    started_at: _payloadStartedAt,
-    heartbeat_at: _payloadHeartbeatAt,
-    completed_at: _payloadCompletedAt,
-    last_error: _payloadLastError,
-    last_error_code: _payloadLastErrorCode,
-    active_query: _payloadActiveQuery,
-    query_summaries_live: _payloadQuerySummariesLive,
-    requested_page: _payloadRequestedPage,
-    current_page: _payloadCurrentPage,
-    fetched_candidates_total: _payloadFetchedCandidatesTotal,
-    page_candidate_count: _payloadPageCandidateCount,
-    new_unique_count: _payloadNewUniqueCount,
-    termination_reason: _payloadTerminationReason,
-    page_classification: _payloadPageClassification,
-    job_pid: _payloadJobPid,
-    ...compactedPayload
-  } = compactGettyPrefetchPayload(payload);
+  const compactedPayload = compactGettyPrefetchPayload(payload);
   return {
     ...(previous ?? {}),
     ...compactedPayload,

@@ -2,9 +2,16 @@ import "server-only";
 
 import { NextRequest, NextResponse } from "next/server";
 
-import { requireAdmin } from "@/lib/server/auth";
+import { requireAdmin, type AuthenticatedUser } from "@/lib/server/auth";
+import {
+  isTimeoutSafeFetchTimeoutError,
+  timeoutSafeFetch,
+} from "@/lib/server/timeout-safe-fetch";
 import { getBackendApiUrl } from "@/lib/server/trr-api/backend";
-import { buildInternalAdminHeaders } from "@/lib/server/trr-api/internal-admin-auth";
+import {
+  buildInternalAdminHeaders,
+  type VerifiedAdminContext,
+} from "@/lib/server/trr-api/internal-admin-auth";
 
 export type AdminBackendProxyMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 export type AdminBackendProxyResponseMode = "json" | "passthrough";
@@ -182,6 +189,27 @@ const buildBackendFetchFailedPayload = (error: unknown): { error: string; detail
   };
 };
 
+const normalizeAdminEmail = (value: unknown): string | null => {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+};
+
+const buildVerifiedAdminContextFromUser = (
+  user: AuthenticatedUser | undefined,
+): VerifiedAdminContext | undefined => {
+  if (!user?.uid) return undefined;
+  const verifiedAt =
+    typeof user.token.verified_at === "number" && Number.isFinite(user.token.verified_at)
+      ? user.token.verified_at
+      : Date.now();
+  return {
+    uid: user.uid,
+    email: normalizeAdminEmail(user.email),
+    verifiedAt,
+  };
+};
+
 export const readJsonRequestBody = async (
   request: NextRequest,
   options?: {
@@ -216,6 +244,7 @@ export async function executeAdminBackendProxy<TParams extends Record<string, st
   request: NextRequest,
   params: TParams,
   config: AdminBackendProxyRouteConfig<TParams, TBodyValue>,
+  adminContext?: VerifiedAdminContext,
 ): Promise<NextResponse> {
   for (const requiredParam of config.requiredParams ?? []) {
     if (!params[requiredParam.key]) {
@@ -250,17 +279,16 @@ export async function executeAdminBackendProxy<TParams extends Record<string, st
   if (bodyResult.contentType && !requestHeaders.has("Content-Type")) {
     requestHeaders.set("Content-Type", bodyResult.contentType);
   }
-  const headers = buildInternalAdminHeaders(requestHeaders);
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeout.ms);
+  const headers = buildInternalAdminHeaders(adminContext, requestHeaders);
 
   try {
-    const response = await fetch(backendUrl, {
+    const response = await timeoutSafeFetch(backendUrl, {
       method: config.method,
       headers,
       body: bodyResult.body,
       ...(config.backendCache ? { cache: config.backendCache } : {}),
-      signal: controller.signal,
+      timeoutMs: timeout.ms,
+      timeoutName: timeout.name,
     });
     const responseHeaders = await resolveHeaders(config.responseHeaders, context);
 
@@ -288,7 +316,7 @@ export async function executeAdminBackendProxy<TParams extends Record<string, st
       headers: responseHeaders,
     });
   } catch (error) {
-    if (error instanceof Error && error.name === "AbortError") {
+    if (isTimeoutSafeFetchTimeoutError(error)) {
       return NextResponse.json(
         {
           error: readErrorMessage(config.timeoutError, context),
@@ -302,8 +330,6 @@ export async function executeAdminBackendProxy<TParams extends Record<string, st
       );
     }
     return NextResponse.json(buildBackendFetchFailedPayload(error), { status: 502 });
-  } finally {
-    clearTimeout(timer);
   }
 }
 
@@ -316,8 +342,13 @@ export function createAdminBackendProxyRoute<
     { params }: RouteHandlerContext<TParams>,
   ): Promise<NextResponse> {
     try {
-      await requireAdmin(request);
-      return executeAdminBackendProxy(request, await params, config);
+      const adminUser = await requireAdmin(request);
+      return executeAdminBackendProxy(
+        request,
+        await params,
+        config,
+        buildVerifiedAdminContextFromUser(adminUser),
+      );
     } catch (error) {
       console.error(config.logMessage, error);
       const message = error instanceof Error ? error.message : "failed";

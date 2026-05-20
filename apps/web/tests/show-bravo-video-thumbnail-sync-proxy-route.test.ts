@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
+import { captureExpectedConsoleError } from "./helpers/expected-console";
 
 const { requireAdminMock, getBackendApiUrlMock, getInternalAdminBearerTokenMock } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
@@ -71,6 +72,7 @@ describe("show bravo video-thumbnail sync proxy route", () => {
   });
 
   it("maps aborts to a timeout response", async () => {
+    const expectedError = captureExpectedConsoleError(/^\[api\] Failed to sync Bravo video thumbnails .*aborted/);
     const abortError = new Error("aborted");
     abortError.name = "AbortError";
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(abortError));
@@ -88,5 +90,6 @@ describe("show bravo video-thumbnail sync proxy route", () => {
 
     expect(response.status).toBe(504);
     expect(String(payload.error || "")).toMatch(/timed out after \d+s/i);
+    expectedError.expectCalled();
   });
 });

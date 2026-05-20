@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
+import { captureExpectedConsoleError } from "./helpers/expected-console";
 
 const { requireAdminMock, getBackendApiUrlMock, getInternalAdminBearerTokenMock } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
@@ -74,6 +75,7 @@ describe("facebank seed proxy route", () => {
   });
 
   it("returns 500 when internal secret is missing", async () => {
+    const expectedError = captureExpectedConsoleError(/^\[api\] Failed to toggle facebank seed .*TRR_INTERNAL_ADMIN_SHARED_SECRET is not configured/);
     getInternalAdminBearerTokenMock.mockImplementation(() => {
       throw new Error("TRR_INTERNAL_ADMIN_SHARED_SECRET is not configured");
     });
@@ -88,6 +90,7 @@ describe("facebank seed proxy route", () => {
     expect(response.status).toBe(500);
     expect(payload.error).toBe("TRR_INTERNAL_ADMIN_SHARED_SECRET is not configured");
     expect(fetchMock).not.toHaveBeenCalled();
+    expectedError.expectCalled();
   });
 
   it("passes through backend status and error payload", async () => {

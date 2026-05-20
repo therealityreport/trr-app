@@ -1,6 +1,9 @@
 import "server-only";
 
-import { fetchAdminBackendJson } from "@/lib/server/trr-api/admin-read-proxy";
+import {
+  AdminReadProxyError,
+  fetchAdminBackendJson,
+} from "@/lib/server/trr-api/admin-read-proxy";
 
 export type StableRedditReadResult<T> = {
   payload: T;
@@ -18,7 +21,7 @@ type StableRedditReadOptions<T> = {
   allowFallbackStatusCodes?: number[];
 };
 
-const DEFAULT_FALLBACK_STATUS_CODES = new Set([404, 501]);
+const DEFAULT_FALLBACK_STATUS_CODES = new Set([404, 501, 502, 503, 504]);
 
 const normalizeStatusCodes = (codes?: number[]): Set<number> => {
   if (!codes || codes.length === 0) return DEFAULT_FALLBACK_STATUS_CODES;
@@ -30,11 +33,24 @@ export async function loadStableRedditRead<T>(
 ): Promise<StableRedditReadResult<T>> {
   const fallbackStatusCodes = normalizeStatusCodes(options.allowFallbackStatusCodes);
 
-  const upstream = await fetchAdminBackendJson(options.backendPath, {
-    queryString: options.queryString,
-    timeoutMs: options.timeoutMs,
-    routeName: options.routeName,
-  });
+  let upstream;
+  try {
+    upstream = await fetchAdminBackendJson(options.backendPath, {
+      queryString: options.queryString,
+      timeoutMs: options.timeoutMs,
+      routeName: options.routeName,
+    });
+  } catch (error) {
+    if (error instanceof AdminReadProxyError && fallbackStatusCodes.has(error.status)) {
+      const payload = await options.fallback();
+      return {
+        payload,
+        source: "local",
+        upstreamStatus: error.status,
+      };
+    }
+    throw error;
+  }
 
   if (upstream.status === 200) {
     return {

@@ -39,7 +39,7 @@ describe("cast photo variants proxy route", () => {
     getBackendApiUrlMock.mockReturnValue(
       "https://backend.example.com/api/v1/admin/cast-photos/photo-1/variants",
     );
-    buildInternalAdminHeadersMock.mockImplementation((headers?: HeadersInit) => {
+    buildInternalAdminHeadersMock.mockImplementation((_context: unknown, headers?: HeadersInit) => {
       const out = new Headers(headers);
       out.set("Authorization", "Bearer internal-admin-token");
       return out;

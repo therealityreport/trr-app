@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { invalidateTypographyRouteCaches } from "@/lib/server/admin/typography-route-cache";
+import { captureExpectedConsoleError } from "./helpers/expected-console";
 
 const {
   requireAdminMock,
@@ -194,6 +195,7 @@ describe("design system typography routes", () => {
   });
 
   it("validates create payloads", async () => {
+    const expectedError = captureExpectedConsoleError(/^\[api\] Failed to create typography set .*Invalid role config/);
     const response = await createTypography(
       new NextRequest("http://localhost/api/admin/design-system/typography/sets", {
         method: "POST",
@@ -220,6 +222,7 @@ describe("design system typography routes", () => {
     expect(response.status).toBe(400);
     expect(payload.error).toContain("Invalid role config");
     expect(createTypographySetMock).not.toHaveBeenCalled();
+    expectedError.expectCalled();
   });
 
   it("updates and deletes typography sets", async () => {

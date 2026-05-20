@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
+import { captureExpectedConsoleError } from "./helpers/expected-console";
 
 const {
   requireAdminMock,
@@ -122,6 +123,7 @@ describe("/api/admin/reddit/communities/[communityId]/flairs/refresh route", () 
   });
 
   it("maps auth failures to 403", async () => {
+    const expectedError = captureExpectedConsoleError(/^\[api\] Failed to refresh reddit post flairs .*forbidden/);
     requireAdminMock.mockRejectedValue(new Error("forbidden"));
 
     const request = new NextRequest(`http://localhost/api/admin/reddit/communities/${COMMUNITY_ID}/flairs/refresh`, {
@@ -135,6 +137,7 @@ describe("/api/admin/reddit/communities/[communityId]/flairs/refresh route", () 
 
     expect(response.status).toBe(403);
     expect(payload.error).toBe("forbidden");
+    expectedError.expectCalled();
   });
 
   it("returns 400 for invalid communityId", async () => {

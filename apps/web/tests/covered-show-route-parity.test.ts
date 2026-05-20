@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest, NextResponse } from "next/server";
+import { captureExpectedConsoleWarn } from "./helpers/expected-console";
 
 const {
   requireAdminMock,
@@ -142,6 +143,7 @@ describe("covered show route parity", () => {
   });
 
   it("falls back to the local repository for covered-shows list when backend auth is unavailable", async () => {
+    const expectedWarning = captureExpectedConsoleWarn(/^\[api\] Covered shows backend proxy unavailable; using local repository .*Backend internal auth is not configured/);
     fetchAdminBackendJsonMock.mockRejectedValue(new Error("Backend internal auth is not configured"));
     getCoveredShowsLocalMock.mockResolvedValue([
       {
@@ -173,6 +175,7 @@ describe("covered show route parity", () => {
       ],
     });
     expect(getCoveredShowsLocalMock).toHaveBeenCalledTimes(1);
+    expectedWarning.expectCalled();
   });
 
   it("deletes covered shows through the backend proxy with admin uid", async () => {

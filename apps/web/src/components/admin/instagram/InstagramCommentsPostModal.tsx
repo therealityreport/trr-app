@@ -530,6 +530,23 @@ export default function InstagramCommentsPostModal({
     () => getFirstValidExternalUrl(comments?.facebook_crosspost?.post_url, post?.facebook_crosspost?.post_url),
     [comments?.facebook_crosspost?.post_url, post?.facebook_crosspost?.post_url],
   );
+  useEffect(() => {
+    if (!mediaPreview) return;
+
+    const hideWhenLeavingMediaTrigger = (event: MouseEvent) => {
+      const target =
+        event.target instanceof HTMLElement
+          ? event.target.closest<HTMLElement>("[data-comment-media-preview-trigger='true']")
+          : null;
+      if (!target) return;
+      const relatedTarget = event.relatedTarget;
+      if (relatedTarget instanceof Node && target.contains(relatedTarget)) return;
+      setMediaPreview(null);
+    };
+
+    document.addEventListener("mouseout", hideWhenLeavingMediaTrigger, true);
+    return () => document.removeEventListener("mouseout", hideWhenLeavingMediaTrigger, true);
+  }, [mediaPreview]);
   const updateCommentSearch = (value: string) => {
     setCommentSearch(value);
     setPage(1);
@@ -580,10 +597,11 @@ export default function InstagramCommentsPostModal({
           target="_blank"
           rel="noreferrer"
           aria-label="Open comment media"
+          data-comment-media-preview-trigger="true"
           onMouseEnter={(event) => updateMediaPreview(previewMediaUrl, event)}
           onMouseMove={(event) => updateMediaPreview(previewMediaUrl, event)}
           onMouseLeave={hideMediaPreview}
-          onMouseOut={hideMediaPreviewWhenLeavingTarget}
+          onMouseOutCapture={hideMediaPreviewWhenLeavingTarget}
           onFocus={(event) => showMediaPreviewFromElement(previewMediaUrl, event.currentTarget)}
           onBlur={hideMediaPreview}
           className="group relative block size-12 overflow-hidden rounded-md border border-border bg-muted"

@@ -91,6 +91,18 @@ export interface SharedPipelineSummary {
   review_items: SharedReviewItemSummary[];
 }
 
+export interface ScrapeJobHealthSummary {
+  window_hours: number;
+  window_started_at: string | null;
+  generated_at: string | null;
+  total_jobs: number;
+  active_jobs: number;
+  failed_jobs: number;
+  failure_signal_jobs: number;
+  in_failed_sql_transaction_hits: number;
+  latest_failure_at: string | null;
+}
+
 export interface RedditDashboardSummary {
   active_community_count: number;
   archived_community_count: number;
@@ -180,5 +192,6 @@ export interface SocialLandingPayload {
   cast_socialblade_shows: CastSocialBladeShowSummary[];
   shared_source_sets: SharedAccountSourceSet[];
   shared_pipeline: SharedPipelineSummary;
+  scrape_job_health: ScrapeJobHealthSummary;
   reddit_dashboard: RedditDashboardSummary;
 }

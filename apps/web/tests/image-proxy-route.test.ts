@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
+import { captureExpectedConsoleError } from "./helpers/expected-console";
 
 const { requireAdminMock } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
@@ -16,6 +17,18 @@ describe("image proxy route", () => {
     requireAdminMock.mockReset();
     requireAdminMock.mockResolvedValue({ uid: "admin-user" });
     vi.restoreAllMocks();
+  });
+
+  it("requires admin access", async () => {
+    const expectedError = captureExpectedConsoleError(/^\[api\] Failed to proxy image .*unauthorized/);
+    requireAdminMock.mockRejectedValue(new Error("unauthorized"));
+
+    const response = await GET(
+      new NextRequest("http://localhost/api/admin/colors/image-proxy?url=https://images.example.com/a.png"),
+    );
+
+    expect(response.status).toBe(401);
+    expectedError.expectCalled();
   });
 
   it("rejects invalid URLs and disallowed hosts", async () => {
@@ -41,6 +54,43 @@ describe("image proxy route", () => {
     );
 
     expect(response.status).toBe(415);
+  });
+
+  it("rejects redirects to disallowed hosts", async () => {
+    const expectedError = captureExpectedConsoleError(/^\[api\] Failed to proxy image .*Host is not allowed/);
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(null, {
+        status: 302,
+        headers: { location: "http://127.0.0.1/private.png" },
+      }),
+    );
+
+    const response = await GET(
+      new NextRequest("http://localhost/api/admin/colors/image-proxy?url=https://images.example.com/a.png"),
+    );
+
+    expect(response.status).toBe(400);
+    expectedError.expectCalled();
+  });
+
+  it("rejects oversized upstream responses before reading the body", async () => {
+    const expectedError = captureExpectedConsoleError(/^\[api\] Failed to proxy image .*Image exceeds size limit/);
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("too-large", {
+        status: 200,
+        headers: {
+          "content-type": "image/png",
+          "content-length": String(10 * 1024 * 1024 + 1),
+        },
+      }),
+    );
+
+    const response = await GET(
+      new NextRequest("http://localhost/api/admin/colors/image-proxy?url=https://images.example.com/a.png"),
+    );
+
+    expect(response.status).toBe(413);
+    expectedError.expectCalled();
   });
 
   it("proxies valid image responses", async () => {

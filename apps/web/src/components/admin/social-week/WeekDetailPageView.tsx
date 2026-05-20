@@ -6406,10 +6406,7 @@ export default function WeekDetailPage() {
   );
 
   const refreshWeekSnapshotNow = useCallback(
-    async (
-      _cause: "manual" | "mutation" = "mutation",
-      options?: { runId?: string | null; syncSessionId?: string | null },
-    ) => {
+    async (options?: { runId?: string | null; syncSessionId?: string | null }) => {
       await invalidateWeekSnapshotFamily();
       const snapshot = await fetchWeekSnapshot({
         forceRefresh: true,
@@ -8818,7 +8815,7 @@ export default function WeekDetailPage() {
                       syncPollFailureCountRef.current = 0;
                       missingRunConsecutiveCountRef.current = 0;
                       terminalCoverageFailureCountRef.current = 0;
-                      void refreshWeekSnapshotNow("manual");
+                      void refreshWeekSnapshotNow();
                     }}
                     className="rounded border border-red-300 bg-white px-2 py-0.5 text-xs font-semibold text-red-600 hover:bg-red-50"
                   >

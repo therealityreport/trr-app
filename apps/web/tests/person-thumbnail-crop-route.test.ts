@@ -1,12 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
+import { captureExpectedConsoleError } from "./helpers/expected-console";
 
 const {
   requireAdminMock,
+  invalidateAdminBackendCacheMock,
   updateCastPhotoThumbnailCropMock,
   updateMediaLinkThumbnailCropMock,
 } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
+  invalidateAdminBackendCacheMock: vi.fn(),
   updateCastPhotoThumbnailCropMock: vi.fn(),
   updateMediaLinkThumbnailCropMock: vi.fn(),
 }));
@@ -18,6 +21,10 @@ vi.mock("@/lib/server/auth", () => ({
 vi.mock("@/lib/server/admin/person-thumbnail-crops-repository", () => ({
   updateCastPhotoThumbnailCrop: updateCastPhotoThumbnailCropMock,
   updateMediaLinkThumbnailCrop: updateMediaLinkThumbnailCropMock,
+}));
+
+vi.mock("@/lib/server/trr-api/admin-read-proxy", () => ({
+  invalidateAdminBackendCache: invalidateAdminBackendCacheMock,
 }));
 
 import { PUT } from "@/app/api/admin/trr-api/people/[personId]/photos/[photoId]/thumbnail-crop/route";
@@ -32,9 +39,11 @@ const makeRequest = (body: Record<string, unknown>) =>
 describe("person thumbnail crop route", () => {
   beforeEach(() => {
     requireAdminMock.mockReset();
+    invalidateAdminBackendCacheMock.mockReset();
     updateCastPhotoThumbnailCropMock.mockReset();
     updateMediaLinkThumbnailCropMock.mockReset();
     requireAdminMock.mockResolvedValue(undefined);
+    invalidateAdminBackendCacheMock.mockResolvedValue(undefined);
   });
 
   it("updates cast photo thumbnail crop", async () => {
@@ -64,6 +73,10 @@ describe("person thumbnail crop route", () => {
       photoId: "photo-1",
       crop: { x: 44, y: 26, zoom: 1.2, mode: "manual" },
     });
+    expect(invalidateAdminBackendCacheMock).toHaveBeenCalledWith(
+      "/admin/people/person-1/cache/invalidate",
+      { routeName: "person-gallery" },
+    );
     expect(payload.thumbnail_crop_mode).toBe("manual");
     expect(payload.thumbnail_focus_x).toBe(44);
   });
@@ -94,6 +107,10 @@ describe("person thumbnail crop route", () => {
       linkId: "photo-1",
       crop: null,
     });
+    expect(invalidateAdminBackendCacheMock).toHaveBeenCalledWith(
+      "/admin/people/person-1/cache/invalidate",
+      { routeName: "person-gallery" },
+    );
   });
 
   it("rejects out-of-range crop values", async () => {
@@ -112,6 +129,7 @@ describe("person thumbnail crop route", () => {
   });
 
   it("maps auth failures to 401", async () => {
+    const expectedError = captureExpectedConsoleError(/^\[api\] Failed to update thumbnail crop .*unauthorized/);
     requireAdminMock.mockRejectedValue(new Error("unauthorized"));
 
     const response = await PUT(
@@ -123,5 +141,6 @@ describe("person thumbnail crop route", () => {
     );
 
     expect(response.status).toBe(401);
+    expectedError.expectCalled();
   });
 });

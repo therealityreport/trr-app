@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest, NextResponse } from "next/server";
+import { captureExpectedConsoleError } from "./helpers/expected-console";
 
 process.env.TRR_ADMIN_ROUTE_CACHE_DISABLED = "1";
 
@@ -79,6 +80,7 @@ describe("person route parity", () => {
   });
 
   it("keeps 404 parity for missing people", async () => {
+    const expectedError = captureExpectedConsoleError(/^\[api\] Failed to get TRR person .*Person not found/);
     fetchAdminBackendJsonMock.mockResolvedValue({
       status: 404,
       data: { detail: "Person not found" },
@@ -90,5 +92,6 @@ describe("person route parity", () => {
 
     expect(response.status).toBe(404);
     await expect(response.json()).resolves.toEqual({ error: "Person not found" });
+    expectedError.expectCalled();
   });
 });

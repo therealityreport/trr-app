@@ -486,7 +486,7 @@ export const BRAND_FONT_REGISTRY_SEED: readonly BrandFontSeed[] = [
     currentReferenceSubstitute: "Cheltenham",
     provenance: "design-doc-jsx",
     confidence: "high",
-    evidenceIds: ["brand-the-athletic:specimen-meta:136"],
+    evidenceIds: ["brand-the-athletic:specimen-meta:120"],
   },
   {
     brandId: "brand-the-athletic",
@@ -500,7 +500,7 @@ export const BRAND_FONT_REGISTRY_SEED: readonly BrandFontSeed[] = [
     currentReferenceSubstitute: "Franklin Gothic",
     provenance: "design-doc-jsx",
     confidence: "high",
-    evidenceIds: ["brand-the-athletic:specimen-meta:230"],
+    evidenceIds: ["brand-the-athletic:specimen-meta:214"],
   },
   {
     brandId: "brand-the-athletic",
@@ -514,7 +514,7 @@ export const BRAND_FONT_REGISTRY_SEED: readonly BrandFontSeed[] = [
     currentReferenceSubstitute: "RegularSlab",
     provenance: "design-doc-jsx",
     confidence: "high",
-    evidenceIds: ["brand-the-athletic:specimen-meta:299"],
+    evidenceIds: ["brand-the-athletic:specimen-meta:283"],
   },
   {
     brandId: "brand-wirecutter",

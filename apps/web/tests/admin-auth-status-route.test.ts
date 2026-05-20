@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
+import { captureExpectedConsoleError } from "./helpers/expected-console";
 
 const { requireAdminMock, getAuthDiagnosticsSnapshotMock, evaluateAuthCutoverReadinessMock } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
@@ -99,6 +100,7 @@ describe("/api/admin/auth/status route", () => {
   });
 
   it("returns 401 when request is unauthorized", async () => {
+    const expectedError = captureExpectedConsoleError(/^\[api\] Failed to resolve auth diagnostics .*unauthorized/);
     requireAdminMock.mockRejectedValue(new Error("unauthorized"));
 
     const request = new NextRequest("http://localhost/api/admin/auth/status", { method: "GET" });
@@ -107,5 +109,6 @@ describe("/api/admin/auth/status route", () => {
 
     expect(response.status).toBe(401);
     expect(payload).toEqual({ error: "unauthorized" });
+    expectedError.expectCalled();
   });
 });

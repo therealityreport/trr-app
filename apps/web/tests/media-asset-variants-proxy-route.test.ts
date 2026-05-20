@@ -42,7 +42,7 @@ describe("media asset image action proxy routes", () => {
     getBackendApiUrlMock.mockImplementation(
       (path: string) => `https://backend.example.com/api/v1${path}`,
     );
-    buildInternalAdminHeadersMock.mockImplementation((headers?: HeadersInit) => {
+    buildInternalAdminHeadersMock.mockImplementation((_context: unknown, headers?: HeadersInit) => {
       const out = new Headers(headers);
       out.set("Authorization", "Bearer internal-admin-token");
       return out;

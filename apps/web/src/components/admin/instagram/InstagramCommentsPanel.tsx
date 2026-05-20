@@ -143,6 +143,15 @@ const readFiniteNumber = (value: unknown): number | null => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 
+const readProgressTruthy = (value: unknown): boolean => {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value !== 0;
+  if (typeof value === "string") {
+    return ["1", "true", "yes", "on", "enabled"].includes(value.trim().toLowerCase());
+  }
+  return false;
+};
+
 const readNonNegativeInteger = (value: unknown): number | null => {
   const parsed = readFiniteNumber(value);
   return parsed === null ? null : Math.max(0, Math.trunc(parsed));
@@ -422,8 +431,29 @@ const formatCommentsProgressWarning = (progress?: SocialAccountCommentsRunProgre
     endpointProbe && typeof endpointProbe === "object"
       ? String(endpointProbe.status || endpointProbe.result || "").trim().toLowerCase()
       : "";
-  if (progress.manual_auth_required === true || endpointProbeStatus === "auth_blocked") {
+  const summary = progress.summary && typeof progress.summary === "object" ? progress.summary : {};
+  const hasActiveRows =
+    ACTIVE_RUN_STATUSES.has(normalizeRunStatus(progress.run_status)) &&
+    [
+      summary.items_found_total,
+      summary.comments_processed_total,
+      summary.comments_upserted_total,
+      progress.post_progress?.completed_posts,
+    ].some((value) => (readFiniteNumber(value) ?? 0) > 0);
+  const endpointProbeAdvisoryActive =
+    readProgressTruthy(progress.comments_endpoint_probe_advisory_active) ||
+    (endpointProbeStatus === "auth_blocked" &&
+      endpointProbe &&
+      typeof endpointProbe === "object" &&
+      readProgressTruthy(endpointProbe.advisory_continue) &&
+      hasActiveRows);
+  if (progress.manual_auth_required === true) {
     return "Instagram comments auth is blocked. Repair Instagram auth, then rerun the comments scrape.";
+  }
+  if (endpointProbeStatus === "auth_blocked") {
+    return endpointProbeAdvisoryActive
+      ? "Comments endpoint preflight was blocked; workers are continuing with fallback."
+      : "Instagram comments auth is blocked. Repair Instagram auth, then rerun the comments scrape.";
   }
   if (endpointProbeStatus === "transport_blocked") {
     return "Comments endpoint preflight timed out through the proxy; workers are continuing.";
@@ -636,6 +666,7 @@ export default function InstagramCommentsPanel({
     hasAccess,
     page,
     platform,
+    platformLabel,
     supportsInlineCommentsSync,
     user,
   ]);
@@ -1008,6 +1039,11 @@ export default function InstagramCommentsPanel({
     setSelectedPost(null);
     replacePostParam(null);
   }, [replacePostParam]);
+  const fetchPostCommentsAdmin = useCallback(
+    (input: RequestInfo | URL, init?: RequestInit) =>
+      fetchAdminWithAuth(input, init, { preferredUser: user }),
+    [fetchAdminWithAuth, user],
+  );
   const selectCommentsPostFilter = useCallback((filter: CommentsPostFilter) => {
     setCommentsPostFilter(filter);
     setPage(1);
@@ -1351,7 +1387,7 @@ export default function InstagramCommentsPanel({
         platform={platform}
         handle={handle}
         post={selectedPost}
-        fetchAdmin={(input, init) => fetchAdminWithAuth(input, init, { preferredUser: user })}
+        fetchAdmin={fetchPostCommentsAdmin}
         refreshKey={modalRefreshKey}
       />
     </>

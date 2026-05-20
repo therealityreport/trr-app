@@ -202,6 +202,17 @@ type SummaryLoadResult = {
   uninitialized: boolean;
 };
 
+type CatalogFreshnessPayload = SocialAccountCatalogFreshness &
+  ProxyErrorPayload & {
+    degraded?: boolean;
+    partial?: boolean;
+    freshness_degraded?: boolean;
+    recent_runs_degraded?: boolean;
+    recent_runs_unavailable?: boolean;
+    degraded_reason?: string | null;
+    degradation_reason?: string | null;
+  };
+
 type CatalogRunProgressResponse = SocialAccountCatalogRunProgressSnapshot & ProxyErrorPayload;
 
 type SocialAccountProfileSnapshot = {
@@ -1049,7 +1060,19 @@ const hasBackendSaturationText = (value: string): boolean => {
     message.includes("maxclientsinsessionmode") ||
     message.includes("session-pool capacity") ||
     message.includes("session pool capacity") ||
+    message.includes("pool pressure") ||
     message.includes("backend is saturated")
+  );
+};
+
+const isBackendPressureCode = (value: string | null | undefined): boolean => {
+  const normalized = String(value || "").trim().toUpperCase();
+  return (
+    normalized === "BACKEND_TIMEOUT" ||
+    normalized === "BACKEND_REQUEST_TIMEOUT" ||
+    normalized === "DATABASE_SERVICE_UNAVAILABLE" ||
+    normalized === "UPSTREAM_TIMEOUT" ||
+    normalized === "REQUEST_TIMEOUT"
   );
 };
 
@@ -1134,6 +1157,20 @@ const isBackendSaturationError = (error: unknown): error is SocialAccountRequest
   return Boolean((error as SocialAccountRequestError | undefined)?.isBackendSaturated);
 };
 
+const isCatalogFreshnessDegraded = (payload: CatalogFreshnessPayload | null | undefined): boolean => {
+  if (!payload) return false;
+  const reason = payload.degraded_reason ?? payload.degradation_reason ?? payload.reason ?? null;
+  return (
+    Boolean(payload.degraded) ||
+    Boolean(payload.partial) ||
+    Boolean(payload.freshness_degraded) ||
+    Boolean(payload.recent_runs_degraded) ||
+    Boolean(payload.recent_runs_unavailable) ||
+    Boolean(reason && hasBackendSaturationText(reason)) ||
+    isBackendSaturatedPayload(payload)
+  );
+};
+
 const toSharedLiveResourceRequestError = (
   message: string | null,
   details: {
@@ -1160,6 +1197,17 @@ const isTimeoutRequestError = (error: SocialAccountRequestError | null | undefin
     error.code === "UPSTREAM_TIMEOUT" ||
     error.upstreamStatus === 504 ||
     error.message.toLowerCase().includes("timed out")
+  );
+};
+
+const isBackendPressureError = (error: unknown): error is SocialAccountRequestError => {
+  const requestError = error as SocialAccountRequestError | undefined;
+  if (!requestError) return false;
+  return (
+    Boolean(requestError.isBackendSaturated) ||
+    isBackendPressureCode(requestError.code) ||
+    isTimeoutRequestError(requestError) ||
+    hasBackendSaturationText(requestError.message || "")
   );
 };
 
@@ -1493,10 +1541,49 @@ const readCommentsProgressBoolean = (value: unknown): boolean | null => {
   return typeof value === "boolean" ? value : null;
 };
 
+const readCommentsProgressTruthy = (value: unknown): boolean => {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value !== 0;
+  if (typeof value === "string") {
+    return ["1", "true", "yes", "on", "enabled"].includes(value.trim().toLowerCase());
+  }
+  return false;
+};
+
 const readCommentsProgressMetadata = (
   progress?: SocialAccountCommentsRunProgress | null,
 ): Record<string, unknown> => {
   return progress?.job_metadata && typeof progress.job_metadata === "object" ? progress.job_metadata : {};
+};
+
+const commentsProgressHasActiveRows = (progress?: SocialAccountCommentsRunProgress | null): boolean => {
+  if (!progress) return false;
+  const normalizedStatus = String(progress.run_status || "").trim().toLowerCase();
+  if (!ACTIVE_CATALOG_RUN_STATUSES.has(normalizedStatus)) return false;
+  const summary = progress.summary && typeof progress.summary === "object" ? progress.summary : {};
+  return [
+    summary.items_found_total,
+    summary.comments_processed_total,
+    summary.comments_upserted_total,
+    progress.post_progress?.completed_posts,
+  ].some((value) => (readFiniteNumber(value) ?? 0) > 0);
+};
+
+const isCommentsEndpointProbeAdvisoryActive = (progress?: SocialAccountCommentsRunProgress | null): boolean => {
+  if (!progress) return false;
+  if (readCommentsProgressTruthy(progress.comments_endpoint_probe_advisory_active)) return true;
+  const endpointProbe = progress.comments_endpoint_probe;
+  const endpointProbeStatus =
+    endpointProbe && typeof endpointProbe === "object"
+      ? String(endpointProbe.status || endpointProbe.result || "").trim().toLowerCase()
+      : "";
+  return Boolean(
+    endpointProbeStatus === "auth_blocked" &&
+    endpointProbe &&
+    typeof endpointProbe === "object" &&
+    readCommentsProgressTruthy(endpointProbe.advisory_continue) &&
+    commentsProgressHasActiveRows(progress)
+  );
 };
 
 const formatActiveCommentsProgressWarning = (progress?: SocialAccountCommentsRunProgress | null): string | null => {
@@ -1510,8 +1597,13 @@ const formatActiveCommentsProgressWarning = (progress?: SocialAccountCommentsRun
     endpointProbe && typeof endpointProbe === "object"
       ? String(endpointProbe.status || endpointProbe.result || "").trim().toLowerCase()
       : "";
-  if (progress.manual_auth_required === true || endpointProbeStatus === "auth_blocked") {
+  if (progress.manual_auth_required === true) {
     return "Instagram comments auth is blocked. Repair Instagram auth, then rerun the comments scrape.";
+  }
+  if (endpointProbeStatus === "auth_blocked") {
+    return isCommentsEndpointProbeAdvisoryActive(progress)
+      ? "Comments endpoint preflight was blocked; workers are continuing with fallback."
+      : "Instagram comments auth is blocked. Repair Instagram auth, then rerun the comments scrape.";
   }
   if (endpointProbeStatus === "transport_blocked") {
     return "Comments endpoint preflight timed out through the proxy; workers are continuing.";
@@ -2513,6 +2605,57 @@ const buildCommentsAuthCookieHealthProbeKey = (
   return [platform, handle, fingerprint || "no-fingerprint", cookieHealth.source_kind || "", sourcePath].join(":");
 };
 
+const COOKIE_HEALTH_SESSION_CACHE_TTL_MS = 5 * 60 * 1000;
+
+const buildCookieHealthSessionCacheKey = (platform: string, handle: string): string =>
+  `trr-social-cookie-health:${platform.toLowerCase()}:${handle.toLowerCase()}`;
+
+const hasCommentsAuthProbe = (cookieHealth: SocialProfileCookieHealth): boolean =>
+  Boolean(cookieHealth.comments_auth_health || cookieHealth.comments_auth_probe);
+
+const readCookieHealthSessionCache = (input: {
+  platform: string;
+  handle: string;
+  needsCommentsAuth: boolean;
+}): SocialProfileCookieHealth | null => {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.sessionStorage.getItem(buildCookieHealthSessionCacheKey(input.platform, input.handle));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as {
+      cached_at?: unknown;
+      cookie_health?: unknown;
+    };
+    if (typeof parsed.cached_at !== "number") return null;
+    if (Date.now() - parsed.cached_at > COOKIE_HEALTH_SESSION_CACHE_TTL_MS) return null;
+    if (!parsed.cookie_health || typeof parsed.cookie_health !== "object") return null;
+    const cookieHealth = parsed.cookie_health as SocialProfileCookieHealth;
+    if (input.needsCommentsAuth && !hasCommentsAuthProbe(cookieHealth)) return null;
+    return cookieHealth;
+  } catch {
+    return null;
+  }
+};
+
+const writeCookieHealthSessionCache = (
+  platform: string,
+  handle: string,
+  cookieHealth: SocialProfileCookieHealth,
+): void => {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.setItem(
+      buildCookieHealthSessionCacheKey(platform, handle),
+      JSON.stringify({
+        cached_at: Date.now(),
+        cookie_health: cookieHealth,
+      }),
+    );
+  } catch {
+    // A disabled or full sessionStorage should not block the live health check.
+  }
+};
+
 const buildProvisionalCatalogRunProgress = (input: {
   runId: string;
   status?: string | null;
@@ -2628,6 +2771,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   const [catalogFreshness, setCatalogFreshness] = useState<SocialAccountCatalogFreshness | null>(null);
   const [catalogFreshnessLoading, setCatalogFreshnessLoading] = useState(false);
   const [catalogFreshnessError, setCatalogFreshnessError] = useState<SocialAccountRequestError | null>(null);
+  const [catalogFreshnessRequestNonce, setCatalogFreshnessRequestNonce] = useState(0);
   const [catalogGapAnalysis, setCatalogGapAnalysis] = useState<SocialAccountCatalogGapAnalysis | null>(null);
   const [catalogGapAnalysisStatus, setCatalogGapAnalysisStatus] = useState<SocialAccountCatalogGapAnalysisStatus>("idle");
   const [catalogGapAnalysisOperationId, setCatalogGapAnalysisOperationId] = useState<string | null>(null);
@@ -2677,6 +2821,12 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   const [cookieHealthError, setCookieHealthError] = useState<string | null>(null);
   const [cookieRefreshing, setCookieRefreshing] = useState(false);
   const [cookieRefreshMessage, setCookieRefreshMessage] = useState<string | null>(null);
+  const [secondaryReadsGateOpen, setSecondaryReadsGateOpen] = useState(false);
+  const [secondaryReadBudgetSlot, setSecondaryReadBudgetSlot] = useState(0);
+  const [secondaryReadsPressurePause, setSecondaryReadsPressurePause] = useState<{
+    reason: string;
+    code?: string | null;
+  } | null>(null);
   const pendingCatalogActionAfterCookieRepairRef = useRef<PendingCatalogAction | null>(null);
   const liveProfileTotalProbeKeyRef = useRef<string | null>(null);
   const commentsAuthCookieHealthProbeKeyRef = useRef<string | null>(null);
@@ -2762,11 +2912,49 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       setSharedAccountSourcesLoading(false);
     }
   }, [fetchAdminWithAuth, sharedAccountSources.length, sharedAccountSourcesLoading, user]);
-  const shouldDeferSecondaryCatalogReads =
-    !hasSummary || summaryLoading || summarySaturationActive || catalogProgressSaturationActive;
   const hashtagsRequestKey = `hashtags:${platform}:${handle}:${hashtagWindow}`;
   const hashtagTimelineRequestKey = `hashtags-timeline:${platform}:${handle}:${hashtagWindow}`;
   const collaboratorsRequestKey = `collaborators-tags:${platform}:${handle}`;
+  const selectedTabPrimaryReadActive =
+    (selectedTab === "posts" && postsLoading) ||
+    (selectedTab === "catalog" && catalogPostsLoading) ||
+    (selectedTab === "hashtags" && (hashtagsLoading || hashtagTimelineLoading)) ||
+    (selectedTab === "collaborators-tags" && collaboratorsLoading);
+  const selectedTabPrimaryReadPending =
+    hasSummary &&
+    !summaryUninitialized &&
+    (
+      (selectedTab === "posts" && !posts && !postsError) ||
+      (selectedTab === "catalog" && supportsCatalog && !catalogPosts && !catalogPostsError) ||
+      (selectedTab === "hashtags" &&
+        (
+          hashtagsLoadedRequestKey !== hashtagsRequestKey ||
+          (platform === "instagram" && !hashtagTimeline && !hashtagTimelineError)
+        )) ||
+      (selectedTab === "collaborators-tags" && !collaboratorsTags && !collaboratorsError)
+    );
+  const shouldPauseSecondaryReads =
+    !secondaryReadsGateOpen ||
+    secondaryReadBudgetSlot <= 0 ||
+    Boolean(secondaryReadsPressurePause) ||
+    summarySaturationActive ||
+    catalogProgressSaturationActive;
+  const shouldDeferSecondaryCatalogReads =
+    !hasSummary || summaryLoading || selectedTabPrimaryReadActive || selectedTabPrimaryReadPending || shouldPauseSecondaryReads;
+  const shouldDeferManualCatalogDiagnostics =
+    !hasSummary ||
+    summaryLoading ||
+    summarySaturationActive ||
+    catalogProgressSaturationActive;
+  const pauseSecondaryReadsForPressure = useCallback((error: unknown, fallbackReason: string) => {
+    const requestError = toSocialAccountRequestError(error, fallbackReason);
+    if (!isBackendPressureError(requestError)) return false;
+    setSecondaryReadsPressurePause({
+      reason: requestError.message || fallbackReason,
+      code: requestError.code ?? null,
+    });
+    return true;
+  }, []);
   const visibleCatalogRecentRuns = useMemo(() => {
     const runs = summary?.catalog_recent_runs ?? [];
     if (pendingDismissedCatalogRunIds.size === 0) {
@@ -2850,6 +3038,45 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   }, []);
 
   useEffect(() => {
+    setSecondaryReadsGateOpen(false);
+    setSecondaryReadBudgetSlot(0);
+    setSecondaryReadsPressurePause(null);
+  }, [handle, platform, selectedTab]);
+
+  useEffect(() => {
+    if (secondaryReadsGateOpen) return;
+    if (checking || !user || !hasAccess || summaryLoading) return;
+    if (!hasSummary && !summaryError && !summaryUninitialized) return;
+    if (selectedTabPrimaryReadActive || selectedTabPrimaryReadPending) return;
+    const timeoutId = window.setTimeout(() => {
+      setSecondaryReadsGateOpen(true);
+      setSecondaryReadBudgetSlot(1);
+    }, 0);
+    return () => window.clearTimeout(timeoutId);
+  }, [
+    checking,
+    hasAccess,
+    hasSummary,
+    secondaryReadsGateOpen,
+    selectedTabPrimaryReadActive,
+    selectedTabPrimaryReadPending,
+    summaryError,
+    summaryLoading,
+    summaryUninitialized,
+    user,
+  ]);
+
+  useEffect(() => {
+    if (!secondaryReadsGateOpen || secondaryReadsPressurePause) return;
+    const cookieTimer = window.setTimeout(() => setSecondaryReadBudgetSlot((slot) => Math.max(slot, 2)), 25);
+    const remainingTimer = window.setTimeout(() => setSecondaryReadBudgetSlot((slot) => Math.max(slot, 3)), 50);
+    return () => {
+      window.clearTimeout(cookieTimer);
+      window.clearTimeout(remainingTimer);
+    };
+  }, [secondaryReadsGateOpen, secondaryReadsPressurePause]);
+
+  useEffect(() => {
     setPage(1);
     setCatalogPage(1);
     setSummary(null);
@@ -2893,6 +3120,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     setCatalogFreshness(null);
     setCatalogFreshnessLoading(false);
     setCatalogFreshnessError(null);
+    setCatalogFreshnessRequestNonce(0);
     setCatalogGapAnalysis(null);
     setCatalogGapAnalysisStatus("idle");
     setCatalogGapAnalysisOperationId(null);
@@ -2905,6 +3133,8 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     setCookieHealthError(null);
     setCookieRefreshing(false);
     setCookieRefreshMessage(null);
+    setSecondaryReadsGateOpen(false);
+    setSecondaryReadsPressurePause(null);
     commentsAuthCookieHealthProbeKeyRef.current = null;
     setCollaboratorsTags(null);
     setCollaboratorsLoading(false);
@@ -3477,7 +3707,8 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
             profile_url: data.profile_url || current.profile_url,
           };
         });
-      } catch {
+      } catch (error) {
+        pauseSecondaryReadsForPressure(error, "Failed to load social account live profile total");
         if (liveProfileTotalProbeKeyRef.current === pendingProbeKey) {
           liveProfileTotalProbeKeyRef.current = null;
         }
@@ -3498,6 +3729,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     handle,
     hasAccess,
     platform,
+    pauseSecondaryReadsForPressure,
     summary,
     summaryLoading,
     summaryUninitialized,
@@ -3505,7 +3737,15 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   ]);
 
   useEffect(() => {
-    if (checking || !user || !hasAccess || !supportsCatalog || summaryUninitialized || shouldDeferSecondaryCatalogReads) {
+    if (
+      checking ||
+      !user ||
+      !hasAccess ||
+      !supportsCatalog ||
+      summaryUninitialized ||
+      shouldDeferSecondaryCatalogReads ||
+      secondaryReadBudgetSlot < 3
+    ) {
       return;
     }
     const liveCatalogTotal = Number(summary?.live_catalog_total_posts ?? summary?.catalog_total_posts ?? 0);
@@ -3533,7 +3773,8 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
           total: Number(data.pagination?.total ?? 0),
           latestPostedAt: data.items?.[0]?.posted_at ?? null,
         });
-      } catch {
+      } catch (error) {
+        pauseSecondaryReadsForPressure(error, "Failed to load catalog preview");
         if (!cancelled) {
           setCatalogCardPreview(null);
         }
@@ -3549,12 +3790,14 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     fetchAdminWithAuth,
     handle,
     hasAccess,
+    pauseSecondaryReadsForPressure,
     platform,
     visibleCatalogRecentRuns,
     summary?.catalog_total_posts,
     summary?.live_catalog_total_posts,
     summaryUninitialized,
     shouldDeferSecondaryCatalogReads,
+    secondaryReadBudgetSlot,
     supportsCatalog,
     user,
   ]);
@@ -3644,7 +3887,14 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     const shouldLoadHashtags =
       selectedTab === "hashtags" ||
       (selectedTab === "stats" && !useSummaryTopHashtagsPreview);
-    if (checking || !user || !hasAccess || !shouldLoadHashtags || summaryUninitialized || shouldDeferSecondaryCatalogReads) {
+    if (
+      checking ||
+      !user ||
+      !hasAccess ||
+      !shouldLoadHashtags ||
+      summaryUninitialized ||
+      (selectedTab !== "hashtags" && shouldDeferSecondaryCatalogReads)
+    ) {
       return;
     }
     let cancelled = false;
@@ -3658,6 +3908,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       } catch (error) {
         if (cancelled) return;
         const requestError = toSocialAccountRequestError(error, "Failed to load social account profile hashtags");
+        pauseSecondaryReadsForPressure(requestError, "Failed to load social account profile hashtags");
         const cached = hashtagResponseCacheRef.current.get(hashtagsRequestKey);
         if (cached) {
           setHashtags(cloneHashtagItems(cached.items));
@@ -3690,6 +3941,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     hasAccess,
     hashtagsRequestKey,
     platform,
+    pauseSecondaryReadsForPressure,
     refreshHashtags,
     selectedTab,
     useSummaryTopHashtagsPreview,
@@ -3735,6 +3987,8 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       !hasAccess ||
       !supportsCatalog ||
       summaryUninitialized ||
+      (selectedTab !== "hashtags" && shouldDeferSecondaryCatalogReads) ||
+      (selectedTab !== "hashtags" && secondaryReadBudgetSlot < 3) ||
       (selectedTab !== "hashtags" && selectedTab !== "catalog" && !pendingReviewOpen)
     ) {
       return;
@@ -3758,6 +4012,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
         setReviewQueue(data.items ?? []);
       } catch (error) {
         if (cancelled) return;
+        pauseSecondaryReadsForPressure(error, "Failed to load social account catalog review queue");
         setReviewQueueError(error instanceof Error ? error.message : "Failed to load social account catalog review queue");
       } finally {
         if (!cancelled) setReviewQueueLoading(false);
@@ -3774,8 +4029,11 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     handle,
     hasAccess,
     pendingReviewOpen,
+    pauseSecondaryReadsForPressure,
     platform,
     selectedTab,
+    secondaryReadBudgetSlot,
+    shouldDeferSecondaryCatalogReads,
     summaryUninitialized,
     supportsCatalog,
     user,
@@ -3883,7 +4141,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       supportsCatalog &&
       platform === "instagram" &&
       !summaryUninitialized &&
-      !shouldDeferSecondaryCatalogReads &&
+      !shouldDeferManualCatalogDiagnostics &&
       catalogCountsMismatch &&
       !activeCatalogRun &&
       latestCatalogRunStatus === "completed" &&
@@ -3895,7 +4153,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     catalogCountsMismatch,
     latestCatalogRunStatus,
     platform,
-    shouldDeferSecondaryCatalogReads,
+    shouldDeferManualCatalogDiagnostics,
     summaryUninitialized,
     supportsCatalog,
   ]);
@@ -3905,6 +4163,13 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     setCatalogGapAnalysisStale(Boolean(catalogGapAnalysis));
     setCatalogGapAnalysisRequestNonce((current) => current + 1);
   }, [catalogGapAnalysis]);
+
+  const requestCatalogFreshness = useCallback(() => {
+    setSecondaryReadsPressurePause(null);
+    setCatalogFreshnessError(null);
+    catalogFreshnessProbeKeyRef.current = null;
+    setCatalogFreshnessRequestNonce((current) => current + 1);
+  }, []);
 
   const summaryTopHashtagsPreview = useMemo(
     () => cloneHashtagItems(summary?.top_hashtags ?? []),
@@ -3942,18 +4207,21 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       selectedTab !== "catalog" ||
       !supportsCatalog ||
       platform !== "instagram" ||
-      summaryUninitialized ||
-      shouldDeferSecondaryCatalogReads
+      summaryUninitialized
     ) {
       setCatalogFreshness(null);
       setCatalogFreshnessError(null);
       setCatalogFreshnessLoading(false);
       return;
     }
+    if (shouldDeferSecondaryCatalogReads) {
+      setCatalogFreshnessLoading(false);
+      return;
+    }
 
     const latestStatus = normalizeCatalogRunStatus(latestCatalogRun?.status);
     const activeStatus = normalizeCatalogRunStatus(activeCatalogRun?.status);
-    const probeKey = `${platform}:${handle}:${latestCatalogRun?.run_id ?? "none"}:${activeCatalogRun?.run_id ?? "none"}`;
+    const probeKey = `${platform}:${handle}:${latestCatalogRun?.run_id ?? "none"}:${activeCatalogRun?.run_id ?? "none"}:${catalogFreshnessRequestNonce}`;
 
     if (activeCatalogRun || latestStatus !== "completed" || activeStatus) {
       setCatalogFreshness(null);
@@ -3967,6 +4235,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     }
 
     let cancelled = false;
+    const controller = new AbortController();
     catalogFreshnessProbeKeyRef.current = probeKey;
 
     const loadCatalogFreshness = async () => {
@@ -3977,19 +4246,28 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
           `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/catalog/freshness`,
           {
             method: "POST",
+            signal: controller.signal,
           },
           { preferredUser: user },
         );
-        const data = (await response.json().catch(() => ({}))) as (SocialAccountCatalogFreshness & ProxyErrorPayload);
+        const data = (await response.json().catch(() => ({}))) as CatalogFreshnessPayload;
         if (!response.ok) {
           throw buildSocialAccountRequestError(data, "Failed to check catalog freshness");
         }
         if (cancelled) return;
         setCatalogFreshness(data);
+        if (isCatalogFreshnessDegraded(data)) {
+          setSecondaryReadsPressurePause({
+            reason: data.degraded_reason ?? data.degradation_reason ?? data.reason ?? "Catalog freshness returned partial data.",
+            code: data.code ?? null,
+          });
+        }
       } catch (error) {
         if (cancelled) return;
-        setCatalogFreshness(null);
-        setCatalogFreshnessError(toSocialAccountRequestError(error, "Failed to check catalog freshness"));
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        const requestError = toSocialAccountRequestError(error, "Failed to check catalog freshness");
+        pauseSecondaryReadsForPressure(requestError, "Failed to check catalog freshness");
+        setCatalogFreshnessError(requestError);
       } finally {
         if (!cancelled) {
           setCatalogFreshnessLoading(false);
@@ -4000,15 +4278,18 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     void loadCatalogFreshness();
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, [
     activeCatalogRun,
+    catalogFreshnessRequestNonce,
     checking,
     fetchAdminWithAuth,
     handle,
     hasAccess,
     latestCatalogRun?.run_id,
     latestCatalogRun?.status,
+    pauseSecondaryReadsForPressure,
     platform,
     selectedTab,
     shouldDeferSecondaryCatalogReads,
@@ -4027,10 +4308,10 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       platform !== "instagram" ||
       summaryUninitialized ||
       !catalogCountsMismatch ||
-      shouldDeferSecondaryCatalogReads ||
+      shouldDeferManualCatalogDiagnostics ||
       catalogGapAnalysisRequestNonce <= 0
     ) {
-      if (!catalogCountsMismatch || shouldDeferSecondaryCatalogReads) {
+      if (!catalogCountsMismatch || shouldDeferManualCatalogDiagnostics) {
         setCatalogGapAnalysis(null);
         setCatalogGapAnalysisStatus("idle");
         setCatalogGapAnalysisOperationId(null);
@@ -4096,7 +4377,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     latestCatalogRun?.status,
     platform,
     selectedTab,
-    shouldDeferSecondaryCatalogReads,
+    shouldDeferManualCatalogDiagnostics,
     summaryUninitialized,
     supportsCatalog,
     user,
@@ -4112,7 +4393,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       platform !== "instagram" ||
       summaryUninitialized ||
       !catalogCountsMismatch ||
-      shouldDeferSecondaryCatalogReads ||
+      shouldDeferManualCatalogDiagnostics ||
       !catalogGapAnalysisOperationId ||
       (catalogGapAnalysisStatus !== "queued" && catalogGapAnalysisStatus !== "running")
     ) {
@@ -4198,7 +4479,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     hasAccess,
     platform,
     selectedTab,
-    shouldDeferSecondaryCatalogReads,
+    shouldDeferManualCatalogDiagnostics,
     summaryUninitialized,
     supportsCatalog,
     user,
@@ -4656,7 +4937,9 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     const activeCommentsStatus = String(activeCommentsRunProgressData?.run_status || "").trim().toLowerCase();
     return (
       ["queued", "running", "retrying", "pending"].includes(activeCommentsStatus) &&
-      activeCommentsRunProgressData?.manual_auth_required === false
+      activeCommentsRunProgressData?.manual_auth_required !== true &&
+      (activeCommentsRunProgressData?.manual_auth_required === false ||
+        isCommentsEndpointProbeAdvisoryActive(activeCommentsRunProgressData))
     );
   }, [activeCommentsRunProgressData, platform]);
   const instagramCommentsAuthOwnsCurrentSurface =
@@ -5001,6 +5284,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       (catalogFreshnessLoading ||
         catalogFreshness !== null ||
         catalogFreshnessError !== null ||
+        secondaryReadsPressurePause !== null ||
         catalogCountsMismatch ||
         catalogGapAnalysisLoading ||
         catalogGapAnalysis !== null ||
@@ -5015,6 +5299,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     catalogGapAnalysisError,
     catalogGapAnalysisLoading,
     platform,
+    secondaryReadsPressurePause,
     supportsCatalog,
   ]);
 
@@ -5029,8 +5314,22 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     }
     if (catalogFreshnessError) {
       return {
-        tone: "text-red-700",
-        text: formatCatalogDiagnosticErrorMessage("Freshness check", catalogFreshnessError),
+        tone: isBackendPressureError(catalogFreshnessError) ? "text-amber-800" : "text-red-700",
+        text: catalogFreshness
+          ? `Freshness check paused automatic retries. Showing the last usable catalog data.`
+          : formatCatalogDiagnosticErrorMessage("Freshness check", catalogFreshnessError),
+      };
+    }
+    if (isCatalogFreshnessDegraded(catalogFreshness as CatalogFreshnessPayload | null)) {
+      return {
+        tone: "text-amber-800",
+        text: "Freshness check returned partial data. Automatic retries are paused; saved catalog data remains usable.",
+      };
+    }
+    if (secondaryReadsPressurePause) {
+      return {
+        tone: "text-amber-800",
+        text: "Secondary profile reads are paused while the backend recovers.",
       };
     }
     if (catalogFreshness && catalogFreshness.eligible) {
@@ -5054,7 +5353,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       };
     }
     return null;
-  }, [catalogFreshness, catalogFreshnessError, catalogFreshnessLoading, catalogHasCountDrift]);
+  }, [catalogFreshness, catalogFreshnessError, catalogFreshnessLoading, catalogHasCountDrift, secondaryReadsPressurePause]);
 
   const catalogGapAnalysisStatusCopy = useMemo(() => {
     if (!catalogCountsMismatch) {
@@ -5767,17 +6066,39 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
 
   // --- Cookie preflight: fetch health on load for cookie-dependent platforms ---
   const fetchCookieHealth = useCallback(
-    async (force = false): Promise<SocialProfileCookieHealth | null> => {
+    async (
+      force = false,
+      options: { includePostsAuth?: boolean; includeCommentsAuth?: boolean } = {},
+    ): Promise<SocialProfileCookieHealth | null> => {
       if (!platformRequiresCookies || !user) return null;
       const commentsAuthRequested = platform === "instagram" && selectedTab === "comments";
+      if (!force) {
+        const cachedCookieHealth = readCookieHealthSessionCache({
+          platform,
+          handle,
+          needsCommentsAuth: commentsAuthRequested,
+        });
+        if (cachedCookieHealth) {
+          setCookieHealth(cachedCookieHealth);
+          setCookieHealthError(null);
+          if (commentsAuthRequested) {
+            commentsAuthCookieHealthProbeKeyRef.current = buildCommentsAuthCookieHealthProbeKey(
+              platform,
+              handle,
+              cachedCookieHealth,
+            );
+          }
+          return cachedCookieHealth;
+        }
+      }
       setCookieHealthLoading(true);
       setCookieHealthError(null);
       try {
         const params = new URLSearchParams();
         if (force) params.set("force", "true");
         if (platform === "instagram") {
-          params.set("posts_auth", "true");
-          if (commentsAuthRequested) params.set("comments_auth", "true");
+          if (options.includePostsAuth ?? force) params.set("posts_auth", "true");
+          if (options.includeCommentsAuth ?? commentsAuthRequested) params.set("comments_auth", "true");
         }
         const qs = params.size > 0 ? `?${params.toString()}` : "";
         const response = await fetchAdminWithAuth(
@@ -5785,21 +6106,23 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
           { method: "GET" },
           { preferredUser: user },
         );
-        if (!response.ok) throw new Error("Failed to check cookie health");
-        const data = (await response.json()) as SocialProfileCookieHealth;
+        const data = (await response.json().catch(() => ({}))) as SocialProfileCookieHealth & ProxyErrorPayload;
+        if (!response.ok) throw buildSocialAccountRequestError(data, "Failed to check cookie health");
         setCookieHealth(data);
+        writeCookieHealthSessionCache(platform, handle, data);
         if (commentsAuthRequested) {
           commentsAuthCookieHealthProbeKeyRef.current = buildCommentsAuthCookieHealthProbeKey(platform, handle, data);
         }
         return data;
       } catch (error) {
+        pauseSecondaryReadsForPressure(error, "Failed to check cookie health");
         setCookieHealthError(error instanceof Error ? error.message : "Cookie health check failed");
         return null;
       } finally {
         setCookieHealthLoading(false);
       }
     },
-    [platformRequiresCookies, user, platform, handle, selectedTab, fetchAdminWithAuth],
+    [platformRequiresCookies, user, platform, handle, selectedTab, fetchAdminWithAuth, pauseSecondaryReadsForPressure],
   );
 
   useEffect(() => {
@@ -5820,6 +6143,8 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       !user ||
       !hasAccess ||
       !platformRequiresCookies ||
+      shouldDeferSecondaryCatalogReads ||
+      secondaryReadBudgetSlot < 2 ||
       (commentsAuthProbeMissing && commentsAuthProbeAlreadyRequested) ||
       (cookieHealth && !commentsAuthProbeMissing) ||
       cookieHealthLoading
@@ -5827,7 +6152,10 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       return;
     }
     if (platformRequiresCookies && user && (!cookieHealth || commentsAuthProbeMissing) && !cookieHealthLoading) {
-      void fetchCookieHealth(commentsAuthProbeMissing);
+      void fetchCookieHealth(commentsAuthProbeMissing, {
+        includeCommentsAuth: platform === "instagram" && selectedTab === "comments",
+        includePostsAuth: false,
+      });
     }
   }, [
     checking,
@@ -5839,6 +6167,8 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     platform,
     platformRequiresCookies,
     selectedTab,
+    secondaryReadBudgetSlot,
+    shouldDeferSecondaryCatalogReads,
     user,
   ]);
 
@@ -5962,6 +6292,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       );
       setCatalogFreshness(null);
       setCatalogFreshnessError(null);
+      setSecondaryReadsPressurePause(null);
       setCatalogGapAnalysis(null);
       setCatalogGapAnalysisError(null);
       try {
@@ -6886,6 +7217,11 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                         <span className="inline-block h-2.5 w-2.5 rounded-full bg-emerald-500" />
                         <span className="text-xs text-zinc-600">Comments auth active</span>
                       </>
+                    ) : cookieHealth?.degraded ? (
+                      <>
+                        <span className="inline-block h-2.5 w-2.5 rounded-full bg-amber-400" />
+                        <span className="text-xs text-zinc-600">Cookie check unavailable</span>
+                      </>
                     ) : cookieHealth?.healthy === true ? (
                       <>
                         <span className="inline-block h-2.5 w-2.5 rounded-full bg-emerald-500" />
@@ -7191,6 +7527,18 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                             <p className={`text-sm ${catalogGapAnalysisStatusCopy.tone}`}>{catalogGapAnalysisStatusCopy.text}</p>
                           ) : null}
                         </div>
+                        {(catalogFreshnessError ||
+                          isCatalogFreshnessDegraded(catalogFreshness as CatalogFreshnessPayload | null) ||
+                          secondaryReadsPressurePause) ? (
+                          <button
+                            type="button"
+                            onClick={() => requestCatalogFreshness()}
+                            disabled={catalogFreshnessLoading}
+                            className="mt-3 mr-2 inline-flex rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-semibold text-zinc-800 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {catalogFreshnessLoading ? "Checking Freshness…" : "Retry Freshness"}
+                          </button>
+                        ) : null}
                         {canRequestCatalogGapAnalysis && (!catalogGapAnalysis || catalogGapAnalysisError) ? (
                           <button
                             type="button"

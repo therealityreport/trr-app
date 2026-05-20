@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
 import {
   ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
+  AdminReadProxyError,
   buildAdminProxyErrorResponse,
   fetchAdminBackendJson,
 } from "@/lib/server/trr-api/admin-read-proxy";
@@ -21,6 +22,20 @@ const VALID_PLATFORMS = [
   "youtube",
   "other",
 ] as const;
+
+const isDegradableSocialPostsReadError = (error: unknown): boolean => {
+  if (error instanceof AdminReadProxyError) {
+    return error.status === 504 && (error.code === "BACKEND_TIMEOUT" || error.code === "BACKEND_REQUEST_TIMEOUT");
+  }
+  return error instanceof Error && /timed out|timeout|aborted/i.test(error.message);
+};
+
+const buildDegradedSocialPostsPayload = () => ({
+  posts: [],
+  count: 0,
+  degraded: true,
+  degraded_reason: "backend_timeout",
+});
 
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
@@ -59,6 +74,11 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         { status: upstream.status },
       );
     }
+    if (upstream.status === 504) {
+      return NextResponse.json(buildDegradedSocialPostsPayload(), {
+        headers: { "x-trr-social-posts-source": "backend-timeout-degraded" },
+      });
+    }
     if (upstream.status !== 200) {
       throw new Error(
         typeof upstream.data.error === "string"
@@ -71,6 +91,11 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     return NextResponse.json(upstream.data);
   } catch (error) {
+    if (isDegradableSocialPostsReadError(error)) {
+      return NextResponse.json(buildDegradedSocialPostsPayload(), {
+        headers: { "x-trr-social-posts-source": "backend-timeout-degraded" },
+      });
+    }
     console.error("[api] Failed to list social posts for TRR show", error);
     return buildAdminProxyErrorResponse(error);
   }

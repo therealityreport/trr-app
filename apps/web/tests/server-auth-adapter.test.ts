@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
+import { captureExpectedConsoleError } from "./helpers/expected-console";
 
 const {
   verifyIdTokenMock,
@@ -86,6 +87,7 @@ describe("server auth adapter", () => {
   });
 
   it("does not authenticate with supabase when firebase verification fails", async () => {
+    const expectedError = captureExpectedConsoleError(/^\[auth\] Failed to verify token .*firebase down/);
     verifyIdTokenMock.mockRejectedValue(new Error("firebase down"));
 
     const auth = await import("@/lib/server/auth");
@@ -93,9 +95,11 @@ describe("server auth adapter", () => {
 
     expect(user).toBeNull();
     expect(createClientMock).not.toHaveBeenCalled();
+    expectedError.expectCalled();
   });
 
   it("aborts identity toolkit fallback after ADMIN_AUTH_EXTERNAL_TIMEOUT_MS", async () => {
+    const expectedError = captureExpectedConsoleError(/^\[auth\] Failed to verify token .*firebase down/);
     vi.useFakeTimers();
     process.env.NEXT_PUBLIC_FIREBASE_API_KEY = "firebase-web-api-key";
     process.env.ADMIN_AUTH_EXTERNAL_TIMEOUT_MS = "5";
@@ -124,6 +128,7 @@ describe("server auth adapter", () => {
       await vi.advanceTimersByTimeAsync(5);
       await expect(promise).resolves.toBeNull();
       expect(abortSpy).toHaveBeenCalledTimes(1);
+      expectedError.expectCalled();
     } finally {
       vi.useRealTimers();
     }
@@ -261,10 +266,12 @@ describe("server auth adapter", () => {
 
   it("tracks shadow mismatch diagnostics counters without fallback auth", async () => {
     process.env.TRR_AUTH_SHADOW_MODE = "true";
+    const expectedError = captureExpectedConsoleError(/^\[auth\] Failed to verify token .*firebase down/);
     verifyIdTokenMock.mockRejectedValueOnce(new Error("firebase down"));
 
     const auth = await import("@/lib/server/auth");
     await expect(auth.getUserFromRequest(requestWithBearer("token-fallback"))).resolves.toBeNull();
+    expectedError.expectCalled();
 
     verifyIdTokenMock.mockResolvedValueOnce({
       uid: "firebase-user",

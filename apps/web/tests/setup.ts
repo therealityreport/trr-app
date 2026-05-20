@@ -101,3 +101,46 @@ if (!window.matchMedia) {
 }
 
 window.scrollTo = vi.fn() as typeof window.scrollTo;
+
+if (typeof HTMLCanvasElement !== 'undefined') {
+  Object.defineProperty(HTMLCanvasElement.prototype, 'getContext', {
+    configurable: true,
+    value: vi.fn(() => ({
+      canvas: null,
+      clearRect: vi.fn(),
+      drawImage: vi.fn(),
+      fillRect: vi.fn(),
+      getImageData: vi.fn(() => ({ data: new Uint8ClampedArray(4) })),
+      measureText: vi.fn((text: string) => ({ width: text.length * 8 })),
+      putImageData: vi.fn(),
+      restore: vi.fn(),
+      save: vi.fn(),
+      scale: vi.fn(),
+      setTransform: vi.fn(),
+      translate: vi.fn(),
+    })),
+  });
+}
+
+document.addEventListener(
+  'click',
+  (event) => {
+    const target = event.target instanceof Element ? event.target.closest('a[href]') : null;
+    if (target instanceof HTMLAnchorElement) {
+      event.preventDefault();
+    }
+  },
+  true,
+);
+
+if (typeof HTMLAnchorElement !== 'undefined') {
+  Object.defineProperty(HTMLAnchorElement.prototype, 'click', {
+    configurable: true,
+    value: vi.fn(function click(this: HTMLAnchorElement) {
+      if (this.hasAttribute('download') || this.href.startsWith('data:')) {
+        return;
+      }
+      this.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    }),
+  });
+}

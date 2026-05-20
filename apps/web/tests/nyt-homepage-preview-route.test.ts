@@ -2,6 +2,16 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 
 import { NextRequest } from "next/server";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { captureExpectedConsoleError } from "./helpers/expected-console";
+
+const { requireAdminMock } = vi.hoisted(() => ({
+  requireAdminMock: vi.fn(),
+}));
+
+vi.mock("@/lib/server/auth", () => ({
+  requireAdmin: requireAdminMock,
+}));
 
 import { GET } from "@/app/api/admin/design-docs/nyt-homepage-preview/route";
 import { NYT_HOMEPAGE_SOURCE_BUNDLE } from "@/lib/admin/nyt-homepage-source-bundle";
@@ -18,6 +28,23 @@ const HAS_BUNDLE = existsSync(
 );
 
 describe("NYT homepage preview route", () => {
+  beforeEach(() => {
+    requireAdminMock.mockReset();
+    requireAdminMock.mockResolvedValue({ uid: "admin-user" });
+  });
+
+  it("requires admin access", async () => {
+    const expectedError = captureExpectedConsoleError(/^\[api\] Failed to render NYT homepage preview .*unauthorized/);
+    requireAdminMock.mockRejectedValue(new Error("unauthorized"));
+
+    const response = await GET(
+      new NextRequest("http://localhost/api/admin/design-docs/nyt-homepage-preview?view=fragment&id=games-package"),
+    );
+
+    expect(response.status).toBe(401);
+    expectedError.expectCalled();
+  });
+
   it.skipIf(!HAS_BUNDLE)("serves distinct Watch Today’s Videos and More News fragments", async () => {
     const watchRequest = new NextRequest(
       "http://localhost/api/admin/design-docs/nyt-homepage-preview?view=fragment&id=watch-todays-videos",

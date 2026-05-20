@@ -15,6 +15,7 @@ import {
   TRR_SHOW_SEASONS_CACHE_NAMESPACE,
   TRR_SHOW_SEASONS_CACHE_TTL_MS,
 } from "@/lib/server/trr-api/trr-show-read-route-cache";
+import { getSeasonsByShowId } from "@/lib/server/trr-api/trr-shows-repository";
 
 export const dynamic = "force-dynamic";
 
@@ -26,6 +27,26 @@ const parseBoolean = (value: string | null): boolean => {
   if (!value) return false;
   const normalized = value.trim().toLowerCase();
   return normalized === "1" || normalized === "true";
+};
+
+const buildLocalSeasonsPayload = async (
+  showId: string,
+  options: { limit: number; offset: number; includeEpisodeSignal: boolean },
+) => {
+  const seasons = await getSeasonsByShowId(showId, {
+    limit: options.limit,
+    offset: options.offset,
+    includeEpisodeSignal: options.includeEpisodeSignal,
+  });
+  return {
+    seasons,
+    pagination: {
+      limit: options.limit,
+      offset: options.offset,
+      count: seasons.length,
+    },
+    source: "local-fallback",
+  };
 };
 
 /**
@@ -77,28 +98,41 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         if (includeEpisodeSignal) {
           upstreamParams.set("include_episode_signal", "true");
         }
-        const upstream = await fetchAdminBackendJson(
-          `/admin/trr-api/shows/${showId}/seasons?${upstreamParams.toString()}`,
-          {
-            timeoutMs: ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
-            routeName: "show-seasons",
-          },
-        );
-        if (upstream.status !== 200) {
-          throw new Error(
-            typeof upstream.data.error === "string"
-              ? upstream.data.error
-              : typeof upstream.data.detail === "string"
-                ? upstream.data.detail
-                : "Failed to get TRR seasons",
+        try {
+          const upstream = await fetchAdminBackendJson(
+            `/admin/trr-api/shows/${showId}/seasons?${upstreamParams.toString()}`,
+            {
+              timeoutMs: ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
+              routeName: "show-seasons",
+            },
           );
+          if (upstream.status !== 200) {
+            throw new Error(
+              typeof upstream.data.error === "string"
+                ? upstream.data.error
+                : typeof upstream.data.detail === "string"
+                  ? upstream.data.detail
+                  : "Failed to get TRR seasons",
+            );
+          }
+          setRouteResponseCache(TRR_SHOW_SEASONS_CACHE_NAMESPACE, cacheKey, upstream.data, TRR_SHOW_SEASONS_CACHE_TTL_MS);
+          return upstream.data;
+        } catch (upstreamError) {
+          console.warn("[api] TRR seasons proxy unavailable; using local repository", upstreamError);
+          const fallback = await buildLocalSeasonsPayload(showId, {
+            limit,
+            offset,
+            includeEpisodeSignal,
+          });
+          setRouteResponseCache(TRR_SHOW_SEASONS_CACHE_NAMESPACE, cacheKey, fallback, TRR_SHOW_SEASONS_CACHE_TTL_MS);
+          return fallback;
         }
-        setRouteResponseCache(TRR_SHOW_SEASONS_CACHE_NAMESPACE, cacheKey, upstream.data, TRR_SHOW_SEASONS_CACHE_TTL_MS);
-        return upstream.data;
       },
     );
 
-    return NextResponse.json(payload);
+    return NextResponse.json(payload, {
+      headers: payload.source === "local-fallback" ? { "x-trr-show-seasons-source": "local-fallback" } : undefined,
+    });
   } catch (error) {
     console.error("[api] Failed to get TRR seasons", error);
     return buildAdminProxyErrorResponse(error);

@@ -70,8 +70,6 @@ export default function InteractiveLineChart({ data }: Props) {
     yTicks = [],
     xLabels = [],
     annotation,
-    annotationX = 0.5,
-    annotationY = 0.3,
     source = "",
     note,
     unit = "",

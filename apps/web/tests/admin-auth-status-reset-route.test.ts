@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
+import { captureExpectedConsoleError } from "./helpers/expected-console";
 
 const { requireAdminMock, resetAuthDiagnosticsSnapshotMock, evaluateAuthCutoverReadinessMock } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
@@ -72,6 +73,7 @@ describe("/api/admin/auth/status/reset route", () => {
   });
 
   it("returns 403 when request is forbidden", async () => {
+    const expectedError = captureExpectedConsoleError(/^\[api\] Failed to reset auth diagnostics .*forbidden/);
     requireAdminMock.mockRejectedValue(new Error("forbidden"));
 
     const request = new NextRequest("http://localhost/api/admin/auth/status/reset", { method: "POST" });
@@ -80,5 +82,6 @@ describe("/api/admin/auth/status/reset route", () => {
 
     expect(response.status).toBe(403);
     expect(payload).toEqual({ error: "forbidden" });
+    expectedError.expectCalled();
   });
 });

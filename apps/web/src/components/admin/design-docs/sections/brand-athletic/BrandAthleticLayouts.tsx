@@ -38,7 +38,6 @@ function SectionLabel({
 
 const IMG_BG = "#f0f0ee";
 const TEXT_BG = "#e8e5e0";
-const CARD_BORDER = "1px solid #e5e5e5";
 const DOTTED_BORDER = "1px dotted #ccc";
 
 function MonoLabel({ children }: { children: React.ReactNode }) {

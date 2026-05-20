@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
+import { captureExpectedConsoleError } from "./helpers/expected-console";
 
 const { requireAdminMock, getDevDashboardSkillsAgentsDataMock } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
@@ -52,6 +53,9 @@ describe("/api/admin/dev-dashboard/skills-and-agents route", () => {
   });
 
   it("returns 403 when admin access is forbidden", async () => {
+    const expectedError = captureExpectedConsoleError(
+      /^\[api\] Failed to load dev dashboard skills and agents .*forbidden/,
+    );
     requireAdminMock.mockRejectedValue(new Error("forbidden"));
 
     const response = await GET(new NextRequest("http://localhost/api/admin/dev-dashboard/skills-and-agents"));
@@ -59,5 +63,6 @@ describe("/api/admin/dev-dashboard/skills-and-agents route", () => {
 
     expect(response.status).toBe(403);
     expect(payload).toEqual({ error: "forbidden" });
+    expectedError.expectCalled();
   });
 });

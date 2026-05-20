@@ -40,22 +40,6 @@ function SectionLabel({
   );
 }
 
-function SubSectionLabel({ children }: { children: React.ReactNode }) {
-  return (
-    <div
-      style={{
-        fontFamily: "var(--dd-font-sans)",
-        fontSize: 13,
-        fontWeight: 600,
-        color: "var(--dd-brand-text-primary)",
-        marginBottom: 8,
-      }}
-    >
-      {children}
-    </div>
-  );
-}
-
 function SpecimenMeta({ text }: { text: string }) {
   return (
     <div
