@@ -4,6 +4,10 @@ import path from "node:path";
 
 describe("show social load resilience wiring", () => {
   const pagePath = path.resolve(__dirname, "../src/app/admin/trr-shows/[showId]/page.tsx");
+  const showPageMediaPath = path.resolve(
+    __dirname,
+    "../src/app/admin/trr-shows/[showId]/ShowPageMedia.tsx"
+  );
   const socialTabPath = path.resolve(__dirname, "../src/components/admin/show-tabs/ShowSocialTab.tsx");
   const showIdentityControllerPath = path.resolve(
     __dirname,
@@ -72,7 +76,7 @@ describe("show social load resilience wiring", () => {
   });
 
   it("disables external clearbit logo lookups in non-production mode", () => {
-    const contents = fs.readFileSync(pagePath, "utf8");
+    const contents = fs.readFileSync(showPageMediaPath, "utf8");
 
     expect(contents).toMatch(/if \(process\.env\.NODE_ENV !== "production"\) \{/);
     expect(contents).toMatch(/return null;/);
