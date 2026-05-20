@@ -32,7 +32,6 @@ export async function timeoutSafeFetch(
   const { timeoutMs, timeoutName = "default", fetchImpl = fetch, signal, ...fetchInit } = init;
   const boundedTimeoutMs = Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 30_000;
   const controller = new AbortController();
-  let timedOut = false;
   let upstreamAborted = false;
 
   const onUpstreamAbort = () => {
@@ -47,7 +46,6 @@ export async function timeoutSafeFetch(
   }
 
   const timer = setTimeout(() => {
-    timedOut = true;
     controller.abort();
   }, boundedTimeoutMs);
 
@@ -57,7 +55,7 @@ export async function timeoutSafeFetch(
       signal: controller.signal,
     });
   } catch (error) {
-    if (timedOut && isAbortError(error)) {
+    if (!upstreamAborted && isAbortError(error)) {
       throw new TimeoutSafeFetchTimeoutError(`Fetch timed out after ${boundedTimeoutMs}ms`, {
         timeoutMs: boundedTimeoutMs,
         timeoutName,
