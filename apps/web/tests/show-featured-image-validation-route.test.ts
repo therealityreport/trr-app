@@ -33,6 +33,7 @@ vi.mock("@/lib/server/trr-api/admin-read-proxy", () => ({
   fetchAdminBackendJson: vi.fn(),
   invalidateAdminBackendCache: vi.fn(),
   ADMIN_READ_PROXY_SHORT_TIMEOUT_MS: 5_000,
+  ADMIN_READ_PROXY_PRIMARY_TIMEOUT_MS: 12_000,
   buildAdminProxyErrorResponse: vi.fn(),
 }));
 
