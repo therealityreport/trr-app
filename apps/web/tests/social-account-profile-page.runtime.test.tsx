@@ -82,6 +82,14 @@ const jsonResponse = (body: unknown, status = 200): Response =>
     headers: { "Content-Type": "application/json" },
   });
 
+const deferredResponse = () => {
+  let resolve!: (response: Response) => void;
+  const promise = new Promise<Response>((innerResolve) => {
+    resolve = innerResolve;
+  });
+  return { promise, resolve };
+};
+
 const setWindowLocation = (url: string): void => {
   const parsed = new URL(url, window.location.origin);
   window.history.replaceState({}, "", `${parsed.pathname}${parsed.search}${parsed.hash}`);
@@ -248,6 +256,8 @@ describe("SocialAccountProfilePage", () => {
       checking: false,
       hasAccess: true,
     });
+    window.localStorage.clear();
+    window.sessionStorage.clear();
     setWindowLocation("https://admin.therealityreport.com/social");
   });
 
@@ -615,6 +625,156 @@ describe("SocialAccountProfilePage", () => {
     expect(requestUrls.some((url) => url.includes("/gap-analysis"))).toBe(false);
   });
 
+  it("defers secondary catalog reads while the selected catalog tab read is active", async () => {
+    const catalogPosts = deferredResponse();
+    const requestUrls: string[] = [];
+    const summaryWithCompletedRun = {
+      ...baseSummary,
+      catalog_recent_runs: [
+        {
+          run_id: "catalog-run-completed",
+          status: "completed",
+          created_at: "2026-05-18T12:00:00.000Z",
+        },
+      ],
+    };
+
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      requestUrls.push(url);
+      if (url.includes("/snapshot")) {
+        return jsonResponse({
+          summary: summaryWithCompletedRun,
+          catalog_run_progress: null,
+          generated_at: "2026-05-19T12:00:00.000Z",
+        });
+      }
+      if (url.includes("/catalog/posts")) {
+        await catalogPosts.promise.catch(() => undefined);
+        return jsonResponse({ items: [], pagination: { page: 1, page_size: 25, total: 0, total_pages: 1 } });
+      }
+      if (url.includes("/catalog/freshness")) {
+        return jsonResponse({
+          platform: "instagram",
+          account_handle: "bravotv",
+          eligible: true,
+          checked_at: "2026-05-19T12:00:01.000Z",
+          stored_total_posts: 12,
+          live_total_posts_current: 12,
+          delta_posts: 0,
+          needs_recent_sync: false,
+        });
+      }
+      if (url.includes("/cookies/health")) {
+        return jsonResponse(healthyCookieHealth("instagram"));
+      }
+      if (url.includes("/catalog/review-queue")) {
+        return jsonResponse({ items: [] });
+      }
+      if (url.includes("/live-profile-total")) {
+        return jsonResponse({
+          platform: "instagram",
+          account_handle: "bravotv",
+          live_total_posts_current: 12,
+        });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
+
+    await waitFor(() => {
+      expect(requestUrls.some((url) => url.includes("/catalog/posts"))).toBe(true);
+    });
+    expect(requestUrls.some((url) => url.includes("/catalog/freshness"))).toBe(false);
+    expect(requestUrls.some((url) => url.includes("/cookies/health"))).toBe(false);
+    expect(requestUrls.some((url) => url.includes("/catalog/review-queue"))).toBe(false);
+
+    await act(async () => {
+      catalogPosts.resolve(jsonResponse({}));
+    });
+
+    await waitFor(() => {
+      expect(requestUrls.some((url) => url.includes("/catalog/freshness"))).toBe(true);
+    });
+  });
+
+  it("pauses automatic secondary reads after degraded catalog freshness while keeping catalog usable", async () => {
+    const requestUrls: string[] = [];
+    const summaryWithDrift = {
+      ...baseSummary,
+      total_posts: 14,
+      live_total_posts: 14,
+      catalog_total_posts: 12,
+      live_catalog_total_posts: 12,
+      catalog_recent_runs: [
+        {
+          run_id: "catalog-run-completed",
+          status: "completed",
+          created_at: "2026-05-18T12:00:00.000Z",
+        },
+      ],
+    };
+
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      requestUrls.push(url);
+      if (url.includes("/snapshot")) {
+        return jsonResponse({
+          summary: summaryWithDrift,
+          catalog_run_progress: null,
+          generated_at: "2026-05-19T12:00:00.000Z",
+        });
+      }
+      if (url.includes("/catalog/posts")) {
+        return jsonResponse({ items: [], pagination: { page: 1, page_size: 25, total: 12, total_pages: 1 } });
+      }
+      if (url.includes("/catalog/freshness")) {
+        return jsonResponse({
+          platform: "instagram",
+          account_handle: "bravotv",
+          eligible: true,
+          checked_at: "2026-05-19T12:00:01.000Z",
+          stored_total_posts: 12,
+          live_total_posts_current: null,
+          delta_posts: 0,
+          needs_recent_sync: false,
+          degraded: true,
+          degraded_reason: "session_pool_capacity",
+        });
+      }
+      if (url.includes("/cookies/health")) {
+        return jsonResponse(healthyCookieHealth("instagram"));
+      }
+      if (url.includes("/catalog/review-queue")) {
+        return jsonResponse({ items: [] });
+      }
+      if (url.includes("/live-profile-total")) {
+        return jsonResponse({
+          platform: "instagram",
+          account_handle: "bravotv",
+          live_total_posts_current: 14,
+        });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Catalog" })).toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(screen.getByText("Freshness check returned partial data. Automatic retries are paused; saved catalog data remains usable.")).toBeInTheDocument();
+    });
+
+    expect(screen.getByRole("button", { name: "Backfill Posts" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Retry Freshness" })).toBeEnabled();
+    expect(requestUrls.filter((url) => url.includes("/catalog/freshness"))).toHaveLength(1);
+    expect(requestUrls.some((url) => url.includes("/cookies/health"))).toBe(false);
+    expect(requestUrls.some((url) => url.includes("/catalog/review-queue"))).toBe(false);
+  });
+
   it("renders stale dashboard data as degraded but usable", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
@@ -735,7 +895,7 @@ describe("SocialAccountProfilePage", () => {
     expect(requestUrls.some((url) => url.includes("/live-profile-total"))).toBe(true);
   });
 
-  it("checks Instagram Modal posts auth on page load", async () => {
+  it("checks Instagram cookie health on page load without probing posts auth", async () => {
     const requestUrls: string[] = [];
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
@@ -748,24 +908,7 @@ describe("SocialAccountProfilePage", () => {
         });
       }
       if (url.includes("/cookies/health")) {
-        return jsonResponse({
-          ...healthyCookieHealth("instagram"),
-          posts_auth_health: {
-            platform: "instagram",
-            account_handle: "bravotv",
-            ready: true,
-            reason: null,
-            execution_backend: "modal",
-          },
-          posts_auth_probe: {
-            platform: "instagram",
-            account_handle: "bravotv",
-            status: "valid",
-            result: "valid",
-            ready: true,
-            execution_backend: "modal",
-          },
-        });
+        return jsonResponse(healthyCookieHealth("instagram"));
       }
       if (url.includes("/live-profile-total")) {
         return jsonResponse({
@@ -781,9 +924,53 @@ describe("SocialAccountProfilePage", () => {
     render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
 
     await waitFor(() => {
-      expect(screen.getByText("Modal posts auth verified")).toBeInTheDocument();
+      expect(screen.getByText("Local cookies healthy")).toBeInTheDocument();
     });
-    expect(requestUrls.some((url) => url.includes("/cookies/health?posts_auth=true"))).toBe(true);
+    const cookieHealthUrl = requestUrls.find((url) => url.includes("/cookies/health"));
+    expect(cookieHealthUrl).toBeDefined();
+    expect(cookieHealthUrl).not.toContain("posts_auth=true");
+  });
+
+  it("reuses the Instagram cookie health check across route remounts without probing posts auth", async () => {
+    const cookieHealthUrls: string[] = [];
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/snapshot")) {
+        return jsonResponse({
+          summary: baseSummary,
+          catalog_run_progress: null,
+          generated_at: "2026-05-03T16:00:00.000Z",
+        });
+      }
+      if (url.includes("/cookies/health")) {
+        cookieHealthUrls.push(url);
+        return jsonResponse(healthyCookieHealth("instagram"));
+      }
+      if (url.includes("/live-profile-total")) {
+        return jsonResponse({
+          platform: "instagram",
+          account_handle: "bravotv",
+          profile_url: "https://www.instagram.com/bravotv/",
+          live_total_posts_current: 12,
+        });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    const firstRender = render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
+    await waitFor(() => {
+      expect(screen.getByText("Local cookies healthy")).toBeInTheDocument();
+    });
+    firstRender.unmount();
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
+    await waitFor(() => {
+      expect(screen.getByText("Local cookies healthy")).toBeInTheDocument();
+    });
+
+    expect(cookieHealthUrls).toHaveLength(1);
+    expect(cookieHealthUrls[0]).toContain("/cookies/health");
+    expect(cookieHealthUrls[0]).not.toContain("posts_auth=true");
   });
 
   it("allows a new Instagram backfill when a stale blocked-auth run has verified Modal posts auth", async () => {
@@ -2088,7 +2275,7 @@ describe("SocialAccountProfilePage", () => {
       throw new Error(`Unhandled request: ${url}`);
     });
 
-    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="comments" />);
+    const { unmount } = render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="comments" />);
 
     expect(
       await screen.findByText("Stopped by operator. 7 targets remain; run Sync Comments to resume."),
@@ -2096,9 +2283,9 @@ describe("SocialAccountProfilePage", () => {
     await waitFor(() => {
       expect(summaryRequests).toBeGreaterThanOrEqual(2);
     });
-    await new Promise((resolve) => setTimeout(resolve, 50));
     expect(progressRequests).toBe(1);
     expect(screen.getByRole("button", { name: "Syncing Comments..." })).toBeDisabled();
+    unmount();
   });
 
   it("queues a catalog-driven discussion refresh from the comments tab for TikTok", async () => {
@@ -2389,7 +2576,9 @@ describe("SocialAccountProfilePage", () => {
     expect(mediaLink).toHaveAttribute("href", "https://cdn.example.com/comment-media-1.jpg");
     fireEvent.mouseEnter(mediaLink, { clientX: 100, clientY: 100 });
     expect(within(dialog).getByRole("tooltip", { name: "Comment media preview" })).toBeInTheDocument();
-    fireEvent.mouseLeave(mediaLink);
+    fireEvent.mouseOut(within(dialog).getByRole("link", { name: "Open comment media" }), {
+      relatedTarget: document.body,
+    });
     await waitFor(() => {
       expect(within(dialog).queryByRole("tooltip", { name: "Comment media preview" })).not.toBeInTheDocument();
     });
@@ -5152,7 +5341,10 @@ describe("SocialAccountProfilePage", () => {
 
     expect(await screen.findByText("Modal Instagram comments auth active")).toBeInTheDocument();
     expect(screen.queryByText("Checking cookies…")).not.toBeInTheDocument();
-    resolveCookieHealth?.(jsonResponse(healthyCookieHealth("instagram")));
+    await act(async () => {
+      resolveCookieHealth?.(jsonResponse(healthyCookieHealth("instagram")));
+      await Promise.resolve();
+    });
   });
 
   it("does not offer Instagram cookie refresh on the comments surface while Modal comments auth is active", async () => {
@@ -5216,6 +5408,90 @@ describe("SocialAccountProfilePage", () => {
     expect(await screen.findByText("Modal Instagram comments auth active")).toBeInTheDocument();
     expect(await screen.findByText("Comments auth active")).toBeInTheDocument();
     expect(screen.queryByText(/Cookies expired/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Repair Instagram Auth" })).not.toBeInTheDocument();
+  });
+
+  it("treats advisory comments endpoint auth blocks as continuing fallback work", async () => {
+    const runId = "comments-advisory-auth-run";
+    const activeSummary = {
+      ...baseSummary,
+      account_handle: "thetraitorsus",
+      profile_url: "https://www.instagram.com/thetraitorsus/",
+      comments_coverage: {
+        ...baseSummary.comments_coverage,
+        active_run_id: runId,
+        effective_status: "running",
+        last_comments_run_status: "running",
+      },
+    };
+
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/snapshot")) {
+        return jsonResponse({
+          summary: activeSummary,
+          catalog_run_progress: null,
+          generated_at: "2026-05-18T18:45:00.000Z",
+        });
+      }
+      if (url.includes("/summary")) {
+        return jsonResponse(activeSummary);
+      }
+      if (url.includes("/cookies/health")) {
+        return jsonResponse({
+          ...healthyCookieHealth("instagram"),
+          healthy: false,
+          reason: "request_error",
+        });
+      }
+      if (url.includes("/posts?page=1&page_size=25&comments_only=true")) {
+        return jsonResponse({
+          items: [],
+          pagination: { page: 1, page_size: 25, total: 0, total_pages: 1 },
+        });
+      }
+      if (url.includes(`/comments/runs/${runId}/progress`)) {
+        return jsonResponse({
+          run_id: runId,
+          platform: "instagram",
+          account_handle: "thetraitorsus",
+          run_status: "running",
+          manual_auth_required: false,
+          comments_endpoint_probe_advisory_active: true,
+          comments_endpoint_probe: {
+            status: "auth_blocked",
+            reason: "redirect_to_checkpoint",
+            advisory_continue: true,
+          },
+          comments_shard_count: 4,
+          active_comment_jobs: 3,
+          completed_comment_jobs: 0,
+          failed_comment_jobs: 0,
+          summary: {
+            total_jobs: 4,
+            completed_jobs: 0,
+            failed_jobs: 0,
+            active_jobs: 4,
+            items_found_total: 5259,
+            comments_processed_total: 5259,
+            comments_upserted_total: 5202,
+          },
+          post_progress: { completed_posts: 22, total_posts: 442 },
+        });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="thetraitorsus" activeTab="comments" />);
+
+    expect(await screen.findByText("Modal Instagram comments auth active")).toBeInTheDocument();
+    expect(await screen.findByText("Comments auth active")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Comments endpoint preflight was blocked; workers are continuing with fallback."),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("Instagram comments auth is blocked. Repair Instagram auth, then rerun the comments scrape."),
+    ).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Repair Instagram Auth" })).not.toBeInTheDocument();
   });
 
@@ -9389,17 +9665,15 @@ it("prefers terminal cancelled status labels over stale recovering state", async
         throw new Error(`Unhandled request: ${url}`);
       });
 
-      render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="stats" />);
+      const { unmount } = render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="stats" />);
 
       await waitFor(() => {
         expect(screen.getByText("1,001 / 16,475")).toBeInTheDocument();
       });
 
-      await act(async () => {
-        await new Promise((resolve) => setTimeout(resolve, 5_500));
-      });
       expect(summaryCalls).toBe(1);
       expect(screen.queryByText("1,234")).not.toBeInTheDocument();
+      unmount();
     },
     12_000,
   );
@@ -9447,18 +9721,16 @@ it("prefers terminal cancelled status labels over stale recovering state", async
         throw new Error(`Unhandled request: ${url}`);
       });
 
-      render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="stats" />);
+      const { unmount } = render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="stats" />);
 
       await waitFor(() => {
         expect(screen.getByRole("heading", { name: "Top Hashtags" })).toBeInTheDocument();
       });
 
-      await act(async () => {
-        await new Promise((resolve) => setTimeout(resolve, 5_500));
-      });
       expect(summaryCalls).toBe(1);
       expect(screen.getByRole("heading", { name: "Top Hashtags" })).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Cancel Run" })).toBeInTheDocument();
+      unmount();
     },
     12_000,
   );

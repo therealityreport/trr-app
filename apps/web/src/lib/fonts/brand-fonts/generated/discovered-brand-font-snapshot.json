@@ -1,7 +1,7 @@
 {
   "schemaVersion": "2026-03-23.v2",
-  "inputHash": "c45ecbc23cb64a3c5fec83441ce4d572ed588b5ffa513fd2081f881f369888df",
-  "generatedAt": "2026-04-07T01:23:12.069Z",
+  "inputHash": "1f81dd751bcbc0f0906a6818011421111fde8805a0ec43c7019b63192a0c601d",
+  "generatedAt": "2026-05-17T23:02:10.740Z",
   "scoringConfigVersion": "2026-03-23.score.v3",
   "data": [
     {
@@ -549,36 +549,36 @@
       "anchor": "typography"
     },
     {
-      "id": "brand-the-athletic:specimen-meta:136",
+      "id": "brand-the-athletic:specimen-meta:120",
       "brandId": "brand-the-athletic",
       "brandLabel": "The Athletic",
       "kind": "specimen-meta",
       "text": "nyt-cheltenham: 400 (h1) / 700 (h2 section heads) / 500 (h3 sub-sections)",
       "normalizedText": "nytcheltenham 400 h1 700 h2 section heads 500 h3 subsections",
       "sourcePath": "src/components/admin/design-docs/sections/brand-athletic/BrandAthleticTypography.tsx",
-      "line": 136,
+      "line": 120,
       "anchor": "typography"
     },
     {
-      "id": "brand-the-athletic:specimen-meta:230",
+      "id": "brand-the-athletic:specimen-meta:214",
       "brandId": "brand-the-athletic",
       "brandLabel": "The Athletic",
       "kind": "specimen-meta",
       "text": "nyt-franklin: 300-700 | UI chrome, nav, pills, byline, Datawrapper, storyline, ads",
       "normalizedText": "nytfranklin 300700 ui chrome nav pills byline datawrapper storyline ads",
       "sourcePath": "src/components/admin/design-docs/sections/brand-athletic/BrandAthleticTypography.tsx",
-      "line": 230,
+      "line": 214,
       "anchor": "typography"
     },
     {
-      "id": "brand-the-athletic:specimen-meta:299",
+      "id": "brand-the-athletic:specimen-meta:283",
       "brandId": "brand-the-athletic",
       "brandLabel": "The Athletic",
       "kind": "specimen-meta",
       "text": "RegularSlab: 400 / 18px / Nav bar league labels — wordmark-style slab serif",
       "normalizedText": "regularslab 400 18px nav bar league labels wordmarkstyle slab serif",
       "sourcePath": "src/components/admin/design-docs/sections/brand-athletic/BrandAthleticTypography.tsx",
-      "line": 299,
+      "line": 283,
       "anchor": "typography"
     },
     {

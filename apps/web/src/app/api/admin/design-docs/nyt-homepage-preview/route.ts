@@ -1,10 +1,11 @@
 import { access, readFile } from "node:fs/promises";
 import path from "node:path";
 
-import { JSDOM } from "jsdom";
+import { JSDOM, VirtualConsole } from "jsdom";
 import { NextRequest, NextResponse } from "next/server";
 
 import { NYT_HOMEPAGE_SOURCE_BUNDLE } from "@/lib/admin/nyt-homepage-source-bundle";
+import { requireAdmin } from "@/lib/server/auth";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -40,6 +41,9 @@ const MIME_TYPES: Record<string, string> = {
 };
 const HOMEPAGE_HTML_CACHE = new Map<string, string>();
 const HOMEPAGE_STYLESHEET_CACHE = new Map<string, string[]>();
+const HOMEPAGE_DOM_VIRTUAL_CONSOLE = new VirtualConsole().forwardTo(console, {
+  jsdomErrors: ["unhandled-exception", "not-implemented"],
+});
 
 type HomepageSourceMode = "saved-page" | "workspace-bundle";
 
@@ -102,12 +106,14 @@ async function loadHomepageDocument() {
   const { source, html } = await loadHomepageHtmlSource();
   return {
     source,
-    document: new JSDOM(html).window.document,
+    document: new JSDOM(html, { virtualConsole: HOMEPAGE_DOM_VIRTUAL_CONSOLE }).window.document,
   };
 }
 
 function stripScriptsFromMarkup(markup: string) {
-  const dom = new JSDOM(`<!doctype html><body>${markup}</body>`);
+  const dom = new JSDOM(`<!doctype html><body>${markup}</body>`, {
+    virtualConsole: HOMEPAGE_DOM_VIRTUAL_CONSOLE,
+  });
   dom.window.document.querySelectorAll("script").forEach((node) => node.remove());
   return dom.window.document.body.innerHTML.trim();
 }
@@ -310,7 +316,9 @@ function rewriteFragmentMarkup({
   request: NextRequest;
   source: HomepageSource;
 }) {
-  const dom = new JSDOM(`<!doctype html><body>${markup}</body>`);
+  const dom = new JSDOM(`<!doctype html><body>${markup}</body>`, {
+    virtualConsole: HOMEPAGE_DOM_VIRTUAL_CONSOLE,
+  });
   rewriteTemplateTree({
     root: dom.window.document.body,
     request,
@@ -569,8 +577,17 @@ async function renderFragmentDocument(request: NextRequest, id: string) {
   });
 }
 
+function adminErrorStatus(error: unknown) {
+  const message = error instanceof Error ? error.message : "failed";
+  if (message === "unauthorized") return 401;
+  if (message === "forbidden") return 403;
+  return 500;
+}
+
 export async function GET(request: NextRequest) {
   try {
+    await requireAdmin(request);
+
     const view = request.nextUrl.searchParams.get("view") ?? "fragment";
 
     if (view === "screenshot") {
@@ -684,6 +701,6 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     console.error("[api] Failed to render NYT homepage preview", error);
     const message = error instanceof Error ? error.message : "failed";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: message }, { status: adminErrorStatus(error) });
   }
 }

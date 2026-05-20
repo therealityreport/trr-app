@@ -9,10 +9,6 @@ describe("show social load resilience wiring", () => {
     __dirname,
     "../src/lib/admin/show-page/use-show-identity-load.ts"
   );
-  const showDetailsControllerPath = path.resolve(
-    __dirname,
-    "../src/lib/admin/show-page/use-show-details-controller.ts"
-  );
   const showCoverageControllerPath = path.resolve(
     __dirname,
     "../src/lib/admin/show-page/use-show-coverage.ts"
@@ -56,7 +52,8 @@ describe("show social load resilience wiring", () => {
 
     expect(fetchSeasonsCatch).toContain("setSocialDependencyError(message)");
     expect(fetchSeasonsCatch).not.toContain("setError(message)");
-    expect(contents).toMatch(/Promise\.allSettled\(\[/);
+    expect(contents).toMatch(/await fetchShow\(\);\s*\} finally \{\s*if \(isCurrentShowId\(requestShowId\)\) \{\s*setLoading\(false\);/s);
+    expect(contents).toMatch(/void Promise\.allSettled\(\[/);
     expect(fs.readFileSync(pagePath, "utf8")).toMatch(/loadShowIdentity\(\[checkCoverage\]\)/);
   });
 

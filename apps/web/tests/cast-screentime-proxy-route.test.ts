@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
+import { captureExpectedConsoleError } from "./helpers/expected-console";
 
 
 const { requireAdminMock, getBackendApiUrlMock } = vi.hoisted(() => ({
@@ -81,6 +82,7 @@ describe("cast screentime admin access", () => {
   });
 
   it("returns an actionable error when the internal admin secret is missing", async () => {
+    const expectedError = captureExpectedConsoleError(/^\[api\] Cast screentime proxy failed .*TRR_INTERNAL_ADMIN_SHARED_SECRET is not configured/);
     delete process.env.TRR_INTERNAL_ADMIN_SHARED_SECRET;
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
@@ -93,5 +95,6 @@ describe("cast screentime admin access", () => {
     expect(response.status).toBe(500);
     expect(payload.error).toBe("TRR_INTERNAL_ADMIN_SHARED_SECRET is not configured");
     expect(fetchMock).not.toHaveBeenCalled();
+    expectedError.expectCalled();
   });
 });

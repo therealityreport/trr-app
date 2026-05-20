@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest, NextResponse } from "next/server";
+import { captureExpectedConsoleError } from "./helpers/expected-console";
 
 process.env.TRR_ADMIN_ROUTE_CACHE_DISABLED = "1";
 
@@ -130,6 +131,7 @@ describe("networks-streaming summary route", () => {
   });
 
   it("returns unauthorized when admin check fails", async () => {
+    const expectedError = captureExpectedConsoleError(/^\[api\] Failed to load networks\/streaming summary .*unauthorized/);
     requireAdminMock.mockRejectedValue(new Error("unauthorized"));
 
     const response = await GET(new NextRequest("http://localhost/api/admin/networks-streaming/summary"));
@@ -137,5 +139,6 @@ describe("networks-streaming summary route", () => {
 
     expect(response.status).toBe(401);
     expect(payload).toEqual({ error: "unauthorized" });
+    expectedError.expectCalled();
   });
 });

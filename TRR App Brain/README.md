@@ -10,4 +10,4 @@ Carry forward from the previous repo `AGENTS.md`:
 - follow backend contracts; do not invent response shapes
 - backend access flows through `TRR_API_URL`
 - prefer Server Components unless interaction requires client code
-- validate with `pnpm -C apps/web run lint`, `pnpm -C apps/web exec next build --webpack`, and `pnpm -C apps/web run test:ci`
+- validate app lint/typecheck from the workspace root with `make app-check`; use `pnpm -C apps/web exec next build --webpack` and `pnpm -C apps/web run test:ci` for heavier TRR-APP build and test lanes after the Node 24 baseline is active

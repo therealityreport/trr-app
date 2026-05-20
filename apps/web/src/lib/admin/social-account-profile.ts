@@ -598,6 +598,7 @@ export type SocialAccountCommentsRunProgress = {
   warnings?: string[];
   auth_validation_mode?: string | null;
   comments_endpoint_probe?: Record<string, unknown> | null;
+  comments_endpoint_probe_advisory_active?: boolean | null;
   manual_auth_required?: boolean | null;
   started_at_epoch_seconds?: number | null;
   updated_at?: string | null;
@@ -1445,6 +1446,8 @@ export type SocialProfileCookieHealth = {
   refresh_action?: "cookie_refresh" | "instagram_auth_repair";
   refresh_label?: string;
   source_kind: string;
+  degraded?: boolean;
+  degraded_reason?: string;
   source_path?: string;
   cookie_fingerprint?: string | null;
   cookie_fingerprint_algorithm?: string | null;
@@ -1457,6 +1460,10 @@ export type SocialProfileCookieHealth = {
     category?: string | null;
     reason: string | null;
     execution_backend?: string;
+    probe_only?: boolean;
+    probe_source?: string | null;
+    repair_action?: null;
+    repair_available?: boolean;
     cookie_fingerprint?: string | null;
     cookie_fingerprint_match?: boolean | null;
   };
@@ -1470,6 +1477,10 @@ export type SocialProfileCookieHealth = {
     category?: string | null;
     reason: string | null;
     execution_backend?: string;
+    probe_only?: boolean;
+    probe_source?: string | null;
+    repair_action?: null;
+    repair_available?: boolean;
     cookie_fingerprint?: string | null;
     cookie_fingerprint_match?: boolean | null;
     rendered_fallback_enabled?: boolean | null;
@@ -1478,6 +1489,7 @@ export type SocialProfileCookieHealth = {
   };
   comments_auth_probe?: Record<string, unknown> | null;
   auth_surface_blocked?: boolean;
+  auth_surface_probe_only?: boolean;
   warning_code?: string;
   warning_message?: string;
 };

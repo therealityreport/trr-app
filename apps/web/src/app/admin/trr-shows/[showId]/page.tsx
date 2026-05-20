@@ -131,9 +131,7 @@ import {
 } from "@/lib/media/content-type";
 import {
   THUMBNAIL_DEFAULTS,
-  isThumbnailCropMode,
   parseThumbnailCrop,
-  resolveThumbnailPresentation,
 } from "@/lib/thumbnail-crop";
 import {
   ASSET_SECTION_LABELS,
@@ -227,6 +225,13 @@ import {
 } from "@/lib/admin/show-page/link-discovery-progress";
 import { pickPreferredPersonLinkFeaturedImage } from "@/lib/admin/show-page/person-link-images";
 import type { SeasonAsset } from "@/lib/server/trr-api/trr-shows-repository";
+import {
+  CastPhoto,
+  GalleryImage,
+  NetworkNameOrLogo,
+  RefreshProgressBar,
+  ShowNameOrLogo,
+} from "./ShowPageMedia";
 
 // Types
 interface TrrShow {
@@ -2274,176 +2279,6 @@ const isRefreshTopicFailed = (entry: RefreshLogEntry | null): boolean => {
   return message.includes("failed") || message.includes("error");
 };
 
-// Generic gallery image with error handling - falls back to placeholder on broken images
-function GalleryImage({
-  src,
-  srcCandidates,
-  diagnosticKey,
-  onFallbackEvent,
-  alt,
-  sizes = "200px",
-  className = "object-cover",
-  style,
-  children,
-}: {
-  src: string;
-  srcCandidates?: string[];
-  diagnosticKey?: string;
-  onFallbackEvent?: (event: "attempt" | "recovered" | "failed") => void;
-  alt: string;
-  sizes?: string;
-  className?: string;
-  style?: React.CSSProperties;
-  children?: React.ReactNode;
-}) {
-  const fallbackCandidates = useMemo(() => {
-    const seen = new Set<string>();
-    const out: string[] = [];
-    for (const value of srcCandidates ?? []) {
-      if (typeof value !== "string") continue;
-      const trimmed = value.trim();
-      if (!trimmed || trimmed === src || seen.has(trimmed)) continue;
-      seen.add(trimmed);
-      out.push(trimmed);
-    }
-    return out;
-  }, [src, srcCandidates]);
-  const fallbackCandidatesSignature = useMemo(
-    () => fallbackCandidates.join("\u0001"),
-    [fallbackCandidates]
-  );
-  const [hasError, setHasError] = useState(false);
-  const [currentSrc, setCurrentSrc] = useState(src);
-  const [fallbackIndex, setFallbackIndex] = useState(0);
-  const telemetryStateRef = useRef({
-    attempted: false,
-    recovered: false,
-    failed: false,
-  });
-
-  useEffect(() => {
-    setHasError(false);
-    setCurrentSrc(src);
-    setFallbackIndex(0);
-    telemetryStateRef.current = {
-      attempted: false,
-      recovered: false,
-      failed: false,
-    };
-    if (onFallbackEvent && !telemetryStateRef.current.attempted) {
-      onFallbackEvent("attempt");
-      telemetryStateRef.current.attempted = true;
-    }
-  }, [src, fallbackCandidatesSignature, onFallbackEvent]);
-
-  const handleError = () => {
-    const nextCandidate = fallbackCandidates[fallbackIndex] ?? null;
-    if (nextCandidate && nextCandidate !== currentSrc) {
-      setCurrentSrc(nextCandidate);
-      setFallbackIndex((prev) => prev + 1);
-      return;
-    }
-    if (diagnosticKey) {
-      console.warn("[show-gallery] all image URL candidates failed", {
-        asset: diagnosticKey,
-        attempted: fallbackCandidates.length + 1,
-      });
-    }
-    if (onFallbackEvent && !telemetryStateRef.current.failed) {
-      onFallbackEvent("failed");
-      telemetryStateRef.current.failed = true;
-    }
-    setHasError(true);
-  };
-
-  if (hasError) {
-    return (
-      <div className="flex h-full items-center justify-center bg-zinc-100 text-zinc-400">
-        <svg width="32" height="32" viewBox="0 0 24 24" fill="none">
-          <rect x="3" y="3" width="18" height="18" rx="2" stroke="currentColor" strokeWidth="2" />
-          <circle cx="8.5" cy="8.5" r="1.5" fill="currentColor" />
-          <path d="M21 15l-5-5L5 21" stroke="currentColor" strokeWidth="2" />
-        </svg>
-      </div>
-    );
-  }
-
-  return (
-    <>
-      <Image
-        src={currentSrc}
-        alt={alt}
-        fill
-        className={className}
-        style={style}
-        sizes={sizes}
-        unoptimized
-        onError={handleError}
-        onLoad={() => {
-          if (onFallbackEvent && currentSrc !== src && !telemetryStateRef.current.recovered) {
-            onFallbackEvent("recovered");
-            telemetryStateRef.current.recovered = true;
-          }
-        }}
-      />
-      {children}
-    </>
-  );
-}
-
-// Cast photo with error handling - falls back to placeholder on broken images
-function CastPhoto({
-  src,
-  alt,
-  thumbnail_focus_x,
-  thumbnail_focus_y,
-  thumbnail_zoom,
-  thumbnail_crop_mode,
-}: {
-  src: string;
-  alt: string;
-  thumbnail_focus_x?: number | null;
-  thumbnail_focus_y?: number | null;
-  thumbnail_zoom?: number | null;
-  thumbnail_crop_mode?: "manual" | "auto" | null;
-}) {
-  const hasPersistedCrop =
-    isThumbnailCropMode(thumbnail_crop_mode) &&
-    typeof thumbnail_focus_x === "number" &&
-    Number.isFinite(thumbnail_focus_x) &&
-    typeof thumbnail_focus_y === "number" &&
-    Number.isFinite(thumbnail_focus_y) &&
-    typeof thumbnail_zoom === "number" &&
-    Number.isFinite(thumbnail_zoom);
-
-  const presentation = resolveThumbnailPresentation({
-    width: null,
-    height: null,
-    crop: hasPersistedCrop
-      ? {
-          x: thumbnail_focus_x,
-          y: thumbnail_focus_y,
-          zoom: thumbnail_zoom,
-          mode: thumbnail_crop_mode,
-        }
-      : null,
-  });
-
-  return (
-    <GalleryImage
-      src={src}
-      alt={alt}
-      sizes="200px"
-      className="object-cover transition-transform duration-300"
-      style={{
-        objectPosition: presentation.objectPosition,
-        transformOrigin: presentation.objectPosition,
-        transform: presentation.zoom !== 1 ? `scale(${presentation.zoom})` : undefined,
-      }}
-    />
-  );
-}
-
 const getAssetDisplayUrl = (asset: SeasonAsset): string =>
   firstImageUrlCandidate(getSeasonAssetCardUrlCandidates(asset)) ?? asset.hosted_url;
 
@@ -2506,156 +2341,6 @@ const areNumberArraysEqual = (a: number[], b: number[]): boolean => {
   }
   return true;
 };
-
-const NETWORK_LOGO_DOMAIN_BY_NAME: Record<string, string> = {
-  bravo: "bravotv.com",
-  nbc: "nbc.com",
-  peacock: "peacocktv.com",
-  "paramount+": "paramountplus.com",
-  "e!": "eonline.com",
-  mtv: "mtv.com",
-  vh1: "vh1.com",
-  abc: "abc.com",
-  cbs: "cbs.com",
-  fox: "fox.com",
-  netflix: "netflix.com",
-  hulu: "hulu.com",
-  max: "max.com",
-};
-
-const getNetworkLogoUrl = (network: string | null | undefined): string | null => {
-  if (process.env.NODE_ENV !== "production") {
-    return null;
-  }
-  if (!network) return null;
-  const normalized = network.trim().toLowerCase();
-  if (!normalized) return null;
-  const domain = NETWORK_LOGO_DOMAIN_BY_NAME[normalized];
-  if (!domain) return null;
-  return `https://logo.clearbit.com/${domain}`;
-};
-
-function NetworkNameOrLogo({
-  network,
-  fallbackLabel,
-}: {
-  network: string | null;
-  fallbackLabel: string;
-}) {
-  const [logoFailed, setLogoFailed] = useState(false);
-  const logoUrl = getNetworkLogoUrl(network);
-
-  if (logoUrl && !logoFailed) {
-    return (
-      <Image
-        src={logoUrl}
-        alt={network ? `${network} logo` : "Network logo"}
-        className="h-6 w-auto object-contain"
-        width={96}
-        height={24}
-        loading="lazy"
-        unoptimized
-        onError={() => setLogoFailed(true)}
-      />
-    );
-  }
-
-  return (
-    <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-500">
-      {fallbackLabel}
-    </p>
-  );
-}
-
-function ShowNameOrLogo({ name, logoUrl }: { name: string; logoUrl?: string | null }) {
-  const [logoFailed, setLogoFailed] = useState(false);
-  const trimmedLogo = typeof logoUrl === "string" && logoUrl.trim() ? logoUrl.trim() : null;
-
-  if (trimmedLogo && !logoFailed) {
-    return (
-      <Image
-        src={trimmedLogo}
-        alt={`${name} logo`}
-        className="h-14 w-auto max-w-[28rem] object-contain"
-        width={448}
-        height={56}
-        loading="lazy"
-        unoptimized
-        onError={() => setLogoFailed(true)}
-      />
-    );
-  }
-
-  return <h1 className="text-3xl font-bold text-zinc-900">{name}</h1>;
-}
-
-function RefreshProgressBar({
-  show,
-  stage,
-  message,
-  current,
-  total,
-}: {
-  show: boolean;
-  stage?: string | null;
-  message?: string | null;
-  current?: number | null;
-  total?: number | null;
-}) {
-  if (!show) return null;
-  const hasCounts =
-    typeof current === "number" &&
-    Number.isFinite(current) &&
-    typeof total === "number" &&
-    Number.isFinite(total) &&
-    total >= 0 &&
-    current >= 0;
-  const safeTotal = hasCounts ? Math.max(0, Math.floor(total)) : null;
-  const safeCurrent = hasCounts
-    ? Math.max(
-        0,
-        Math.floor(
-          safeTotal !== null && safeTotal > 0 ? Math.min(current, safeTotal) : current
-        )
-      )
-    : null;
-  const hasProgressBar = safeCurrent !== null && safeTotal !== null && safeTotal > 0;
-  const percent = hasProgressBar
-    ? Math.min(100, Math.round((safeCurrent / safeTotal) * 100))
-    : 0;
-  const stageLabel =
-    typeof stage === "string" && stage.trim()
-      ? stage.replace(/[_-]+/g, " ").trim()
-      : null;
-
-  return (
-    <div className="mt-2 w-full">
-      {(message || stageLabel || hasCounts) && (
-        <div className="mb-1 flex items-center justify-between gap-2">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-zinc-500">
-            {message || stageLabel || "Working..."}
-          </p>
-          {hasProgressBar && safeCurrent !== null && safeTotal !== null && (
-            <p className="text-[11px] tabular-nums text-zinc-500">
-              {safeCurrent.toLocaleString()}/{safeTotal.toLocaleString()} ({percent}%)
-            </p>
-          )}
-        </div>
-      )}
-      <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-zinc-200">
-        {hasProgressBar ? (
-          <div
-            className="h-full rounded-full bg-zinc-700 transition-all"
-            style={{ width: `${percent}%` }}
-          />
-        ) : safeTotal === 0 ? null : (
-          <div className="absolute inset-y-0 left-0 w-1/3 animate-pulse rounded-full bg-zinc-700/70" />
-        )}
-      </div>
-    </div>
-  );
-}
-
 
 export default function TrrShowDetailPage() {
   const params = useParams();
@@ -5065,12 +4750,17 @@ export default function TrrShowDetailPage() {
       );
       const data = (await response.json().catch(() => ({}))) as {
         error?: string;
+        degraded?: boolean;
+        links?: EntityLink[];
       } & { 0?: EntityLink };
       if (!response.ok) {
         throw new Error(data.error || "Failed to load links");
       }
-      setShowLinks(Array.isArray(data) ? (data as EntityLink[]) : []);
-      setLinksLoadTimedOut(false);
+      const degraded =
+        data.degraded === true || response.headers.get("x-trr-show-links-source") === "degraded-timeout";
+      setShowLinks(Array.isArray(data) ? (data as EntityLink[]) : Array.isArray(data.links) ? data.links : []);
+      setLinksLoadTimedOut(degraded);
+      setLinksError(degraded ? "Links are temporarily unavailable; showing an empty list." : null);
     } catch (err) {
       const isTimeout = isAbortError(err) || (err instanceof Error && /timed out|aborted/i.test(err.message));
       setLinksLoadTimedOut(isTimeout);
@@ -6302,6 +5992,7 @@ export default function TrrShowDetailPage() {
         const videosData = (await videosResponse.json().catch(() => ({}))) as {
           videos?: BravoVideoItem[];
           error?: string;
+          degraded?: boolean;
         };
 
         if (!videosResponse.ok) {
@@ -6310,6 +6001,11 @@ export default function TrrShowDetailPage() {
 
         if (!isCurrentShowId(requestShowId)) return;
         setBravoVideos(Array.isArray(videosData.videos) ? videosData.videos : []);
+        setBravoVideoSyncWarning(
+          videosData.degraded === true
+            ? "Bravo videos are temporarily unavailable; showing an empty list."
+            : null
+        );
         setBravoLoaded(true);
       } catch (err) {
         if (!isCurrentShowId(requestShowId)) return;
@@ -7803,39 +7499,45 @@ export default function TrrShowDetailPage() {
       if (!isCurrentShowId(requestShowId)) return;
       await loadShowIdentity([checkCoverage]);
       if (!isCurrentShowId(requestShowId)) return;
-      // Bravo data can be slow/unavailable and should not block page load.
-      void loadBravoData();
+      if (showRouteState.tab === "details") {
+        // Bravo data can be slow/unavailable and should not block page load.
+        void loadBravoData();
+      }
     };
 
     void loadData();
-  }, [checkCoverage, hasAccess, isCurrentShowId, loadBravoData, loadShowIdentity, showId]);
+  }, [checkCoverage, hasAccess, isCurrentShowId, loadBravoData, loadShowIdentity, showId, showRouteState.tab]);
 
   useEffect(() => {
-    if (!hasAccess || !showId || (activeTab !== "settings" && activeTab !== "details" && activeTab !== "cast")) {
+    if (
+      !hasAccess ||
+      !showId ||
+      (showRouteState.tab !== "settings" && showRouteState.tab !== "details" && showRouteState.tab !== "cast")
+    ) {
       return;
     }
     void fetchShowLinks();
-  }, [activeTab, fetchShowLinks, hasAccess, showId]);
+  }, [fetchShowLinks, hasAccess, showId, showRouteState.tab]);
 
   useEffect(() => {
-    if (!hasAccess || !showId || activeTab !== "settings") return;
+    if (!hasAccess || !showId || showRouteState.tab !== "settings") return;
     void fetchLinksEligibleCast();
-  }, [activeTab, fetchLinksEligibleCast, hasAccess, showId]);
+  }, [fetchLinksEligibleCast, hasAccess, showId, showRouteState.tab]);
 
   useEffect(() => {
-    if (!hasAccess || !showId || (activeTab !== "settings" && activeTab !== "details")) {
+    if (!hasAccess || !showId || (showRouteState.tab !== "settings" && showRouteState.tab !== "details")) {
       return;
     }
     void fetchRedditCommunities();
-  }, [activeTab, fetchRedditCommunities, hasAccess, showId]);
+  }, [fetchRedditCommunities, hasAccess, showId, showRouteState.tab]);
 
   useEffect(() => {
-    if (!hasAccess || !showId || (activeTab !== "cast" && activeTab !== "settings")) return;
+    if (!hasAccess || !showId || (showRouteState.tab !== "cast" && showRouteState.tab !== "settings")) return;
     const autoLoadKey = `${showId}:roles`;
     if (showRolesAutoLoadAttemptedRef.current === autoLoadKey) return;
     showRolesAutoLoadAttemptedRef.current = autoLoadKey;
     void fetchShowRoles();
-  }, [activeTab, fetchShowRoles, hasAccess, showId]);
+  }, [fetchShowRoles, hasAccess, showId, showRouteState.tab]);
 
   useEffect(() => {
     if (!hasAccess || !showId || activeTab !== "cast") return;
@@ -12159,13 +11861,7 @@ export default function TrrShowDetailPage() {
     Boolean(refreshingTargets.cast_credits) ||
     hasReconnectableCreditsRun ||
     hasPersonRefreshInFlight;
-  const isCastRefreshBusy =
-    isShowRefreshBusy ||
-    castMatrixSyncLoading ||
-    castRefreshPipelineRunning ||
-    castMediaEnriching ||
-    hasReconnectableCreditsRun ||
-    hasPersonRefreshInFlight;
+  const isCastRefreshBusy = isShowRefreshBusy || castAnyJobRunning;
   const rolesWarningWithSnapshotAge = withSnapshotAgeSuffix(rolesWarning, lastSuccessfulRolesAt);
   const castRoleMembersWarningWithSnapshotAge = withSnapshotAgeSuffix(
     castRoleMembersWarning,

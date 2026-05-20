@@ -2,6 +2,7 @@
 import React from "react";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { captureExpectedConsoleError } from "./helpers/expected-console";
 
 const { fetchAdminWithAuthMock, useAdminGuardMock } = vi.hoisted(() => ({
   fetchAdminWithAuthMock: vi.fn(),
@@ -9,16 +10,15 @@ const { fetchAdminWithAuthMock, useAdminGuardMock } = vi.hoisted(() => ({
 }));
 
 vi.mock("next/link", () => ({
-  default: ({
-    children,
-    href,
-    prefetch: _prefetch,
-    ...rest
-  }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { href: string; prefetch?: boolean }) => (
-    <a href={href} {...rest}>
-      {children}
-    </a>
-  ),
+  default: ({ children, href, ...rest }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { href: string; prefetch?: boolean }) => {
+    const { prefetch, ...anchorProps } = rest;
+    void prefetch;
+    return (
+      <a href={href} {...anchorProps}>
+        {children}
+      </a>
+    );
+  },
 }));
 
 vi.mock("next/image", () => ({
@@ -120,6 +120,9 @@ describe("TRR shows page covered shows loading", () => {
   });
 
   it("shows a covered shows load error instead of the empty-state message when the request fails", async () => {
+    const expectedError = captureExpectedConsoleError(
+      /^Failed to fetch covered shows: .*database unavailable/,
+    );
     fetchAdminWithAuthMock.mockResolvedValue(
       new Response(JSON.stringify({ error: "database unavailable" }), {
         status: 500,
@@ -135,5 +138,6 @@ describe("TRR shows page covered shows loading", () => {
 
     expect(screen.getByText("database unavailable")).toBeInTheDocument();
     expect(screen.queryByText(/No shows added yet/i)).not.toBeInTheDocument();
+    expectedError.expectCalled();
   });
 });

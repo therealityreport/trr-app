@@ -16,8 +16,9 @@ describe("PaletteExportPanel", () => {
     toPngMock.mockReset();
     toPngMock.mockResolvedValue("data:image/png;base64,abc123");
 
-    Object.assign(navigator, {
-      clipboard: {
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
         writeText: vi.fn().mockResolvedValue(undefined),
       },
     });

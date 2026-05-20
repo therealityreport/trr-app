@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
+import { captureExpectedConsoleWarn } from "./helpers/expected-console";
 
 const {
   requireAdminMock,
@@ -137,6 +138,7 @@ describe("show route featured image validation", () => {
 
   it("rejects backdrop assignment when image does not validate for this show", async () => {
     validateShowImageForFieldMock.mockResolvedValue(false);
+    const expectedWarning = captureExpectedConsoleWarn(/^\[api\] Rejected invalid featured backdrop image assignment .*primary_backdrop_image_id/);
 
     const response = await PUT(buildRequest({ primary_backdrop_image_id: BACKDROP_ID }), {
       params: Promise.resolve({ showId: SHOW_ID }),
@@ -148,6 +150,7 @@ describe("show route featured image validation", () => {
       error: "primary_backdrop_image_id must reference a backdrop image for this show",
     });
     expect(updateShowByIdMock).not.toHaveBeenCalled();
+    expectedWarning.expectCalled();
   });
 
   it("allows clearing featured ids with null without validation", async () => {

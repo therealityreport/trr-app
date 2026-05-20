@@ -21,6 +21,7 @@ import type {
   PersonProfileSummary,
   PersonTargetSummary,
   RedditDashboardSummary,
+  ScrapeJobHealthSummary,
   SharedAccountSourceSummary,
   SharedAccountSourceSet,
   SharedAccountSourceSetScope,
@@ -62,6 +63,17 @@ type SharedReviewPayload = {
   items?: SharedReviewItemSummary[];
 };
 
+type ScrapeJobHealthRow = {
+  generated_at?: string | Date | null;
+  window_started_at?: string | Date | null;
+  total_jobs?: number | string | null;
+  active_jobs?: number | string | null;
+  failed_jobs?: number | string | null;
+  failure_signal_jobs?: number | string | null;
+  in_failed_sql_transaction_hits?: number | string | null;
+  latest_failure_at?: string | Date | null;
+};
+
 type CastSummaryMember = {
   person_id?: string | null;
   full_name?: string | null;
@@ -88,6 +100,19 @@ type SocialBladeRowsPayload = {
 
 type SocialBladeProgressCountsPayload = {
   rows?: SocialBladeProgressCountRow[];
+};
+
+const SCRAPE_JOB_HEALTH_WINDOW_HOURS = 8;
+const EMPTY_SCRAPE_JOB_HEALTH: ScrapeJobHealthSummary = {
+  window_hours: SCRAPE_JOB_HEALTH_WINDOW_HOURS,
+  window_started_at: null,
+  generated_at: null,
+  total_jobs: 0,
+  active_jobs: 0,
+  failed_jobs: 0,
+  failure_signal_jobs: 0,
+  in_failed_sql_transaction_hits: 0,
+  latest_failure_at: null,
 };
 
 type SocialBladeProgressCountRow = {
@@ -1114,6 +1139,84 @@ const safeLoadSharedReviewItems = async (
   } catch (error) {
     console.warn("[social-landing] Failed to load shared review items", error);
     return [];
+  }
+};
+
+const coerceCount = (value: number | string | null | undefined): number => {
+  const parsed = typeof value === "number" ? value : Number(value ?? 0);
+  return Number.isFinite(parsed) ? Math.max(0, Math.trunc(parsed)) : 0;
+};
+
+const safeLoadScrapeJobHealth = async (): Promise<ScrapeJobHealthSummary> => {
+  try {
+    const result = await query<ScrapeJobHealthRow>(
+      `
+        /* landing_social_scrape_job_health */
+        WITH recent_jobs AS (
+          SELECT
+            status,
+            error_message,
+            last_error_code,
+            metadata,
+            created_at
+          FROM social.scrape_jobs
+          WHERE platform = ANY($2::text[])
+            AND created_at >= now() - ($1::int * interval '1 hour')
+        ),
+        job_signals AS (
+          SELECT
+            status,
+            created_at,
+            coalesce(error_message, '') || ' ' ||
+              coalesce(last_error_code, '') AS error_signal,
+            coalesce(error_message, '') || ' ' ||
+              coalesce(last_error_code, '') || ' ' ||
+              coalesce(metadata::text, '') AS diagnostic_text
+          FROM recent_jobs
+        )
+        SELECT
+          now() AS generated_at,
+          now() - ($1::int * interval '1 hour') AS window_started_at,
+          count(*)::bigint AS total_jobs,
+          count(*) FILTER (
+            WHERE status IN ('queued', 'pending', 'running', 'retrying', 'cancelling')
+          )::bigint AS active_jobs,
+          count(*) FILTER (
+            WHERE status IN ('failed', 'error')
+          )::bigint AS failed_jobs,
+          count(*) FILTER (
+            WHERE status IN ('failed', 'error')
+              OR nullif(trim(error_signal), '') IS NOT NULL
+          )::bigint AS failure_signal_jobs,
+          count(*) FILTER (
+            WHERE diagnostic_text ILIKE '%InFailedSqlTransaction%'
+          )::bigint AS in_failed_sql_transaction_hits,
+          max(created_at) FILTER (
+            WHERE status IN ('failed', 'error')
+              OR nullif(trim(error_signal), '') IS NOT NULL
+          ) AS latest_failure_at
+        FROM job_signals
+      `,
+      [
+        SCRAPE_JOB_HEALTH_WINDOW_HOURS,
+        ["instagram", "tiktok", "twitter", "youtube"],
+      ],
+    );
+    const row = result.rows[0] ?? {};
+    return {
+      window_hours: SCRAPE_JOB_HEALTH_WINDOW_HOURS,
+      window_started_at: toIsoStringOrNull(row.window_started_at),
+      generated_at: toIsoStringOrNull(row.generated_at),
+      total_jobs: coerceCount(row.total_jobs),
+      active_jobs: coerceCount(row.active_jobs),
+      failed_jobs: coerceCount(row.failed_jobs),
+      failure_signal_jobs: coerceCount(row.failure_signal_jobs),
+      in_failed_sql_transaction_hits: coerceCount(row.in_failed_sql_transaction_hits),
+      latest_failure_at: toIsoStringOrNull(row.latest_failure_at),
+    };
+  } catch (error) {
+    console.warn("[social-landing] Failed to load scrape job health", error);
+    return EMPTY_SCRAPE_JOB_HEALTH;
   }
 };
 
@@ -2334,6 +2437,7 @@ export async function getSocialLandingPayloadResult(
 ): Promise<SocialLandingPayloadResult> {
   const { coveredShows, redditDashboard, cacheable: landingSummaryCacheable } =
     await safeLoadBackendLandingSummary(adminContext);
+  const scrapeJobHealthPromise = safeLoadScrapeJobHealth();
   const coveredShowIds = coveredShows.map((show) => show.trr_show_id);
   const [
     networkSharedSources,
@@ -2400,6 +2504,7 @@ export async function getSocialLandingPayloadResult(
   const hydratedNetworkSharedSources = networkSharedSources.map((source) =>
     hydrateSharedSourceProgress(source, progressByKey),
   );
+  const scrapeJobHealth = await scrapeJobHealthPromise;
 
   return {
     payload: {
@@ -2414,6 +2519,7 @@ export async function getSocialLandingPayloadResult(
         runs: sharedRuns,
         review_items: sharedReviewItems,
       } satisfies SharedPipelineSummary,
+      scrape_job_health: scrapeJobHealth,
       reddit_dashboard: redditDashboard,
     },
     cacheable:

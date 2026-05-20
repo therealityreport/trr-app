@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { requireAdmin } from "@/lib/server/auth";
+
 /* ------------------------------------------------------------------ */
 /*  Design Docs — AI Image Generation API                              */
 /*  Generates icons/illustrations via Gemini or GPT image models       */
@@ -99,8 +101,17 @@ async function generateWithGPT(prompt: string): Promise<string> {
   throw new Error("No image in GPT response");
 }
 
+function adminErrorStatus(error: unknown) {
+  const message = error instanceof Error ? error.message : "Unknown error";
+  if (message === "unauthorized") return 401;
+  if (message === "forbidden") return 403;
+  return 500;
+}
+
 export async function POST(req: NextRequest) {
   try {
+    await requireAdmin(req);
+
     const body = (await req.json()) as GenerateRequest;
     const { prompt, model } = body;
 
@@ -155,6 +166,6 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     console.error("[design-docs/generate-image]", message);
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: message }, { status: adminErrorStatus(err) });
   }
 }

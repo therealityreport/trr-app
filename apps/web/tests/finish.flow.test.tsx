@@ -3,6 +3,7 @@ import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import * as usersDb from '@/lib/db/users';
+import { captureExpectedConsoleLog, captureExpectedConsoleWarn } from './helpers/expected-console';
 
 const replace = vi.fn();
 const router = { replace };
@@ -42,6 +43,7 @@ describe('/auth/finish interactions', () => {
   });
 
   it('enforces min-3 shows and username uniqueness on blur', async () => {
+    const expectedLogs = captureExpectedConsoleLog(/^Finish: /);
     render(<FinishPage />);
     // wait for page render (username input appears)
     const uname = await screen.findByLabelText(/username/i);
@@ -58,9 +60,11 @@ describe('/auth/finish interactions', () => {
     for (const s of firstThree) {
       expect(screen.getByRole('button', { name: s })).toHaveAttribute('aria-pressed', 'true');
     }
+    expectedLogs.expectCalled();
   });
 
   it('captures show requests from the request CTA', async () => {
+    const expectedLogs = captureExpectedConsoleLog(/^Finish: /);
     render(<FinishPage />);
     await screen.findByRole('button', { name: ALL_SHOWS[0] });
 
@@ -74,9 +78,14 @@ describe('/auth/finish interactions', () => {
     expect(screen.getByLabelText(/remove requested show the valley/i)).toBeInTheDocument();
     const raw = sessionStorage.getItem('finish_show_requests');
     expect(raw).toContain('The Valley');
+    expectedLogs.expectCalled();
   });
 
   it('keeps the form usable when username lookup fails', async () => {
+    const expectedLogs = captureExpectedConsoleLog(/^Finish: /);
+    const expectedWarn = captureExpectedConsoleWarn(
+      /^Finish: username uniqueness lookup unavailable; skipping live uniqueness check .*firestore unavailable/,
+    );
     vi.mocked(usersDb.getUserByUsername).mockRejectedValueOnce(new Error('firestore unavailable'));
     render(<FinishPage />);
     const uname = await screen.findByLabelText(/username/i);
@@ -85,5 +94,7 @@ describe('/auth/finish interactions', () => {
     await waitFor(() => {
       expect(screen.queryByText(/taken/i)).not.toBeInTheDocument();
     });
+    expectedLogs.expectCalled();
+    expectedWarn.expectCalled();
   });
 });

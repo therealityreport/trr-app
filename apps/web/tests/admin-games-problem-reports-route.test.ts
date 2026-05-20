@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
+import { captureExpectedConsoleError } from "./helpers/expected-console";
 
 const {
   requireAdminMock,
@@ -55,12 +56,14 @@ describe("/api/admin/games/problem-reports", () => {
   });
 
   it("returns 403 when admin auth fails", async () => {
+    const expectedError = captureExpectedConsoleError(/^\[api\/admin\/games\/problem-reports\] failed .*forbidden/);
     requireAdminMock.mockRejectedValueOnce(new Error("forbidden"));
     const request = new NextRequest("http://localhost/api/admin/games/problem-reports");
     const response = await GET(request);
     const payload = await response.json();
     expect(response.status).toBe(403);
     expect(payload.error).toBe("forbidden");
+    expectedError.expectCalled();
   });
 
   it("validates the game query parameter", async () => {

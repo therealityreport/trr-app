@@ -60,7 +60,6 @@ type AdminGetJsonInit = Omit<AdminFetchWithTimeoutInit, "method" | "body" | "tim
 };
 
 declare global {
-  // eslint-disable-next-line no-var
   var __trrAdminGetJsonInFlight: Map<string, Promise<unknown>> | undefined;
 }
 

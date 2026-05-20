@@ -33,6 +33,19 @@ type WorkerHealth = {
   executor_backend?: string | null;
   dispatch_enabled?: boolean;
   dispatcher_heartbeat_fresh?: boolean;
+  modal_capacity?: {
+    total_min_containers?: number;
+    total_max_containers?: number;
+    entries?: Array<{
+      worker_family?: string | null;
+      modal_app?: string | null;
+      modal_function?: string | null;
+      image_family?: string | null;
+      timeout_seconds?: number;
+      min_containers?: number;
+      max_containers?: number;
+    }>;
+  } | null;
   active_invocations?: number;
   oldest_queued_age_seconds?: number | null;
   stale_running_count?: number;
@@ -84,6 +97,7 @@ const EMPTY_WORKER_HEALTH: WorkerHealth = {
   executor_backend: null,
   dispatch_enabled: false,
   dispatcher_heartbeat_fresh: false,
+  modal_capacity: null,
   active_invocations: 0,
   oldest_queued_age_seconds: null,
   stale_running_count: 0,
@@ -1022,6 +1036,8 @@ function buildSystemHealthViewModel(queueStatus: QueueStatus, state: HealthState
   const freshWorkers = queueStatus.workers.fresh_workers ?? 0;
   const totalWorkers = queueStatus.workers.total_workers ?? 0;
   const activeInvocations = Number(queueStatus.workers.active_invocations ?? 0);
+  const modalCapacityTotal = Number(queueStatus.workers.modal_capacity?.total_max_containers ?? 0);
+  const modalCapacityEntries = queueStatus.workers.modal_capacity?.entries ?? [];
   const staleRunningCount = Number(queueStatus.workers.stale_running_count ?? 0);
   const staleClaims = queueStatus.queue.stale_claims;
   const dispatcherReadiness = queueStatus.workers.dispatcher_readiness;
@@ -1117,6 +1133,15 @@ function buildSystemHealthViewModel(queueStatus: QueueStatus, state: HealthState
     { title: "Completed", value: String(runStatuses.completed), detail: "Runs finished successfully", tone: runStatuses.completed > 0 ? "good" : "neutral" },
     { title: "Cancelled", value: String(runStatuses.cancelled), detail: "Runs stopped manually or by policy" },
     { title: "Invocations", value: String(activeInvocations), detail: "Active remote executions" },
+    {
+      title: "Modal Capacity",
+      value: modalCapacityTotal > 0 ? `${activeInvocations}/${modalCapacityTotal}` : "n/a",
+      detail:
+        modalCapacityEntries.length > 0
+          ? `${modalCapacityEntries.length.toLocaleString()} deployed worker function limits reported`
+          : "Configured function limits have not reported yet",
+      tone: modalCapacityTotal > 0 && activeInvocations >= modalCapacityTotal ? "warn" : "neutral",
+    },
     {
       title: "Dispatch Blocked",
       value: String(dispatchBlockedCount),
@@ -1393,7 +1418,7 @@ export function useQueueStatusModal(options: { isOpen: boolean }) {
 
     try {
       const response = await fetchAdminWithAuth(
-        `${QUEUE_STATUS_URL}?fresh=true`,
+        `${QUEUE_STATUS_URL}?fresh=true&detail=summary`,
         { cache: "no-store", signal: controller.signal },
         { allowDevAdminBypass: true },
       );

@@ -25,7 +25,7 @@ const readPersonId = async (params: RouteParams["params"]): Promise<string> => {
 
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
-    const user = await requireAdmin(request);
+    await requireAdmin(request);
 
     const personId = await readPersonId(params);
     if (!personId) {

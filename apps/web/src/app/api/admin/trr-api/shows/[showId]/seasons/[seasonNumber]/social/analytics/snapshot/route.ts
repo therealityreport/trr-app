@@ -29,6 +29,19 @@ const LIVE_STALE_MS = 2_500;
 
 export const dynamic = "force-dynamic";
 
+const readSnapshotPart = async <T>(
+  responsePromise: Promise<Response>,
+  label: string,
+  fallback: T,
+): Promise<T> => {
+  try {
+    return await readRouteJsonOrThrow<T>(await responsePromise, label);
+  } catch (error) {
+    console.warn(`[api] Season social analytics snapshot part unavailable: ${label}`, error);
+    return fallback;
+  }
+};
+
 export async function GET(request: NextRequest, context: RouteParams) {
   try {
     const user = await requireAdmin(request);
@@ -71,8 +84,8 @@ export async function GET(request: NextRequest, context: RouteParams) {
         jobsParams.delete("runs_limit");
 
         const [analytics, targets, runs, runSummaries, workerHealth, sharedStatus, jobs] = await Promise.all([
-          readRouteJsonOrThrow<Record<string, unknown>>(
-            await getAnalytics(
+          readSnapshotPart<Record<string, unknown> | null>(
+            getAnalytics(
               buildSnapshotSubrequest(
                 request,
                 `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/social/analytics`,
@@ -81,9 +94,10 @@ export async function GET(request: NextRequest, context: RouteParams) {
               context,
             ),
             "Failed to load social analytics snapshot",
+            null,
           ),
-          readRouteJsonOrThrow<Record<string, unknown>>(
-            await getTargets(
+          readSnapshotPart<Record<string, unknown>>(
+            getTargets(
               buildSnapshotSubrequest(
                 request,
                 `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/social/targets`,
@@ -92,9 +106,10 @@ export async function GET(request: NextRequest, context: RouteParams) {
               context,
             ),
             "Failed to load social targets snapshot",
+            { targets: [] },
           ),
-          readRouteJsonOrThrow<Record<string, unknown>>(
-            await getRuns(
+          readSnapshotPart<Record<string, unknown>>(
+            getRuns(
               buildSnapshotSubrequest(
                 request,
                 `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/social/runs`,
@@ -103,9 +118,10 @@ export async function GET(request: NextRequest, context: RouteParams) {
               context,
             ),
             "Failed to load social runs snapshot",
+            { runs: [] },
           ),
-          readRouteJsonOrThrow<Record<string, unknown>>(
-            await getRunSummaries(
+          readSnapshotPart<Record<string, unknown>>(
+            getRunSummaries(
               buildSnapshotSubrequest(
                 request,
                 `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/social/runs/summary`,
@@ -114,9 +130,10 @@ export async function GET(request: NextRequest, context: RouteParams) {
               context,
             ),
             "Failed to load social run summary snapshot",
+            { summaries: [] },
           ),
-          readRouteJsonOrThrow<Record<string, unknown>>(
-            await getWorkerHealth(
+          readSnapshotPart<Record<string, unknown> | null>(
+            getWorkerHealth(
               buildSnapshotSubrequest(
                 request,
                 `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/social/ingest/worker-health`,
@@ -124,9 +141,10 @@ export async function GET(request: NextRequest, context: RouteParams) {
               context,
             ),
             "Failed to load social worker health snapshot",
+            null,
           ),
-          readRouteJsonOrThrow<Record<string, unknown>>(
-            await getSharedStatus(
+          readSnapshotPart<Record<string, unknown> | null>(
+            getSharedStatus(
               buildSnapshotSubrequest(
                 request,
                 `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/social/shared-status`,
@@ -135,10 +153,11 @@ export async function GET(request: NextRequest, context: RouteParams) {
               context,
             ),
             "Failed to load shared social status snapshot",
+            null,
           ),
           jobsRunId
-            ? readRouteJsonOrThrow<Record<string, unknown>>(
-                await getJobs(
+            ? readSnapshotPart<Record<string, unknown>>(
+                getJobs(
                   buildSnapshotSubrequest(
                     request,
                     `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/social/jobs`,
@@ -147,6 +166,7 @@ export async function GET(request: NextRequest, context: RouteParams) {
                   context,
                 ),
                 "Failed to load social jobs snapshot",
+                { jobs: [] },
               )
             : Promise.resolve({ jobs: [] }),
         ]);

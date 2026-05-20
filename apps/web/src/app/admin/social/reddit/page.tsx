@@ -12,6 +12,18 @@ import { fetchAdminWithAuth } from "@/lib/admin/client-auth";
 import type { SocialLandingPayload } from "@/lib/admin/social-landing";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 
+const DEFAULT_SCRAPE_JOB_HEALTH = {
+  window_hours: 8,
+  window_started_at: null,
+  generated_at: null,
+  total_jobs: 0,
+  active_jobs: 0,
+  failed_jobs: 0,
+  failure_signal_jobs: 0,
+  in_failed_sql_transaction_hits: 0,
+  latest_failure_at: null,
+} satisfies SocialLandingPayload["scrape_job_health"];
+
 const loadLandingData = async (currentUser: User): Promise<SocialLandingPayload> => {
   const response = await fetchAdminWithAuth("/api/admin/social/landing", undefined, {
     allowDevAdminBypass: true,
@@ -44,6 +56,34 @@ const loadLandingData = async (currentUser: User): Promise<SocialLandingPayload>
       review_items: Array.isArray(data?.shared_pipeline?.review_items)
         ? data.shared_pipeline.review_items
         : [],
+    },
+    scrape_job_health: {
+      ...DEFAULT_SCRAPE_JOB_HEALTH,
+      ...(data?.scrape_job_health ?? {}),
+      window_hours:
+        typeof data?.scrape_job_health?.window_hours === "number"
+          ? data.scrape_job_health.window_hours
+          : DEFAULT_SCRAPE_JOB_HEALTH.window_hours,
+      total_jobs:
+        typeof data?.scrape_job_health?.total_jobs === "number"
+          ? data.scrape_job_health.total_jobs
+          : 0,
+      active_jobs:
+        typeof data?.scrape_job_health?.active_jobs === "number"
+          ? data.scrape_job_health.active_jobs
+          : 0,
+      failed_jobs:
+        typeof data?.scrape_job_health?.failed_jobs === "number"
+          ? data.scrape_job_health.failed_jobs
+          : 0,
+      failure_signal_jobs:
+        typeof data?.scrape_job_health?.failure_signal_jobs === "number"
+          ? data.scrape_job_health.failure_signal_jobs
+          : 0,
+      in_failed_sql_transaction_hits:
+        typeof data?.scrape_job_health?.in_failed_sql_transaction_hits === "number"
+          ? data.scrape_job_health.in_failed_sql_transaction_hits
+          : 0,
     },
     reddit_dashboard: {
       active_community_count:

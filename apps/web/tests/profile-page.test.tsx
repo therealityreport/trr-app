@@ -19,13 +19,11 @@ const mocks = vi.hoisted(() => {
 });
 
 vi.mock("next/link", () => ({
-  default: ({
-    href,
-    children,
-    prefetch: _prefetch,
-    ...rest
-  }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { href: string; prefetch?: boolean }) =>
-    React.createElement("a", { href, ...rest }, children),
+  default: ({ href, children, ...rest }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { href: string; prefetch?: boolean }) => {
+    const { prefetch, ...anchorProps } = rest;
+    void prefetch;
+    return React.createElement("a", { href, ...anchorProps }, children);
+  },
 }));
 
 vi.mock("@/lib/firebase", () => ({

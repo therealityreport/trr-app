@@ -1,10 +1,25 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { fetchAdminBackendJsonMock } = vi.hoisted(() => ({
-  fetchAdminBackendJsonMock: vi.fn(),
-}));
+const { AdminReadProxyErrorMock, fetchAdminBackendJsonMock } = vi.hoisted(() => {
+  class AdminReadProxyError extends Error {
+    status: number;
+    retryable?: boolean;
+
+    constructor(message: string, status: number, options?: { retryable?: boolean }) {
+      super(message);
+      this.status = status;
+      this.retryable = options?.retryable;
+    }
+  }
+
+  return {
+    AdminReadProxyErrorMock: AdminReadProxyError,
+    fetchAdminBackendJsonMock: vi.fn(),
+  };
+});
 
 vi.mock("@/lib/server/trr-api/admin-read-proxy", () => ({
+  AdminReadProxyError: AdminReadProxyErrorMock,
   fetchAdminBackendJson: fetchAdminBackendJsonMock,
 }));
 
@@ -51,5 +66,25 @@ describe("stable reddit read helper", () => {
     expect(result.upstreamStatus).toBe(404);
     expect(result.payload).toEqual({ community: { id: "community-1" } });
     expect(fallback).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back to the local repository when the backend read times out", async () => {
+    fetchAdminBackendJsonMock.mockRejectedValueOnce(
+      new AdminReadProxyErrorMock("Admin read request timed out after 12s", 504, {
+        retryable: true,
+      }),
+    );
+
+    const result = await loadStableRedditRead({
+      backendPath: "/admin/reddit/communities",
+      routeName: "reddit-communities:list",
+      fallback: async () => ({ communities: [{ id: "local-community" }] }),
+    });
+
+    expect(result).toEqual({
+      payload: { communities: [{ id: "local-community" }] },
+      source: "local",
+      upstreamStatus: 504,
+    });
   });
 });

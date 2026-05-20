@@ -1,12 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
+import { captureExpectedConsoleError } from "./helpers/expected-console";
 
 const {
   requireAdminMock,
+  invalidateAdminBackendCacheMock,
   listPersonExternalIdsMock,
   syncPersonExternalIdsMock,
 } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
+  invalidateAdminBackendCacheMock: vi.fn(),
   listPersonExternalIdsMock: vi.fn(),
   syncPersonExternalIdsMock: vi.fn(),
 }));
@@ -20,6 +23,10 @@ vi.mock("@/lib/server/trr-api/trr-shows-repository", () => ({
   syncPersonExternalIds: syncPersonExternalIdsMock,
 }));
 
+vi.mock("@/lib/server/trr-api/admin-read-proxy", () => ({
+  invalidateAdminBackendCache: invalidateAdminBackendCacheMock,
+}));
+
 import {
   GET,
   PUT,
@@ -28,9 +35,11 @@ import {
 describe("person external ids route", () => {
   beforeEach(() => {
     requireAdminMock.mockReset();
+    invalidateAdminBackendCacheMock.mockReset();
     listPersonExternalIdsMock.mockReset();
     syncPersonExternalIdsMock.mockReset();
     requireAdminMock.mockResolvedValue({ uid: "admin-user" });
+    invalidateAdminBackendCacheMock.mockResolvedValue(undefined);
   });
 
   it("lists normalized external ids and forwards includeInactive", async () => {
@@ -111,10 +120,15 @@ describe("person external ids route", () => {
         is_primary: true,
       },
     ]);
+    expect(invalidateAdminBackendCacheMock).toHaveBeenCalledWith(
+      "/admin/people/person-1/cache/invalidate",
+      { routeName: "person-detail" },
+    );
     expect(payload.external_ids).toHaveLength(1);
   });
 
   it("rejects unsupported sources with a 400", async () => {
+    const expectedError = captureExpectedConsoleError(/^\[api\] Failed to sync person external IDs .*Unsupported source: letterboxd/);
     const request = new NextRequest(
       "http://localhost/api/admin/trr-api/people/person-1/external-ids",
       {
@@ -134,5 +148,6 @@ describe("person external ids route", () => {
     expect(response.status).toBe(400);
     expect(payload.error).toBe("Unsupported source: letterboxd");
     expect(syncPersonExternalIdsMock).not.toHaveBeenCalled();
+    expectedError.expectCalled();
   });
 });

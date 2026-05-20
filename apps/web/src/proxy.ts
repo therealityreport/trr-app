@@ -14,6 +14,7 @@ const INTERNAL_ADMIN_REWRITE_HEADER = "x-trr-admin-rewrite";
 const CANONICAL_SOCIAL_PATH = "/social";
 const CANONICAL_API_REFERENCES_PATH = "/api-references";
 const CANONICAL_DEV_DASHBOARD_PATH = "/dev-dashboard";
+const CAST_SCREENTIME_ADMIN_PATH = "/admin/cast-screentime";
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
 const ROOT_SHOW_ROUTE_RESERVED_FIRST_SEGMENTS = new Set([
   "admin",
@@ -152,6 +153,12 @@ const CANONICAL_ADMIN_REWRITE_PREFIXES = [
   [ADMIN_DESIGN_DOCS_PATH, "/admin/design-docs"],
   [CANONICAL_API_REFERENCES_PATH, ADMIN_API_REFERENCES_PATH],
   [CANONICAL_DEV_DASHBOARD_PATH, ADMIN_DEV_DASHBOARD_PATH],
+] as const;
+const LEGACY_SCREENALYTICS_ROUTE_PREFIXES = [
+  "/screenalytics",
+  "/screenlaytics",
+  "/admin/screenalytics",
+  "/admin/screenlaytics",
 ] as const;
 
 function parseOptionalBoolean(value: string | undefined): boolean | null {
@@ -301,6 +308,15 @@ function remapPathPrefix(pathname: string, fromPrefix: string, toPrefix: string)
   if (pathname === fromPrefix) return toPrefix;
   if (!pathname.startsWith(`${fromPrefix}/`)) return null;
   return `${toPrefix}${pathname.slice(fromPrefix.length)}`;
+}
+
+function mapLegacyScreenalyticsRoute(pathname: string, searchParams?: URLSearchParams): string | null {
+  for (const legacyPrefix of LEGACY_SCREENALYTICS_ROUTE_PREFIXES) {
+    if (remapPathPrefix(pathname, legacyPrefix, CAST_SCREENTIME_ADMIN_PATH)) {
+      return appendSearch(CAST_SCREENTIME_ADMIN_PATH, searchParams);
+    }
+  }
+  return null;
 }
 
 function stripSearch(pathname: string): string {
@@ -1019,7 +1035,16 @@ export function proxy(request: NextRequest): NextResponse {
   const requestHost = normalizeHost(request.headers.get("host")) ?? normalizeHost(request.nextUrl.hostname);
   const onCanonicalAdminHost = hostsMatch(canonicalAdminHost, requestHost);
   const isInternalAdminRewrite = request.headers.get(INTERNAL_ADMIN_REWRITE_HEADER) === "1";
+  const legacyScreenalyticsPath = mapLegacyScreenalyticsRoute(pathname, request.nextUrl.searchParams);
   const legacyBrandsPath = mapLegacyBrandsPath(pathname, request.nextUrl.searchParams);
+
+  if (legacyScreenalyticsPath) {
+    const redirectOrigin = onCanonicalAdminHost ? request.nextUrl.origin : adminOrigin;
+    if (!redirectOrigin) {
+      return NextResponse.json({ error: "Admin origin is not configured." }, { status: 403 });
+    }
+    return NextResponse.redirect(new URL(legacyScreenalyticsPath, redirectOrigin), 307);
+  }
 
   if (legacyBrandsPath) {
     const redirectOrigin = onCanonicalAdminHost ? request.nextUrl.origin : adminOrigin;

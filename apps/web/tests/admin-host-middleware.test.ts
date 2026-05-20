@@ -120,6 +120,37 @@ describe("admin host proxy", () => {
   });
 
   it.each([
+    ["/screenalytics", "http://admin.localhost:3000/admin/cast-screentime"],
+    ["/screenlaytics", "http://admin.localhost:3000/admin/cast-screentime"],
+    ["/admin/screenalytics", "http://admin.localhost:3000/admin/cast-screentime"],
+    ["/admin/screenlaytics", "http://admin.localhost:3000/admin/cast-screentime"],
+  ])("redirects retired Screenalytics alias %s to Cast Screen-Time", (pathname, expectedLocation) => {
+    process.env.ADMIN_APP_ORIGIN = "http://admin.localhost:3000";
+    process.env.ADMIN_ENFORCE_HOST = "true";
+    process.env.ADMIN_STRICT_HOST_ROUTING = "false";
+
+    const request = new NextRequest(`http://admin.localhost:3000${pathname}`);
+    const response = proxy(request);
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe(expectedLocation);
+  });
+
+  it("redirects retired Screenalytics aliases from the public host directly to the admin Cast Screen-Time route", () => {
+    process.env.ADMIN_APP_ORIGIN = "http://admin.localhost:3000";
+    process.env.ADMIN_ENFORCE_HOST = "true";
+    process.env.ADMIN_STRICT_HOST_ROUTING = "false";
+
+    const request = new NextRequest("http://localhost:3000/screenalytics?run=demo");
+    const response = proxy(request);
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe(
+      "http://admin.localhost:3000/admin/cast-screentime?run=demo",
+    );
+  });
+
+  it.each([
     "/dev-dashboard",
     "/docs",
     "/groups",

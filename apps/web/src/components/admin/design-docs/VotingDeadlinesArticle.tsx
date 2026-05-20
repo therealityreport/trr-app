@@ -11,7 +11,6 @@ import {
   getBrandSubSections,
   isBrandSection,
 } from "@/lib/admin/design-docs-config";
-import type { DesignDocSectionId } from "@/lib/admin/design-docs-config";
 
 /* ═══════════════════════════════════════════════════════════════════════
    NYT "When to Vote in Your State" — Full-page article reproduction
@@ -316,18 +315,6 @@ function getCellColor(types: string[]): string {
   if (types.includes("request")) return T.request;
   if (types.includes("register")) return T.register;
   return "transparent";
-}
-
-function getCellBorder(types: string[]): string | undefined {
-  if (types.includes("election_day")) return "2px solid transparent";
-  return undefined;
-}
-
-function getCellBackground(types: string[]): string | undefined {
-  if (types.includes("election_day")) {
-    return T.electionGradient;
-  }
-  return undefined;
 }
 
 /* ── Overlay Menu — Design Docs Navigation ──────────────────────────── */
@@ -2458,7 +2445,6 @@ export default function VotingDeadlinesArticle() {
       )}
 
       {/* ── NYT Web Fonts ──────────────────────────────────────────────── */}
-      {/* eslint-disable-next-line @next/next/no-css-tags */}
       <link
         href="https://g1.nyt.com/fonts/css/web-fonts.c851560786173ad206e1f76c1901be7e096e8f8b.css"
         rel="stylesheet"

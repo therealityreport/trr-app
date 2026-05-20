@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
+import { captureExpectedConsoleError } from "./helpers/expected-console";
 
 const { requireAdminMock, getBackendApiUrlMock, getInternalAdminBearerTokenMock } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
@@ -74,6 +75,7 @@ describe("show google-news sync status proxy route", () => {
   });
 
   it("maps aborts to a 60s timeout response", async () => {
+    const expectedError = captureExpectedConsoleError(/^\[api\] Failed to fetch Google News sync status .*aborted/);
     const abortError = new Error("aborted");
     abortError.name = "AbortError";
     const fetchMock = vi.fn().mockRejectedValue(abortError);
@@ -87,5 +89,6 @@ describe("show google-news sync status proxy route", () => {
 
     expect(response.status).toBe(504);
     expect(String(payload.error || "")).toContain("timed out after 60s");
+    expectedError.expectCalled();
   });
 });

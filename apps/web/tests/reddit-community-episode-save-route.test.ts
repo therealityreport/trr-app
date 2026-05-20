@@ -1,5 +1,6 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
+import { captureExpectedConsoleInfo } from "./helpers/expected-console";
 
 const {
   requireAdminMock,
@@ -33,7 +34,11 @@ const SHOW_ID = "11111111-1111-4111-8111-111111111111";
 const SEASON_ID = "22222222-2222-4222-8222-222222222222";
 
 describe("/api/admin/reddit/communities/[communityId]/episode-discussions/save", () => {
+  let expectedInfoLogs: ReturnType<typeof captureExpectedConsoleInfo> | null = null;
+
   beforeEach(() => {
+    expectedInfoLogs = captureExpectedConsoleInfo(/^\[reddit_episode_save_complete\]/);
+
     requireAdminMock.mockReset();
     getRedditCommunityByIdMock.mockReset();
     getSeasonByIdMock.mockReset();
@@ -48,6 +53,11 @@ describe("/api/admin/reddit/communities/[communityId]/episode-discussions/save",
     });
     getSeasonByIdMock.mockResolvedValue({ id: SEASON_ID, show_id: SHOW_ID });
     createRedditThreadMock.mockResolvedValue({ id: "thread-1" });
+  });
+
+  afterEach(() => {
+    expectedInfoLogs?.restore();
+    expectedInfoLogs = null;
   });
 
   it("bulk-saves selected episode discussion threads without show_id/show_name", async () => {

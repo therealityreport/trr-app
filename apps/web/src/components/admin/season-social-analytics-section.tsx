@@ -1255,12 +1255,9 @@ const REQUEST_TIMEOUT_MS = {
   commentsCoverage: 35_000,
   mirrorCoverage: 35_000,
   weekDetail: 35_000,
-  workerHealth: 12_000,
 } as const;
 const DEV_LOW_HEAT_MODE = process.env.NODE_ENV !== "production";
 const DEV_VISIBLE_POLL_INTERVAL_MS = 8_000;
-const INITIAL_SOCIAL_REFRESH_CONCURRENCY = 2;
-const DEFERRED_SOCIAL_REFRESH_CONCURRENCY = 2;
 const WEEK_DETAIL_FETCH_CONCURRENCY = 2;
 const WEEK_DETAIL_TARGETS_PAGE_LIMIT = 100;
 const WEEK_DETAIL_TARGETS_MAX_PAGES = 20;
@@ -1407,36 +1404,6 @@ const readProxyErrorText = (value: unknown): string => {
   return [record.message, record.error, record.detail]
     .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
     .join(" ");
-};
-
-const settleWithConcurrencyLimit = async <T,>(
-  operations: Array<() => Promise<T>>,
-  concurrency: number,
-): Promise<Array<PromiseSettledResult<T>>> => {
-  const results: Array<PromiseSettledResult<T>> = new Array(operations.length);
-  let nextIndex = 0;
-
-  const runWorker = async (): Promise<void> => {
-    while (nextIndex < operations.length) {
-      const currentIndex = nextIndex;
-      nextIndex += 1;
-      try {
-        results[currentIndex] = {
-          status: "fulfilled",
-          value: await operations[currentIndex](),
-        };
-      } catch (error) {
-        results[currentIndex] = {
-          status: "rejected",
-          reason: error,
-        };
-      }
-    }
-  };
-
-  const workerCount = Math.max(1, Math.min(concurrency, operations.length));
-  await Promise.all(Array.from({ length: workerCount }, () => runWorker()));
-  return results;
 };
 
 const TRANSIENT_DEV_RESTART_PATTERNS = [
@@ -2431,16 +2398,12 @@ export default function SeasonSocialAnalyticsSection({
   const inFlightRef = useRef<{
     analyticsByKey: Map<string, Promise<AnalyticsResponse>>;
     runsByKey: Map<string, Promise<SocialRun[]>>;
-    targetsByKey: Map<string, Promise<SocialTarget[]>>;
     jobsByKey: Map<string, Promise<SocialJob[]>>;
-    workerHealthByKey: Map<string, Promise<WorkerHealthState | null>>;
     refreshAllByView: Map<SocialAnalyticsView, Promise<void>>;
   }>({
     analyticsByKey: new Map(),
     runsByKey: new Map(),
-    targetsByKey: new Map(),
     jobsByKey: new Map(),
-    workerHealthByKey: new Map(),
     refreshAllByView: new Map(),
   });
   const activeSyncSessionLastRefreshAtRef = useRef(0);
@@ -2513,7 +2476,6 @@ export default function SeasonSocialAnalyticsSection({
       inFlightRef.current.refreshAllByView.clear();
       inFlightRef.current.analyticsByKey.clear();
       inFlightRef.current.runsByKey.clear();
-      inFlightRef.current.targetsByKey.clear();
       inFlightRef.current.jobsByKey.clear();
     }
     if (analyticsView !== "reddit") {
@@ -3096,151 +3058,6 @@ export default function SeasonSocialAnalyticsSection({
     getAuthHeaders,
     isActiveView,
     readErrorMessage,
-    scope,
-    seasonId,
-    seasonNumber,
-    showId,
-  ]);
-
-  const fetchWorkerHealth = useCallback(async () => {
-    if (!isActiveView(analyticsView)) {
-      return null;
-    }
-    const workerHealthRequestKey = `${runsRequestKey}:worker-health`;
-    const existingRequest = inFlightRef.current.workerHealthByKey.get(workerHealthRequestKey);
-    if (existingRequest) {
-      return existingRequest;
-    }
-    const request = (async () => {
-      try {
-        const headers = await getAuthHeaders();
-        const response = await fetchAdminWithTimeout(
-          "/api/admin/trr-api/social/ingest/health-dot",
-          { headers, cache: "no-store" },
-          REQUEST_TIMEOUT_MS.workerHealth,
-          "Social worker health request timed out",
-        );
-        if (!response.ok) {
-          throw new Error(await readErrorMessage(response, "Failed to load social worker health"));
-        }
-        const data = await parseResponseJson<Record<string, unknown>>(
-          response,
-          "Failed to load social worker health",
-        );
-        const normalized = normalizeWorkerHealth(data.worker_health ?? data);
-        if (isActiveView(analyticsView)) {
-          setWorkerHealth(normalized);
-          setWorkerHealthError(null);
-        }
-        return normalized;
-      } catch (workerHealthFetchError) {
-        const message =
-          workerHealthFetchError instanceof Error
-            ? workerHealthFetchError.message
-            : "Failed to load social worker health";
-        if (isActiveView(analyticsView)) {
-          setWorkerHealthError(message);
-        }
-        throw workerHealthFetchError;
-      }
-    })();
-    inFlightRef.current.workerHealthByKey.set(workerHealthRequestKey, request);
-    try {
-      return await request;
-    } finally {
-      const activeRequest = inFlightRef.current.workerHealthByKey.get(workerHealthRequestKey);
-      if (activeRequest === request) {
-        inFlightRef.current.workerHealthByKey.delete(workerHealthRequestKey);
-      }
-    }
-  }, [analyticsView, getAuthHeaders, isActiveView, readErrorMessage, runsRequestKey]);
-
-  const fetchSharedStatus = useCallback(async () => {
-    if (!isActiveView(analyticsView)) {
-      return null;
-    }
-    try {
-      const headers = await getAuthHeaders();
-      const params = new URLSearchParams();
-      params.set("season_id", seasonId);
-      params.set("source_scope", scope);
-      const response = await fetchAdminWithAuth(
-        `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/social/shared-status?${params.toString()}`,
-        {
-          headers,
-          cache: "no-store",
-        },
-        { allowDevAdminBypass: true },
-      );
-      if (!response.ok) {
-        throw new Error(await readErrorMessage(response, "Failed to load shared social pipeline status"));
-      }
-      const data = await parseResponseJson<SharedSeasonStatus>(response, "Failed to load shared social pipeline status");
-      if (isActiveView(analyticsView)) {
-        setSharedStatus(data);
-        setSharedStatusError(null);
-      }
-      return data;
-    } catch (sharedStatusFetchError) {
-      const message =
-        sharedStatusFetchError instanceof Error
-          ? sharedStatusFetchError.message
-          : "Failed to load shared social pipeline status";
-      if (isActiveView(analyticsView)) {
-        setSharedStatus(null);
-        setSharedStatusError(message);
-      }
-      throw sharedStatusFetchError;
-    }
-  }, [analyticsView, getAuthHeaders, isActiveView, readErrorMessage, scope, seasonId, seasonNumber, showId]);
-
-  const fetchTargets = useCallback(async () => {
-    const existingRequest = inFlightRef.current.targetsByKey.get(runsRequestKey);
-    if (existingRequest) {
-      return existingRequest;
-    }
-
-    const request = (async () => {
-      if (!isActiveView(analyticsView)) {
-        return [] as SocialTarget[];
-      }
-
-      const headers = await getAuthHeaders();
-      const params = new URLSearchParams();
-      params.set("source_scope", scope);
-      params.set("season_id", seasonId);
-      const response = await fetchAdminWithTimeout(
-        `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/social/targets?${params.toString()}`,
-        { headers, cache: "no-store" },
-        REQUEST_TIMEOUT_MS.targets,
-        "Social targets request timed out",
-      );
-      if (!response.ok) {
-        throw new Error(await readErrorMessage(response, "Failed to load social targets"));
-      }
-      const data = await parseResponseJson<{ targets?: SocialTarget[] }>(response, "Failed to load social targets");
-      if (isActiveView(analyticsView)) {
-        setTargets(data.targets ?? []);
-        setSectionLastSuccessAt((current) => ({ ...current, targets: new Date() }));
-      }
-      return data.targets ?? [];
-    })();
-
-    inFlightRef.current.targetsByKey.set(runsRequestKey, request);
-    try {
-      return await request;
-    } finally {
-      const activeRequest = inFlightRef.current.targetsByKey.get(runsRequestKey);
-      if (activeRequest === request) {
-        inFlightRef.current.targetsByKey.delete(runsRequestKey);
-      }
-    }
-  }, [
-    analyticsView,
-    getAuthHeaders,
-    isActiveView,
-    readErrorMessage,
-    runsRequestKey,
     scope,
     seasonId,
     seasonNumber,

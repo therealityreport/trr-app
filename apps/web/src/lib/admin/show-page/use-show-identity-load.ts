@@ -216,14 +216,16 @@ export function useShowIdentityLoad<TShow, TSeason>({
       setLoading(true);
       try {
         await fetchShow();
-        await Promise.allSettled([
-          fetchSeasons(),
-          ...extraTasks.map((task) => Promise.resolve().then(() => task())),
-        ]);
       } finally {
-        if (!isCurrentShowId(requestShowId)) return;
-        setLoading(false);
+        if (isCurrentShowId(requestShowId)) {
+          setLoading(false);
+        }
       }
+
+      void Promise.allSettled([
+        fetchSeasons(),
+        ...extraTasks.map((task) => Promise.resolve().then(() => task())),
+      ]);
     },
     [fetchSeasons, fetchShow, isCurrentShowId, setLoading, showId]
   );

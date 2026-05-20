@@ -232,6 +232,47 @@ describe("social routes season_id hint forwarding", () => {
     expect(String(options.queryString ?? "")).not.toContain("timeout_profile=");
   });
 
+  it("returns degraded empty analytics instead of a 504 when the backend analytics read times out", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    fetchSeasonBackendJsonMock.mockRejectedValue(
+      Object.assign(new Error("TRR-Backend request timed out."), {
+        status: 504,
+        code: "UPSTREAM_TIMEOUT",
+        retryable: true,
+      }),
+    );
+    const request = new NextRequest(
+      `http://localhost/api/admin/trr-api/shows/${showId}/seasons/6/social/analytics?season_id=${seasonId}&source_scope=network&timezone=America%2FNew_York`,
+      { method: "GET" },
+    );
+
+    const response = await getAnalytics(request, { params: Promise.resolve({ showId, seasonNumber: "6" }) });
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-trr-social-analytics-source")).toBe("backend-timeout-degraded");
+    expect(payload).toMatchObject({
+      degraded: true,
+      degraded_reason: "backend_timeout",
+      summary: {
+        show_id: showId,
+        season_id: seasonId,
+        season_number: 6,
+        total_posts: 0,
+        total_comments: 0,
+      },
+      weekly: [],
+      platform_breakdown: [],
+      leaderboards: { bravo_content: [], viewer_discussion: [] },
+    });
+    expect(socialProxyErrorResponseMock).not.toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalledWith(
+      "[api] Season social analytics unavailable; returning degraded empty analytics",
+      expect.any(Error),
+    );
+    warnSpy.mockRestore();
+  });
+
   it("forwards season_id hint on week analytics route", async () => {
     const request = new NextRequest(
       `http://localhost/api/admin/trr-api/shows/${showId}/seasons/6/social/analytics/week/3?season_id=${seasonId}&source_scope=bravo`,

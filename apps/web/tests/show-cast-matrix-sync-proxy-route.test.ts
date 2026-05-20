@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
+import { captureExpectedConsoleError } from "./helpers/expected-console";
 
 process.env.TRR_ADMIN_ROUTE_CACHE_DISABLED = "1";
 
@@ -84,6 +85,7 @@ describe("show cast-matrix sync proxy route", () => {
   });
 
   it("returns actionable backend connectivity error when fetch fails", async () => {
+    const expectedError = captureExpectedConsoleError(/^\[api\] Failed to sync cast matrix .*fetch failed/);
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("fetch failed")));
 
     const request = new NextRequest(
@@ -100,5 +102,6 @@ describe("show cast-matrix sync proxy route", () => {
     expect(response.status).toBe(502);
     expect(payload.error).toContain("Could not reach TRR-Backend");
     expect(payload.error).toContain("https://backend.example.com/api/v1/admin/shows/show-1/cast-matrix/sync");
+    expectedError.expectCalled();
   });
 });

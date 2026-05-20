@@ -42,10 +42,6 @@ const NETWORK_SOURCE_SCOPE_BY_KEY = {
   "bravo-tv": "network",
 } as const;
 const SHOW_HANDLE_SHARED_SOURCE_SCOPE = "network";
-const SHARED_SOURCE_TARGET_SCOPES = {
-  news: "news",
-  creator: "creator",
-} as const;
 const SHOW_EXTERNAL_ID_KEYS_BY_PLATFORM = {
   instagram: ["instagram_handle", "instagram", "instagram_id"],
   facebook: ["facebook_handle", "facebook", "facebook_id"],
@@ -57,7 +53,7 @@ const SHOW_EXTERNAL_ID_KEYS_BY_PLATFORM = {
 
 type LandingTargetType = "network" | "show" | "person" | "shared_source";
 type LandingPlatform = keyof typeof SHOW_EXTERNAL_ID_KEYS_BY_PLATFORM;
-type SharedSourceTargetScope = (typeof SHARED_SOURCE_TARGET_SCOPES)[keyof typeof SHARED_SOURCE_TARGET_SCOPES];
+type SharedSourceTargetScope = "news" | "creator";
 type NormalizedSocialSourceInput = {
   accountHandle: string;
   externalIdValue: string;

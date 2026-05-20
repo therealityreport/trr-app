@@ -6,10 +6,12 @@ import Image from "next/image";
 import type { User } from "firebase/auth";
 import Link from "next/link";
 import {
+  AlertTriangle,
   BarChart3,
   Check,
   ChevronDown,
   ChevronsUpDown,
+  CircleCheck,
   Pencil,
   Plus,
   Search,
@@ -65,6 +67,7 @@ import type {
   SocialAccountProgressSummary,
   SharedAccountSourceSet,
   SharedAccountSourceSetScope,
+  ScrapeJobHealthSummary,
   ShowProfileSet,
   SocialHandleSummary,
   SocialLandingPlatform,
@@ -82,7 +85,18 @@ import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 
 const sectionEyebrowClass =
   "text-xs font-semibold uppercase tracking-[0.25em] text-zinc-500";
-const SOCIAL_LANDING_CACHE_KEY = "trr-admin-social-landing:v5";
+const SOCIAL_LANDING_CACHE_KEY = "trr-admin-social-landing:v6";
+const DEFAULT_SCRAPE_JOB_HEALTH: ScrapeJobHealthSummary = {
+  window_hours: 8,
+  window_started_at: null,
+  generated_at: null,
+  total_jobs: 0,
+  active_jobs: 0,
+  failed_jobs: 0,
+  failure_signal_jobs: 0,
+  in_failed_sql_transaction_hits: 0,
+  latest_failure_at: null,
+};
 const SOCIAL_SOURCE_SET_DEFINITIONS: Omit<SharedAccountSourceSet, "sources">[] = [
   {
     key: "bravo-tv",
@@ -317,6 +331,34 @@ const coerceLandingPayload = (
       ? data.shared_pipeline.review_items
       : [],
   },
+  scrape_job_health: {
+    ...DEFAULT_SCRAPE_JOB_HEALTH,
+    ...(data?.scrape_job_health ?? {}),
+    window_hours:
+      typeof data?.scrape_job_health?.window_hours === "number"
+        ? data.scrape_job_health.window_hours
+        : DEFAULT_SCRAPE_JOB_HEALTH.window_hours,
+    total_jobs:
+      typeof data?.scrape_job_health?.total_jobs === "number"
+        ? data.scrape_job_health.total_jobs
+        : 0,
+    active_jobs:
+      typeof data?.scrape_job_health?.active_jobs === "number"
+        ? data.scrape_job_health.active_jobs
+        : 0,
+    failed_jobs:
+      typeof data?.scrape_job_health?.failed_jobs === "number"
+        ? data.scrape_job_health.failed_jobs
+        : 0,
+    failure_signal_jobs:
+      typeof data?.scrape_job_health?.failure_signal_jobs === "number"
+        ? data.scrape_job_health.failure_signal_jobs
+        : 0,
+    in_failed_sql_transaction_hits:
+      typeof data?.scrape_job_health?.in_failed_sql_transaction_hits === "number"
+        ? data.scrape_job_health.in_failed_sql_transaction_hits
+        : 0,
+  },
   reddit_dashboard: {
     active_community_count:
       typeof data?.reddit_dashboard?.active_community_count === "number"
@@ -492,6 +534,43 @@ const IconActionLink = ({
     <TooltipContent>{label}</TooltipContent>
   </Tooltip>
 );
+
+const ScrapeJobHealthBadge = ({
+  health,
+}: {
+  health: ScrapeJobHealthSummary;
+}) => {
+  const failureSignalJobs = Math.max(
+    health.failed_jobs,
+    health.failure_signal_jobs,
+  );
+  const issueCount = failureSignalJobs + health.in_failed_sql_transaction_hits;
+  const hasIssues = issueCount > 0;
+  const Icon = hasIssues ? AlertTriangle : CircleCheck;
+  const toneClassName = hasIssues
+    ? "border-amber-300 bg-amber-50 text-amber-900"
+    : "border-emerald-200 bg-emerald-50 text-emerald-800";
+  const detail = hasIssues
+    ? `${health.failed_jobs.toLocaleString()} failed · ${failureSignalJobs.toLocaleString()} signals · ${health.in_failed_sql_transaction_hits.toLocaleString()} SQL tx`
+    : `${health.total_jobs.toLocaleString()} jobs · no failure hits`;
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold ${toneClassName}`}
+        >
+          <Icon aria-hidden="true" className="h-3.5 w-3.5" />
+          <span>Last {health.window_hours}h</span>
+          <span className="text-current/70">{detail}</span>
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>
+        Post-deploy watch for recent social scrape job failures and InFailedSqlTransaction hits.
+      </TooltipContent>
+    </Tooltip>
+  );
+};
 
 const CastMemberAvatar = ({
   member,
@@ -1766,7 +1845,9 @@ export default function AdminSocialMediaPage() {
         setLoadError(null);
       }
       try {
-        const { payload, cacheable } = await loadLandingData(user);
+        const { payload, cacheable } = await loadLandingData(user, {
+          refresh: Boolean(cachedPayload),
+        });
         if (cancelled) return;
         setLanding(payload);
         if (cacheable) {
@@ -1887,6 +1968,7 @@ export default function AdminSocialMediaPage() {
   const personTargets = landing?.person_targets ?? [];
   const castSocialBladeShows = landing?.cast_socialblade_shows ?? [];
   const sharedSourceSets = landing?.shared_source_sets ?? buildEmptySharedSourceSets();
+  const scrapeJobHealth = landing?.scrape_job_health ?? DEFAULT_SCRAPE_JOB_HEALTH;
   const networkSourceSet =
     sharedSourceSets.find((sourceSet) => sourceSet.source_scope === "network") ?? {
       key: "bravo-tv",
@@ -2056,6 +2138,11 @@ export default function AdminSocialMediaPage() {
                 Review network profiles, dedicated show social sets, and cast
                 handles already stored in TRR.
               </p>
+              {landing ? (
+                <div className="mt-3">
+                  <ScrapeJobHealthBadge health={scrapeJobHealth} />
+                </div>
+              ) : null}
             </div>
             <div className="flex items-start gap-2 sm:items-end">
               <div className="flex flex-col gap-2">

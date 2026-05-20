@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
 const { requireAdminMock, getBackendApiUrlMock, buildInternalAdminHeadersMock } = vi.hoisted(() => ({
@@ -73,15 +73,24 @@ describe("admin backend proxy route helper", () => {
     buildInternalAdminHeadersMock.mockReset();
     vi.restoreAllMocks();
 
-    requireAdminMock.mockResolvedValue(undefined);
+    requireAdminMock.mockResolvedValue({
+      uid: "admin-user-1",
+      email: "admin@example.com",
+      provider: "firebase",
+      token: { uid: "admin-user-1", email: "admin@example.com" },
+    });
     getBackendApiUrlMock.mockImplementation(
       (path: string) => `https://backend.example.com/api/v1${path}`,
     );
-    buildInternalAdminHeadersMock.mockImplementation((headers?: HeadersInit) => {
+    buildInternalAdminHeadersMock.mockImplementation((_context: unknown, headers?: HeadersInit) => {
       const out = new Headers(headers);
       out.set("Authorization", "Bearer internal-admin-token");
       return out;
     });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("builds backend paths, forwards method/body/query, and applies auth headers", async () => {
@@ -112,6 +121,52 @@ describe("admin backend proxy route helper", () => {
     const headers = options.headers as Headers;
     expect(headers.get("Authorization")).toBe("Bearer internal-admin-token");
     expect(headers.get("Content-Type")).toBe("application/json");
+    expect(buildInternalAdminHeadersMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        uid: "admin-user-1",
+        email: "admin@example.com",
+        verifiedAt: expect.any(Number),
+      }),
+      expect.any(Headers),
+    );
+  });
+
+  it("preserves previously propagated admin verification time in backend headers", async () => {
+    requireAdminMock.mockResolvedValueOnce({
+      uid: "forwarded-admin",
+      email: "forwarded@example.com",
+      provider: "firebase",
+      token: {
+        uid: "forwarded-admin",
+        email: "forwarded@example.com",
+        verified_admin_context: true,
+        verified_at: 1_700_000_000_000,
+      },
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      ),
+    );
+
+    const response = await makeTestRoute()(
+      makeJsonRequest("http://localhost/api/test", { force: true }),
+      { params: Promise.resolve({ itemId: "item-1" }) },
+    );
+
+    expect(response.status).toBe(200);
+    expect(buildInternalAdminHeadersMock).toHaveBeenCalledWith(
+      {
+        uid: "forwarded-admin",
+        email: "forwarded@example.com",
+        verifiedAt: 1_700_000_000_000,
+      },
+      expect.any(Headers),
+    );
   });
 
   it("rejects missing declared params before proxying", async () => {
@@ -130,14 +185,26 @@ describe("admin backend proxy route helper", () => {
   });
 
   it("returns declarative timeout errors when upstream fetch aborts", async () => {
-    const abortError = new Error("aborted");
-    abortError.name = "AbortError";
-    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(abortError));
+    vi.useFakeTimers();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((_url: string, init?: RequestInit) => {
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => {
+            const abortError = new Error("aborted");
+            abortError.name = "AbortError";
+            reject(abortError);
+          });
+        });
+      }) as unknown as typeof fetch,
+    );
 
-    const response = await makeTestRoute()(
+    const responsePromise = makeTestRoute()(
       makeJsonRequest("http://localhost/api/test", { force: false }),
       { params: Promise.resolve({ itemId: "item-1" }) },
     );
+    await vi.advanceTimersByTimeAsync(25);
+    const response = await responsePromise;
     const payload = await response.json();
 
     expect(response.status).toBe(504);
