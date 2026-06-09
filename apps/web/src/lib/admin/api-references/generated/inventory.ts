@@ -3,7 +3,7 @@ import type { AdminApiReferenceInventory } from "@/lib/admin/api-references/type
 export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
   "inventorySchemaVersion": "1.0.0",
   "generatorVersion": "1.0.0",
-  "generatedAt": "2026-06-09T21:52:09.219Z",
+  "generatedAt": "2026-06-09T23:54:11.571Z",
   "sourceCommitSha": "b4198ec471d55204af3f5bbeca194ac0a9706ab7",
   "overrideDigest": "1a9e22b4c9b465cc3dab3ee0fcfc469f25b643ecae9e10baf11cdd12f9133e71",
   "nodes": [
@@ -20073,7 +20073,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx",
       "sourceLocator": {
-        "line": 1687,
+        "line": 1679,
         "matchedText": "`/api/admin/trr-api/shows/${showId}/cast?limit=500&photo_fallback=none&exclude_zero_episode_members=1`"
       },
       "provenance": "static_scan",
@@ -20091,7 +20091,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx",
       "sourceLocator": {
-        "line": 1716,
+        "line": 1708,
         "matchedText": "`/api/admin/trr-api/shows/${showId}/credits`"
       },
       "provenance": "static_scan",
@@ -20163,7 +20163,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx",
       "sourceLocator": {
-        "line": 1533,
+        "line": 1525,
         "matchedText": "`/api/admin/trr-api/shows/resolve-slug?slug=${encodeURIComponent(raw)}`"
       },
       "provenance": "static_scan",
