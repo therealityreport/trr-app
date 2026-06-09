@@ -258,7 +258,7 @@ export default function Page() {
                     You&apos;re signed in as <span className="font-semibold text-black">{user.email}</span>.
                   </p>
                   <div className="mt-6 grid gap-3 sm:grid-cols-2">
-                    <button
+                    <button type="button"
                       onClick={handleHubNavigation}
                       className="inline-flex min-h-14 items-center justify-center rounded-full bg-black px-6 text-sm font-semibold uppercase tracking-[0.18em] text-white transition duration-200 hover:opacity-85"
                       {...buildTypographyDataAttributes({
@@ -270,14 +270,14 @@ export default function Page() {
                     >
                       Go to hub
                     </button>
-                    <button
+                    <button type="button"
                       onClick={handleProfileNavigation}
                       className="inline-flex min-h-14 items-center justify-center rounded-full border border-black bg-white px-6 text-sm font-semibold uppercase tracking-[0.18em] text-black transition duration-200 hover:opacity-80"
                     >
                       Finish profile
                     </button>
                   </div>
-                  <button
+                  <button type="button"
                     onClick={handleSignOut}
                     className="mt-3 inline-flex min-h-12 items-center justify-center rounded-full px-4 text-xs font-semibold uppercase tracking-[0.18em] transition hover:opacity-80"
                     style={{ color: ACCENT }}

@@ -6,6 +6,7 @@ import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
 import { AdminDocsCatalogContent } from "@/components/admin/AdminDocsCatalogContent";
 import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
 import { buildAdminSectionBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
+import { ADMIN_ROOT_PATH } from "@/lib/admin/admin-route-paths";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 
 export default function AdminDocsPage() {
@@ -40,7 +41,7 @@ export default function AdminDocsPage() {
             </div>
             <div className="flex flex-wrap gap-3">
               <Link
-                href="/"
+                href={ADMIN_ROOT_PATH}
                 className="rounded-lg border border-zinc-200 px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100"
               >
                 Back to Admin

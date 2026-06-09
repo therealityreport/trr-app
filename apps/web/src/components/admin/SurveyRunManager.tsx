@@ -158,7 +158,7 @@ export function SurveyRunManager({ surveySlug }: SurveyRunManagerProps) {
       {error && (
         <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-red-700">
           {error}
-          <button
+          <button type="button"
             onClick={() => setError(null)}
             className="ml-2 text-red-800 underline"
           >
@@ -298,14 +298,14 @@ export function SurveyRunManager({ surveySlug }: SurveyRunManagerProps) {
                     </div>
                   </div>
                   <div className="flex gap-2">
-                    <button
+                    <button type="button"
                       onClick={() => handleToggleActive(run)}
                       className="text-sm text-zinc-600 hover:text-zinc-900"
                     >
                       {run.is_active ? "Deactivate" : "Activate"}
                     </button>
                     {run.response_count === 0 && (
-                      <button
+                      <button type="button"
                         onClick={() => handleDeleteRun(run.id)}
                         className="text-sm text-red-600 hover:text-red-800"
                       >

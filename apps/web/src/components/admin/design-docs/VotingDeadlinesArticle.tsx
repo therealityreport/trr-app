@@ -415,7 +415,7 @@ function NYTOverlayMenu({
       >
         {/* Close button */}
         <div style={{ display: "flex", justifyContent: "flex-end", padding: "16px 16px 0" }}>
-          <button
+          <button type="button"
             onClick={onClose}
             aria-label="Close menu"
             style={{
@@ -778,20 +778,20 @@ function ShareToolbar() {
   };
   return (
     <div style={{ display: "flex", gap: 8, marginTop: 16, marginBottom: 24 }}>
-      <button style={btnStyle} title="Gift this article">
+      <button type="button" style={btnStyle} title="Gift this article">
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2">
           <rect x="1" y="7" width="14" height="8" rx="1" />
           <path d="M8 7v8M1 10h14M4 7c0-2 1-3 4-3s4 1 4 3" />
         </svg>
         Gift
       </button>
-      <button style={btnStyle} title="Share">
+      <button type="button" style={btnStyle} title="Share">
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2">
           <path d="M4 9l4-5 4 5M8 4v9" />
         </svg>
         Share
       </button>
-      <button style={btnStyle} title="Save">
+      <button type="button" style={btnStyle} title="Save">
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2">
           <path d="M3 2h10v12l-5-3-5 3z" />
         </svg>
@@ -899,7 +899,7 @@ export default function VotingDeadlinesArticle() {
         >
           &larr; Design Docs
         </Link>
-        <button
+        <button type="button"
           onClick={() => setShowCss((p) => !p)}
           style={{
             fontSize: 11,
@@ -956,7 +956,7 @@ export default function VotingDeadlinesArticle() {
       >
         {/* Left: hamburger + search */}
         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-          <button
+          <button type="button"
             onClick={handleMenuToggle}
             aria-label="Open navigation menu"
             style={{

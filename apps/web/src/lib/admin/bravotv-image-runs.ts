@@ -58,6 +58,7 @@ export type BravotvImageRunRecord = {
   episode?: number | null;
   created_at?: string | null;
   completed_at?: string | null;
+  manifest?: Record<string, unknown> | null;
   summary?: Record<string, unknown> | null;
   import_summary?: Record<string, unknown> | null;
   review_summary?: Record<string, unknown> | null;

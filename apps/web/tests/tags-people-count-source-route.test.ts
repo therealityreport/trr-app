@@ -3,26 +3,36 @@ import { NextRequest } from "next/server";
 
 const {
   requireAdminMock,
+  toVerifiedAdminContextMock,
   getTagsByPhotoIdsMock,
   upsertCastPhotoTagsMock,
   setCastPhotoFaceBoxesMock,
-  getMediaLinkByIdMock,
-  ensureMediaLinksForPeopleMock,
-  getMediaLinksByAssetIdMock,
-  setMediaLinkContextByIdMock,
-} = vi.hoisted(() => ({
-  requireAdminMock: vi.fn(),
-  getTagsByPhotoIdsMock: vi.fn(),
-  upsertCastPhotoTagsMock: vi.fn(),
-  setCastPhotoFaceBoxesMock: vi.fn(),
-  getMediaLinkByIdMock: vi.fn(),
-  ensureMediaLinksForPeopleMock: vi.fn(),
-  getMediaLinksByAssetIdMock: vi.fn(),
-  setMediaLinkContextByIdMock: vi.fn(),
-}));
+  fetchAdminBackendJsonMock,
+  MockAdminReadProxyError,
+} = vi.hoisted(() => {
+  class AdminReadProxyError extends Error {
+    status: number;
+
+    constructor(message: string, status: number) {
+      super(message);
+      this.status = status;
+    }
+  }
+
+  return {
+    requireAdminMock: vi.fn(),
+    toVerifiedAdminContextMock: vi.fn(),
+    getTagsByPhotoIdsMock: vi.fn(),
+    upsertCastPhotoTagsMock: vi.fn(),
+    setCastPhotoFaceBoxesMock: vi.fn(),
+    fetchAdminBackendJsonMock: vi.fn(),
+    MockAdminReadProxyError: AdminReadProxyError,
+  };
+});
 
 vi.mock("@/lib/server/auth", () => ({
   requireAdmin: requireAdminMock,
+  toVerifiedAdminContext: toVerifiedAdminContextMock,
 }));
 
 vi.mock("@/lib/server/admin/cast-photo-tags-repository", () => ({
@@ -31,28 +41,45 @@ vi.mock("@/lib/server/admin/cast-photo-tags-repository", () => ({
   setCastPhotoFaceBoxes: setCastPhotoFaceBoxesMock,
 }));
 
-vi.mock("@/lib/server/trr-api/media-links-repository", () => ({
-  getMediaLinkById: getMediaLinkByIdMock,
-  ensureMediaLinksForPeople: ensureMediaLinksForPeopleMock,
-  getMediaLinksByAssetId: getMediaLinksByAssetIdMock,
-  setMediaLinkContextById: setMediaLinkContextByIdMock,
+vi.mock("@/lib/server/trr-api/admin-read-proxy", () => ({
+  AdminReadProxyError: MockAdminReadProxyError,
+  ADMIN_READ_PROXY_SHORT_TIMEOUT_MS: 5000,
+  buildAdminBackendStatusError: (options: {
+    status: number;
+    data: Record<string, unknown>;
+    fallbackMessage: string;
+  }) =>
+    new MockAdminReadProxyError(
+      typeof options.data.detail === "string"
+        ? options.data.detail
+        : typeof options.data.error === "string"
+          ? options.data.error
+          : options.fallbackMessage,
+      options.status
+    ),
+  fetchAdminBackendJson: fetchAdminBackendJsonMock,
 }));
 
 import { PUT as putCastPhotoTags } from "@/app/api/admin/trr-api/cast-photos/[photoId]/tags/route";
 import { PUT as putMediaLinkTags } from "@/app/api/admin/trr-api/media-links/[linkId]/tags/route";
 
+const parseProxyBody = (): Record<string, unknown> => {
+  const body = fetchAdminBackendJsonMock.mock.calls[0]?.[1]?.body;
+  expect(typeof body).toBe("string");
+  return JSON.parse(body as string) as Record<string, unknown>;
+};
+
 describe("tags route people_count_source semantics", () => {
   beforeEach(() => {
     requireAdminMock.mockReset();
+    toVerifiedAdminContextMock.mockReset();
     getTagsByPhotoIdsMock.mockReset();
     upsertCastPhotoTagsMock.mockReset();
     setCastPhotoFaceBoxesMock.mockReset();
-    getMediaLinkByIdMock.mockReset();
-    ensureMediaLinksForPeopleMock.mockReset();
-    getMediaLinksByAssetIdMock.mockReset();
-    setMediaLinkContextByIdMock.mockReset();
+    fetchAdminBackendJsonMock.mockReset();
 
     requireAdminMock.mockResolvedValue({ uid: "admin-user" });
+    toVerifiedAdminContextMock.mockReturnValue({ uid: "admin-user" });
   });
 
   it("cast-photo tag-only update preserves manual count source and count", async () => {
@@ -105,33 +132,18 @@ describe("tags route people_count_source semantics", () => {
     expect(payload.people_count_source).toBe("manual");
   });
 
-  it("media-link tag-only update preserves manual count source and count", async () => {
-    getMediaLinkByIdMock.mockResolvedValue({
-      id: "link-1",
-      entity_id: "person-1",
-      media_asset_id: "asset-1",
-      context: {
+  it("media-link tag-only update proxies the preserved manual count contract", async () => {
+    fetchAdminBackendJsonMock.mockResolvedValue({
+      status: 200,
+      data: {
+        people_names: ["Person One"],
+        people_ids: ["person-1"],
         people_count: 4,
         people_count_source: "manual",
+        face_boxes: null,
       },
+      durationMs: 7,
     });
-    ensureMediaLinksForPeopleMock.mockResolvedValue(undefined);
-    getMediaLinksByAssetIdMock.mockResolvedValue([
-      {
-        id: "link-1",
-        entity_id: "person-1",
-        media_asset_id: "asset-1",
-        kind: "gallery",
-        entity_type: "person",
-        position: null,
-        context: {
-          people_count: 4,
-          people_count_source: "manual",
-        },
-        created_at: "2024-01-01T00:00:00.000Z",
-      },
-    ]);
-    setMediaLinkContextByIdMock.mockResolvedValue(undefined);
 
     const request = new NextRequest("http://localhost/api/admin/trr-api/media-links/link-1/tags", {
       method: "PUT",
@@ -147,44 +159,45 @@ describe("tags route people_count_source semantics", () => {
     const payload = await response.json();
 
     expect(response.status).toBe(200);
-    expect(setMediaLinkContextByIdMock).toHaveBeenCalledWith(
-      "link-1",
+    expect(fetchAdminBackendJsonMock).toHaveBeenCalledWith(
+      "/admin/media-links/link-1/tags",
       expect.objectContaining({
-        people_count: 4,
-        people_count_source: "manual",
+        method: "PUT",
+        adminContext: { uid: "admin-user" },
+        requestRole: "primary",
+        routeName: "media-link-tags:sync",
       })
     );
+    expect(parseProxyBody()).toEqual({
+      people: [{ id: "person-1", name: "Person One" }],
+    });
     expect(payload.people_count).toBe(4);
     expect(payload.people_count_source).toBe("manual");
   });
 
-  it("media-link update persists face_boxes in context payload", async () => {
-    getMediaLinkByIdMock.mockResolvedValue({
-      id: "link-1",
-      entity_id: "person-1",
-      media_asset_id: "asset-1",
-      context: {
+  it("media-link update proxies face_boxes to the backend", async () => {
+    fetchAdminBackendJsonMock.mockResolvedValue({
+      status: 200,
+      data: {
+        people_names: ["Person One"],
+        people_ids: ["person-1"],
         people_count: 2,
         people_count_source: "manual",
+        face_boxes: [
+          {
+            index: 1,
+            kind: "face",
+            x: 0.1,
+            y: 0.2,
+            width: 0.3,
+            height: 0.35,
+            confidence: null,
+            person_name: "Person One",
+          },
+        ],
       },
+      durationMs: 7,
     });
-    ensureMediaLinksForPeopleMock.mockResolvedValue(undefined);
-    getMediaLinksByAssetIdMock.mockResolvedValue([
-      {
-        id: "link-1",
-        entity_id: "person-1",
-        media_asset_id: "asset-1",
-        kind: "gallery",
-        entity_type: "person",
-        position: null,
-        context: {
-          people_count: 2,
-          people_count_source: "manual",
-        },
-        created_at: "2024-01-01T00:00:00.000Z",
-      },
-    ]);
-    setMediaLinkContextByIdMock.mockResolvedValue(undefined);
 
     const request = new NextRequest("http://localhost/api/admin/trr-api/media-links/link-1/tags", {
       method: "PUT",
@@ -203,21 +216,12 @@ describe("tags route people_count_source semantics", () => {
     const payload = await response.json();
 
     expect(response.status).toBe(200);
-    expect(setMediaLinkContextByIdMock).toHaveBeenCalledWith(
-      "link-1",
-      expect.objectContaining({
-        face_boxes: expect.arrayContaining([
-          expect.objectContaining({
-            index: 1,
-            x: 0.1,
-            y: 0.2,
-            width: 0.3,
-            height: 0.35,
-            person_name: "Person One",
-          }),
-        ]),
-      })
-    );
+    expect(parseProxyBody()).toEqual({
+      people: [{ id: "person-1", name: "Person One" }],
+      face_boxes: [
+        { index: 1, x: 0.1, y: 0.2, width: 0.3, height: 0.35, person_name: "Person One" },
+      ],
+    });
     expect(payload.face_boxes).toHaveLength(1);
   });
 
@@ -257,27 +261,18 @@ describe("tags route people_count_source semantics", () => {
     expect(payload.people_count).toBe(0);
   });
 
-  it("media-link route accepts explicit people_count=0", async () => {
-    getMediaLinkByIdMock.mockResolvedValue({
-      id: "link-1",
-      entity_id: "person-1",
-      media_asset_id: "asset-1",
-      context: {},
-    });
-    ensureMediaLinksForPeopleMock.mockResolvedValue(undefined);
-    getMediaLinksByAssetIdMock.mockResolvedValue([
-      {
-        id: "link-1",
-        entity_id: "person-1",
-        media_asset_id: "asset-1",
-        kind: "gallery",
-        entity_type: "person",
-        position: null,
-        context: {},
-        created_at: "2024-01-01T00:00:00.000Z",
+  it("media-link route accepts explicit people_count=0 through the backend proxy", async () => {
+    fetchAdminBackendJsonMock.mockResolvedValue({
+      status: 200,
+      data: {
+        people_names: [],
+        people_ids: [],
+        people_count: 0,
+        people_count_source: "manual",
+        face_boxes: null,
       },
-    ]);
-    setMediaLinkContextByIdMock.mockResolvedValue(undefined);
+      durationMs: 7,
+    });
 
     const request = new NextRequest("http://localhost/api/admin/trr-api/media-links/link-1/tags", {
       method: "PUT",
@@ -291,13 +286,29 @@ describe("tags route people_count_source semantics", () => {
     const payload = await response.json();
 
     expect(response.status).toBe(200);
-    expect(setMediaLinkContextByIdMock).toHaveBeenCalledWith(
-      "link-1",
-      expect.objectContaining({
-        people_count: 0,
-        people_count_source: "manual",
-      })
-    );
+    expect(parseProxyBody()).toEqual({ people_count: 0, people: [] });
     expect(payload.people_count).toBe(0);
+  });
+
+  it("media-link route maps backend not-found status", async () => {
+    fetchAdminBackendJsonMock.mockResolvedValue({
+      status: 404,
+      data: { detail: "Media link not found" },
+      durationMs: 7,
+    });
+
+    const request = new NextRequest("http://localhost/api/admin/trr-api/media-links/missing-link/tags", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ people: [] }),
+    });
+
+    const response = await putMediaLinkTags(request, {
+      params: Promise.resolve({ linkId: "missing-link" }),
+    });
+    const payload = await response.json();
+
+    expect(response.status).toBe(404);
+    expect(payload.error).toBe("Media link not found");
   });
 });

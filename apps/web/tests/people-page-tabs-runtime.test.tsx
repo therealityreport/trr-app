@@ -268,6 +268,7 @@ describe("people page tab runtime behavior", () => {
     render(<PersonPage />);
 
     await waitForPersonHeading("Andy Cohen");
+    await waitForPrimaryGalleryBootstrap(fetchMock);
 
     const requestedUrls = fetchMock.mock.calls.map(([url]) => String(url));
     expect(

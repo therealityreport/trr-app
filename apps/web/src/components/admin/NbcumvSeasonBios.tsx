@@ -111,7 +111,7 @@ export default function NbcumvSeasonBios({ personName }: NbcumvSeasonBiosProps) 
       <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm lg:col-span-2">
         <h3 className="mb-4 text-lg font-bold text-zinc-900">Season Bios</h3>
         <p className="text-sm text-red-600">{error}</p>
-        <button
+        <button type="button"
           onClick={fetchBios}
           className="mt-2 text-sm font-medium text-zinc-600 hover:text-zinc-900"
         >

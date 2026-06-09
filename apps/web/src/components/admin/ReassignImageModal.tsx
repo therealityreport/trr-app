@@ -200,7 +200,7 @@ export default function ReassignImageModal({
           <h2 className="text-lg font-semibold text-zinc-900">
             Re-assign Image
           </h2>
-          <button
+          <button type="button"
             onClick={onClose}
             className="p-1 hover:bg-zinc-100 rounded transition-colors"
           >
@@ -283,7 +283,7 @@ export default function ReassignImageModal({
           {searchResults.length > 0 && (
             <div className="mt-2 max-h-40 overflow-y-auto border border-zinc-200 rounded-md">
               {searchResults.map((result) => (
-                <button
+                <button type="button"
                   key={result.id}
                   onClick={() => setSelectedEntity(result)}
                   className={`w-full px-3 py-2 text-left text-sm hover:bg-zinc-50 transition-colors ${
@@ -324,13 +324,13 @@ export default function ReassignImageModal({
 
         {/* Actions */}
         <div className="flex gap-3 justify-end">
-          <button
+          <button type="button"
             onClick={onClose}
             className="px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-100 rounded-md transition-colors"
           >
             Cancel
           </button>
-          <button
+          <button type="button"
             onClick={handleSubmit}
             disabled={!selectedEntity || submitting}
             className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md disabled:opacity-50 disabled:cursor-not-allowed transition-colors"

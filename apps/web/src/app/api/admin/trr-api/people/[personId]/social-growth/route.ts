@@ -2,8 +2,18 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
 import { getBackendApiUrl } from "@/lib/server/trr-api/backend";
 import { buildInternalAdminHeaders } from "@/lib/server/trr-api/internal-admin-auth";
+import {
+  isTimeoutSafeFetchTimeoutError,
+  timeoutSafeFetch,
+} from "@/lib/server/timeout-safe-fetch";
+import {
+  buildSocialBladeBackendErrorPayload,
+  buildSocialBladeTimeoutResponse,
+} from "@/lib/server/trr-api/socialblade-proxy";
 
 export const dynamic = "force-dynamic";
+
+const SOCIALBLADE_READ_TIMEOUT_MS = 25_000;
 
 interface RouteParams {
   params: Promise<{ personId: string }>;
@@ -54,21 +64,26 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       );
     }
 
-    const upstream = await fetch(backendUrl, {
+    const upstream = await timeoutSafeFetch(backendUrl, {
       headers,
+      timeoutMs: SOCIALBLADE_READ_TIMEOUT_MS,
+      timeoutName: "socialblade-read",
     });
 
     const data = await upstream.json().catch(() => ({ error: "Invalid response from backend" }));
 
     if (!upstream.ok) {
       return NextResponse.json(
-        { error: data.detail || data.error || `Backend returned ${upstream.status}` },
+        buildSocialBladeBackendErrorPayload(data, `Backend returned ${upstream.status}`),
         { status: upstream.status }
       );
     }
 
     return NextResponse.json(data);
   } catch (error) {
+    if (isTimeoutSafeFetchTimeoutError(error)) {
+      return buildSocialBladeTimeoutResponse(error, SOCIALBLADE_READ_TIMEOUT_MS);
+    }
     console.error("[api] Failed to get social growth data", error);
     const message = error instanceof Error ? error.message : "failed";
     const status =

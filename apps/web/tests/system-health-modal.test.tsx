@@ -23,29 +23,18 @@ const jsonResponse = (body: unknown, status = 200): Response =>
     headers: { "content-type": "application/json" },
   });
 
-const healthDotCallCount = () =>
+const liveStatusPollCallCount = () =>
   fetchAdminWithAuthMock.mock.calls.filter(([input]) =>
-    String(input).includes("/api/admin/trr-api/social/ingest/health-dot"),
+    String(input) === "/api/admin/trr-api/social/ingest/live-status" ||
+    String(input) === "/api/admin/trr-api/social/ingest/live-status?refresh=1",
   ).length;
 
-// TODO(admin-live-status): Re-enable after rewriting this suite for the
-// new /api/admin/trr-api/social/ingest/live-status endpoint.
-//
-// Commit 6e960f2 consolidated /health-dot, /queue-status, and
-// /operations/health into a single SSE-first + polling-fallback
-// `useAdminLiveStatus` hook that reads /live-status. The refactor did not
-// update this test file, so every test here still asserts direct calls to
-// the removed endpoints and every test fails with
-// "Unexpected URL: /api/admin/trr-api/social/ingest/live-status".
-//
-// This breakage is pre-existing on main — web-tests.yml only runs on
-// pull_request events against main, so nothing re-ran main's suite after
-// 6e960f2 landed. PR #84 is the first PR to surface it.
-//
-// Skipping (not patching) because the tests assert on endpoint names from
-// the old architecture and need to be replaced, not fixed. Follow-up work:
-// rewrite the suite against the bundled live-status envelope.
-describe.skip("SystemHealthModal polling", () => {
+const liveStatusStreamCallCount = () =>
+  fetchAdminWithAuthMock.mock.calls.filter(([input]) =>
+    String(input).includes("/api/admin/trr-api/social/ingest/live-status/stream"),
+  ).length;
+
+describe("SystemHealthModal polling", () => {
   let queueStatusPayload: {
     queue_enabled: boolean;
     remote_plane?: {
@@ -99,6 +88,9 @@ describe.skip("SystemHealthModal polling", () => {
         by_stage: Record<string, number>;
       };
       recent_failures: unknown[];
+      silent_drop_warnings?: Array<Record<string, unknown>>;
+      silent_drop_warnings_total?: number;
+      silent_drop_warnings_error?: string;
       stuck_jobs: Array<Record<string, unknown>>;
       stuck_jobs_total: number;
       dispatch_blocked_jobs?: Array<Record<string, unknown>>;
@@ -115,9 +107,6 @@ describe.skip("SystemHealthModal polling", () => {
     vi.spyOn(Math, "random").mockReturnValue(0);
     fetchAdminWithAuthMock.mockReset();
     usePathnameMock.mockReturnValue("/admin/social");
-    delete (window as Window & { __trr_admin_health_dot_poller__?: unknown }).__trr_admin_health_dot_poller__;
-    window.localStorage.removeItem("trr:admin:health-dot:leader:v1");
-    window.localStorage.removeItem("trr:admin:health-dot:snapshot:v1");
     Object.defineProperty(document, "visibilityState", {
       configurable: true,
       value: "visible",
@@ -174,6 +163,8 @@ describe.skip("SystemHealthModal polling", () => {
         running_jobs: [],
         stale_claims: { total: 0, by_reason: {}, by_platform: {}, by_stage: {} },
         recent_failures: [],
+        silent_drop_warnings: [],
+        silent_drop_warnings_total: 0,
         stuck_jobs: [],
         stuck_jobs_total: 0,
         dispatch_blocked_jobs: [],
@@ -236,33 +227,44 @@ describe.skip("SystemHealthModal polling", () => {
 
     fetchAdminWithAuthMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      if (url.includes("/api/admin/trr-api/social/ingest/health-dot")) {
-        return jsonResponse({
-          queue_enabled: true,
-          workers: { healthy: true, healthy_workers: 1 },
-          queue: { by_status: { running: 0, pending: 0, queued: 0, failed: 0 } },
-          updated_at: "2026-02-28T12:00:00.000Z",
-        });
+      if (url === "/api/admin/trr-api/social/ingest/live-status/stream") {
+        return jsonResponse({ error: "stream unavailable in test" }, 503);
       }
-      if (url.includes("/api/admin/trr-api/social/ingest/queue-status")) {
-        return jsonResponse(queueStatusPayload);
-      }
-      if (url.includes("/api/admin/trr-api/operations/health")) {
+      if (url.includes("/api/admin/trr-api/social/ingest/live-status")) {
         return jsonResponse({
-          summary: {
-            active_total: 0,
-            stale_total: 0,
-            cancelling_total: 0,
-            by_status: {},
-            by_type: {},
-            runtime_split: { modal: 0, local: 0, other: 0, unknown: 0 },
-            stale_after_seconds: 300,
-            cancelling_grace_seconds: 60,
+          data: {
+            health_dot: {
+              queue_enabled: true,
+              workers: { healthy: true, healthy_workers: 1 },
+              queue: { by_status: { running: 0, pending: 0, queued: 0, failed: 0 } },
+              updated_at: "2026-02-28T12:00:00.000Z",
+            },
+            queue_status: queueStatusPayload,
+            admin_operations: {
+              summary: {
+                active_total: 0,
+                stale_total: 0,
+                cancelling_total: 0,
+                by_status: {},
+                by_type: {},
+                runtime_split: { modal: 0, local: 0, other: 0, unknown: 0 },
+                stale_after_seconds: 300,
+                cancelling_grace_seconds: 60,
+              },
+              active_operations: [],
+              stale_operations: [],
+              updated_at: "2026-03-02T12:05:00.000Z",
+            },
+            generated_at: "2026-03-02T12:05:00.000Z",
+            sequence: 1,
           },
-          active_operations: [],
-          stale_operations: [],
-          updated_at: "2026-03-02T12:05:00.000Z",
+          generated_at: "2026-03-02T12:05:00.000Z",
+          cache_age_ms: 0,
+          stale: false,
         });
+      }
+      if (url.includes("/api/admin/trr-api/snapshots/invalidate")) {
+        return jsonResponse({ invalidated: true });
       }
       if (url.includes("/api/admin/trr-api/social/ingest/stuck-jobs/cancel")) {
         queueStatusPayload = {
@@ -398,16 +400,21 @@ describe.skip("SystemHealthModal polling", () => {
     vi.restoreAllMocks();
   });
 
-  it("uses health-dot polling for header indicator", async () => {
+  it("uses live-status fallback polling for header indicator", async () => {
     const { container } = render(<HealthIndicator onClick={() => undefined} />);
 
     await waitFor(() => {
       expect(
         fetchAdminWithAuthMock.mock.calls.some(([input]) =>
-          String(input).includes("/api/admin/trr-api/social/ingest/health-dot"),
+          String(input).includes("/api/admin/trr-api/social/ingest/live-status"),
         ),
       ).toBe(true);
     }, { timeout: 4000 });
+    expect(
+      fetchAdminWithAuthMock.mock.calls.some(([input]) =>
+        String(input).includes("/api/admin/trr-api/social/ingest/health-dot"),
+      ),
+    ).toBe(false);
     expect(
       fetchAdminWithAuthMock.mock.calls.some(([input]) =>
         String(input).includes("/api/admin/trr-api/social/ingest/queue-status"),
@@ -417,7 +424,7 @@ describe.skip("SystemHealthModal polling", () => {
     expect(container.querySelector(".bg-emerald-500")).toBeTruthy();
   });
 
-  it("backs off repeated health-dot polling after a stable status in dev", async () => {
+  it("retries live-status fallback polling while the SSE stream is unavailable", async () => {
     vi.useFakeTimers();
 
     render(<HealthIndicator onClick={() => undefined} />);
@@ -425,25 +432,23 @@ describe.skip("SystemHealthModal polling", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(250);
     });
-    expect(healthDotCallCount()).toBe(1);
+    expect(liveStatusStreamCallCount()).toBe(1);
+    expect(liveStatusPollCallCount()).toBe(1);
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(30_000);
+      await vi.advanceTimersByTimeAsync(9_999);
     });
-    expect(healthDotCallCount()).toBe(7);
+    expect(liveStatusStreamCallCount()).toBeGreaterThanOrEqual(2);
+    expect(liveStatusPollCallCount()).toBeGreaterThanOrEqual(2);
 
+    const pollCountAfterReconnect = liveStatusPollCallCount();
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(14_000);
+      await vi.advanceTimersByTimeAsync(10_000);
     });
-    expect(healthDotCallCount()).toBe(7);
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(1_500);
-    });
-    expect(healthDotCallCount()).toBe(8);
+    expect(liveStatusPollCallCount()).toBeGreaterThan(pollCountAfterReconnect);
   });
 
-  it("pauses health-dot polling while hidden and refetches immediately when visible again", async () => {
+  it("pauses live-status polling while hidden and refetches immediately when visible again", async () => {
     vi.useFakeTimers();
 
     render(<HealthIndicator onClick={() => undefined} />);
@@ -451,7 +456,7 @@ describe.skip("SystemHealthModal polling", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(250);
     });
-    expect(healthDotCallCount()).toBe(1);
+    expect(liveStatusPollCallCount()).toBe(1);
 
     Object.defineProperty(document, "visibilityState", {
       configurable: true,
@@ -462,7 +467,7 @@ describe.skip("SystemHealthModal polling", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(20_000);
     });
-    expect(healthDotCallCount()).toBe(1);
+    expect(liveStatusPollCallCount()).toBe(1);
 
     Object.defineProperty(document, "visibilityState", {
       configurable: true,
@@ -473,51 +478,34 @@ describe.skip("SystemHealthModal polling", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(0);
     });
-    expect(healthDotCallCount()).toBe(2);
+    expect(liveStatusPollCallCount()).toBe(2);
   });
 
-  it("loads full queue diagnostics when modal is open", async () => {
+  it("loads full queue diagnostics from live-status when modal is open", async () => {
     render(<SystemHealthModal isOpen onClose={() => undefined} />);
 
     await waitFor(() => {
       expect(
         fetchAdminWithAuthMock.mock.calls.some(([input]) =>
-          String(input).includes("/api/admin/trr-api/social/ingest/queue-status"),
+          String(input).includes("/api/admin/trr-api/social/ingest/live-status"),
         ),
       ).toBe(true);
     }, { timeout: 4000 });
+    expect(
+      fetchAdminWithAuthMock.mock.calls.some(([input]) =>
+        String(input).includes("/api/admin/trr-api/social/ingest/queue-status"),
+      ),
+    ).toBe(false);
   });
 
-  it("normalizes aborted queue-status fetch errors to request timed out", async () => {
+  it("renders live-status fallback polling errors", async () => {
     fetchAdminWithAuthMock.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
-      if (url.includes("/api/admin/trr-api/social/ingest/health-dot")) {
-        return jsonResponse({
-          queue_enabled: true,
-          workers: { healthy: true, healthy_workers: 1 },
-          queue: { by_status: { running: 0, pending: 0, queued: 0, failed: 0 } },
-          updated_at: "2026-02-28T12:00:00.000Z",
-        });
+      if (url === "/api/admin/trr-api/social/ingest/live-status/stream") {
+        return jsonResponse({ error: "stream unavailable in test" }, 503);
       }
-      if (url.includes("/api/admin/trr-api/social/ingest/queue-status")) {
-        throw new Error("signal is aborted without reason");
-      }
-      if (url.includes("/api/admin/trr-api/operations/health")) {
-        return jsonResponse({
-          summary: {
-            active_total: 0,
-            stale_total: 0,
-            cancelling_total: 0,
-            by_status: {},
-            by_type: {},
-            runtime_split: { modal: 0, local: 0, other: 0, unknown: 0 },
-            stale_after_seconds: 300,
-            cancelling_grace_seconds: 60,
-          },
-          active_operations: [],
-          stale_operations: [],
-          updated_at: "2026-03-02T12:05:00.000Z",
-        });
+      if (url.includes("/api/admin/trr-api/social/ingest/live-status")) {
+        return jsonResponse({ error: "Request timed out" }, 504);
       }
       throw new Error(`Unexpected URL: ${url}`);
     });
@@ -667,7 +655,49 @@ describe.skip("SystemHealthModal polling", () => {
     expect(
       screen.getByText("Workers are available. Recent failures are historical, but they are still worth reviewing."),
     ).toBeInTheDocument();
-    expect(screen.getByText("0 likely stuck · 1 recent failures")).toBeInTheDocument();
+    expect(screen.getByText("0 likely stuck · 0 silent warnings · 1 recent failures")).toBeInTheDocument();
+  });
+
+  it("marks the modal as needing attention when silent-drop warnings exist", async () => {
+    queueStatusPayload = {
+      ...queueStatusPayload,
+      queue: {
+        ...queueStatusPayload.queue,
+        by_status: { running: 0, pending: 0, queued: 0, retrying: 0, failed: 0, cancelled: 0, completed: 313 },
+        recent_failures: [],
+        silent_drop_warnings_total: 1,
+        silent_drop_warnings: [
+          {
+            id: "job-silent-1",
+            run_id: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+            platform: "instagram",
+            account_handle: "bravotv",
+            stage: "shared_account_posts",
+            job_type: "shared_account_posts",
+            status: "completed",
+            posts_checked: 12,
+            posts_upserted: 0,
+            media_assets_persisted: 0,
+            observed_at: "2026-03-02T10:01:00.000Z",
+          },
+        ],
+        stuck_jobs_total: 0,
+        stuck_jobs: [],
+        stale_claims: { total: 0, by_reason: {}, by_platform: {}, by_stage: {} },
+      },
+    };
+
+    render(<SystemHealthModal isOpen onClose={() => undefined} />);
+
+    await waitFor(() => {
+      expect(screen.getAllByText("Needs Attention").length).toBeGreaterThan(0);
+    });
+
+    expect(screen.getByText("A completed social post job may have silently dropped post data.")).toBeInTheDocument();
+    expect(screen.getByText("Silent Data-Loss Watch")).toBeInTheDocument();
+    expect(screen.getByText("@bravotv")).toBeInTheDocument();
+    expect(screen.getByText(/Checked 12 posts · saved 0 · media assets 0/)).toBeInTheDocument();
+    expect(screen.getByText("0 likely stuck · 1 silent warnings · 0 recent failures")).toBeInTheDocument();
   });
 
   it("hides stale-only worker stage cards when current stage capacity exists", async () => {
@@ -1104,10 +1134,11 @@ describe.skip("SystemHealthModal polling", () => {
 
     await waitFor(() => {
       expect(screen.getByText("Admin Actions")).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "Cancel all active jobs" })).toBeInTheDocument();
+      expect(screen.getAllByRole("button", { name: "Cancel all active jobs" }).length).toBeGreaterThanOrEqual(2);
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Cancel all active jobs" }));
+    const cancelButtons = screen.getAllByRole("button", { name: "Cancel all active jobs" });
+    fireEvent.click(cancelButtons[cancelButtons.length - 1]);
 
     await waitFor(() => {
       expect(

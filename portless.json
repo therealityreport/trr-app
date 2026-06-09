@@ -1,0 +1,11 @@
+{
+  "apps": {
+    "apps/web": {
+      "name": "trr"
+    },
+    "apps/vue-wordle": {
+      "name": "wordle.trr",
+      "appPort": 5173
+    }
+  }
+}

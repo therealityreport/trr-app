@@ -56,7 +56,7 @@ function ForgotPasswordContent() {
     <div className="min-h-screen w-full relative bg-white">
       {/* Header */}
       <div className="w-full h-20 border-b border-black flex items-center justify-center">
-        <button 
+        <button type="button" 
           onClick={() => router.push("/")}
           className="text-2xl font-medium font-['Gloucester_OS_MT_Std'] text-black hover:text-gray-600 transition-colors cursor-pointer"
         >

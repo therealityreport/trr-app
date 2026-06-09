@@ -355,7 +355,7 @@ export default function SurveysSection({
           </p>
           <h3 className="text-xl font-bold text-zinc-900">{showName}</h3>
         </div>
-        <button
+        <button type="button"
           onClick={() => {
             resetForm();
             setShowForm(true);
@@ -370,7 +370,7 @@ export default function SurveysSection({
       {error && (
         <div className="rounded-lg border border-red-200 bg-red-50 p-4">
           <p className="text-sm text-red-700">{error}</p>
-          <button
+          <button type="button"
             onClick={() => setError(null)}
             className="mt-2 text-xs font-semibold text-red-600 hover:underline"
           >
@@ -686,7 +686,7 @@ export default function SurveysSection({
               ? "Create a survey linked to this season. Cast members will be automatically imported from the TRR database."
               : "Create a survey linked to this show. Cast members will be automatically imported from the TRR database."}
           </p>
-          <button
+          <button type="button"
             onClick={() => setShowForm(true)}
             className="mt-4 rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800"
           >

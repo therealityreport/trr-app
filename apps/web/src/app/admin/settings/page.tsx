@@ -5,6 +5,7 @@ import ClientOnly from "@/components/ClientOnly";
 import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
 import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
 import { buildAdminSectionBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
+import { ADMIN_ROOT_PATH } from "@/lib/admin/admin-route-paths";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 
 export default function AdminSettingsPage() {
@@ -36,7 +37,7 @@ export default function AdminSettingsPage() {
               <p className="text-sm text-zinc-500">Application and admin settings.</p>
             </div>
             <Link
-              href="/"
+              href={ADMIN_ROOT_PATH}
               className="rounded-lg border border-zinc-200 px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100"
             >
               Back to Admin

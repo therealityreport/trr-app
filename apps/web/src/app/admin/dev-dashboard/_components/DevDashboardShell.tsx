@@ -5,6 +5,7 @@ import Link from "next/link";
 import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
 import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
 import type { AdminBreadcrumbItem } from "@/lib/admin/admin-breadcrumbs";
+import { ADMIN_ROOT_PATH } from "@/lib/admin/admin-route-paths";
 
 const DEV_DASHBOARD_ROUTES = [
   { href: "/dev-dashboard", label: "Overview" },
@@ -66,7 +67,7 @@ export function DevDashboardShell({
           </div>
           <div className="flex flex-wrap gap-3">
             <Link
-              href="/"
+              href={ADMIN_ROOT_PATH}
               className="rounded-lg border border-zinc-200 px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100"
             >
               Back to Admin

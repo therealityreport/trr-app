@@ -1,5 +1,5 @@
 import "server-only";
-import { query as pgQuery, withTransaction } from "@/lib/server/postgres";
+import { query as pgQuery } from "@/lib/server/postgres";
 import { parseThumbnailCrop } from "@/lib/thumbnail-crop";
 import {
   getPhotoIdsByPersonId,
@@ -14,13 +14,18 @@ import {
 } from "@/lib/server/trr-api/fandom-ownership";
 import { slugifyToken } from "@/lib/slugify";
 import {
-  buildLegacyExternalIdsFromRecords,
   isPersonExternalIdSource,
   normalizePersonExternalIdValue,
   type PersonExternalIdInput,
   type PersonExternalIdRecord,
   type PersonExternalIdSource,
 } from "@/lib/admin/person-external-ids";
+import {
+  ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
+  buildAdminBackendStatusError,
+  fetchAdminBackendJson,
+} from "@/lib/server/trr-api/admin-read-proxy";
+import type { VerifiedAdminContext } from "@/lib/server/trr-api/internal-admin-auth";
 
 // ============================================================================
 // Types
@@ -205,14 +210,6 @@ export interface PersonEffectiveSocialHandles {
   youtube_handle: string | null;
 }
 
-type PersonOverrideHandles = {
-  person_id: string;
-  instagram_handle: string | null;
-  tiktok_handle: string | null;
-  twitter_handle: string | null;
-  youtube_handle: string | null;
-};
-
 const normalizeStringArray = (value: unknown): string[] => {
   if (!Array.isArray(value)) return [];
   return value.filter((item): item is string => typeof item === "string");
@@ -293,31 +290,6 @@ const normalizeTrrShowRow = (row: TrrShow): TrrShow => ({
 
 const CANONICAL_PROFILE_SOURCES = ["imdb", "tmdb", "fandom", "manual"] as const;
 type CanonicalProfileSource = (typeof CANONICAL_PROFILE_SOURCES)[number];
-const MANAGED_PERSON_EXTERNAL_ID_KEYS = [
-  "imdb",
-  "imdb_id",
-  "tmdb",
-  "tmdb_id",
-  "wikidata",
-  "wikidata_id",
-  "tvdb",
-  "tvdb_id",
-  "tvrage",
-  "tvrage_id",
-  "fandom",
-  "fandom_id",
-  "facebook",
-  "facebook_id",
-  "instagram",
-  "instagram_id",
-  "twitter",
-  "twitter_id",
-  "tiktok",
-  "tiktok_id",
-  "youtube",
-  "youtube_id",
-] as const;
-
 export interface TrrCastFandom {
   id: string;
   person_id: string;
@@ -2311,54 +2283,6 @@ export async function listEffectivePersonSocialHandlesByPersonIds(
   return handlesByPersonId;
 }
 
-const normalizePersonExternalIdInput = (
-  input: PersonExternalIdInput,
-): PersonExternalIdInput | null => {
-  if (!isPersonExternalIdSource(input.source_id)) return null;
-  const externalId = normalizePersonExternalIdValue(input.source_id, input.external_id);
-  if (!externalId) return null;
-  return {
-    source_id: input.source_id,
-    external_id: externalId,
-    is_primary: input.is_primary ?? true,
-    valid_from: input.valid_from ?? null,
-    valid_to: input.valid_to ?? null,
-  };
-};
-
-const buildMirroredPersonExternalIds = (
-  existingExternalIds: Record<string, unknown> | null | undefined,
-  activeRecords: PersonExternalIdRecord[],
-): Record<string, unknown> => {
-  const next: Record<string, unknown> = {
-    ...((existingExternalIds ?? {}) as Record<string, unknown>),
-  };
-  for (const key of MANAGED_PERSON_EXTERNAL_ID_KEYS) {
-    delete next[key];
-  }
-  Object.assign(next, buildLegacyExternalIdsFromRecords(activeRecords));
-  return next;
-};
-
-const buildPersonOverrideHandleValues = (
-  activeRecords: PersonExternalIdRecord[],
-): Pick<
-  PersonOverrideHandles,
-  "instagram_handle" | "tiktok_handle" | "twitter_handle" | "youtube_handle"
-> => {
-  const findSourceValue = (source: PersonExternalIdSource): string | null => {
-    const record = activeRecords.find((candidate) => candidate.source_id === source);
-    return record ? normalizePersonExternalIdValue(source, record.external_id) : null;
-  };
-
-  return {
-    instagram_handle: findSourceValue("instagram"),
-    tiktok_handle: findSourceValue("tiktok"),
-    twitter_handle: findSourceValue("twitter"),
-    youtube_handle: findSourceValue("youtube"),
-  };
-};
-
 const mapPrimaryPersonExternalIdRows = (
   rows: Array<Record<string, unknown>>,
 ): PersonExternalIdRecord[] =>
@@ -2386,176 +2310,34 @@ const mapPrimaryPersonExternalIdRows = (
       return records;
     }, []);
 
-const PERSON_EXTERNAL_ID_UNIQUE_CONFLICT_MESSAGES: Record<string, string> = {
-  person_external_ids_unique_active_handles_uq:
-    "That social handle is already assigned to another person.",
-  person_external_ids_unique_identifiers_uq:
-    "That external ID is already assigned to another person.",
-  person_external_ids_primary_uq:
-    "Only one primary record is allowed per source for a person.",
-};
-
-const coerceRepositoryErrorMessage = (error: unknown): string => {
-  if (error && typeof error === "object") {
-    const candidate = error as { code?: string; constraint?: string; message?: string };
-    if (candidate.code === "23505" && candidate.constraint) {
-      return PERSON_EXTERNAL_ID_UNIQUE_CONFLICT_MESSAGES[candidate.constraint] ?? "External ID conflict";
-    }
-    if (typeof candidate.message === "string" && candidate.message.trim().length > 0) {
-      return candidate.message;
-    }
-  }
-  return "Failed to update person external IDs.";
-};
-
 export async function syncPersonExternalIds(
   personId: string,
   inputs: PersonExternalIdInput[],
+  options?: { adminContext?: VerifiedAdminContext },
 ): Promise<PersonExternalIdRecord[]> {
-  const normalized = inputs
-    .map(normalizePersonExternalIdInput)
-    .filter((row): row is PersonExternalIdInput => Boolean(row));
-
-  const dedupedBySource = new Map<PersonExternalIdSource, PersonExternalIdInput>();
-  for (const row of normalized) {
-    dedupedBySource.set(row.source_id, { ...row, is_primary: true });
-  }
-
-  try {
-    return await withTransaction(async (client) => {
-      const currentPersonResult = await client.query<{
-        external_ids: Record<string, unknown> | null;
-      }>(
-        `SELECT external_ids
-         FROM core.people
-         WHERE id = $1::uuid
-         LIMIT 1`,
-        [personId]
-      );
-      if (currentPersonResult.rows.length === 0) {
-        throw new Error("Person not found");
-      }
-
-      const desiredRows = Array.from(dedupedBySource.values());
-      for (const row of desiredRows) {
-        await client.query(
-          `INSERT INTO core.person_external_ids (
-             person_id,
-             source_id,
-             external_id,
-             is_primary,
-             valid_from,
-             valid_to,
-             observed_at
-           )
-           VALUES ($1::uuid, $2::text, $3::text, true, $4::date, $5::date, now())
-           ON CONFLICT (person_id, source_id) WHERE (is_primary = true)
-           DO UPDATE
-           SET external_id = EXCLUDED.external_id,
-               valid_from = EXCLUDED.valid_from,
-               valid_to = EXCLUDED.valid_to,
-               observed_at = now(),
-               updated_at = now()`,
-          [personId, row.source_id, row.external_id, row.valid_from ?? null, row.valid_to ?? null]
-        );
-      }
-
-      const desiredSources = desiredRows.map((row) => row.source_id);
-      if (desiredSources.length > 0) {
-        await client.query(
-          `UPDATE core.person_external_ids
-           SET valid_to = COALESCE(valid_to, CURRENT_DATE),
-               updated_at = now()
-           WHERE person_id = $1::uuid
-             AND is_primary = true
-             AND source_id <> ALL($2::text[])`,
-          [personId, desiredSources]
-        );
-      } else {
-        await client.query(
-          `UPDATE core.person_external_ids
-           SET valid_to = COALESCE(valid_to, CURRENT_DATE),
-               updated_at = now()
-           WHERE person_id = $1::uuid
-             AND is_primary = true`,
-          [personId]
-        );
-      }
-
-      const primaryRowsResult = await client.query<Record<string, unknown>>(
-        `SELECT
-           id,
-           source_id,
-           external_id,
-           is_primary,
-           valid_from,
-           valid_to,
-           observed_at,
-           created_at,
-           updated_at
-         FROM core.person_external_ids
-         WHERE person_id = $1::uuid
-           AND is_primary = true
-           AND valid_to IS NULL
-         ORDER BY source_id ASC`,
-        [personId]
-      );
-
-      const activeRecords = mapPrimaryPersonExternalIdRows(primaryRowsResult.rows);
-      const existingExternalIds = currentPersonResult.rows[0]?.external_ids ?? {};
-      const nextExternalIds = buildMirroredPersonExternalIds(existingExternalIds, activeRecords);
-      await client.query(
-        `UPDATE core.people
-         SET external_ids = $2::jsonb,
-             updated_at = now()
-         WHERE id = $1::uuid`,
-        [personId, JSON.stringify(nextExternalIds)]
-      );
-
-      const nextHandles = buildPersonOverrideHandleValues(activeRecords);
-      const hasAnyHandle = Object.values(nextHandles).some((value) => Boolean(value));
-      const overrideRowExists = await client.query<{ person_id: string }>(
-        `SELECT person_id
-         FROM core.people_overrides
-         WHERE person_id = $1::uuid
-         LIMIT 1`,
-        [personId]
-      );
-      if (hasAnyHandle || overrideRowExists.rows.length > 0) {
-        await client.query(
-          `INSERT INTO core.people_overrides (
-             person_id,
-             instagram_handle,
-             tiktok_handle,
-             twitter_handle,
-             youtube_handle
-           )
-           VALUES ($1::uuid, $2::text, $3::text, $4::text, $5::text)
-           ON CONFLICT (person_id)
-           DO UPDATE SET
-             instagram_handle = EXCLUDED.instagram_handle,
-             tiktok_handle = EXCLUDED.tiktok_handle,
-             twitter_handle = EXCLUDED.twitter_handle,
-             youtube_handle = EXCLUDED.youtube_handle,
-             updated_at = now()`,
-          [
-            personId,
-            nextHandles.instagram_handle,
-            nextHandles.tiktok_handle,
-            nextHandles.twitter_handle,
-            nextHandles.youtube_handle,
-          ]
-        );
-      }
-
-      return activeRecords;
+  const upstream = await fetchAdminBackendJson(`/admin/people/${personId}/external-ids`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ external_ids: inputs }),
+    adminContext: options?.adminContext,
+    timeoutMs: ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
+    routeName: "person-external-ids:sync",
+    requestRole: "primary",
+  });
+  if (upstream.status !== 200) {
+    throw buildAdminBackendStatusError({
+      status: upstream.status,
+      data: upstream.data,
+      fallbackMessage: "Failed to update person external IDs.",
+      routeName: "person-external-ids:sync",
+      requestRole: "primary",
     });
-  } catch (error) {
-    if (error instanceof Error && error.message === "Person not found") {
-      throw error;
-    }
-    throw new Error(coerceRepositoryErrorMessage(error));
   }
+
+  const rawRows = Array.isArray(upstream.data.external_ids) ? upstream.data.external_ids : [];
+  return mapPrimaryPersonExternalIdRows(
+    rawRows.filter((row): row is Record<string, unknown> => Boolean(row) && typeof row === "object"),
+  );
 }
 
 export async function updatePersonCanonicalProfileSourceOrder(

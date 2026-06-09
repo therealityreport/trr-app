@@ -1318,7 +1318,7 @@ export default function CastSocialBladeComparison({
           Refresh SocialBlade here to backfill missing cast rows without visiting each person page.
         </p>
         <div className="mt-4 flex items-center justify-center gap-2">
-          <button
+          <button type="button"
             onClick={() => void triggerBatchRefresh(refreshableEntries.length > 0 ? refreshableEntries : entries)}
             disabled={batchRefreshing}
             className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 shadow-sm transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
@@ -1326,7 +1326,7 @@ export default function CastSocialBladeComparison({
             {batchRefreshing ? "Refreshing SocialBlade..." : "Refresh SocialBlade"}
           </button>
           {failedEntries.length > 0 && (
-            <button
+            <button type="button"
               onClick={() => void triggerBatchRefresh(failedEntries, true)}
               disabled={batchRefreshing}
               className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-semibold text-red-700 shadow-sm transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
@@ -1369,7 +1369,7 @@ export default function CastSocialBladeComparison({
             </span>
           </p>
           <div className="flex items-center gap-2">
-            <button
+            <button type="button"
               onClick={() => void triggerBatchRefresh(refreshableEntries.length > 0 ? refreshableEntries : entries)}
               disabled={batchRefreshing}
               className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 shadow-sm transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
@@ -1377,7 +1377,7 @@ export default function CastSocialBladeComparison({
               {batchRefreshing ? "Refreshing..." : "Refresh SocialBlade"}
             </button>
             {failedEntries.length > 0 && (
-              <button
+              <button type="button"
                 onClick={() => void triggerBatchRefresh(failedEntries, true)}
                 disabled={batchRefreshing}
                 className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-semibold text-red-700 shadow-sm transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"

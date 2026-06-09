@@ -6,6 +6,29 @@ const MAX_DEPTH = 6;
 const SENSITIVE_KEY_RE =
   /(token|secret|password|cookie|authorization|api[_-]?key|session|credential|jwt|bearer|email|uid|user[_-]?id)/i;
 
+function envFlag(name: string): boolean {
+  return /^(1|true|yes|on)$/i.test(process.env[name]?.trim() ?? "");
+}
+
+function isLocalDebugHost(hostname: string): boolean {
+  const normalized = hostname.trim().toLowerCase();
+  return (
+    normalized === "localhost" ||
+    normalized === "127.0.0.1" ||
+    normalized === "::1" ||
+    normalized === "[::1]" ||
+    normalized.endsWith(".localhost")
+  );
+}
+
+function remoteDebugLoggingEnabled(request: NextRequest): boolean {
+  const hostname = request.nextUrl.hostname || new URL(request.url).hostname;
+  if (isLocalDebugHost(hostname)) {
+    return true;
+  }
+  return envFlag("TRR_REMOTE_DEBUG_LOG_ENABLED");
+}
+
 function redactPayload(value: unknown, depth = 0): unknown {
   if (depth > MAX_DEPTH) return "[TRUNCATED]";
   if (value === null || value === undefined) return value;
@@ -20,12 +43,13 @@ function redactPayload(value: unknown, depth = 0): unknown {
 }
 
 async function isAuthorized(request: NextRequest): Promise<boolean> {
+  const sharedSecretAuthEnabled = envFlag("TRR_DEBUG_LOG_SHARED_SECRET_ENABLED");
   const sharedSecret = process.env.TRR_INTERNAL_ADMIN_SHARED_SECRET?.trim() ?? "";
   const providedSecret =
     request.headers.get("x-trr-internal-admin-secret")?.trim() ||
     request.headers.get("x-internal-admin-secret")?.trim() ||
     "";
-  if (sharedSecret && providedSecret && providedSecret === sharedSecret) {
+  if (sharedSecretAuthEnabled && sharedSecret && providedSecret && providedSecret === sharedSecret) {
     return true;
   }
   try {
@@ -38,6 +62,10 @@ async function isAuthorized(request: NextRequest): Promise<boolean> {
 
 export async function POST(request: NextRequest) {
   try {
+    if (!remoteDebugLoggingEnabled(request)) {
+      return NextResponse.json({ error: "remote_debug_logging_disabled" }, { status: 404 });
+    }
+
     if (!(await isAuthorized(request))) {
       return NextResponse.json({ error: "forbidden" }, { status: 403 });
     }

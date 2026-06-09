@@ -40,7 +40,7 @@ export class ErrorBoundary extends React.Component<
             <p className="text-gray-600 font-hamburg mb-4">
               We&apos;re having trouble loading this page. Please try refreshing or contact support if the problem persists.
             </p>
-            <button
+            <button type="button"
               onClick={() => window.location.reload()}
               className="bg-neutral-900 text-white px-6 py-2 rounded font-hamburg hover:bg-neutral-800 transition-colors"
             >

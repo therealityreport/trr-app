@@ -164,7 +164,7 @@ export function QuestionBuilder({
       {error && (
         <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-red-700">
           {error}
-          <button
+          <button type="button"
             onClick={() => setError(null)}
             className="ml-2 text-red-800 underline"
           >
@@ -275,7 +275,7 @@ export function QuestionBuilder({
                   </p>
                   <p className="mt-2 text-zinc-900">{question.question_text}</p>
                 </div>
-                <button
+                <button type="button"
                   onClick={() => handleDeleteQuestion(question.id)}
                   className="text-sm text-red-600 hover:text-red-800"
                 >
@@ -305,7 +305,7 @@ export function QuestionBuilder({
                             </span>{" "}
                             {option.option_text}
                           </span>
-                          <button
+                          <button type="button"
                             onClick={() =>
                               handleDeleteOption(question.id, option.id)
                             }
@@ -334,13 +334,13 @@ export function QuestionBuilder({
                         onChange={(e) => setNewOptionText(e.target.value)}
                         className="flex-1 rounded-md border border-zinc-300 px-2 py-1 text-sm"
                       />
-                      <button
+                      <button type="button"
                         onClick={() => handleAddOption(question.id)}
                         className="rounded bg-zinc-900 px-3 py-1 text-sm text-white"
                       >
                         Add
                       </button>
-                      <button
+                      <button type="button"
                         onClick={() => {
                           setAddingOptionTo(null);
                           setNewOptionKey("");
@@ -352,7 +352,7 @@ export function QuestionBuilder({
                       </button>
                     </div>
                   ) : (
-                    <button
+                    <button type="button"
                       onClick={() => setAddingOptionTo(question.id)}
                       className="mt-3 text-sm text-zinc-600 hover:text-zinc-900"
                     >

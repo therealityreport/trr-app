@@ -14,11 +14,6 @@ export interface MediaLinkRow {
   created_at: string;
 }
 
-export interface TagPerson {
-  id?: string;
-  name: string;
-}
-
 const MEDIA_LINK_FIELDS =
   "id, entity_type, entity_id, media_asset_id, kind, position, context, created_at";
 
@@ -29,97 +24,6 @@ export async function getMediaLinkById(linkId: string): Promise<MediaLinkRow | n
      WHERE id = $1::uuid
      LIMIT 1`,
     [linkId]
-  );
-  return result.rows[0] ?? null;
-}
-
-export async function getMediaLinksByAssetId(
-  mediaAssetId: string
-): Promise<MediaLinkRow[]> {
-  const result = await query<MediaLinkRow>(
-    `SELECT ${MEDIA_LINK_FIELDS}
-     FROM core.media_links
-     WHERE media_asset_id = $1::uuid
-       AND entity_type = 'person'
-       AND kind = 'gallery'`,
-    [mediaAssetId]
-  );
-  return result.rows;
-}
-
-export async function ensureMediaLinksForPeople(
-  mediaAssetId: string,
-  people: TagPerson[],
-  baseContext: Record<string, unknown>
-): Promise<void> {
-  const peopleWithIds = people.filter((person) => Boolean(person.id));
-  if (peopleWithIds.length === 0) return;
-
-  const existing = await getMediaLinksByAssetId(mediaAssetId);
-  const existingIds = new Set(existing.map((link) => link.entity_id));
-
-  const rows = peopleWithIds
-    .filter((person) => person.id && !existingIds.has(person.id))
-    .map((person) => ({
-      entity_type: "person",
-      entity_id: person.id as string,
-      media_asset_id: mediaAssetId,
-      kind: "gallery",
-      position: null,
-      context: baseContext,
-    }));
-
-  if (rows.length === 0) return;
-
-  const values: unknown[] = [];
-  const tuples: string[] = [];
-  let idx = 1;
-  for (const row of rows) {
-    tuples.push(
-      `($${idx++}::text, $${idx++}::uuid, $${idx++}::uuid, $${idx++}::text, $${idx++}::int, $${idx++}::jsonb)`
-    );
-    values.push(
-      row.entity_type,
-      row.entity_id,
-      row.media_asset_id,
-      row.kind,
-      row.position,
-      JSON.stringify(row.context ?? {})
-    );
-  }
-
-  await query(
-    `INSERT INTO core.media_links (entity_type, entity_id, media_asset_id, kind, position, context)
-     VALUES ${tuples.join(", ")}`,
-    values
-  );
-}
-
-export async function updateMediaLinksContext(
-  mediaAssetId: string,
-  context: Record<string, unknown>
-): Promise<void> {
-  await query(
-    `UPDATE core.media_links
-     SET context = $2::jsonb
-     WHERE media_asset_id = $1::uuid
-       AND entity_type = 'person'
-       AND kind = 'gallery'`,
-    [mediaAssetId, JSON.stringify(context)]
-  );
-}
-
-export async function setMediaLinkContextById(
-  linkId: string,
-  context: Record<string, unknown>
-): Promise<MediaLinkRow | null> {
-  const result = await query<MediaLinkRow>(
-    `UPDATE core.media_links
-     SET context = $2::jsonb,
-         updated_at = NOW()
-     WHERE id = $1::uuid
-     RETURNING ${MEDIA_LINK_FIELDS}`,
-    [linkId, JSON.stringify(context)]
   );
   return result.rows[0] ?? null;
 }

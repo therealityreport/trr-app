@@ -380,7 +380,7 @@ export default function BrandAthleticShapes() {
             Ranking NFL playoff coaches by who gives their team the biggest edge on fourth down.
           </div>
           <div style={{ display: "flex", gap: 8 }}>
-            <button
+            <button type="button"
               style={{
                 fontFamily: "var(--dd-font-sans)",
                 fontWeight: 600,
@@ -395,7 +395,7 @@ export default function BrandAthleticShapes() {
             >
               Read More
             </button>
-            <button
+            <button type="button"
               style={{
                 fontFamily: "var(--dd-font-sans)",
                 fontWeight: 600,

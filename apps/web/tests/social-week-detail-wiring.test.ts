@@ -2,6 +2,28 @@ import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 
+const readSource = (relativePath: string): string =>
+  fs.readFileSync(path.resolve(__dirname, relativePath), "utf8");
+
+const sourceBetween = (contents: string, start: string, end: string): string => {
+  const startIndex = contents.indexOf(start);
+  expect(startIndex, `Expected source to contain start marker: ${start}`).toBeGreaterThanOrEqual(0);
+  const endIndex = contents.indexOf(end, startIndex + start.length);
+  expect(endIndex, `Expected source to contain end marker after ${start}: ${end}`).toBeGreaterThan(startIndex);
+  return contents.slice(startIndex, endIndex);
+};
+
+const expectInOrder = (contents: string, snippets: string[]): void => {
+  let previousIndex = -1;
+  for (const snippet of snippets) {
+    const nextIndex = contents.indexOf(snippet, previousIndex + 1);
+    expect(nextIndex, `Expected source to contain snippet after index ${previousIndex}: ${snippet}`).toBeGreaterThan(
+      previousIndex,
+    );
+    previousIndex = nextIndex;
+  }
+};
+
 describe("social week detail wiring", () => {
   it("uses speed-first week route retry/timeout defaults", () => {
     const filePath = path.resolve(
@@ -62,37 +84,54 @@ describe("social week detail wiring", () => {
     expect(contents).not.toMatch(/useEffect\(\(\) => \{\s*void fetchWeekMetricsPosts\(\);\s*\}, \[fetchWeekMetricsPosts\]\);/s);
   });
 
-  // TODO(week-detail-source-patterns): Re-enable after rewriting these three
-  // assertions for the post-6e960f2 source shape.
-  //
-  // These are source-text pattern matchers (fs.readFileSync + toMatch(regex))
-  // that assert exact code strings live in WeekDetailPageView.tsx and
-  // season-social-analytics-section.tsx. Commit 6e960f2 refactored both files
-  // (snapshot caching, polling consolidation, dev-low-heat gating) but did
-  // not update the regex patterns here, so they fail on the current source:
-  //   - "includes season_id in week ingest and poll requests" — URL template
-  //     strings were rewritten.
-  //   - "uses timeout-bounded fetches for week detail and sync polling" —
-  //     several timeout-error messages and helpers were renamed.
-  //   - "throttles week and season social polling in dev when tabs are
-  //     hidden" — the DEV_LOW_HEAT_MODE gating was moved and rewritten.
-  //
-  // This is pre-existing main breakage: web-tests.yml only runs on
-  // pull_request events, so nothing re-ran main's suite after 6e960f2
-  // landed. PR #84 is the first PR to surface it. Skipping (not patching)
-  // because the tests assert on old source layout and need to be rewritten
-  // against the new file shape.
-  it.skip("includes season_id in week ingest and poll requests", () => {
-    const filePath = path.resolve(
-      __dirname,
-      "../src/components/admin/social-week/WeekDetailPageView.tsx",
-    );
-    const contents = fs.readFileSync(filePath, "utf8");
+  it("includes season_id in week ingest and poll requests", () => {
+    const contents = readSource("../src/components/admin/social-week/WeekDetailPageView.tsx");
 
-    expect(contents).toMatch(/social\/runs\/\$\{runId\}\/progress\?\$\{progressParams\.toString\(\)\}/);
-    expect(contents).toMatch(/social\/analytics\/week\/\$\{weekIndex\}\/live-health\?\$\{params\.toString\(\)\}/);
-    expect(contents).toMatch(/social\/sync-sessions\$\{ingestParams\.toString\(\) \? `\?\$\{ingestParams\.toString\(\)\}` : ""\}/);
-    expect(contents).toMatch(/progressParams = new URLSearchParams\(\{\s*recent_log_limit:\s*"40"/s);
+    const runProgressBlock = sourceBetween(
+      contents,
+      "const progressParams = new URLSearchParams({ recent_log_limit: \"40\" });",
+      "const progressPayload = await parseResponseJson<RunProgressSnapshot>(",
+    );
+    expectInOrder(runProgressBlock, [
+      "const progressParams = new URLSearchParams({ recent_log_limit: \"40\" });",
+      "if (resolvedSeasonId) {",
+      "progressParams.set(\"season_id\", resolvedSeasonId);",
+      "social/runs/${runId}/progress?${progressParams.toString()}",
+      "REQUEST_TIMEOUT_MS.runProgress",
+    ]);
+
+    const syncSessionKickoffBlock = sourceBetween(
+      contents,
+      "const ingestParams = new URLSearchParams();",
+      "const adoptRun = (runId: string | null, syncSessionIdValue: string, operationId?: string | null) => {",
+    );
+    expectInOrder(syncSessionKickoffBlock, [
+      "const ingestParams = new URLSearchParams();",
+      "if (resolvedSeasonId) {",
+      "ingestParams.set(\"season_id\", resolvedSeasonId);",
+      "social/sync-sessions${ingestParams.toString() ? `?${ingestParams.toString()}` : \"\"}",
+    ]);
+
+    const syncSessionPollBlock = sourceBetween(
+      contents,
+      "const fetchSyncSessionProgress = useCallback(",
+      "const fetchCommentsCoverage = useCallback",
+    );
+    expectInOrder(syncSessionPollBlock, [
+      "if (resolvedSeasonId) {",
+      "params.set(\"season_id\", resolvedSeasonId);",
+      "social/sync-sessions/${sessionId}${params.toString() ? `?${params.toString()}` : \"\"}",
+      "REQUEST_TIMEOUT_MS.syncRuns",
+    ]);
+
+    const syncSessionStreamBlock = sourceBetween(
+      contents,
+      "const syncSessionStream = useSharedSseResource<SocialSyncSessionStreamPayload>({",
+      "useEffect(() => {",
+    );
+    expect(syncSessionStreamBlock).toContain(
+      "social/sync-sessions/${syncSessionId}/stream${resolvedSeasonId ? `?season_id=${encodeURIComponent(resolvedSeasonId)}` : \"\"}",
+    );
   });
 
   it("uses the active day filter when kicking off a sync session", () => {
@@ -108,29 +147,66 @@ describe("social week detail wiring", () => {
     expect(contents).toMatch(/dateEnd: syncWindow\.dateEnd,/);
   });
 
-  // See TODO above — pre-existing main breakage from commit 6e960f2.
-  it.skip("uses timeout-bounded fetches for week detail and sync polling", () => {
-    const filePath = path.resolve(
-      __dirname,
-      "../src/components/admin/social-week/WeekDetailPageView.tsx",
-    );
-    const contents = fs.readFileSync(filePath, "utf8");
+  it("uses timeout-bounded fetches for week detail and sync polling", () => {
+    const contents = readSource("../src/components/admin/social-week/WeekDetailPageView.tsx");
 
-    expect(contents).toMatch(/const REQUEST_TIMEOUT_MS = \{/);
-    expect(contents).toMatch(/const fetchWithTimeout = async/);
-    expect(contents).toMatch(/weekSummary:\s*40_000/);
-    expect(contents).toMatch(/Week detail request timed out/);
-    expect(contents).toMatch(/Week detail summary request timed out/);
-    expect(contents).toMatch(/Sync runs request timed out/);
-    expect(contents).toMatch(/Sync run progress request timed out/);
-    expect(contents).toMatch(/Week live health request timed out/);
-    expect(contents).toMatch(/ingestKickoff:\s*210_000/);
-    expect(contents).toMatch(/Sync kickoff request timed out/);
-    expect(contents).toMatch(/social\/sync-sessions\/\$\{sessionId\}/);
-    expect(contents).toMatch(/Waiting for sync session follow-up/);
-    expect(contents).toMatch(/SYNC_POLL_BACKOFF_MS/);
-    expect(contents).toMatch(/syncPollFailureCountRef/);
-    expect(contents).toMatch(/syncPollFailureCountRef\.current >= 2 && !isTransientDevRestartMessage\(message\)/);
+    const timeoutConfig = sourceBetween(contents, "const REQUEST_TIMEOUT_MS = {", "} as const;");
+    expect(timeoutConfig).toMatch(/weekDetail:\s*50_000/);
+    expect(timeoutConfig).toMatch(/weekSummary:\s*40_000/);
+    expect(timeoutConfig).toMatch(/ingestKickoff:\s*210_000/);
+    expect(timeoutConfig).toMatch(/syncRuns:\s*30_000/);
+    expect(timeoutConfig).toMatch(/runProgress:\s*30_000/);
+    expect(timeoutConfig).toMatch(/weekLiveHealth:\s*20_000/);
+
+    const timeoutHelper = sourceBetween(contents, "const fetchWithTimeout = async (", "const registerInFlightRequest = (");
+    expectInOrder(timeoutHelper, [
+      "const controller = new AbortController();",
+      "const timeoutId = setTimeout(() => controller.abort(), timeoutMs);",
+      "externalSignal.addEventListener(\"abort\", onExternalAbort, { once: true });",
+      "throw new Error(timeoutMessage);",
+      "clearTimeout(timeoutId);",
+    ]);
+
+    const weekDetailFetch = sourceBetween(contents, "const fetchData = useCallback(", "const fetchPlatformTotalsSummary = useCallback");
+    expectInOrder(weekDetailFetch, [
+      "fetchWithTimeout(",
+      "REQUEST_TIMEOUT_MS.weekDetail",
+      "\"Week detail request timed out\"",
+    ]);
+
+    const weekSummaryFetch = sourceBetween(contents, "const fetchPlatformTotalsSummary = useCallback", "const fetchWeekMetricsPosts = useCallback");
+    expectInOrder(weekSummaryFetch, [
+      "fetchWithTimeout(",
+      "REQUEST_TIMEOUT_MS.weekSummary",
+      "\"Week detail summary request timed out\"",
+    ]);
+
+    const runProgressFetch = sourceBetween(contents, "const fetchSyncProgress = useCallback(", "const queueSyncPass = useCallback");
+    expectInOrder(runProgressFetch, [
+      "fetchWithTimeout(",
+      "REQUEST_TIMEOUT_MS.runProgress",
+      "\"Sync run progress request timed out\"",
+      "options?.signal",
+    ]);
+
+    const syncSessionKickoff = sourceBetween(contents, "const queueSyncPass = useCallback", "const syncAllCommentsForWeek = useCallback");
+    expectInOrder(syncSessionKickoff, [
+      "fetchWithTimeout(",
+      "REQUEST_TIMEOUT_MS.ingestKickoff",
+      "SYNC_KICKOFF_TIMEOUT_MESSAGE",
+    ]);
+
+    const snapshotFetch = sourceBetween(contents, "const fetchWeekSnapshot = useCallback(", "const refreshWeekSnapshotNow = useCallback");
+    expectInOrder(snapshotFetch, [
+      "fetchWithTimeout(",
+      "REQUEST_TIMEOUT_MS.runProgress",
+      "\"Week social snapshot request timed out\"",
+    ]);
+
+    const fallbackPolling = sourceBetween(contents, "if (!syncRunId || !syncingComments) return;", "useEffect(() => {\n    if (!syncingComments && syncPass !== 0)");
+    expect(fallbackPolling).toContain("SYNC_POLL_BACKOFF_MS");
+    expect(fallbackPolling).toContain("syncPollFailureCountRef.current >= 2 && !isTransientDevRestartMessage(message)");
+    expect(contents).toContain("Waiting for sync session follow-up");
   });
 
   it("shows detailed sync-session gap counters including comment media", () => {
@@ -214,33 +290,53 @@ describe("social week detail wiring", () => {
     expect(contents).toMatch(/syncPollFailureCountRef\.current = Math\.max\(1, syncPollFailureCountRef\.current\)/);
   });
 
-  // See TODO above — pre-existing main breakage from commit 6e960f2.
-  it.skip("throttles week and season social polling in dev when tabs are hidden", () => {
-    const weekFilePath = path.resolve(
-      __dirname,
-      "../src/components/admin/social-week/WeekDetailPageView.tsx",
+  it("throttles week and season social polling in dev when tabs are hidden", () => {
+    const weekContents = readSource("../src/components/admin/social-week/WeekDetailPageView.tsx");
+    const seasonContents = readSource("../src/components/admin/season-social-analytics-section.tsx");
+    const sharedPollingContents = readSource("../src/lib/admin/shared-live-resource.ts");
+
+    const sharedVisibilityGate = sourceBetween(
+      sharedPollingContents,
+      "private shouldRunInThisTab(): boolean {",
+      "private publish =",
     );
-    const weekContents = fs.readFileSync(weekFilePath, "utf8");
+    expectInOrder(sharedVisibilityGate, [
+      "if (typeof document === \"undefined\") return false;",
+      "if (document.visibilityState !== \"visible\") return false;",
+      "return this.hasActiveInterest();",
+    ]);
+    expect(sharedPollingContents).toContain("private handleVisibilityChange = (): void => {");
+    expect(sharedPollingContents).toContain("this.requestImmediateRefresh();");
+    expect(sharedPollingContents).toContain("this.reconcile();");
 
-    expect(weekContents).toMatch(/const DEV_LOW_HEAT_MODE = process\.env\.NODE_ENV !== "production";/);
-    expect(weekContents).toMatch(/const SYNC_GALLERY_REFRESH_MS = DEV_LOW_HEAT_MODE \? 10_000 : 4_000;/);
-    expect(weekContents).toMatch(/const SYNC_ACTIVE_POLL_INTERVAL_MS = DEV_LOW_HEAT_MODE \? 10_000 : 4_000;/);
-    expect(weekContents).toMatch(/const \[isDocumentVisible, setIsDocumentVisible\] = useState<boolean>\(\(\) => \{/);
-    expect(weekContents).toMatch(/const syncPollingEnabled = !DEV_LOW_HEAT_MODE \|\| isDocumentVisible;/);
-    expect(weekContents).toMatch(/if \(!syncPollingEnabled\) return;/);
+    const weekVisibilityState = sourceBetween(weekContents, "const [isDocumentVisible, setIsDocumentVisible]", "const resolvedSeasonId = useMemo");
+    expectInOrder(weekVisibilityState, [
+      "document.visibilityState === \"visible\"",
+      "document.addEventListener(\"visibilitychange\", handleVisibilityChange);",
+      "document.removeEventListener(\"visibilitychange\", handleVisibilityChange);",
+      "const syncPollingEnabled = !DEV_LOW_HEAT_MODE || isDocumentVisible;",
+    ]);
+    expect(weekContents).toContain("const SYNC_GALLERY_REFRESH_MS = DEV_LOW_HEAT_MODE ? 10_000 : 4_000;");
+    expect(weekContents).toContain("const SYNC_ACTIVE_POLL_INTERVAL_MS = DEV_LOW_HEAT_MODE ? 10_000 : 4_000;");
+    expect(weekContents.match(/if \(!syncPollingEnabled\) return;/g)?.length).toBeGreaterThanOrEqual(3);
+    expectInOrder(weekContents, [
+      "const liveWeekSnapshot = useSharedPollingResource",
+      "intervalMs: syncingComments ? SYNC_ACTIVE_POLL_INTERVAL_MS : 30_000",
+    ]);
 
-    const seasonFilePath = path.resolve(
-      __dirname,
-      "../src/components/admin/season-social-analytics-section.tsx",
-    );
-    const seasonContents = fs.readFileSync(seasonFilePath, "utf8");
-
-    expect(seasonContents).toMatch(/const DEV_LOW_HEAT_MODE = process\.env\.NODE_ENV !== "production";/);
-    expect(seasonContents).toMatch(/const DEV_VISIBLE_POLL_INTERVAL_MS = 8_000;/);
-    expect(seasonContents).toMatch(/const \[isDocumentVisible, setIsDocumentVisible\] = useState<boolean>\(\(\) => \{/);
-    expect(seasonContents).toMatch(/if \(DEV_LOW_HEAT_MODE && !isDocumentVisible\) return;/);
-    expect(seasonContents).toMatch(/const baseInterval = DEV_LOW_HEAT_MODE \? DEV_VISIBLE_POLL_INTERVAL_MS : runningIngest \? 3_000 : 5_000;/);
-    expect(seasonContents).toMatch(/const refreshInterval = DEV_LOW_HEAT_MODE\s*\? DEV_VISIBLE_POLL_INTERVAL_MS/s);
+    const seasonVisibilityState = sourceBetween(seasonContents, "const [isDocumentVisible, setIsDocumentVisible]", "const showRouteSlug =");
+    expectInOrder(seasonVisibilityState, [
+      "document.visibilityState === \"visible\"",
+      "document.addEventListener(\"visibilitychange\", handleVisibilityChange);",
+      "document.removeEventListener(\"visibilitychange\", handleVisibilityChange);",
+    ]);
+    expect(seasonContents).toContain("const DEV_LOW_HEAT_MODE = process.env.NODE_ENV !== \"production\";");
+    expect(seasonContents).toContain("const DEV_VISIBLE_POLL_INTERVAL_MS = 8_000;");
+    expect(seasonContents).toContain("if (DEV_LOW_HEAT_MODE && !isDocumentVisible) return;");
+    expectInOrder(seasonContents, [
+      "const liveSeasonSnapshot = useSharedPollingResource",
+      "intervalMs: DEV_LOW_HEAT_MODE ? DEV_VISIBLE_POLL_INTERVAL_MS : runningIngest ? 3_000 : 5_000",
+    ]);
   });
 
   it("does not keep polling manual attach runs while the week detail screen is idle", () => {

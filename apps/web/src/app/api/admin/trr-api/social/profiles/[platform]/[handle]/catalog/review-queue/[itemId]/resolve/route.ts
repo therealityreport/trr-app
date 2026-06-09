@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { invalidateAdminSnapshotFamilies } from "@/lib/server/admin/admin-snapshot-cache";
 import { requireAdmin } from "@/lib/server/auth";
 import {
   fetchSocialBackendJson,
@@ -27,6 +28,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
         timeoutMs: 45_000,
       },
     );
+    invalidateAdminSnapshotFamilies([{ pageFamily: "social-profile", scope: `${platform}:${handle}` }]);
     return NextResponse.json(data);
   } catch (error) {
     return socialProxyErrorResponse(error, "[api] Failed to resolve social account catalog review queue item");

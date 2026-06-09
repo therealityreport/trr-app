@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { NextConfig } from "next";
+import { withSentryConfig } from "@sentry/nextjs";
 
 const IS_DEV = process.env.NODE_ENV === "development";
 const DIST_DIR = process.env.NEXT_DIST_DIR?.trim() || ".next";
@@ -11,6 +12,12 @@ const DIST_DIR = process.env.NEXT_DIST_DIR?.trim() || ".next";
 const TYPED_ROUTES_ENABLED = process.env.NEXT_TYPED_ROUTES === "true";
 const APP_ROOT = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(APP_ROOT, "..", "..");
+const parsePositiveInteger = (value: string | undefined): number | undefined => {
+  const parsed = Number.parseInt(value ?? "", 10);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
+};
+
+const BUILD_WORKER_COUNT = parsePositiveInteger(process.env.TRR_NEXT_BUILD_CPUS);
 
 // Force all @firebase internal packages to resolve to a single copy so the
 // component service registry is shared between firebase/app and firebase/firestore.
@@ -49,6 +56,12 @@ const nextConfig: NextConfig = {
   reactStrictMode: true,
   typedRoutes: TYPED_ROUTES_ENABLED,
   distDir: DIST_DIR,
+  experimental: BUILD_WORKER_COUNT
+    ? {
+        cpus: BUILD_WORKER_COUNT,
+        staticGenerationMaxConcurrency: BUILD_WORKER_COUNT,
+      }
+    : undefined,
   webpack(config) {
     config.resolve = config.resolve ?? {};
     config.resolve.alias = { ...config.resolve.alias, ...firebaseAliases };
@@ -300,4 +313,35 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default nextConfig;
+// Sentry build-time wrapping is fully env-gated. With no `SENTRY_DSN` set we
+// export the plain `nextConfig` untouched so the build/runtime is unchanged and
+// the Sentry webpack/turbopack plugin never runs. Source map upload only happens
+// when an auth token + org/project are provided; otherwise it is skipped.
+const SENTRY_DSN = process.env.SENTRY_DSN;
+const SENTRY_ORG = process.env.SENTRY_ORG;
+const SENTRY_PROJECT = process.env.SENTRY_PROJECT;
+const SENTRY_AUTH_TOKEN = process.env.SENTRY_AUTH_TOKEN;
+
+const config: NextConfig = SENTRY_DSN
+  ? withSentryConfig(nextConfig, {
+      // Only pass org/project/authToken when present so a DSN-only setup builds
+      // without failing on missing source-map-upload credentials.
+      org: SENTRY_ORG,
+      project: SENTRY_PROJECT,
+      authToken: SENTRY_AUTH_TOKEN,
+      // Suppress all Sentry CLI build logs.
+      silent: true,
+      // Never fail the build because of Sentry (e.g. missing auth token).
+      errorHandler: () => {},
+      // Skip source map upload entirely unless full upload creds are present.
+      sourcemaps: {
+        disable: !(SENTRY_AUTH_TOKEN && SENTRY_ORG && SENTRY_PROJECT),
+      },
+      // Avoid extra route handlers/work when not explicitly enabled.
+      disableLogger: true,
+      automaticVercelMonitors: false,
+      widenClientFileUpload: false,
+    })
+  : nextConfig;
+
+export default config;

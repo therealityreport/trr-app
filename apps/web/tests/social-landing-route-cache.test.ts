@@ -214,4 +214,29 @@ describe("social landing route cache", () => {
       vi.useRealTimers();
     }
   });
+
+  it("serves stale landing cache when a rebuild throws after ttl expiry", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-04-29T12:00:00Z"));
+      getSocialLandingPayloadResultMock
+        .mockResolvedValueOnce({ payload: buildPayload("good"), cacheable: true })
+        .mockRejectedValueOnce(new Error("Supabase session pool unavailable"));
+
+      const baseRequest = new NextRequest("http://localhost/api/admin/social/landing");
+      await getLanding(baseRequest);
+
+      vi.advanceTimersByTime(301_000);
+      const staleResponse = await getLanding(baseRequest);
+      const stalePayload = await staleResponse.json();
+
+      expect(staleResponse.status).toBe(200);
+      expect(staleResponse.headers.get("x-trr-cache")).toBe("stale");
+      expect(staleResponse.headers.get("x-trr-cacheable")).toBe("0");
+      expect(stalePayload.show_sets[0].show_id).toBe("good");
+      expect(getSocialLandingPayloadResultMock).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

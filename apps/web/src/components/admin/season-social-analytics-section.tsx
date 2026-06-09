@@ -1248,7 +1248,7 @@ const formatMirrorCoverageLabel = (readyCount: number, scannedCount: number): st
 };
 
 const REQUEST_TIMEOUT_MS = {
-  analytics: 22_000,
+  analytics: 35_000,
   runs: 15_000,
   targets: 12_000,
   jobs: 15_000,

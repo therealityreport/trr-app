@@ -248,7 +248,7 @@ export default function DesignDocsPageClient({ activeSection, articleSlug, brand
         >
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             {/* Hamburger */}
-            <button
+            <button type="button"
               onClick={() => setSidebarOpen(true)}
               style={{
                 background: "none",

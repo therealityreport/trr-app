@@ -26,7 +26,7 @@ const buildDegradedCookieHealthPayload = (platform: string, handle: string) => (
   refresh_supported: true,
   refresh_available: false,
   refresh_action: platform === "instagram" ? "instagram_auth_repair" : "cookie_refresh",
-  refresh_label: platform === "instagram" ? "Repair Instagram Auth" : "Refresh Cookies",
+  refresh_label: platform === "instagram" ? "Manual Instagram Auth" : "Refresh Cookies",
   source_kind: "unavailable",
   degraded: true,
   degraded_reason: "backend_timeout",

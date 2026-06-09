@@ -10,6 +10,18 @@ import { requireAdmin } from "@/lib/server/auth";
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY ?? "";
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY ?? "";
 
+const DEFAULT_GEMINI_IMAGE_MODELS = {
+  flash: "gemini-3.1-flash-image-preview",
+  pro: "gemini-3-pro-image-preview",
+} as const;
+
+const GEMINI_IMAGE_MODEL_ENV_KEYS = {
+  flash: "GEMINI_FLASH_IMAGE_MODEL",
+  pro: "GEMINI_PRO_IMAGE_MODEL",
+} as const;
+
+type GeminiModelVariant = keyof typeof DEFAULT_GEMINI_IMAGE_MODELS;
+
 type ModelId =
   | "gemini-flash"
   | "gemini-pro"
@@ -21,14 +33,19 @@ interface GenerateRequest {
   size?: string;
 }
 
+export function resolveGeminiImageModel(
+  modelVariant: GeminiModelVariant,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  const configuredModel = env[GEMINI_IMAGE_MODEL_ENV_KEYS[modelVariant]]?.trim();
+  return configuredModel || DEFAULT_GEMINI_IMAGE_MODELS[modelVariant];
+}
+
 async function generateWithGemini(
   prompt: string,
-  modelVariant: "flash" | "pro",
+  modelVariant: GeminiModelVariant,
 ): Promise<string> {
-  const model =
-    modelVariant === "flash"
-      ? "gemini-3.1-flash-image-preview"
-      : "gemini-3-pro-image-preview";
+  const model = resolveGeminiImageModel(modelVariant);
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`;
 

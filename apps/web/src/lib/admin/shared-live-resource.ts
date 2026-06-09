@@ -508,7 +508,8 @@ class SharedLiveResourceCoordinator<T> {
     if (!lease || lease.expiresAt <= now || lease.tabId === this.tabId) {
       this.writeLease(now + this.leaseDurationMs());
       const confirmed = this.readLease();
-      return confirmed?.tabId === this.tabId;
+      if (confirmed?.tabId === this.tabId) return true;
+      return !lease;
     }
     return false;
   }

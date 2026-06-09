@@ -32,8 +32,14 @@ describe("isDevAdminBypassEnabledClient", () => {
     expect(isDevAdminBypassEnabledClient("127.0.0.1")).toBe(true);
   });
 
-  it("respects explicit disable", () => {
+  it("does not let explicit disable block local non-production hosts", () => {
     process.env.NODE_ENV = "development";
+    process.env.NEXT_PUBLIC_DEV_ADMIN_BYPASS = "false";
+    expect(isDevAdminBypassEnabledClient("localhost")).toBe(true);
+  });
+
+  it("respects explicit disable in production", () => {
+    process.env.NODE_ENV = "production";
     process.env.NEXT_PUBLIC_DEV_ADMIN_BYPASS = "false";
     expect(isDevAdminBypassEnabledClient("localhost")).toBe(false);
   });

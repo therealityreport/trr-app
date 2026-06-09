@@ -91,4 +91,73 @@ describe("social growth person proxy route", () => {
     expect(payload).toEqual({ error: "Backend auth not configured" });
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it("preserves structured backend error details with a string error", async () => {
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          detail: {
+            message: "Visible SocialBlade browser is not authenticated",
+            code: "SOCIALBLADE_AUTH_REQUIRED",
+            retryable: true,
+            reason: "missing_cf_clearance",
+          },
+        }),
+        {
+          status: 503,
+          headers: { "content-type": "application/json" },
+        },
+      ),
+    );
+
+    const request = new NextRequest(
+      "http://localhost/api/admin/trr-api/people/person-1/social-growth?handle=heathergay",
+    );
+
+    const response = await GET(request, {
+      params: Promise.resolve({ personId: "person-1" }),
+    });
+    const payload = await response.json();
+
+    expect(response.status).toBe(503);
+    expect(payload).toEqual({
+      error: "Visible SocialBlade browser is not authenticated",
+      detail: {
+        message: "Visible SocialBlade browser is not authenticated",
+        code: "SOCIALBLADE_AUTH_REQUIRED",
+        retryable: true,
+        reason: "missing_cf_clearance",
+      },
+      code: "SOCIALBLADE_AUTH_REQUIRED",
+      retryable: true,
+      reason: "missing_cf_clearance",
+    });
+    expect(typeof payload.error).toBe("string");
+  });
+
+  it("returns a typed 504 when the SocialBlade backend read times out", async () => {
+    const abortError = Object.assign(new Error("aborted"), { name: "AbortError" });
+    fetchMock.mockRejectedValue(abortError);
+
+    const request = new NextRequest(
+      "http://localhost/api/admin/trr-api/people/person-1/social-growth?handle=heathergay",
+    );
+
+    const response = await GET(request, {
+      params: Promise.resolve({ personId: "person-1" }),
+    });
+    const payload = await response.json();
+
+    expect(response.status).toBe(504);
+    expect(payload).toMatchObject({
+      error: "SocialBlade backend request timed out",
+      code: "SOCIALBLADE_UPSTREAM_TIMEOUT",
+      retryable: true,
+      detail: {
+        code: "SOCIALBLADE_UPSTREAM_TIMEOUT",
+        timeout_ms: 25_000,
+      },
+    });
+    expect(typeof payload.error).toBe("string");
+  });
 });

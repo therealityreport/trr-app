@@ -49,7 +49,7 @@ def _load_computer_use_runtime():
 
 def run(
     prompt: str,
-    model: str = "claude-opus-4-6",
+    model: str = "claude-opus-4-8",
     max_iterations: int = 10,
     json_output: bool = False,
 ) -> dict:
@@ -95,7 +95,7 @@ def run(
 def main():
     parser = argparse.ArgumentParser(description="Claude Computer Use for TRR-APP")
     parser.add_argument("prompt", help="Task for Claude to perform")
-    parser.add_argument("--model", default="claude-opus-4-6", help="Claude model")
+    parser.add_argument("--model", default="claude-opus-4-8", help="Claude model")
     parser.add_argument("--max-iterations", type=int, default=10, help="Max loop iterations")
     parser.add_argument("--json", action="store_true", help="Output full JSON with message history")
     args = parser.parse_args()

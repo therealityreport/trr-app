@@ -607,6 +607,9 @@ describe("admin social page auth bypass", () => {
     });
 
     expect(
+      screen.getByRole("link", { name: "Open Instagram @bravotv account page" }),
+    ).toHaveAttribute("href", "/social/instagram/bravotv");
+    expect(
       screen.getByText(
         "Review network profiles, dedicated show social sets, and cast handles already stored in TRR.",
       ),

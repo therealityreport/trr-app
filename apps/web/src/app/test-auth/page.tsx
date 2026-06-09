@@ -51,7 +51,7 @@ export default function AuthPage() {
       <main className="mx-auto max-w-xl p-8 space-y-4">
         <h1 className="text-3xl font-serif">Signed in</h1>
         <p className="text-lg">Welcome, {user.displayName ?? user.email}</p>
-        <button className="px-4 py-2 border rounded" onClick={() => logout()}>
+        <button type="button" className="px-4 py-2 border rounded" onClick={() => logout()}>
           Sign out
         </button>
       </main>
@@ -62,7 +62,7 @@ export default function AuthPage() {
     <main className="mx-auto max-w-xl p-8 space-y-4">
       <h1 className="text-3xl font-serif">Sign in</h1>
       {err && <p className="text-sm text-red-600">{err}</p>}
-      <button
+      <button type="button"
         className="px-4 py-2 border rounded disabled:opacity-60"
         disabled={pending}
         onClick={handleGoogle}

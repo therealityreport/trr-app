@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import ClientOnly from "@/components/ClientOnly";
 import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
 import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
 import AdminGlobalSearch from "@/components/admin/AdminGlobalSearch";
+import { Button } from "@/components/ui/button";
 import { buildAdminRootBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
 import { fetchAdminWithAuth } from "@/lib/admin/client-auth";
 import { ADMIN_DASHBOARD_TOOLS } from "@/lib/admin/admin-navigation";
@@ -23,9 +24,12 @@ const STATUS_NOTES = [
   "Use Settings and Users for access work instead of editing local state directly.",
 ] as const;
 const ACCENT = "#7A0307";
+const ADMIN_DASHBOARD_BUTTON_CLASS =
+  "rounded-none border-black bg-white px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.16em] text-black hover:bg-black hover:text-white";
 
 type DbPressureSnapshot = {
   status?: string;
+  reason?: string;
   application_name?: string;
   db_configured?: boolean;
   vercel_pool_attached?: boolean;
@@ -36,7 +40,46 @@ type DbPressureSnapshot = {
   pool_total_count?: number;
   pool_idle_count?: number;
   pool_waiting_count?: number;
+  backend_db_pressure?: {
+    status?: string;
+    reason?: string;
+    application_name?: string;
+    db_configured?: boolean;
+    upstream_status?: number;
+    pools?: Array<{
+      pool_name?: string;
+      pressure_state?: string;
+      reason?: string;
+    }>;
+  };
 };
+
+const TRANSIENT_BACKEND_PRESSURE_REASONS = new Set([
+  "pool_capacity",
+  "pool_near_capacity",
+  "session_pool_capacity",
+]);
+
+function isPortlessHost() {
+  if (typeof window === "undefined") return false;
+  const hostname = window.location.hostname;
+  return hostname === "trr.localhost" || hostname.endsWith(".trr.localhost");
+}
+
+function summarizePressurePools(backendSnapshot?: DbPressureSnapshot["backend_db_pressure"]) {
+  const pools = backendSnapshot?.pools ?? [];
+  const saturatedPools = pools
+    .filter((pool) => pool.pressure_state === "saturated")
+    .map((pool) => pool.pool_name)
+    .filter(Boolean);
+  if (saturatedPools.length > 0) return saturatedPools.join(", ");
+
+  const pressuredPools = pools
+    .filter((pool) => pool.pressure_state && !["ok", "unconfigured"].includes(pool.pressure_state))
+    .map((pool) => pool.pool_name)
+    .filter(Boolean);
+  return pressuredPools.length > 0 ? pressuredPools.join(", ") : null;
+}
 
 function ConnectionBudgetCard() {
   const [snapshot, setSnapshot] = useState<DbPressureSnapshot | null>(null);
@@ -48,7 +91,7 @@ function ConnectionBudgetCard() {
       try {
         const response = await fetchAdminWithAuth("/api/admin/health/app-db-pressure", {
           cache: "no-store",
-        });
+        }, { allowDevAdminBypass: true });
         if (!response.ok) throw new Error(`status ${response.status}`);
         const payload = (await response.json()) as DbPressureSnapshot;
         if (!cancelled) {
@@ -110,6 +153,144 @@ function ConnectionBudgetCard() {
   );
 }
 
+function BackendEnvironmentReadinessCard() {
+  const [snapshot, setSnapshot] = useState<DbPressureSnapshot | null>(null);
+  const [state, setState] = useState<"loading" | "ready" | "error">("loading");
+  const [refreshNonce, setRefreshNonce] = useState(0);
+  const [portlessActive, setPortlessActive] = useState(false);
+  const autoRefreshAttemptedRef = useRef(false);
+
+  useEffect(() => {
+    setPortlessActive(isPortlessHost());
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    const load = async () => {
+      setState("loading");
+      try {
+        const response = await fetchAdminWithAuth("/api/admin/health/app-db-pressure", {
+          cache: "no-store",
+        }, { allowDevAdminBypass: true });
+        if (!response.ok) throw new Error(`status ${response.status}`);
+        const payload = (await response.json()) as DbPressureSnapshot;
+        if (!cancelled) {
+          setSnapshot(payload);
+          setState("ready");
+          const backendSnapshot = payload.backend_db_pressure;
+          const shouldRetryTransientPressure =
+            backendSnapshot?.status === "degraded" &&
+            Boolean(backendSnapshot.reason && TRANSIENT_BACKEND_PRESSURE_REASONS.has(backendSnapshot.reason));
+          if (shouldRetryTransientPressure && !autoRefreshAttemptedRef.current) {
+            autoRefreshAttemptedRef.current = true;
+            retryTimer = setTimeout(() => {
+              if (!cancelled) setRefreshNonce((current) => current + 1);
+            }, 1500);
+          }
+        }
+      } catch {
+        if (!cancelled) {
+          setSnapshot(null);
+          setState("error");
+        }
+      }
+    };
+    void load();
+    return () => {
+      cancelled = true;
+      if (retryTimer) clearTimeout(retryTimer);
+    };
+  }, [refreshNonce]);
+
+  const backendSnapshot = snapshot?.backend_db_pressure;
+  const backendStatus = backendSnapshot?.status;
+  const backendReachable = Boolean(backendSnapshot && backendStatus !== "unavailable");
+  const backendReady = backendStatus === "ok";
+  const backendReason = backendSnapshot?.reason;
+  const pressurePoolNames = summarizePressurePools(backendSnapshot);
+  const appDatabaseReady = snapshot?.db_configured === true;
+  const appPoolAttached = snapshot?.vercel_pool_attached === true;
+  const shouldRequireVercelPool = process.env.NODE_ENV === "production";
+  const readinessLabel =
+    state === "loading"
+      ? "Checking"
+      : state === "error"
+        ? "Backend unavailable"
+        : !backendReachable
+          ? "Backend unavailable"
+          : !backendReady
+            ? "Backend degraded"
+            : !appDatabaseReady
+              ? "App DB URL missing"
+              : shouldRequireVercelPool && !appPoolAttached
+                ? "Vercel pool detached"
+                : "Ready";
+  const readinessDetail =
+    state === "loading"
+      ? "Checking the admin backend and database pool contract."
+      : state === "error"
+        ? "Admin could not load backend health. In local dev this usually means the backend is down or TRR_DB_URL is missing."
+        : !backendReachable
+          ? `Admin reached the app health route, but backend pressure details are unavailable${backendReason ? ` (${backendReason})` : ""}.`
+          : !backendReady
+            ? `Backend health is reachable, but database pool pressure is degraded${pressurePoolNames ? ` in ${pressurePoolNames}` : ""}${backendReason ? ` (${backendReason})` : ""}.`
+          : !appDatabaseReady
+            ? "Backend health is reachable, but the app process is missing its database URL."
+            : shouldRequireVercelPool && !appPoolAttached
+              ? "Backend health is reachable. The Vercel pool attachment is not reported on this app-process snapshot."
+              : "Backend health and app database configuration are reported as ready.";
+  const readinessRows = [
+    [
+      "Backend API",
+      state === "error" ? "Unavailable" : state === "loading" ? "Checking" : backendReachable ? "Reachable" : "Unavailable",
+    ],
+    ["App DB URL", state === "ready" ? (appDatabaseReady ? "Configured" : "Missing") : "-"],
+    ["Vercel pool", state === "ready" ? (appPoolAttached ? "Attached" : "Not attached") : "-"],
+    ["Portless", portlessActive ? "Active" : "Loopback"],
+    ["App name", snapshot?.application_name ?? backendSnapshot?.application_name ?? "No snapshot"],
+  ] as const;
+
+  return (
+    <section className="rounded-[1.8rem] border border-black bg-white p-6">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.24em]" style={{ color: ACCENT }}>
+            Backend readiness
+          </p>
+          <h2 className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-black">
+            Environment check
+          </h2>
+        </div>
+        <span className="rounded-none border border-black px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-black">
+          {readinessLabel}
+        </span>
+      </div>
+      <p className="mt-4 text-sm leading-7 text-black/70">{readinessDetail}</p>
+      <dl className="mt-5 grid grid-cols-2 gap-3 text-sm">
+        {readinessRows.map(([label, value]) => (
+          <div key={label} className="border border-black px-3 py-3">
+            <dt className="text-[10px] font-semibold uppercase tracking-[0.18em] text-black/50">{label}</dt>
+            <dd className="mt-1 text-sm font-semibold text-black">{value}</dd>
+          </div>
+        ))}
+      </dl>
+      <Button
+        onClick={() => {
+          autoRefreshAttemptedRef.current = false;
+          setRefreshNonce((current) => current + 1);
+        }}
+        disabled={state === "loading"}
+        size="sm"
+        variant="outline"
+        className={`mt-5 ${ADMIN_DASHBOARD_BUTTON_CLASS}`}
+      >
+        {state === "loading" ? "Checking..." : "Refresh readiness"}
+      </Button>
+    </section>
+  );
+}
+
 export default function AdminDashboardPage() {
   const { user, checking, hasAccess } = useAdminGuard();
 
@@ -130,7 +311,7 @@ export default function AdminDashboardPage() {
 
   const displayName = user.displayName ?? user.email ?? "Admin";
   const primaryTools = ADMIN_DASHBOARD_TOOLS.filter((tool) =>
-    ["trr-shows", "screenalytics", "people", "surveys", "social-media", "games"].includes(tool.key),
+    ["trr-shows", "screenalytics", "cast-reference-review", "people", "surveys", "social-media", "games"].includes(tool.key),
   );
   const secondaryTools = ADMIN_DASHBOARD_TOOLS.filter(
     (tool) => !primaryTools.some((primaryTool) => primaryTool.key === tool.key),
@@ -285,6 +466,7 @@ export default function AdminDashboardPage() {
           </section>
 
           <aside className="space-y-6">
+            <BackendEnvironmentReadinessCard />
             <ConnectionBudgetCard />
 
             <section className="rounded-[1.8rem] border border-black bg-white p-6">

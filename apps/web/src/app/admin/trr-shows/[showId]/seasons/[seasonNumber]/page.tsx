@@ -4917,7 +4917,7 @@ export default function SeasonDetailPage() {
               <>
                 <nav className="pb-2 flex flex-wrap gap-2">
                   {SEASON_SOCIAL_ANALYTICS_VIEWS.map((view) => (
-                    <button
+                    <button type="button"
                       key={view.id}
                       onClick={() => setSocialAnalyticsView(view.id)}
                       className={`rounded-full border px-3 py-1.5 text-xs font-semibold tracking-[0.08em] transition ${
@@ -4999,7 +4999,7 @@ export default function SeasonDetailPage() {
                       }`}
                     >
                       {episode.url_original_still && (
-                        <button
+                        <button type="button"
                           onClick={(e) => {
                             const episodesWithStills = episodes.filter((ep) => ep.url_original_still);
                             const idx = episodesWithStills.findIndex((ep) => ep.id === episode.id);
@@ -5188,7 +5188,7 @@ export default function SeasonDetailPage() {
 
                   {assetsView === "images" && (
                     <div className="flex flex-wrap items-center gap-2">
-                      <button
+                      <button type="button"
                         onClick={handleRefreshImages}
                         disabled={refreshingAssets}
                         className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
@@ -5198,7 +5198,7 @@ export default function SeasonDetailPage() {
                         </svg>
                         {refreshingAssets ? "Refreshing..." : "Refresh Images"}
                       </button>
-                      <button
+                      <button type="button"
                         onClick={() => setAdvancedFiltersOpen(true)}
                         className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50"
                       >
@@ -5218,7 +5218,7 @@ export default function SeasonDetailPage() {
                       >
                         Batch Jobs
                       </button>
-                      <button
+                      <button type="button"
                         onClick={openAddBackdrops}
                         disabled={!seasonEligibleForMedia && !allowPlaceholderMediaOverride}
                         className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
@@ -5228,7 +5228,7 @@ export default function SeasonDetailPage() {
                         </svg>
                         Assign TMDb Backdrops
                       </button>
-                      <button
+                      <button type="button"
                         onClick={() => setScrapeDrawerOpen(true)}
                         disabled={!seasonEligibleForMedia && !allowPlaceholderMediaOverride}
                         className="flex items-center gap-2 rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:opacity-50"
@@ -5403,7 +5403,7 @@ export default function SeasonDetailPage() {
                     <h4 className="mb-3 text-sm font-semibold text-zinc-900">Backdrops</h4>
                     <div className="grid grid-cols-3 gap-4">
                       {mediaSections.backdrops.map((asset, i, arr) => (
-                          <button
+                          <button type="button"
                             key={asset.id}
                             onClick={(e) => openAssetLightbox(asset, i, arr, e.currentTarget)}
                             className="relative aspect-[16/9] overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -5428,7 +5428,7 @@ export default function SeasonDetailPage() {
                     <h4 className="mb-3 text-sm font-semibold text-zinc-900">Posters</h4>
                     <div className="grid grid-cols-4 gap-4">
                       {mediaSections.posters.map((asset, i, arr) => (
-                          <button
+                          <button type="button"
                             key={asset.id}
                             onClick={(e) => openAssetLightbox(asset, i, arr, e.currentTarget)}
                             className="relative aspect-[2/3] overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -5452,7 +5452,7 @@ export default function SeasonDetailPage() {
                     <h4 className="mb-3 text-sm font-semibold text-zinc-900">Episode Stills</h4>
                     <div className="grid grid-cols-6 gap-3">
                       {mediaSections.episode_stills.map((asset, i, arr) => (
-                          <button
+                          <button type="button"
                             key={asset.id}
                             onClick={(e) => openAssetLightbox(asset, i, arr, e.currentTarget)}
                             className="relative aspect-video overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -5476,7 +5476,7 @@ export default function SeasonDetailPage() {
                     <h4 className="mb-3 text-sm font-semibold text-zinc-900">Profile Pictures</h4>
                     <div className="grid grid-cols-5 gap-4">
                       {mediaSections.profile_pictures.map((asset, i, arr) => (
-                          <button
+                          <button type="button"
                             key={asset.id}
                             onClick={(e) => openAssetLightbox(asset, i, arr, e.currentTarget)}
                             className="relative aspect-[2/3] overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -5505,7 +5505,7 @@ export default function SeasonDetailPage() {
                     <h4 className="mb-3 text-sm font-semibold text-zinc-900">Cast Photos</h4>
                     <div className="grid grid-cols-5 gap-4">
                       {mediaSections.cast_photos.map((asset, i, arr) => (
-                          <button
+                          <button type="button"
                             key={asset.id}
                             onClick={(e) => openAssetLightbox(asset, i, arr, e.currentTarget)}
                             className="relative aspect-[2/3] overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -5534,7 +5534,7 @@ export default function SeasonDetailPage() {
                     <h4 className="mb-3 text-sm font-semibold text-zinc-900">Confessionals</h4>
                     <div className="grid grid-cols-5 gap-4">
                       {mediaSections.confessionals.map((asset, i, arr) => (
-                        <button
+                        <button type="button"
                           key={asset.id}
                           onClick={(e) => openAssetLightbox(asset, i, arr, e.currentTarget)}
                           className="relative aspect-[2/3] overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -5563,7 +5563,7 @@ export default function SeasonDetailPage() {
                     <h4 className="mb-3 text-sm font-semibold text-zinc-900">Reunion</h4>
                     <div className="grid grid-cols-5 gap-4">
                       {mediaSections.reunion.map((asset, i, arr) => (
-                        <button
+                        <button type="button"
                           key={asset.id}
                           onClick={(e) => openAssetLightbox(asset, i, arr, e.currentTarget)}
                           className="relative aspect-[2/3] overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -5587,7 +5587,7 @@ export default function SeasonDetailPage() {
                     <h4 className="mb-3 text-sm font-semibold text-zinc-900">Intro Card</h4>
                     <div className="grid grid-cols-5 gap-4">
                       {mediaSections.intro_card.map((asset, i, arr) => (
-                        <button
+                        <button type="button"
                           key={asset.id}
                           onClick={(e) => openAssetLightbox(asset, i, arr, e.currentTarget)}
                           className="relative aspect-[2/3] overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -5611,7 +5611,7 @@ export default function SeasonDetailPage() {
                     <h4 className="mb-3 text-sm font-semibold text-zinc-900">Other</h4>
                     <div className="grid grid-cols-5 gap-4">
                       {mediaSections.other.map((asset, i, arr) => (
-                        <button
+                        <button type="button"
                           key={asset.id}
                           onClick={(e) => openAssetLightbox(asset, i, arr, e.currentTarget)}
                           className="relative aspect-[2/3] overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500"

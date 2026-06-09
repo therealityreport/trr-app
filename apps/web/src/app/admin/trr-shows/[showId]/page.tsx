@@ -12363,7 +12363,7 @@ export default function TrrShowDetailPage() {
                 <>
                   <nav className="mt-3 flex flex-wrap gap-2">
                     {SHOW_SOCIAL_ANALYTICS_VIEWS.map((view) => (
-                      <button
+                      <button type="button"
                         key={view.id}
                         onClick={() => setSocialAnalyticsView(view.id)}
                         className={`rounded-full border px-3 py-1.5 text-xs font-semibold tracking-[0.08em] transition ${
@@ -12530,7 +12530,7 @@ export default function TrrShowDetailPage() {
                         {refreshCenterButtonLabel}
                       </button>
 
-                      <button
+                      <button type="button"
                         onClick={() => setAdvancedFiltersOpen(true)}
                         className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50"
                       >
@@ -12583,7 +12583,7 @@ export default function TrrShowDetailPage() {
                         {refreshingTargets.get_images ? "Getting Images..." : "Get Images"}
                       </button>
 
-                      <button
+                      <button type="button"
                         onClick={() => {
                           if (selectedGallerySeason !== "all") {
                             const selectedSeason = visibleSeasons.find(
@@ -12727,7 +12727,7 @@ export default function TrrShowDetailPage() {
                           </h4>
                           <div className="grid grid-cols-5 gap-4">
                             {gallerySectionAssets.profile_pictures.map((asset, i, arr) => (
-                                <button
+                                <button type="button"
                                   key={asset.id}
                                   onClick={(e) =>
                                     openAssetLightbox(asset, i, arr, e.currentTarget)
@@ -12774,7 +12774,7 @@ export default function TrrShowDetailPage() {
                           </h4>
                           <div className="grid grid-cols-5 gap-4">
                             {castPromoSectionAssets.map((asset, i, arr) => (
-                                <button
+                                <button type="button"
                                   key={asset.id}
                                   onClick={(e) =>
                                     openAssetLightbox(asset, i, arr, e.currentTarget)
@@ -14963,7 +14963,7 @@ export default function TrrShowDetailPage() {
                     Show Visibility
                   </p>
                   {isCovered ? (
-                    <button
+                    <button type="button"
                       onClick={removeFromCoveredShows}
                       disabled={coverageLoading}
                       className="flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-4 py-2 text-sm font-semibold text-green-700 transition hover:bg-green-100 disabled:opacity-50"
@@ -14974,7 +14974,7 @@ export default function TrrShowDetailPage() {
                       {coverageLoading ? "..." : "Remove from Shows"}
                     </button>
                   ) : (
-                    <button
+                    <button type="button"
                       onClick={addToCoveredShows}
                       disabled={coverageLoading}
                       className="flex items-center gap-2 rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:opacity-50"
@@ -15491,7 +15491,7 @@ export default function TrrShowDetailPage() {
                               {statusText}
                             </span>
                             {step.status === "failed" && step.parentOperationId && (
-                              <button
+                              <button type="button"
                                 className="text-xs text-blue-500 hover:text-blue-700 ml-2"
                                 onClick={() => retryRefreshTarget(step.topic.key, step.parentOperationId!)}
                               >

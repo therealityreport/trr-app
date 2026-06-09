@@ -9,6 +9,7 @@ import AdminGlobalSearch from "@/components/admin/AdminGlobalSearch";
 import { HealthIndicator } from "@/components/admin/SystemHealthModal";
 import SystemHealthModal from "@/components/admin/SystemHealthModal";
 import { ADMIN_NAV_ITEMS } from "@/lib/admin/admin-navigation";
+import { ADMIN_ROOT_PATH } from "@/lib/admin/admin-route-paths";
 import { buildTypographyDataAttributes } from "@/lib/typography/runtime";
 import {
   readAdminRecentShows,
@@ -62,7 +63,7 @@ export default function AdminGlobalHeader({ children, bodyClassName = "px-6 py-6
             </svg>
           </button>
 
-          <Link href="/" className="transition hover:opacity-80" aria-label="Go to admin dashboard">
+          <Link href={ADMIN_ROOT_PATH} className="transition hover:opacity-80" aria-label="Go to admin dashboard">
             <Image
               src="/images/logos/FullName-Black.png"
               alt="The Reality Report"

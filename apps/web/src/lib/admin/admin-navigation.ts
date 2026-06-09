@@ -43,6 +43,14 @@ export const ADMIN_NAV_ITEMS: readonly AdminNavItem[] = [
     activeMatchPrefixes: ["/screenalytics", "/screenlaytics", "/admin/screenalytics", "/admin/screenlaytics", "/admin/trr-shows"],
   },
   {
+    key: "cast-reference-review",
+    title: "Cast References",
+    href: "/admin/cast-reference-review" as Route,
+    description: "Review uncertain gallery face seeds before they become screen-time reference fingerprints.",
+    badge: "Review",
+    activeMatchPrefixes: ["/admin/cast-reference-review"],
+  },
+  {
     key: "people",
     title: "People",
     href: "/people" as Route,

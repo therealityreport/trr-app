@@ -7,7 +7,6 @@ import {
 } from "@/lib/admin/admin-route-paths";
 import { toFriendlyBrandSlug } from "@/lib/admin/brand-profile";
 
-const DEFAULT_DEV_ADMIN_ORIGIN = "http://admin.localhost:3000";
 const DEFAULT_DEV_ADMIN_API_HOSTS = ["admin.localhost", "localhost", "127.0.0.1", "[::1]", "::1"];
 const STATIC_PATH_PREFIXES = ["/_next", "/favicon.ico", "/robots.txt", "/sitemap.xml"];
 const INTERNAL_ADMIN_REWRITE_HEADER = "x-trr-admin-rewrite";
@@ -203,7 +202,26 @@ function normalizeHost(value: string | null | undefined): string | null {
 function resolveAdminOrigin(request: NextRequest): string | null {
   const configuredOrigin = process.env.ADMIN_APP_ORIGIN?.trim();
   if (configuredOrigin) return configuredOrigin;
-  if (process.env.NODE_ENV === "development") return DEFAULT_DEV_ADMIN_ORIGIN;
+
+  const shouldDeriveAdminOrigin =
+    process.env.NODE_ENV === "development" ||
+    parseOptionalBoolean(process.env.ADMIN_APP_DERIVE_FROM_REQUEST_HOST) === true ||
+    Boolean(process.env.ADMIN_APP_BASE_DOMAIN?.trim());
+  if (shouldDeriveAdminOrigin) {
+    const adminHostPrefix = process.env.ADMIN_APP_HOST_PREFIX?.trim() || "admin";
+    const configuredBaseDomain = normalizeHost(process.env.ADMIN_APP_BASE_DOMAIN);
+    const requestHost = configuredBaseDomain
+      ?? normalizeHost(request.headers.get("host"))
+      ?? normalizeHost(request.nextUrl.hostname);
+    if (!requestHost) return request.nextUrl.origin;
+    const adminHost = requestHost.startsWith(`${adminHostPrefix}.`)
+      ? requestHost
+      : isLoopbackHost(requestHost)
+        ? `${adminHostPrefix}.localhost`
+        : `${adminHostPrefix}.${requestHost}`;
+    const port = request.nextUrl.port ? `:${request.nextUrl.port}` : "";
+    return `${request.nextUrl.protocol}//${adminHost}${port}`;
+  }
   return request.nextUrl.origin;
 }
 

@@ -121,6 +121,20 @@ type FailureEntry = {
   completed_at: string | null;
 };
 
+type SilentDropWarningEntry = {
+  id: string;
+  run_id: string | null;
+  platform: string;
+  account_handle: string | null;
+  stage: string;
+  job_type: string;
+  status: string;
+  posts_checked: number;
+  posts_upserted: number;
+  media_assets_persisted: number;
+  observed_at: string | null;
+};
+
 const ACTION_MESSAGE_AUTO_DISMISS_MS = 10 * 60 * 1000;
 
 type StuckJobEntry = {
@@ -258,6 +272,9 @@ type QueueStatus = {
       by_stage: Record<string, number>;
     };
     recent_failures: FailureEntry[];
+    silent_drop_warnings?: SilentDropWarningEntry[];
+    silent_drop_warnings_total?: number;
+    silent_drop_warnings_error?: string;
     stuck_jobs: StuckJobEntry[];
     stuck_jobs_total: number;
     dispatch_blocked_jobs?: StuckJobEntry[];
@@ -279,6 +296,8 @@ const EMPTY_QUEUE_SUMMARY: QueueStatus["queue"] = {
   by_job_type: {},
   running_jobs: [],
   recent_failures: [],
+  silent_drop_warnings: [],
+  silent_drop_warnings_total: 0,
   stuck_jobs: [],
   stuck_jobs_total: 0,
   dispatch_blocked_jobs: [],
@@ -646,6 +665,8 @@ type SystemHealthViewModel = {
   liveWorkers: LiveWorkerRowViewModel[];
   recentFailureSummary: string;
   recentFailures: ProblemFailureViewModel[];
+  silentDropWarningSummary: string;
+  silentDropWarnings: SilentDropWarningEntry[];
 };
 
 type SystemHealthDebugSnapshot = {
@@ -696,6 +717,7 @@ type SystemHealthDebugSnapshot = {
           };
           workers_summary_label: string;
           recent_failure_summary: string;
+          silent_drop_warning_summary: string;
         }
       | null;
     admin_operations_summary: AdminOperationsHealth["summary"] | null;
@@ -1008,7 +1030,16 @@ function modalQueueHealthState(queueStatus: QueueStatus): HealthState {
   const dispatchBlockedCount = Number(queueStatus.queue.dispatch_blocked_jobs_total ?? 0);
   const staleClaimsCount = Number(queueStatus.queue.stale_claims?.total ?? 0);
   const recentFailureCount = Number(queueStatus.queue.recent_failures.length ?? 0);
-  if (dispatchBlockedCount > 0 || likelyStuckCount > 0 || staleClaimsCount > 0 || recentFailureCount > 0) {
+  const silentDropWarningCount = Number(
+    queueStatus.queue.silent_drop_warnings_total ?? queueStatus.queue.silent_drop_warnings?.length ?? 0,
+  );
+  if (
+    dispatchBlockedCount > 0 ||
+    likelyStuckCount > 0 ||
+    staleClaimsCount > 0 ||
+    recentFailureCount > 0 ||
+    silentDropWarningCount > 0
+  ) {
     return "degraded";
   }
 
@@ -1028,6 +1059,8 @@ function buildSystemHealthViewModel(queueStatus: QueueStatus, state: HealthState
   const jobStatuses = queueStatus.queue.by_status ?? {};
   const jobRunning = jobStatuses.running ?? 0;
   const recentFailureCount = queueStatus.queue.recent_failures.length;
+  const silentDropWarnings = queueStatus.queue.silent_drop_warnings ?? [];
+  const silentDropWarningCount = Number(queueStatus.queue.silent_drop_warnings_total ?? silentDropWarnings.length);
   const likelyStuckCount = queueStatus.queue.stuck_jobs_total ?? 0;
   const dispatchBlockedCount = Number(queueStatus.queue.dispatch_blocked_jobs_total ?? 0);
   const waitingForClaimCount = Number(queueStatus.queue.waiting_for_claim_jobs_total ?? 0);
@@ -1072,6 +1105,11 @@ function buildSystemHealthViewModel(queueStatus: QueueStatus, state: HealthState
         : "Workers are online, but some jobs are blocked before any worker can claim them.";
   } else if (likelyStuckCount > 0) {
     statusSummary = "Workers are online, but some jobs likely need intervention.";
+  } else if (silentDropWarningCount > 0) {
+    statusSummary =
+      silentDropWarningCount === 1
+        ? "A completed social post job may have silently dropped post data."
+        : "Completed social post jobs may have silently dropped post data.";
   } else if (recentFailureCount > 0) {
     statusSummary = "Workers are available. Recent failures are historical, but they are still worth reviewing.";
   } else if (jobRunning > 0 || runStatuses.running > 0) {
@@ -1100,8 +1138,13 @@ function buildSystemHealthViewModel(queueStatus: QueueStatus, state: HealthState
     {
       title: "Attention Needed",
       value: `${dispatchBlockedCount.toLocaleString()} dispatch blocked`,
-      detail: `${likelyStuckCount.toLocaleString()} likely stuck · ${recentFailureCount.toLocaleString()} recent failures`,
-      tone: dispatchBlockedCount > 0 || likelyStuckCount > 0 ? "bad" : recentFailureCount > 0 ? "warn" : "good",
+      detail: `${likelyStuckCount.toLocaleString()} likely stuck · ${silentDropWarningCount.toLocaleString()} silent warnings · ${recentFailureCount.toLocaleString()} recent failures`,
+      tone:
+        dispatchBlockedCount > 0 || likelyStuckCount > 0 || silentDropWarningCount > 0
+          ? "bad"
+          : recentFailureCount > 0
+            ? "warn"
+            : "good",
     },
   ];
 
@@ -1147,6 +1190,12 @@ function buildSystemHealthViewModel(queueStatus: QueueStatus, state: HealthState
       value: String(dispatchBlockedCount),
       detail: "Jobs blocked before any worker claim",
       tone: dispatchBlockedCount > 0 ? "bad" : "neutral",
+    },
+    {
+      title: "Silent Drops",
+      value: String(silentDropWarningCount),
+      detail: "Completed jobs with zero saved posts",
+      tone: silentDropWarningCount > 0 ? "bad" : "neutral",
     },
     {
       title: "Waiting For Claim",
@@ -1265,6 +1314,8 @@ function buildSystemHealthViewModel(queueStatus: QueueStatus, state: HealthState
     liveWorkers,
     recentFailureSummary: `${recentFailureCount.toLocaleString()} recent failures`,
     recentFailures,
+    silentDropWarningSummary: `${silentDropWarningCount.toLocaleString()} silent-drop warnings`,
+    silentDropWarnings: silentDropWarnings.slice(0, 20),
   };
 }
 
@@ -1362,6 +1413,7 @@ function buildSystemHealthDebugSnapshot({
             },
             workers_summary_label: viewModel.workersSummaryLabel,
             recent_failure_summary: viewModel.recentFailureSummary,
+            silent_drop_warning_summary: viewModel.silentDropWarningSummary,
           }
         : null,
       admin_operations_summary: adminOperationsData?.summary ?? null,
@@ -1927,6 +1979,38 @@ function RunningJobs({ jobs }: { jobs: RunningJobEntry[] }) {
               <span className="text-zinc-700">{titleCaseWords(job.required_execution_backend ?? "any")}</span>
             </p>
           </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function SilentDropWarnings({ warnings }: { warnings: SilentDropWarningEntry[] }) {
+  if (warnings.length === 0) {
+    return <p className="text-sm text-zinc-400">No silent data-loss warnings detected.</p>;
+  }
+
+  return (
+    <div className="max-h-48 space-y-2 overflow-y-auto">
+      {warnings.slice(0, 20).map((warning) => (
+        <div key={warning.id} className="rounded-lg border border-red-100 bg-red-50/50 px-3 py-2 text-xs">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-medium text-zinc-900">{titleCaseWords(warning.platform)}</span>
+            <span className="text-zinc-400">{formatStageLabel(warning.stage || warning.job_type)}</span>
+            {warning.account_handle ? (
+              <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-medium text-red-700">
+                @{warning.account_handle.replace(/^@+/, "")}
+              </span>
+            ) : null}
+            {warning.run_id ? <span className="font-mono text-zinc-500">run {truncate(warning.run_id, 8)}</span> : null}
+            <span className="ml-auto text-zinc-400">{relativeTime(warning.observed_at)}</span>
+          </div>
+          <p className="mt-1 text-red-700">
+            Checked {warning.posts_checked.toLocaleString()} posts · saved{" "}
+            {warning.posts_upserted.toLocaleString()} · media assets{" "}
+            {warning.media_assets_persisted.toLocaleString()}
+          </p>
+          <p className="mt-1 font-mono text-[11px] text-red-600">Job {truncate(warning.id, 16)}</p>
         </div>
       ))}
     </div>
@@ -3389,6 +3473,15 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
                       onCancelJob={cancelSingleStuckJob}
                       onClearAll={clearAllStuckJobs}
                     />
+                  </div>
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-zinc-900">Silent Data-Loss Watch</p>
+                  <p className="mt-1 text-xs text-zinc-500">
+                    These completed jobs checked live posts but saved none, which can indicate silent data loss.
+                  </p>
+                  <div className="mt-3">
+                    <SilentDropWarnings warnings={viewModel.silentDropWarnings} />
                   </div>
                 </div>
                 <div>

@@ -1,2 +1,25 @@
 packages:
   - "apps/*"
+
+nodeVersion: 24.14.0
+
+allowBuilds:
+  # Firebase SDK utility package used by firebase/firebase-admin; trusted first-party dependency.
+  '@firebase/util': true
+  # Sentry's official CLI package used for release/source-map tooling.
+  '@sentry/cli': true
+  # esbuild downloads its platform binary during install; required by common web tooling.
+  esbuild: true
+  # protobufjs generates fast protocol-buffer helpers during install.
+  protobufjs: true
+  # re2 builds the native safe-regex engine used by dependent packages.
+  re2: true
+  # sharp installs native image-processing binaries used by Next/image workflows.
+  sharp: true
+  # unrs-resolver installs native resolver bindings used by modern JS tooling.
+  unrs-resolver: true
+
+overrides:
+  glob: 10.4.5
+  json-ptr: 3.1.0
+  node-domexception: 2.0.2

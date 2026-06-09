@@ -31,7 +31,7 @@ export default function DebugPanel() {
 
   if (!isOpen) {
     return (
-      <button
+      <button type="button"
         onClick={() => {
           setIsOpen(true);
           refreshLogs();
@@ -47,7 +47,7 @@ export default function DebugPanel() {
     <div className="fixed bottom-4 right-4 bg-black text-white p-4 rounded-lg max-w-md max-h-96 overflow-auto z-50 text-xs font-mono">
       <div className="flex justify-between items-center mb-2">
         <h3 className="font-bold">Auth Debug Logs</h3>
-        <button 
+        <button type="button" 
           onClick={() => setIsOpen(false)}
           className="text-red-400 hover:text-red-300"
         >
@@ -56,19 +56,19 @@ export default function DebugPanel() {
       </div>
       
       <div className="flex gap-2 mb-2">
-        <button 
+        <button type="button" 
           onClick={refreshLogs}
           className="bg-blue-600 px-2 py-1 rounded text-xs"
         >
           Refresh
         </button>
-        <button 
+        <button type="button" 
           onClick={clearLogs}
           className="bg-yellow-600 px-2 py-1 rounded text-xs"
         >
           Clear
         </button>
-        <button 
+        <button type="button" 
           onClick={exportLogs}
           className="bg-green-600 px-2 py-1 rounded text-xs"
         >

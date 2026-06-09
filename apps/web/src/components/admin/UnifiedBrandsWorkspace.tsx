@@ -21,6 +21,7 @@ import {
   UNIFIED_BRANDS_VIEW_OPTIONS,
 } from "@/lib/admin/brands-workspace";
 import { buildAdminSectionBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
+import { ADMIN_ROOT_PATH } from "@/lib/admin/admin-route-paths";
 import { toFriendlyBrandSlug } from "@/lib/admin/brand-profile";
 import { fetchAdminWithAuth } from "@/lib/admin/client-auth";
 import { normalizeEntityKey, toEntitySlug } from "@/lib/admin/networks-streaming-entity";
@@ -815,7 +816,7 @@ export default function UnifiedBrandsWorkspace() {
                 {syncing ? "Syncing..." : "Sync Logos"}
               </button>
               <Link
-                href="/"
+                href={ADMIN_ROOT_PATH}
                 className="rounded-lg border border-zinc-200 px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100"
               >
                 Back to Admin

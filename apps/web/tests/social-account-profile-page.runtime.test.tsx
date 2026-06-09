@@ -72,7 +72,10 @@ vi.mock("@/lib/admin/show-admin-routes", async () => {
   };
 });
 
-import SocialAccountProfilePage from "@/components/admin/SocialAccountProfilePage";
+import SocialAccountProfilePage, {
+  __resetSocialProfileRequestInflightForTests,
+  getCatalogRepairAuthEndpointSegment,
+} from "@/components/admin/SocialAccountProfilePage";
 import { __resetSharedLiveResourceRegistryForTests } from "@/lib/admin/shared-live-resource";
 import * as devAdminBypass from "@/lib/admin/dev-admin-bypass";
 
@@ -80,6 +83,21 @@ const jsonResponse = (body: unknown, status = 200): Response =>
   new Response(JSON.stringify(body), {
     status,
     headers: { "Content-Type": "application/json" },
+  });
+
+const profileSnapshotResponse = (summary: Record<string, unknown>): Response =>
+  jsonResponse({
+    data: {
+      summary,
+      catalog_run_progress: null,
+      dashboard_freshness: {
+        status: "fresh",
+        source: "live",
+        generated_at: "2026-03-20T14:00:00.000Z",
+        age_seconds: 0,
+      },
+    },
+    generated_at: "2026-03-20T14:00:00.000Z",
   });
 
 const deferredResponse = () => {
@@ -104,6 +122,12 @@ const installClipboardMock = () => {
     value: { writeText },
   });
   return writeText;
+};
+
+const waitForSecondaryReadsToOpen = async (): Promise<void> => {
+  await act(async () => {
+    await new Promise((resolve) => window.setTimeout(resolve, 75));
+  });
 };
 
 const baseSummary = {
@@ -232,12 +256,57 @@ const healthyCookieHealth = (platform: string) => ({
   refresh_supported: true,
   refresh_available: true,
   refresh_action: platform === "instagram" ? "instagram_auth_repair" : "cookie_refresh",
-  refresh_label: platform === "instagram" ? "Repair Instagram Auth" : "Refresh Cookies",
+  refresh_label: platform === "instagram" ? "Manual Instagram Auth" : "Refresh Cookies",
   source_kind: "default_file",
 });
 
 const INSTAGRAM_BACKFILL_DEFAULT_TASKS = ["post_details", "comments"] as const;
 const TIKTOK_BACKFILL_DEFAULT_TASKS = ["post_details", "comments", "media"] as const;
+
+const createStorageMock = (): Storage => {
+  const values = new Map<string, string>();
+  return {
+    get length() {
+      return values.size;
+    },
+    clear: () => values.clear(),
+    getItem: (key: string) => values.get(key) ?? null,
+    key: (index: number) => Array.from(values.keys())[index] ?? null,
+    removeItem: (key: string) => {
+      values.delete(key);
+    },
+    setItem: (key: string, value: string) => {
+      values.set(key, String(value));
+    },
+  };
+};
+
+const ensureStorageForTest = (key: "localStorage" | "sessionStorage"): Storage => {
+  const storage = window[key];
+  if (
+    storage &&
+    typeof storage.clear === "function" &&
+    typeof storage.getItem === "function" &&
+    typeof storage.setItem === "function" &&
+    typeof storage.removeItem === "function"
+  ) {
+    return storage;
+  }
+  const mock = createStorageMock();
+  Object.defineProperty(window, key, {
+    configurable: true,
+    value: mock,
+  });
+  return mock;
+};
+
+const clearStorageForTest = (storage: Storage): void => {
+  try {
+    storage.clear();
+  } catch {
+    // jsdom can expose partial storage when the localstorage-file flag is invalid.
+  }
+};
 
 describe("SocialAccountProfilePage", () => {
   beforeEach(() => {
@@ -245,6 +314,7 @@ describe("SocialAccountProfilePage", () => {
     // (pending timers, in-flight polls, cached snapshots) into each other unless the
     // registry is explicitly cleared between cases.
     __resetSharedLiveResourceRegistryForTests();
+    __resetSocialProfileRequestInflightForTests();
     mocks.fetchAdminWithAuth.mockReset();
     mocks.routerReplace.mockReset();
     mocks.routerReplace.mockImplementation((href: string) => {
@@ -256,13 +326,14 @@ describe("SocialAccountProfilePage", () => {
       checking: false,
       hasAccess: true,
     });
-    window.localStorage.clear();
-    window.sessionStorage.clear();
+    clearStorageForTest(ensureStorageForTest("localStorage"));
+    clearStorageForTest(ensureStorageForTest("sessionStorage"));
     setWindowLocation("https://admin.therealityreport.com/social");
   });
 
   afterEach(() => {
     __resetSharedLiveResourceRegistryForTests();
+    __resetSocialProfileRequestInflightForTests();
     vi.useRealTimers();
   });
 
@@ -547,17 +618,23 @@ describe("SocialAccountProfilePage", () => {
   });
 
   it("shows catalog-supported post totals as cataloged over profile total on the stats card", async () => {
+    const twitterSummary = {
+      ...baseSummary,
+      platform: "twitter",
+      total_posts: 124_619,
+      live_total_posts: 124_619,
+      catalog_total_posts: 45,
+      live_catalog_total_posts: 45,
+      top_hashtags: [],
+    };
+
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.includes("/snapshot")) {
+        return profileSnapshotResponse(twitterSummary);
+      }
       if (url.includes("/summary")) {
-        return jsonResponse({
-          ...baseSummary,
-          platform: "twitter",
-          total_posts: 124_619,
-          live_total_posts: 124_619,
-          catalog_total_posts: 45,
-          live_catalog_total_posts: 45,
-        });
+        return jsonResponse(twitterSummary);
       }
       throw new Error(`Unhandled request: ${url}`);
     });
@@ -1058,7 +1135,7 @@ describe("SocialAccountProfilePage", () => {
       expect(screen.getByRole("button", { name: "Backfill Posts" })).toBeEnabled();
     });
     expect(
-      screen.queryByText(/Catalog launch is blocked until the required auth is repaired/i),
+      screen.queryByText(/Catalog launch is blocked until the required manual auth is complete/i),
     ).not.toBeInTheDocument();
   });
 
@@ -1673,7 +1750,7 @@ describe("SocialAccountProfilePage", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Incomplete Fill" }));
 
-    expect(await screen.findByText("Instagram auth repaired. Incomplete Fill queued. Run incfill1.")).toBeInTheDocument();
+    expect(await screen.findByText("Manual Instagram Auth validated. Incomplete Fill queued. Run incfill1.")).toBeInTheDocument();
   });
 
   it("keeps incomplete fill clickable when no incomplete comment targets are known", async () => {
@@ -1728,17 +1805,23 @@ describe("SocialAccountProfilePage", () => {
   });
 
   it("reattaches the comments tab to an already-active comments sync", async () => {
+    const activeSummary = {
+      ...baseSummary,
+      comments_coverage: {
+        ...baseSummary.comments_coverage,
+        active_run_id: "comments-run-active-1234",
+        effective_status: "running",
+      },
+      top_hashtags: [],
+    };
+
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.includes("/snapshot")) {
+        return profileSnapshotResponse(activeSummary);
+      }
       if (url.includes("/summary")) {
-        return jsonResponse({
-          ...baseSummary,
-          comments_coverage: {
-            ...baseSummary.comments_coverage,
-            active_run_id: "comments-run-active-1234",
-            effective_status: "running",
-          },
-        });
+        return jsonResponse(activeSummary);
       }
       if (url.includes("/posts?page=1&page_size=25&comments_only=true")) {
         return jsonResponse({
@@ -1887,6 +1970,15 @@ describe("SocialAccountProfilePage", () => {
           ],
         });
       }
+      if (url.includes(`/comments/runs/${runId}/jobs/live-shard-job/cancel`)) {
+        expect(init?.method).toBe("POST");
+        return jsonResponse({
+          run_id: runId,
+          job_id: "live-shard-job",
+          status: "cancelled",
+          accepted: true,
+        });
+      }
       if (url.includes("/snapshot")) {
         expect(url).toContain("refresh=1");
         return jsonResponse({
@@ -1905,14 +1997,19 @@ describe("SocialAccountProfilePage", () => {
     expect(await screen.findByText("4 shards: 2 active, 1 queued, 1 complete, 0 failed")).toBeInTheDocument();
     expect(await screen.findByText("5 / 12 posts checked")).toBeInTheDocument();
     expect(await screen.findByText("204 comments fetched this run")).toBeInTheDocument();
-    expect(await screen.findByText("120 comments upserted this run")).toBeInTheDocument();
     expect(await screen.findByText("7 new comments saved this run")).toBeInTheDocument();
-    expect(await screen.findByText("9 existing comments changed this run")).toBeInTheDocument();
-    expect(await screen.findByText("113 existing comments seen this run")).toBeInTheDocument();
-    expect(screen.getByText("Shard 1 of 4 · job live-sha")).toBeInTheDocument();
-    expect(
-      screen.getByText(/120 fetched .* 7 new comments saved .* 113 existing comments seen .* 120 comments upserted/),
-    ).toBeInTheDocument();
+    expect(screen.getByText("Live Shard Speed Ranking")).toBeInTheDocument();
+    expect(screen.getByText("#1 · Shard 1 of 4 · job live-sha")).toBeInTheDocument();
+    expect(screen.getByText(/2 \/ 3 posts checked .* 120 comments fetched/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel Shard" }));
+    await waitFor(() => {
+      expect(
+        mocks.fetchAdminWithAuth.mock.calls.some(([input, init]) =>
+          String(input).includes(`/comments/runs/${runId}/jobs/live-shard-job/cancel`) &&
+          (init as RequestInit | undefined)?.method === "POST",
+        ),
+      ).toBe(true);
+    });
 
     await waitFor(() => {
       expect(screen.getAllByText("52 saved comments / 429 reported comments").length).toBeGreaterThan(0);
@@ -1921,17 +2018,23 @@ describe("SocialAccountProfilePage", () => {
 
   it("cancels an already-active comments sync from the comments tab", async () => {
     const runId = "comments-run-active-1234";
+    const activeSummary = {
+      ...baseSummary,
+      comments_coverage: {
+        ...baseSummary.comments_coverage,
+        active_run_id: runId,
+        effective_status: "running",
+      },
+      top_hashtags: [],
+    };
+
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.includes("/snapshot")) {
+        return profileSnapshotResponse(activeSummary);
+      }
       if (url.includes("/summary")) {
-        return jsonResponse({
-          ...baseSummary,
-          comments_coverage: {
-            ...baseSummary.comments_coverage,
-            active_run_id: runId,
-            effective_status: "running",
-          },
-        });
+        return jsonResponse(activeSummary);
       }
       if (url.includes("/posts?page=1&page_size=25&comments_only=true")) {
         return jsonResponse({
@@ -1978,7 +2081,9 @@ describe("SocialAccountProfilePage", () => {
         }),
       ).toBe(true);
     });
-    expect(await screen.findByText("Comments sync cancelled. Run comments.")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Cancel requested. Waiting for run comments to finish cancelling."),
+    ).toBeInTheDocument();
   });
 
   it("ignores stale cached terminal comments progress when coverage says the same run is active", async () => {
@@ -2023,6 +2128,17 @@ describe("SocialAccountProfilePage", () => {
 
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.includes("/snapshot")) {
+        return profileSnapshotResponse({
+          ...baseSummary,
+          comments_coverage: {
+            ...baseSummary.comments_coverage,
+            active_run_id: runId,
+            effective_status: "running",
+          },
+          top_hashtags: [],
+        });
+      }
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
@@ -2077,15 +2193,24 @@ describe("SocialAccountProfilePage", () => {
 
     expect(await screen.findByRole("button", { name: "Syncing Comments..." })).toBeDisabled();
     expect(screen.queryByText(/\[SSL: WRONG_VERSION_NUMBER\]/)).not.toBeInTheDocument();
-    expect(await screen.findByText("Shard 5 of 8 · job fresh-sh")).toBeInTheDocument();
-    expect(
-      screen.getByText("Running · 49 targets · 6 checked · 18 unchecked · 399 fetched"),
-    ).toBeInTheDocument();
+    expect(await screen.findByText("#1 · Shard 5 of 8 · job fresh-sh")).toBeInTheDocument();
+    expect(screen.getByText("6 / 49 posts checked · 399 comments fetched")).toBeInTheDocument();
   });
 
   it("warns when an active comments run predates sharding", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.includes("/snapshot")) {
+        return profileSnapshotResponse({
+          ...baseSummary,
+          comments_coverage: {
+            ...baseSummary.comments_coverage,
+            active_run_id: "comments-run-single-1234",
+            effective_status: "running",
+          },
+          top_hashtags: [],
+        });
+      }
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
@@ -2335,6 +2460,9 @@ describe("SocialAccountProfilePage", () => {
 
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.includes("/snapshot")) {
+        return profileSnapshotResponse(baseSummary);
+      }
       if (url.includes("/summary")) {
         return jsonResponse(baseSummary);
       }
@@ -2375,6 +2503,9 @@ describe("SocialAccountProfilePage", () => {
   it("renders one row per post and opens a post comments modal from the post link", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.includes("/snapshot")) {
+        return profileSnapshotResponse(baseSummary);
+      }
       if (url.includes("/summary")) {
         return jsonResponse(baseSummary);
       }
@@ -3482,6 +3613,51 @@ describe("SocialAccountProfilePage", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("keeps the primary summary usable when a secondary stats panel times out", async () => {
+    const requestUrls: string[] = [];
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      requestUrls.push(url);
+      if (url.includes("/snapshot")) {
+        return profileSnapshotResponse({
+          ...baseSummary,
+          top_hashtags: [],
+        });
+      }
+      if (url.includes("/live-profile-total")) {
+        return jsonResponse({
+          platform: "instagram",
+          account_handle: "bravotv",
+          profile_url: "https://www.instagram.com/bravotv/",
+          live_total_posts_current: 12,
+        });
+      }
+      if (url.includes("/hashtags")) {
+        return jsonResponse(
+          {
+            error: "TRR-Backend request timed out.",
+            code: "BACKEND_REQUEST_TIMEOUT",
+            retryable: true,
+            upstream_status: 504,
+            upstream_detail_code: "REQUEST_TIMEOUT",
+          },
+          504,
+        );
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="stats" />);
+
+    expect(await screen.findByText("Saved Comments")).toBeInTheDocument();
+    expect(screen.getByText("41 saved comments / 429 reported comments")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText("Hashtag load timed out before completion. Retry when needed.")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("TRR-Backend request timed out.")).not.toBeInTheDocument();
+    expect(requestUrls.some((url) => url.includes("/hashtags"))).toBe(true);
+  });
+
   it("renders an empty account shell when the dashboard responds without summary data", async () => {
     let liveSummaryCalls = 0;
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
@@ -3640,7 +3816,7 @@ describe("SocialAccountProfilePage", () => {
           refresh_supported: true,
           refresh_available: true,
           refresh_action: "instagram_auth_repair",
-          refresh_label: "Repair Instagram Auth",
+          refresh_label: "Manual Instagram Auth",
           source_kind: "default_file",
         });
       }
@@ -3651,6 +3827,9 @@ describe("SocialAccountProfilePage", () => {
             source_scope: "creator",
             backfill_scope: "full_history",
             selected_tasks: [...INSTAGRAM_BACKFILL_DEFAULT_TASKS],
+            detail_worker_count: 8,
+          comments_worker_count: 8,
+          comments_enable_media_followups: true,
           }),
         );
         return jsonResponse({ run_id: "catalog-run-12345678", status: "queued" });
@@ -3668,7 +3847,7 @@ describe("SocialAccountProfilePage", () => {
 
     expect(await screen.findByText("Choose what this backfill should run")).toBeInTheDocument();
     const checkboxes = screen.getAllByRole("checkbox");
-    expect(checkboxes).toHaveLength(3);
+    expect(checkboxes).toHaveLength(4);
     expect(checkboxes[0]).toBeChecked();
     expect(checkboxes[1]).toBeChecked();
     expect(checkboxes[2]).not.toBeChecked();
@@ -3732,6 +3911,9 @@ describe("SocialAccountProfilePage", () => {
           source_scope: "network",
           backfill_scope: "full_history",
           selected_tasks: [...INSTAGRAM_BACKFILL_DEFAULT_TASKS],
+          detail_worker_count: 8,
+          comments_worker_count: 8,
+          comments_enable_media_followups: true,
         });
         return jsonResponse({
           run_id: "catalog-run-pending-12345678",
@@ -4041,6 +4223,9 @@ describe("SocialAccountProfilePage", () => {
           source_scope: "network",
           backfill_scope: "full_history",
           selected_tasks: ["post_details", "comments", "media"],
+          detail_worker_count: 8,
+          comments_worker_count: 8,
+          comments_enable_media_followups: true,
         });
         return jsonResponse({
           run_id: "catalog-run-abcdef12",
@@ -4060,14 +4245,18 @@ describe("SocialAccountProfilePage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Backfill Posts" }));
 
     const checkboxes = screen.getAllByRole("checkbox");
-    expect(checkboxes).toHaveLength(3);
+    expect(checkboxes).toHaveLength(4);
     expect(checkboxes[0]).toBeChecked();
     expect(checkboxes[1]).toBeChecked();
     expect(checkboxes[2]).not.toBeChecked();
 
     fireEvent.click(checkboxes[2]);
 
-    expect(screen.getByText("Selected: Post Details, Comments, Media")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Selected: Post Details, Comments, Media · 8 detail workers · 8 comments workers · comment media on",
+      ),
+    ).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Start Backfill" }));
 
@@ -4943,7 +5132,7 @@ describe("SocialAccountProfilePage", () => {
     expect(screen.getByText("Bravo Fan")).toBeInTheDocument();
   });
 
-  it("renders Instagram auth repair CTA in the cookie preflight card when cookies are unhealthy", async () => {
+  it("renders Manual Instagram Auth CTA in the cookie preflight card when cookies are unhealthy", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes("/summary")) {
@@ -4958,7 +5147,7 @@ describe("SocialAccountProfilePage", () => {
           refresh_supported: true,
           refresh_available: true,
           refresh_action: "instagram_auth_repair",
-          refresh_label: "Repair Instagram Auth",
+          refresh_label: "Manual Instagram Auth",
           source_kind: "default_file",
         });
       }
@@ -4968,7 +5157,66 @@ describe("SocialAccountProfilePage", () => {
     render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Repair Instagram Auth" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Manual Instagram Auth" })).toBeInTheDocument();
+    });
+  });
+
+  it("confirmed cookie refresh allows the backend to refresh cookies", async () => {
+    const refreshBodies: unknown[] = [];
+    let cookieHealthChecks = 0;
+
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse(baseSummary);
+      }
+      if (url.includes("/cookies/health")) {
+        cookieHealthChecks += 1;
+        if (cookieHealthChecks === 1) {
+          return jsonResponse({
+            platform: "instagram",
+            required: true,
+            healthy: false,
+            reason: "expired",
+            refresh_supported: true,
+            refresh_available: true,
+            refresh_action: "instagram_auth_repair",
+            refresh_label: "Manual Instagram Auth",
+            source_kind: "default_file",
+          });
+        }
+        return jsonResponse(healthyCookieHealth("instagram"));
+      }
+      if (url.includes("/cookies/refresh")) {
+        expect(init?.method).toBe("POST");
+        refreshBodies.push(JSON.parse(String(init?.body || "{}")));
+        return jsonResponse({
+          success: true,
+          healthy: true,
+          reason: null,
+          refresh_action: "instagram_auth_repair",
+        });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Manual Instagram Auth" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Confirm Manual Auth Check" })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Confirm Manual Auth Check" }));
+
+    await waitFor(() => {
+      expect(refreshBodies).toEqual([
+        expect.objectContaining({
+          operator_confirmation: "I UNDERSTAND INSTAGRAM AUTH RISK",
+          allow_cookie_refresh: true,
+        }),
+      ]);
     });
   });
 
@@ -5011,7 +5259,7 @@ describe("SocialAccountProfilePage", () => {
     expect(screen.queryByText("Checking cookies…")).not.toBeInTheDocument();
   });
 
-  it("repairs Instagram auth and then auto-starts backfill when Backfill Posts is clicked with unhealthy cookies", async () => {
+  it("does not auto-repair Instagram auth before starting backfill", async () => {
     let cookieHealthChecks = 0;
     const backfillBodies: unknown[] = [];
 
@@ -5030,20 +5278,12 @@ describe("SocialAccountProfilePage", () => {
           refresh_supported: true,
           refresh_available: true,
           refresh_action: "instagram_auth_repair",
-          refresh_label: "Repair Instagram Auth",
+          refresh_label: "Manual Instagram Auth",
           source_kind: "default_file",
         });
       }
       if (url.includes("/cookies/refresh")) {
-        expect(init?.method).toBe("POST");
-        return jsonResponse({
-          success: true,
-          healthy: true,
-          reason: null,
-          refresh_action: "instagram_auth_repair",
-          steps: [{ name: "refresh", status: "ok" }],
-          remote_auth_probe: { platform: "instagram", ready: true },
-        });
+        throw new Error("Manual Instagram auth should require confirmation");
       }
       if (url.includes("/catalog/backfill")) {
         backfillBodies.push(typeof init?.body === "string" ? JSON.parse(init.body) : init?.body);
@@ -5066,23 +5306,20 @@ describe("SocialAccountProfilePage", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Start Backfill" }));
 
     await waitFor(() => {
-      expect(backfillBodies).toEqual([
-        {
-          source_scope: "network",
-          backfill_scope: "full_history",
-          selected_tasks: [...INSTAGRAM_BACKFILL_DEFAULT_TASKS],
-        },
-      ]);
+      expect(
+        screen.getByText("Backfill was not started. Complete Manual Instagram Auth and confirm before rerunning Backfill."),
+      ).toBeInTheDocument();
     });
+    expect(backfillBodies).toEqual([]);
     expect(
-      screen.getByText("Instagram backfill queued for Post Details, Comments. Catalog catalog-."),
+      screen.getByText(/Manual Instagram auth can surface CAPTCHA, verification code, checkpoint, or account-lock prompts/i),
     ).toBeInTheDocument();
   });
 
-  it("does not start backfill when Instagram auth repair fails during pre-launch gating", async () => {
+  it("does not start backfill when Instagram auth is unhealthy during pre-launch gating", async () => {
     let backfillCalled = false;
 
-    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes("/summary")) {
         return jsonResponse(baseSummary);
@@ -5096,20 +5333,12 @@ describe("SocialAccountProfilePage", () => {
           refresh_supported: true,
           refresh_available: true,
           refresh_action: "instagram_auth_repair",
-          refresh_label: "Repair Instagram Auth",
+          refresh_label: "Manual Instagram Auth",
           source_kind: "default_file",
         });
       }
       if (url.includes("/cookies/refresh")) {
-        expect(init?.method).toBe("POST");
-        return jsonResponse({
-          success: false,
-          healthy: false,
-          reason: "remote_probe_failed",
-          refresh_action: "instagram_auth_repair",
-          steps: [{ name: "verify_remote_auth", status: "failed" }],
-          remote_auth_probe: { platform: "instagram", ready: false, reason: "checkpoint_required" },
-        });
+        throw new Error("Manual Instagram auth should require confirmation");
       }
       if (url.includes("/catalog/backfill")) {
         backfillCalled = true;
@@ -5125,12 +5354,14 @@ describe("SocialAccountProfilePage", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Start Backfill" }));
 
     await waitFor(() => {
-      expect(screen.getByText("Backfill was not started because Instagram auth repair failed.")).toBeInTheDocument();
+      expect(
+        screen.getByText("Backfill was not started. Complete Manual Instagram Auth and confirm before rerunning Backfill."),
+      ).toBeInTheDocument();
     });
     expect(backfillCalled).toBe(false);
   });
 
-  it("blocks Instagram backfill on non-local runtimes until auth is repaired locally", async () => {
+  it("blocks Instagram backfill on non-local runtimes until manual auth is completed locally", async () => {
     let backfillCalled = false;
 
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
@@ -5147,7 +5378,7 @@ describe("SocialAccountProfilePage", () => {
           refresh_supported: true,
           refresh_available: false,
           refresh_action: "instagram_auth_repair",
-          refresh_label: "Repair Instagram Auth",
+          refresh_label: "Manual Instagram Auth",
           source_kind: "default_file",
         });
       }
@@ -5166,7 +5397,7 @@ describe("SocialAccountProfilePage", () => {
 
     await waitFor(() => {
       expect(
-        screen.getByText("Backfill cannot continue until Instagram auth is repaired from a local TRR-Backend host."),
+        screen.getByText("Backfill cannot continue until Manual Instagram Auth is completed from a local TRR-Backend host."),
       ).toBeInTheDocument();
     });
     expect(backfillCalled).toBe(false);
@@ -5408,7 +5639,7 @@ describe("SocialAccountProfilePage", () => {
     expect(await screen.findByText("Modal Instagram comments auth active")).toBeInTheDocument();
     expect(await screen.findByText("Comments auth active")).toBeInTheDocument();
     expect(screen.queryByText(/Cookies expired/i)).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Repair Instagram Auth" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Manual Instagram Auth" })).not.toBeInTheDocument();
   });
 
   it("treats advisory comments endpoint auth blocks as continuing fallback work", async () => {
@@ -5490,9 +5721,9 @@ describe("SocialAccountProfilePage", () => {
       await screen.findByText("Comments endpoint preflight was blocked; workers are continuing with fallback."),
     ).toBeInTheDocument();
     expect(
-      screen.queryByText("Instagram comments auth is blocked. Repair Instagram auth, then rerun the comments scrape."),
+      screen.queryByText("Instagram comments auth is blocked. Complete manual Instagram auth, then rerun the comments scrape."),
     ).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Repair Instagram Auth" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Manual Instagram Auth" })).not.toBeInTheDocument();
   });
 
   it("hides cached comments progress rows when the current poll is failing", async () => {
@@ -5905,6 +6136,9 @@ describe("SocialAccountProfilePage", () => {
             source_scope: "network",
             backfill_scope: "full_history",
             selected_tasks: [...INSTAGRAM_BACKFILL_DEFAULT_TASKS],
+            detail_worker_count: 8,
+          comments_worker_count: 8,
+          comments_enable_media_followups: true,
           }),
         );
         return jsonResponse({
@@ -6138,6 +6372,9 @@ describe("SocialAccountProfilePage", () => {
             date_start: "2026-03-01T12:00:00Z",
             date_end: "2026-03-02T12:00:00Z",
             selected_tasks: [...INSTAGRAM_BACKFILL_DEFAULT_TASKS],
+            detail_worker_count: 8,
+          comments_worker_count: 8,
+          comments_enable_media_followups: true,
           }),
         );
         return jsonResponse({ run_id: "catalog-run-window-12345678", status: "queued" });
@@ -6552,11 +6789,7 @@ describe("SocialAccountProfilePage", () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes("/snapshot")) {
-        return jsonResponse({
-          summary: activeSummary,
-          catalog_run_progress: activeProgress,
-          generated_at: "2026-04-09T03:00:00.000Z",
-        });
+        return profileSnapshotResponse(activeSummary);
       }
       if (url.includes("/summary")) {
         return jsonResponse(activeSummary);
@@ -8485,7 +8718,9 @@ it("prefers terminal cancelled status labels over stale recovering state", async
       ).toBe(true);
     });
 
-    expect(screen.getAllByText(/Run run-new-/i).length).toBeGreaterThan(0);
+    await waitFor(() => {
+      expect(screen.getAllByText(/Run run-new-/i).length).toBeGreaterThan(0);
+    });
   });
 
   it("does not auto-pivot away from unrelated runs", async () => {
@@ -9062,7 +9297,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
     expect(screen.queryByRole("button", { name: "Cancel Run" })).not.toBeInTheDocument();
   });
 
-  it("keeps cancel success visible when the follow-up summary refresh times out", async () => {
+  it("keeps catalog runs locked after cancel is requested when confirmation refreshes time out", async () => {
     const cancelCalls: string[] = [];
     let summaryCalls = 0;
     let snapshotCalls = 0;
@@ -9143,13 +9378,14 @@ it("prefers terminal cancelled status labels over stale recovering state", async
 
     fireEvent.click(screen.getByRole("button", { name: "Cancel Run" }));
 
-    await waitFor(() => {
-      expect(screen.getByText("Cancelled run cancelok.")).toBeInTheDocument();
-    });
+    expect(
+      await screen.findByText("Cancel requested for run cancelok. Waiting for backend confirmation."),
+    ).toBeInTheDocument();
     expect(cancelCalls).toEqual([expect.stringContaining("/catalog/runs/cancelok1-run/cancel")]);
-    // This case is about preserving the success banner even when the
-    // follow-up summary refresh times out; the stale running snapshot may
-    // keep the cancel affordance visible until a later poll lands.
+    expect(screen.getByRole("button", { name: "Backfill Posts" })).toBeDisabled();
+    // This case is about avoiding a false local cancellation when the
+    // follow-up summary refresh times out; the stale running snapshot should
+    // keep launch controls locked until a later authoritative poll lands.
     expect(screen.queryByText("TRR-Backend request timed out.")).not.toBeInTheDocument();
   });
 
@@ -9267,7 +9503,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
     expect(screen.getByRole("button", { name: "Sync Recent" })).toBeEnabled();
   });
 
-  it("cancels a queued run and unlocks catalog actions immediately", async () => {
+  it("keeps a queued run non-terminal until cancel confirmation is observed", async () => {
     const cancelCalls: string[] = [];
     let cancelled = false;
     const buildSummary = () => ({
@@ -9357,13 +9593,13 @@ it("prefers terminal cancelled status labels over stale recovering state", async
 
     fireEvent.click(screen.getByRole("button", { name: "Cancel Run" }));
 
-    await waitFor(() => {
-      expect(screen.getByText("Cancelled run queued-r.")).toBeInTheDocument();
-    });
+    expect(
+      await screen.findByText(
+        "Cancel requested for run queued-r. No queued jobs were available to cancel; claimed work may still finish before workers stop. Waiting for backend confirmation.",
+      ),
+    ).toBeInTheDocument();
     expect(cancelCalls).toEqual([expect.stringContaining("/catalog/runs/queued-run-1/cancel")]);
-    expect(screen.queryByRole("button", { name: "Cancel Run" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Backfill Posts" })).toBeEnabled();
-    expect(screen.getByRole("button", { name: "Sync Recent" })).toBeEnabled();
+    expect(screen.queryByText("Cancelled run queued-r.")).not.toBeInTheDocument();
   });
 
   it(
@@ -9776,47 +10012,23 @@ it("prefers terminal cancelled status labels over stale recovering state", async
     expect(screen.queryByText("Bravo network source")).not.toBeInTheDocument();
   });
 
-  // TODO(ci-shard-isolation): 4 hashtag-stats tests in this file fail under
-  // --shard mode — "Unable to find element with text: #alltime" (or similar
-  // fallback text). Likely a fetch-mock / module state leak from another
-  // file under singleFork that pre-loaded hashtag data. Re-enable after the
-  // hashtag state is reset in beforeEach or the mock is fully scoped.
-  it.skip("loads authoritative all-time hashtags on the Instagram stats tab from the hashtags endpoint", async () => {
-    let resolveHashtagsResponse: ((value: Response) => void) | null = null;
-
+  it("loads authoritative all-time hashtags on the Instagram stats tab from the hashtags endpoint", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.includes("/snapshot")) {
+        return profileSnapshotResponse({
+          ...baseSummary,
+          top_hashtags: [],
+        });
+      }
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
-          top_hashtags: [
-            {
-              hashtag: "summaryonly",
-              display_hashtag: "#summaryonly",
-              usage_count: 44,
-              first_seen_at: "2026-02-23T23:00:26.000Z",
-              latest_seen_at: "2026-03-20T14:00:29.000Z",
-            },
-          ],
+          top_hashtags: [],
         });
       }
       if (url.includes("/hashtags")) {
-        return await new Promise<Response>((resolve) => {
-          resolveHashtagsResponse = resolve;
-        });
-      }
-      throw new Error(`Unhandled request: ${url}`);
-    });
-
-    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="stats" />);
-
-    await waitFor(() => {
-      expect(screen.getByText("Loading hashtags…")).toBeInTheDocument();
-    });
-
-    await act(async () => {
-      resolveHashtagsResponse?.(
-        jsonResponse({
+        return jsonResponse({
           items: [
             {
               hashtag: "alltime",
@@ -9826,9 +10038,13 @@ it("prefers terminal cancelled status labels over stale recovering state", async
               latest_seen_at: "2026-03-20T14:00:29.000Z",
             },
           ],
-        }),
-      );
+        });
+      }
+      throw new Error(`Unhandled request: ${url}`);
     });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="stats" />);
+    await waitForSecondaryReadsToOpen();
 
     await waitFor(() => {
       expect(screen.getByText("#alltime")).toBeInTheDocument();
@@ -9841,22 +10057,19 @@ it("prefers terminal cancelled status labels over stale recovering state", async
     ).toBe(true);
   });
 
-  // TODO(ci-shard-isolation): see earlier #alltime skip — same leak class.
-  it.skip("updates stats-tab hashtags when operators change the window selector", async () => {
+  it("updates stats-tab hashtags when operators change the window selector", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.includes("/snapshot")) {
+        return profileSnapshotResponse({
+          ...baseSummary,
+          top_hashtags: [],
+        });
+      }
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
-          top_hashtags: [
-            {
-              hashtag: "summaryonly",
-              display_hashtag: "#summaryonly",
-              usage_count: 44,
-              first_seen_at: "2026-02-23T23:00:26.000Z",
-              latest_seen_at: "2026-03-20T14:00:29.000Z",
-            },
-          ],
+          top_hashtags: [],
         });
       }
       if (url.includes("/hashtags?window=30d")) {
@@ -9902,6 +10115,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
     });
 
     render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="stats" />);
+    await waitForSecondaryReadsToOpen();
 
     await waitFor(() => {
       expect(screen.getByText("#alltime")).toBeInTheDocument();
@@ -9935,22 +10149,19 @@ it("prefers terminal cancelled status labels over stale recovering state", async
     ).toBe(true);
   });
 
-  // TODO(ci-shard-isolation): see earlier #alltime skip — same leak class.
-  it.skip("shows stats-tab hashtag request errors instead of falling back to the summary preview", async () => {
+  it("shows stats-tab hashtag request errors instead of falling back to the summary preview", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.includes("/snapshot")) {
+        return profileSnapshotResponse({
+          ...baseSummary,
+          top_hashtags: [],
+        });
+      }
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
-          top_hashtags: [
-            {
-              hashtag: "summaryonly",
-              display_hashtag: "#summaryonly",
-              usage_count: 44,
-              first_seen_at: "2026-02-23T23:00:26.000Z",
-              latest_seen_at: "2026-03-20T14:00:29.000Z",
-            },
-          ],
+          top_hashtags: [],
         });
       }
       if (url.includes("/hashtags")) {
@@ -9969,6 +10180,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
     });
 
     render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="stats" />);
+    await waitForSecondaryReadsToOpen();
 
     await waitFor(() => {
       expect(screen.getByText("Hashtag data is retryable while the backend is busy.")).toBeInTheDocument();
@@ -9976,12 +10188,14 @@ it("prefers terminal cancelled status labels over stale recovering state", async
     expect(screen.queryByText("#summaryonly")).not.toBeInTheDocument();
   });
 
-  // TODO(ci-shard-isolation): see earlier #alltime skip — same leak class.
-  it.skip("preserves cached all-time hashtags when a later retry for that window is retryably saturated", async () => {
+  it("preserves cached all-time hashtags when a later retry for that window is retryably saturated", async () => {
     let allTimeRequestCount = 0;
 
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.includes("/snapshot")) {
+        return profileSnapshotResponse(baseSummary);
+      }
       if (url.includes("/summary")) {
         return jsonResponse(baseSummary);
       }
@@ -10044,6 +10258,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
     });
 
     render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="hashtags" />);
+    await waitForSecondaryReadsToOpen();
 
     await waitFor(() => {
       expect(screen.getByText("#alltime")).toBeInTheDocument();
@@ -11156,7 +11371,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
     });
   });
 
-it("renders blocked-auth repair controls and starts the repair flow", async () => {
+it("renders blocked-auth manual-auth controls and starts the sync flow", async () => {
   const localHostSpy = vi.spyOn(devAdminBypass, "isLocalDevHostname").mockReturnValue(false);
 	  try {
 	    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -11288,8 +11503,12 @@ it("renders blocked-auth repair controls and starts the repair flow", async () =
           },
         });
       }
-      if (url.includes("/catalog/runs/run-blocked-auth-1/repair-auth")) {
+      if (url.includes("/catalog/runs/run-blocked-auth-1/manual-auth")) {
         expect(init?.method).toBe("POST");
+        expect(typeof init?.body === "string" ? JSON.parse(init.body) : init?.body).toMatchObject({
+          operator_confirmation: "I UNDERSTAND INSTAGRAM AUTH RISK",
+          allow_cookie_refresh: false,
+        });
         return jsonResponse({
           run_id: "run-blocked-auth-1",
           repair_status: "running",
@@ -11309,9 +11528,11 @@ it("renders blocked-auth repair controls and starts the repair flow", async () =
     fireEvent.click(screen.getByRole("button", { name: "View Details" }));
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Repair Instagram Auth" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Sync Validated Cookies" })).toBeInTheDocument();
       expect(
-        screen.getByText(/sync them into modal, redeploy the worker, and verify posts auth/i),
+        screen.getByText(
+          "Instagram blocked this catalog run before jobs were queued. Complete manual auth first, then sync already validated cookies.",
+        ),
       ).toBeInTheDocument();
       expect(
         screen.getByText(/Instagram backfill blocked before jobs were queued\. Local cookies are present/i),
@@ -11320,14 +11541,29 @@ it("renders blocked-auth repair controls and starts the repair flow", async () =
     });
     expect(screen.queryByRole("button", { name: "Retry Locally" })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Repair Instagram Auth" }));
+    fireEvent.click(screen.getByRole("button", { name: "Sync Validated Cookies" }));
 
     await waitFor(() => {
-      expect(screen.getByText(/repairing auth/i)).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Confirm Manual Auth Check" })).toBeInTheDocument();
+      expect(
+        screen.getByText(/Manual Instagram auth can surface CAPTCHA, verification code, checkpoint, or account-lock prompts/i),
+      ).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Confirm Manual Auth Check" }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/checking manual Instagram auth state/i)).toBeInTheDocument();
     });
   } finally {
     localHostSpy.mockRestore();
   }
+});
+
+it("routes blocked-auth cookie refresh runs to the repair-auth endpoint", () => {
+  expect(getCatalogRepairAuthEndpointSegment("repair_instagram_auth")).toBe("manual-auth");
+  expect(getCatalogRepairAuthEndpointSegment("cookie_refresh")).toBe("repair-auth");
+  expect(getCatalogRepairAuthEndpointSegment(null)).toBe("repair-auth");
 });
 
   it("keeps catalog launch actions enabled for a generic discovery empty first page failure", async () => {
@@ -11401,7 +11637,7 @@ it("renders blocked-auth repair controls and starts the repair flow", async () =
   });
   expect(screen.queryByRole("button", { name: "Retry Locally" })).not.toBeInTheDocument();
   expect(
-    screen.queryByText(/Catalog launch is blocked until the required auth is repaired/i),
+    screen.queryByText(/Catalog launch is blocked until the required manual auth is complete/i),
   ).not.toBeInTheDocument();
 });
 
@@ -11552,6 +11788,9 @@ it("shows Retry Locally for failed Instagram blocked-auth runs on local dev and 
           allow_inline_dev_fallback: true,
           execution_preference: "prefer_local_inline",
           selected_tasks: [...INSTAGRAM_BACKFILL_DEFAULT_TASKS],
+          detail_worker_count: 8,
+          comments_worker_count: 8,
+          comments_enable_media_followups: true,
         },
       ]);
     });
@@ -12074,6 +12313,9 @@ it("uses the newest inspected catalog run from the summary when discovery outran
             source_scope: "network",
             backfill_scope: "full_history",
             selected_tasks: [...INSTAGRAM_BACKFILL_DEFAULT_TASKS],
+            detail_worker_count: 8,
+          comments_worker_count: 8,
+          comments_enable_media_followups: true,
           }),
         );
         return jsonResponse({
@@ -12272,6 +12514,7 @@ it("uses the newest inspected catalog run from the summary when discovery outran
             code: "UPSTREAM_TIMEOUT",
             retryable: true,
             upstream_status: 504,
+            trace_id: "trace-gap-timeout-1",
           },
         });
       }
@@ -12298,7 +12541,11 @@ it("uses the newest inspected catalog run from the summary when discovery outran
       expect(screen.getByText("Freshness check is retryable while the backend is busy.")).toBeInTheDocument();
     });
     await waitFor(() => {
-      expect(screen.getByText("Gap analysis timed out before completion. Retry when you need repair guidance.")).toBeInTheDocument();
+      expect(
+        screen.getByText(
+          "Gap analysis timed out before completion. Retry when you need repair guidance. Trace trace-gap-timeout-1.",
+        ),
+      ).toBeInTheDocument();
     });
     expect(screen.queryByText("Local TRR-Backend is saturated. Showing last successful data while retrying.")).not.toBeInTheDocument();
     expect(screen.queryByText("TRR-Backend request timed out.")).not.toBeInTheDocument();
