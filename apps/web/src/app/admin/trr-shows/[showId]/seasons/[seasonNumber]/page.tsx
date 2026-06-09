@@ -1007,14 +1007,6 @@ export default function SeasonDetailPage() {
     [activeSeasonRequestKeyRef, seasonLoadRequestIdRef]
   );
 
-  useEffect(() => {
-    activeSeasonRequestKeyRef.current = `${showId}:${seasonNumber}`;
-    bravoVideoSyncAttemptedRef.current = false;
-    bravoVideoSyncInFlightRef.current = null;
-    setBravoVideoSyncWarning(null);
-    setBravoVideoSyncing(false);
-  }, [activeSeasonRequestKeyRef, seasonNumber, showId]);
-
   const [show, setShow] = useState<TrrShow | null>(null);
   const [season, setSeason] = useState<TrrSeason | null>(null);
   const [showSeasons, setShowSeasons] = useState<TrrSeason[]>([]);
@@ -1965,6 +1957,14 @@ export default function SeasonDetailPage() {
       setBravoVideosLoading(false);
     }
   }, [getAuthHeaders, isCurrentSeasonRequest, seasonNumber, showId, syncSeasonBravoVideoThumbnails]);
+
+  useEffect(() => {
+    activeSeasonRequestKeyRef.current = `${showId}:${seasonNumber}`;
+    bravoVideoSyncAttemptedRef.current = false;
+    bravoVideoSyncInFlightRef.current = null;
+    setBravoVideoSyncWarning(null);
+    setBravoVideoSyncing(false);
+  }, [activeSeasonRequestKeyRef, seasonNumber, showId]);
 
   const fetchSeasonFandomData = useCallback(async () => {
     const requestShowId = showId;

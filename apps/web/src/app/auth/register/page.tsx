@@ -33,6 +33,17 @@ function RegisterContent() {
   const [errors, setErrors] = useState<FieldErrors>({});
   const [formError, setFormError] = useState<string | null>(null);
 
+  const checkIfUserExists = async (emailToCheck: string) => {
+    try {
+      const exists = await checkUserExists(emailToCheck);
+      setIsExistingUser(exists);
+      setStage(exists ? "login" : "details");
+    } catch (error) {
+      console.error("Error checking user:", error);
+      setStage("details"); // Default to signup on error
+    }
+  };
+
   // Handle email parameter and check if user exists
   useEffect(() => {
     const emailParam = searchParams.get("email");
@@ -52,17 +63,6 @@ function RegisterContent() {
       } catch {}
     }
   }, [searchParams]);
-
-  const checkIfUserExists = async (emailToCheck: string) => {
-    try {
-      const exists = await checkUserExists(emailToCheck);
-      setIsExistingUser(exists);
-      setStage(exists ? "login" : "details");
-    } catch (error) {
-      console.error("Error checking user:", error);
-      setStage("details"); // Default to signup on error
-    }
-  };
 
   // Smooth transition function
   const transitionToStage = (newStage: Stage) => {
