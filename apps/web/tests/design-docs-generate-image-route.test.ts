@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { resolveGeminiImageModel } from "@/app/api/design-docs/generate-image/route";
+import { resolveGeminiImageModel } from "@/lib/server/design-docs/gemini-image-model";
 
 describe("design docs generate image route", () => {
   it("uses behavior-compatible Gemini image model defaults", () => {
