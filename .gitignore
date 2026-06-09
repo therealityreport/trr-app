@@ -33,5 +33,11 @@ apps/web/.cache/
 
 # Git worktrees
 /.worktrees/
+
+# Reference-only Vue Wordle sandbox local artifacts
+apps/vue-wordle/node_modules/
+apps/vue-wordle/dist/
+apps/vue-wordle/*.tsbuildinfo
+
 TRR App Brain/sessions/
 .loom-backup/

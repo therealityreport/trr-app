@@ -1,5 +1,6 @@
 packages:
   - "apps/*"
+  - "!apps/vue-wordle"
 
 nodeVersion: 24.14.0
 
