@@ -236,9 +236,20 @@ const isRetryableUpstreamStatus = (status: number): boolean => {
 };
 
 const AUTO_RETRY_ELIGIBLE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+const LOOPBACK_BACKEND_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
 
 const isAutoRetryEligible = (method: string | undefined): boolean => {
   return AUTO_RETRY_ELIGIBLE_METHODS.has(String(method ?? "GET").toUpperCase());
+};
+
+const isLoopbackBackendUrl = (backendUrl: string): boolean => {
+  try {
+    const parsed = new URL(backendUrl);
+    const hostname = parsed.hostname.trim().toLowerCase();
+    return LOOPBACK_BACKEND_HOSTS.has(hostname) || hostname.endsWith(".localhost");
+  } catch {
+    return false;
+  }
 };
 
 const parseRetryAfterSeconds = (value: string | null): number | undefined => {
@@ -543,6 +554,9 @@ async function fetchBackend(
   requestHeaders.set("x-trace-id", traceId);
   if (!requestHeaders.has("x-request-id")) {
     requestHeaders.set("x-request-id", traceId);
+  }
+  if (isLoopbackBackendUrl(backendUrl)) {
+    requestHeaders.set("x-trr-local-admin-proxy", "1");
   }
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
