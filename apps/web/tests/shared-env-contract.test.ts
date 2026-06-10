@@ -1,6 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+
+const testDir = path.dirname(fileURLToPath(import.meta.url));
 
 const readEnvKeys = (contents: string): Set<string> => {
   const keys = new Set<string>();
@@ -57,9 +60,11 @@ describe("workspace shared env contract", () => {
 
   it("documents runtime failure lanes and the remote debug-log kill switch", () => {
     const contractCandidates = [
+      path.resolve(process.cwd(), "docs/workspace/env-contract.md"),
       path.resolve(process.cwd(), "../../docs/workspace/env-contract.md"),
       path.resolve(process.cwd(), "../../../docs/workspace/env-contract.md"),
       path.resolve(process.cwd(), "../../../../docs/workspace/env-contract.md"),
+      path.resolve(testDir, "../../../docs/workspace/env-contract.md"),
     ];
     const contractPath = contractCandidates.find((candidate) => fs.existsSync(candidate));
     expect(contractPath, "missing workspace env contract").toBeTruthy();

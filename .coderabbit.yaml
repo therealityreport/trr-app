@@ -5,3 +5,8 @@ reviews:
     - "!**/BRAIN.md"
     - "!apps/vue-wordle/**"
     - "!PORTLESS.md"
+    - "!pnpm-lock.yaml"
+    - "!apps/web/pnpm-lock.yaml"
+    - "!apps/web/src/lib/fonts/generated/additional-trr-font-catalog.ts"
+    - "!apps/web/src/lib/fonts/brand-fonts/generated/**"
+    - "!apps/web/src/components/admin/design-docs/sections/games/generated/**"
