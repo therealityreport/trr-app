@@ -88,7 +88,8 @@ const normalizeAdminHost = (value: unknown): string | null => {
   if (trimmed.startsWith("[") && trimmed.includes("]")) {
     return trimmed.slice(0, trimmed.indexOf("]") + 1);
   }
-  return trimmed.split(":")[0] ?? null;
+  const host = trimmed.split(":")[0];
+  return host || null;
 };
 
 const readHeaderHost = (headersLike: HeadersInit | Headers | undefined): string | null => {
