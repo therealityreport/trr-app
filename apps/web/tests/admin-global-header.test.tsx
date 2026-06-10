@@ -14,9 +14,19 @@ vi.mock("next/navigation", () => ({
 
 describe("AdminGlobalHeader", () => {
   beforeEach(() => {
+    const storage = new Map<string, string>();
+    Object.defineProperty(window, "localStorage", {
+      configurable: true,
+      value: {
+        clear: vi.fn(() => storage.clear()),
+        getItem: vi.fn((key: string) => storage.get(key) ?? null),
+        removeItem: vi.fn((key: string) => storage.delete(key)),
+        setItem: vi.fn((key: string, value: string) => storage.set(key, value)),
+      },
+    });
     usePathnameMock.mockReset();
     usePathnameMock.mockReturnValue("/admin");
-    localStorage.clear();
+    window.localStorage.clear();
     document.body.className = "";
     vi.unstubAllGlobals();
   });
@@ -29,7 +39,7 @@ describe("AdminGlobalHeader", () => {
     );
 
     expect(screen.getByRole("img", { name: "The Reality Report" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Go to admin dashboard" })).toHaveAttribute("href", "/");
+    expect(screen.getByRole("link", { name: "Go to admin dashboard" })).toHaveAttribute("href", "/admin");
     expect(screen.getByText("Header body content")).toBeInTheDocument();
   });
 
@@ -66,7 +76,7 @@ describe("AdminGlobalHeader", () => {
   });
 
   it("renders recent shows from storage and limits to five", async () => {
-    localStorage.setItem(
+    window.localStorage.setItem(
       ADMIN_RECENT_SHOWS_STORAGE_KEY,
       JSON.stringify(
         Array.from({ length: 6 }, (_, index) => ({

@@ -28,7 +28,7 @@ export function isDevAdminBypassEnabledClient(hostnameOverride?: string | null):
         ? window.location.hostname
         : null;
   if (!isLocalDevHostname(hostname)) return false;
+  if (process.env.NODE_ENV !== "production") return true;
   const explicitBypass = parseOptionalBoolean(process.env.NEXT_PUBLIC_DEV_ADMIN_BYPASS);
-  if (explicitBypass !== null) return explicitBypass;
-  return process.env.NODE_ENV === "development";
+  return explicitBypass === true;
 }

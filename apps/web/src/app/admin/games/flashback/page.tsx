@@ -244,7 +244,7 @@ export default function AdminFlashbackPage() {
                   Flashback Quizzes
                 </h2>
               </div>
-              <button
+              <button type="button"
                 onClick={handleCreateQuiz}
                 className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-700"
               >
@@ -269,7 +269,7 @@ export default function AdminFlashbackPage() {
                         : "px-1"
                     }`}
                   >
-                    <button
+                    <button type="button"
                       onClick={() =>
                         setSelectedQuizId(
                           selectedQuizId === quiz.id ? null : quiz.id,
@@ -293,7 +293,7 @@ export default function AdminFlashbackPage() {
                         )}
                       </p>
                     </button>
-                    <button
+                    <button type="button"
                       onClick={() => handleTogglePublish(quiz)}
                       className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition ${
                         quiz.is_published
@@ -321,7 +321,7 @@ export default function AdminFlashbackPage() {
                     {selectedQuiz.title} &mdash; Timeline Events
                   </h2>
                 </div>
-                <button
+                <button type="button"
                   onClick={handleAddEvent}
                   className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-700"
                 >
@@ -378,7 +378,7 @@ export default function AdminFlashbackPage() {
                             )}
                           </td>
                           <td className="py-2.5 text-right">
-                            <button
+                            <button type="button"
                               onClick={() => handleDeleteEvent(evt.id)}
                               className="rounded-lg border border-red-200 px-3 py-1 text-xs font-semibold text-red-600 transition hover:bg-red-50"
                             >

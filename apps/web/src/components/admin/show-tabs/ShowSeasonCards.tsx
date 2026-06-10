@@ -72,30 +72,17 @@ export function ShowSeasonCards({
 
         return (
           <div key={season.id} className="rounded-xl border border-zinc-200 bg-white shadow-sm">
-            <div
-              role="button"
-              tabIndex={0}
-              aria-expanded={isOpen}
-              onClick={() => onToggleSeason(season.id)}
-              onKeyDown={(event) => {
-                if (event.currentTarget !== event.target) return;
-                if (event.key !== "Enter" && event.key !== " ") return;
-                event.preventDefault();
-                onToggleSeason(season.id);
-              }}
-              className="flex w-full cursor-pointer items-center justify-between gap-4 px-4 py-3 text-left"
-            >
+            <div className="flex w-full items-center justify-between gap-4 px-4 py-3 text-left">
               <div>
                 <div className="flex items-center gap-3">
                   <Link
                     href={buildSeasonHref(season.season_number, "overview") as Route}
-                    onClick={(event) => event.stopPropagation()}
                     className="text-lg font-semibold text-zinc-900 hover:underline"
                   >
                     Season {season.season_number}
                   </Link>
                   {season.tmdb_season_id && showTmdbId && (
-                    <span onClick={(event) => event.stopPropagation()} className="inline-flex">
+                    <span className="inline-flex">
                       <TmdbLinkIcon
                         showTmdbId={showTmdbId}
                         seasonNumber={season.season_number}
@@ -109,17 +96,25 @@ export function ShowSeasonCards({
                   <span>{dateRange}</span>
                 </div>
               </div>
-              <span className={`text-zinc-400 transition-transform ${isOpen ? "rotate-180" : ""}`}>
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-                  <path
-                    d="M6 9l6 6 6-6"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-              </span>
+              <button
+                type="button"
+                aria-expanded={isOpen}
+                aria-label={`${isOpen ? "Collapse" : "Expand"} Season ${season.season_number} details`}
+                onClick={() => onToggleSeason(season.id)}
+                className="rounded-full p-2 text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-900"
+              >
+                <span className={`block transition-transform ${isOpen ? "rotate-180" : ""}`} aria-hidden="true">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                    <path
+                      d="M6 9l6 6 6-6"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </span>
+              </button>
             </div>
             <div className="border-t border-zinc-100 px-4 py-4">
               <div className="flex flex-wrap gap-2">

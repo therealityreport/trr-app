@@ -3,7 +3,7 @@ import type { AdminApiReferenceInventory } from "@/lib/admin/api-references/type
 export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
   "inventorySchemaVersion": "1.0.0",
   "generatorVersion": "1.0.0",
-  "generatedAt": "2026-05-20T21:30:34.350Z",
+  "generatedAt": "2026-06-09T23:54:11.571Z",
   "sourceCommitSha": "b4198ec471d55204af3f5bbeca194ac0a9706ab7",
   "overrideDigest": "1a9e22b4c9b465cc3dab3ee0fcfc469f25b643ecae9e10baf11cdd12f9133e71",
   "nodes": [
@@ -581,6 +581,41 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "fanoutRisk": "low"
     },
     {
+      "id": "backend:GET:/api/v1/admin/bravotv/images/runs/[runId]/review",
+      "kind": "backend_endpoint",
+      "title": "GET /api/v1/admin/bravotv/images/runs/[runId]/review",
+      "pathPattern": "/api/v1/admin/bravotv/images/runs/[runId]/review",
+      "symbol": "GET",
+      "sourceFile": "src/app/api/admin/trr-api/bravotv/images/runs/[runId]/review/route.ts",
+      "sourceLocator": {
+        "line": 13,
+        "matchedText": "`/admin/bravotv/images/runs/${runId}/review${request.nextUrl.search}`"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:getBackendApiUrl"
+      ],
+      "usageTier": "manual",
+      "polls": false,
+      "pollCadenceMs": null,
+      "automatic": false,
+      "loadsLargeDatasets": true,
+      "usesPagination": false,
+      "returnsWideRowsOrBlobsOrRawJson": false,
+      "fansOutQueries": false,
+      "postgresAccess": "indirect",
+      "viewKinds": [
+        "gallery",
+        "list",
+        "detail"
+      ],
+      "staticOnly": false,
+      "payloadRisk": "high",
+      "fanoutRisk": "low"
+    },
+    {
       "id": "backend:GET:/api/v1/admin/bravotv/images/shows/[showId]/latest",
       "kind": "backend_endpoint",
       "title": "GET /api/v1/admin/bravotv/images/shows/[showId]/latest",
@@ -643,39 +678,6 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "postgresAccess": "indirect",
       "viewKinds": [
         "list",
-        "detail"
-      ],
-      "staticOnly": false,
-      "payloadRisk": "high",
-      "fanoutRisk": "low"
-    },
-    {
-      "id": "backend:GET:/api/v1/admin/health/db-pressure",
-      "kind": "backend_endpoint",
-      "title": "GET /api/v1/admin/health/db-pressure",
-      "pathPattern": "/api/v1/admin/health/db-pressure",
-      "symbol": "GET",
-      "sourceFile": "src/app/api/admin/health/app-db-pressure/route.ts",
-      "sourceLocator": {
-        "line": 62,
-        "matchedText": "\"/admin/health/db-pressure\""
-      },
-      "provenance": "static_scan",
-      "confidence": "high",
-      "verificationStatus": "verified",
-      "basis": [
-        "static_scan:getBackendApiUrl"
-      ],
-      "usageTier": "high",
-      "polls": false,
-      "pollCadenceMs": null,
-      "automatic": false,
-      "loadsLargeDatasets": false,
-      "usesPagination": false,
-      "returnsWideRowsOrBlobsOrRawJson": true,
-      "fansOutQueries": false,
-      "postgresAccess": "indirect",
-      "viewKinds": [
         "detail"
       ],
       "staticOnly": false,
@@ -789,7 +791,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/trr-api/people/[personId]/social-growth/route.ts",
       "sourceLocator": {
-        "line": 37,
+        "line": 47,
         "matchedText": "`/admin/people/${personId}/socialblade?handle=${encodeURIComponent(handle)}`"
       },
       "provenance": "static_scan",
@@ -1930,6 +1932,146 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "fanoutRisk": "high"
     },
     {
+      "id": "backend:POST:/api/v1/admin/bravotv/images/runs/[runId]/backfill",
+      "kind": "backend_endpoint",
+      "title": "POST /api/v1/admin/bravotv/images/runs/[runId]/backfill",
+      "pathPattern": "/api/v1/admin/bravotv/images/runs/[runId]/backfill",
+      "symbol": "POST",
+      "sourceFile": "src/app/api/admin/trr-api/bravotv/images/runs/[runId]/backfill/route.ts",
+      "sourceLocator": {
+        "line": 13,
+        "matchedText": "`/admin/bravotv/images/runs/${runId}/backfill`"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:getBackendApiUrl"
+      ],
+      "usageTier": "manual",
+      "polls": false,
+      "pollCadenceMs": null,
+      "automatic": false,
+      "loadsLargeDatasets": true,
+      "usesPagination": false,
+      "returnsWideRowsOrBlobsOrRawJson": false,
+      "fansOutQueries": false,
+      "postgresAccess": "indirect",
+      "viewKinds": [
+        "gallery",
+        "list",
+        "detail"
+      ],
+      "staticOnly": false,
+      "payloadRisk": "high",
+      "fanoutRisk": "low"
+    },
+    {
+      "id": "backend:POST:/api/v1/admin/bravotv/images/runs/[runId]/duplicates/resolve",
+      "kind": "backend_endpoint",
+      "title": "POST /api/v1/admin/bravotv/images/runs/[runId]/duplicates/resolve",
+      "pathPattern": "/api/v1/admin/bravotv/images/runs/[runId]/duplicates/resolve",
+      "symbol": "POST",
+      "sourceFile": "src/app/api/admin/trr-api/bravotv/images/runs/[runId]/duplicates/resolve/route.ts",
+      "sourceLocator": {
+        "line": 17,
+        "matchedText": "`/admin/bravotv/images/runs/${params.runId}/duplicates/resolve`"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:createAdminBackendProxyRoute"
+      ],
+      "usageTier": "manual",
+      "polls": false,
+      "pollCadenceMs": null,
+      "automatic": false,
+      "loadsLargeDatasets": true,
+      "usesPagination": false,
+      "returnsWideRowsOrBlobsOrRawJson": false,
+      "fansOutQueries": false,
+      "postgresAccess": "indirect",
+      "viewKinds": [
+        "gallery",
+        "list",
+        "detail"
+      ],
+      "staticOnly": false,
+      "payloadRisk": "high",
+      "fanoutRisk": "low"
+    },
+    {
+      "id": "backend:POST:/api/v1/admin/bravotv/images/runs/[runId]/replacement-candidates/[groupId]/approve",
+      "kind": "backend_endpoint",
+      "title": "POST /api/v1/admin/bravotv/images/runs/[runId]/replacement-candidates/[groupId]/approve",
+      "pathPattern": "/api/v1/admin/bravotv/images/runs/[runId]/replacement-candidates/[groupId]/approve",
+      "symbol": "POST",
+      "sourceFile": "src/app/api/admin/trr-api/bravotv/images/runs/[runId]/replacement-candidates/[groupId]/approve/route.ts",
+      "sourceLocator": {
+        "line": 21,
+        "matchedText": "`/admin/bravotv/images/runs/${params.runId}/replacement-candidates/${params.groupId}/approve`"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:createAdminBackendProxyRoute"
+      ],
+      "usageTier": "manual",
+      "polls": false,
+      "pollCadenceMs": null,
+      "automatic": false,
+      "loadsLargeDatasets": true,
+      "usesPagination": false,
+      "returnsWideRowsOrBlobsOrRawJson": false,
+      "fansOutQueries": false,
+      "postgresAccess": "indirect",
+      "viewKinds": [
+        "gallery",
+        "list",
+        "detail"
+      ],
+      "staticOnly": false,
+      "payloadRisk": "high",
+      "fanoutRisk": "low"
+    },
+    {
+      "id": "backend:POST:/api/v1/admin/bravotv/images/runs/[runId]/replacement-candidates/approve-bulk",
+      "kind": "backend_endpoint",
+      "title": "POST /api/v1/admin/bravotv/images/runs/[runId]/replacement-candidates/approve-bulk",
+      "pathPattern": "/api/v1/admin/bravotv/images/runs/[runId]/replacement-candidates/approve-bulk",
+      "symbol": "POST",
+      "sourceFile": "src/app/api/admin/trr-api/bravotv/images/runs/[runId]/replacement-candidates/approve-bulk/route.ts",
+      "sourceLocator": {
+        "line": 17,
+        "matchedText": "`/admin/bravotv/images/runs/${params.runId}/replacement-candidates/approve-bulk`"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:createAdminBackendProxyRoute"
+      ],
+      "usageTier": "manual",
+      "polls": false,
+      "pollCadenceMs": null,
+      "automatic": false,
+      "loadsLargeDatasets": true,
+      "usesPagination": false,
+      "returnsWideRowsOrBlobsOrRawJson": false,
+      "fansOutQueries": false,
+      "postgresAccess": "indirect",
+      "viewKinds": [
+        "gallery",
+        "list",
+        "detail"
+      ],
+      "staticOnly": false,
+      "payloadRisk": "high",
+      "fanoutRisk": "low"
+    },
+    {
       "id": "backend:POST:/api/v1/admin/bravotv/images/shows/[showId]/stream",
       "kind": "backend_endpoint",
       "title": "POST /api/v1/admin/bravotv/images/shows/[showId]/stream",
@@ -2411,7 +2553,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "POST",
       "sourceFile": "src/app/api/admin/trr-api/people/[personId]/social-growth/refresh/route.ts",
       "sourceLocator": {
-        "line": 36,
+        "line": 46,
         "matchedText": "`/admin/people/${personId}/socialblade/refresh`"
       },
       "provenance": "static_scan",
@@ -2445,7 +2587,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "POST",
       "sourceFile": "src/app/api/admin/trr-api/social-growth/refresh-batch/route.ts",
       "sourceLocator": {
-        "line": 31,
+        "line": 41,
         "matchedText": "\"/admin/people/socialblade/refresh-batch\""
       },
       "provenance": "static_scan",
@@ -4289,6 +4431,38 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "pathPattern": "/admin/brands",
       "symbol": "page",
       "sourceFile": "src/app/admin/brands/page.tsx",
+      "sourceLocator": {
+        "line": 1,
+        "symbol": "page"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:admin_page",
+        "derived:static_only_page"
+      ],
+      "usageTier": "manual",
+      "polls": false,
+      "pollCadenceMs": null,
+      "automatic": false,
+      "loadsLargeDatasets": false,
+      "usesPagination": false,
+      "returnsWideRowsOrBlobsOrRawJson": false,
+      "fansOutQueries": false,
+      "postgresAccess": "none",
+      "viewKinds": [],
+      "staticOnly": true,
+      "payloadRisk": "low",
+      "fanoutRisk": "low"
+    },
+    {
+      "id": "page:/admin/cast-reference-review",
+      "kind": "ui_surface",
+      "title": "Admin / Cast Reference Review",
+      "pathPattern": "/admin/cast-reference-review",
+      "symbol": "page",
+      "sourceFile": "src/app/admin/cast-reference-review/page.tsx",
       "sourceLocator": {
         "line": 1,
         "symbol": "page"
@@ -8680,7 +8854,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/social/landing/route.ts",
       "sourceLocator": {
-        "line": 359,
+        "line": 362,
         "symbol": "GET"
       },
       "provenance": "static_scan",
@@ -9553,6 +9727,41 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "fanoutRisk": "low"
     },
     {
+      "id": "route:GET:/api/admin/trr-api/bravotv/images/runs/[runId]/review",
+      "kind": "api_route",
+      "title": "GET /api/admin/trr-api/bravotv/images/runs/[runId]/review",
+      "pathPattern": "/api/admin/trr-api/bravotv/images/runs/[runId]/review",
+      "symbol": "GET",
+      "sourceFile": "src/app/api/admin/trr-api/bravotv/images/runs/[runId]/review/route.ts",
+      "sourceLocator": {
+        "line": 10,
+        "symbol": "GET"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:app_api_route"
+      ],
+      "usageTier": "manual",
+      "polls": false,
+      "pollCadenceMs": null,
+      "automatic": false,
+      "loadsLargeDatasets": true,
+      "usesPagination": false,
+      "returnsWideRowsOrBlobsOrRawJson": false,
+      "fansOutQueries": false,
+      "postgresAccess": "none",
+      "viewKinds": [
+        "gallery",
+        "list",
+        "detail"
+      ],
+      "staticOnly": false,
+      "payloadRisk": "high",
+      "fanoutRisk": "low"
+    },
+    {
       "id": "route:GET:/api/admin/trr-api/bravotv/images/shows/[showId]/latest",
       "kind": "api_route",
       "title": "GET /api/admin/trr-api/bravotv/images/shows/[showId]/latest",
@@ -9596,6 +9805,39 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "sourceFile": "src/app/api/admin/trr-api/cast-screentime/[...path]/route.ts",
       "sourceLocator": {
         "line": 65,
+        "symbol": "GET"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:app_api_route"
+      ],
+      "usageTier": "manual",
+      "polls": false,
+      "pollCadenceMs": null,
+      "automatic": false,
+      "loadsLargeDatasets": false,
+      "usesPagination": false,
+      "returnsWideRowsOrBlobsOrRawJson": false,
+      "fansOutQueries": false,
+      "postgresAccess": "none",
+      "viewKinds": [
+        "detail"
+      ],
+      "staticOnly": false,
+      "payloadRisk": "low",
+      "fanoutRisk": "low"
+    },
+    {
+      "id": "route:GET:/api/admin/trr-api/face-references/[...path]",
+      "kind": "api_route",
+      "title": "GET /api/admin/trr-api/face-references/[...path]",
+      "pathPattern": "/api/admin/trr-api/face-references/[...path]",
+      "symbol": "GET",
+      "sourceFile": "src/app/api/admin/trr-api/face-references/[...path]/route.ts",
+      "sourceLocator": {
+        "line": 59,
         "symbol": "GET"
       },
       "provenance": "static_scan",
@@ -9898,7 +10140,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/trr-api/people/[personId]/external-ids/route.ts",
       "sourceLocator": {
-        "line": 26,
+        "line": 29,
         "symbol": "GET"
       },
       "provenance": "static_scan",
@@ -10001,7 +10243,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/trr-api/people/[personId]/social-growth/route.ts",
       "sourceLocator": {
-        "line": 18,
+        "line": 28,
         "symbol": "GET"
       },
       "provenance": "static_scan",
@@ -12031,7 +12273,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/trr-api/social/profiles/[platform]/[handle]/catalog/gap-analysis/route.ts",
       "sourceLocator": {
-        "line": 32,
+        "line": 33,
         "symbol": "GET"
       },
       "provenance": "static_scan",
@@ -12133,7 +12375,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/trr-api/social/profiles/[platform]/[handle]/catalog/review-queue/route.ts",
       "sourceLocator": {
-        "line": 14,
+        "line": 8,
         "symbol": "GET"
       },
       "provenance": "static_scan",
@@ -12268,7 +12510,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/trr-api/social/profiles/[platform]/[handle]/comments/route.ts",
       "sourceLocator": {
-        "line": 5,
+        "line": 8,
         "symbol": "GET"
       },
       "provenance": "static_scan",
@@ -12301,7 +12543,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/trr-api/social/profiles/[platform]/[handle]/comments/runs/[runId]/progress/route.ts",
       "sourceLocator": {
-        "line": 26,
+        "line": 37,
         "symbol": "GET"
       },
       "provenance": "static_scan",
@@ -14119,7 +14361,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "POST",
       "sourceFile": "src/app/api/admin/social/landing/route.ts",
       "sourceLocator": {
-        "line": 428,
+        "line": 442,
         "symbol": "POST"
       },
       "provenance": "static_scan",
@@ -14754,6 +14996,146 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "fanoutRisk": "high"
     },
     {
+      "id": "route:POST:/api/admin/trr-api/bravotv/images/runs/[runId]/backfill",
+      "kind": "api_route",
+      "title": "POST /api/admin/trr-api/bravotv/images/runs/[runId]/backfill",
+      "pathPattern": "/api/admin/trr-api/bravotv/images/runs/[runId]/backfill",
+      "symbol": "POST",
+      "sourceFile": "src/app/api/admin/trr-api/bravotv/images/runs/[runId]/backfill/route.ts",
+      "sourceLocator": {
+        "line": 10,
+        "symbol": "POST"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:app_api_route"
+      ],
+      "usageTier": "manual",
+      "polls": false,
+      "pollCadenceMs": null,
+      "automatic": false,
+      "loadsLargeDatasets": true,
+      "usesPagination": false,
+      "returnsWideRowsOrBlobsOrRawJson": false,
+      "fansOutQueries": false,
+      "postgresAccess": "none",
+      "viewKinds": [
+        "gallery",
+        "list",
+        "detail"
+      ],
+      "staticOnly": false,
+      "payloadRisk": "high",
+      "fanoutRisk": "low"
+    },
+    {
+      "id": "route:POST:/api/admin/trr-api/bravotv/images/runs/[runId]/duplicates/resolve",
+      "kind": "api_route",
+      "title": "POST /api/admin/trr-api/bravotv/images/runs/[runId]/duplicates/resolve",
+      "pathPattern": "/api/admin/trr-api/bravotv/images/runs/[runId]/duplicates/resolve",
+      "symbol": "POST",
+      "sourceFile": "src/app/api/admin/trr-api/bravotv/images/runs/[runId]/duplicates/resolve/route.ts",
+      "sourceLocator": {
+        "line": 13,
+        "symbol": "POST"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:app_api_route"
+      ],
+      "usageTier": "manual",
+      "polls": false,
+      "pollCadenceMs": null,
+      "automatic": false,
+      "loadsLargeDatasets": true,
+      "usesPagination": false,
+      "returnsWideRowsOrBlobsOrRawJson": false,
+      "fansOutQueries": false,
+      "postgresAccess": "none",
+      "viewKinds": [
+        "gallery",
+        "list",
+        "detail"
+      ],
+      "staticOnly": false,
+      "payloadRisk": "high",
+      "fanoutRisk": "low"
+    },
+    {
+      "id": "route:POST:/api/admin/trr-api/bravotv/images/runs/[runId]/replacement-candidates/[groupId]/approve",
+      "kind": "api_route",
+      "title": "POST /api/admin/trr-api/bravotv/images/runs/[runId]/replacement-candidates/[groupId]/approve",
+      "pathPattern": "/api/admin/trr-api/bravotv/images/runs/[runId]/replacement-candidates/[groupId]/approve",
+      "symbol": "POST",
+      "sourceFile": "src/app/api/admin/trr-api/bravotv/images/runs/[runId]/replacement-candidates/[groupId]/approve/route.ts",
+      "sourceLocator": {
+        "line": 14,
+        "symbol": "POST"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:app_api_route"
+      ],
+      "usageTier": "manual",
+      "polls": false,
+      "pollCadenceMs": null,
+      "automatic": false,
+      "loadsLargeDatasets": true,
+      "usesPagination": false,
+      "returnsWideRowsOrBlobsOrRawJson": false,
+      "fansOutQueries": false,
+      "postgresAccess": "none",
+      "viewKinds": [
+        "gallery",
+        "list",
+        "detail"
+      ],
+      "staticOnly": false,
+      "payloadRisk": "high",
+      "fanoutRisk": "low"
+    },
+    {
+      "id": "route:POST:/api/admin/trr-api/bravotv/images/runs/[runId]/replacement-candidates/approve-bulk",
+      "kind": "api_route",
+      "title": "POST /api/admin/trr-api/bravotv/images/runs/[runId]/replacement-candidates/approve-bulk",
+      "pathPattern": "/api/admin/trr-api/bravotv/images/runs/[runId]/replacement-candidates/approve-bulk",
+      "symbol": "POST",
+      "sourceFile": "src/app/api/admin/trr-api/bravotv/images/runs/[runId]/replacement-candidates/approve-bulk/route.ts",
+      "sourceLocator": {
+        "line": 13,
+        "symbol": "POST"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:app_api_route"
+      ],
+      "usageTier": "manual",
+      "polls": false,
+      "pollCadenceMs": null,
+      "automatic": false,
+      "loadsLargeDatasets": true,
+      "usesPagination": false,
+      "returnsWideRowsOrBlobsOrRawJson": false,
+      "fansOutQueries": false,
+      "postgresAccess": "none",
+      "viewKinds": [
+        "gallery",
+        "list",
+        "detail"
+      ],
+      "staticOnly": false,
+      "payloadRisk": "high",
+      "fanoutRisk": "low"
+    },
+    {
       "id": "route:POST:/api/admin/trr-api/bravotv/images/shows/[showId]/stream",
       "kind": "api_route",
       "title": "POST /api/admin/trr-api/bravotv/images/shows/[showId]/stream",
@@ -14933,6 +15315,39 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "sourceFile": "src/app/api/admin/trr-api/cast-screentime/[...path]/route.ts",
       "sourceLocator": {
         "line": 69,
+        "symbol": "POST"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:app_api_route"
+      ],
+      "usageTier": "manual",
+      "polls": false,
+      "pollCadenceMs": null,
+      "automatic": false,
+      "loadsLargeDatasets": false,
+      "usesPagination": false,
+      "returnsWideRowsOrBlobsOrRawJson": false,
+      "fansOutQueries": false,
+      "postgresAccess": "none",
+      "viewKinds": [
+        "detail"
+      ],
+      "staticOnly": false,
+      "payloadRisk": "low",
+      "fanoutRisk": "low"
+    },
+    {
+      "id": "route:POST:/api/admin/trr-api/face-references/[...path]",
+      "kind": "api_route",
+      "title": "POST /api/admin/trr-api/face-references/[...path]",
+      "pathPattern": "/api/admin/trr-api/face-references/[...path]",
+      "symbol": "POST",
+      "sourceFile": "src/app/api/admin/trr-api/face-references/[...path]/route.ts",
+      "sourceLocator": {
+        "line": 63,
         "symbol": "POST"
       },
       "provenance": "static_scan",
@@ -15545,7 +15960,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "POST",
       "sourceFile": "src/app/api/admin/trr-api/people/[personId]/social-growth/refresh/route.ts",
       "sourceLocator": {
-        "line": 19,
+        "line": 29,
         "symbol": "POST"
       },
       "provenance": "static_scan",
@@ -16809,7 +17224,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "POST",
       "sourceFile": "src/app/api/admin/trr-api/social-growth/refresh-batch/route.ts",
       "sourceLocator": {
-        "line": 14,
+        "line": 24,
         "symbol": "POST"
       },
       "provenance": "static_scan",
@@ -17034,40 +17449,6 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "fanoutRisk": "low"
     },
     {
-      "id": "route:POST:/api/admin/trr-api/social/profiles/[platform]/[handle]/catalog/apify-backfill",
-      "kind": "api_route",
-      "title": "POST /api/admin/trr-api/social/profiles/[platform]/[handle]/catalog/apify-backfill",
-      "pathPattern": "/api/admin/trr-api/social/profiles/[platform]/[handle]/catalog/apify-backfill",
-      "symbol": "POST",
-      "sourceFile": "src/app/api/admin/trr-api/social/profiles/[platform]/[handle]/catalog/apify-backfill/route.ts",
-      "sourceLocator": {
-        "line": 14,
-        "symbol": "POST"
-      },
-      "provenance": "static_scan",
-      "confidence": "high",
-      "verificationStatus": "verified",
-      "basis": [
-        "static_scan:app_api_route"
-      ],
-      "usageTier": "manual",
-      "polls": false,
-      "pollCadenceMs": null,
-      "automatic": false,
-      "loadsLargeDatasets": true,
-      "usesPagination": false,
-      "returnsWideRowsOrBlobsOrRawJson": false,
-      "fansOutQueries": false,
-      "postgresAccess": "none",
-      "viewKinds": [
-        "list",
-        "detail"
-      ],
-      "staticOnly": false,
-      "payloadRisk": "high",
-      "fanoutRisk": "low"
-    },
-    {
       "id": "route:POST:/api/admin/trr-api/social/profiles/[platform]/[handle]/catalog/backfill",
       "kind": "api_route",
       "title": "POST /api/admin/trr-api/social/profiles/[platform]/[handle]/catalog/backfill",
@@ -17109,7 +17490,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "POST",
       "sourceFile": "src/app/api/admin/trr-api/social/profiles/[platform]/[handle]/catalog/freshness/route.ts",
       "sourceLocator": {
-        "line": 14,
+        "line": 32,
         "symbol": "POST"
       },
       "provenance": "static_scan",
@@ -17124,7 +17505,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "automatic": false,
       "loadsLargeDatasets": true,
       "usesPagination": false,
-      "returnsWideRowsOrBlobsOrRawJson": false,
+      "returnsWideRowsOrBlobsOrRawJson": true,
       "fansOutQueries": false,
       "postgresAccess": "none",
       "viewKinds": [
@@ -17143,7 +17524,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "POST",
       "sourceFile": "src/app/api/admin/trr-api/social/profiles/[platform]/[handle]/catalog/gap-analysis/run/route.ts",
       "sourceLocator": {
-        "line": 32,
+        "line": 33,
         "symbol": "POST"
       },
       "provenance": "static_scan",
@@ -17245,7 +17626,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "POST",
       "sourceFile": "src/app/api/admin/trr-api/social/profiles/[platform]/[handle]/catalog/review-queue/[itemId]/resolve/route.ts",
       "sourceLocator": {
-        "line": 14,
+        "line": 15,
         "symbol": "POST"
       },
       "provenance": "static_scan",
@@ -17340,6 +17721,40 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "fanoutRisk": "low"
     },
     {
+      "id": "route:POST:/api/admin/trr-api/social/profiles/[platform]/[handle]/catalog/runs/[runId]/manual-auth",
+      "kind": "api_route",
+      "title": "POST /api/admin/trr-api/social/profiles/[platform]/[handle]/catalog/runs/[runId]/manual-auth",
+      "pathPattern": "/api/admin/trr-api/social/profiles/[platform]/[handle]/catalog/runs/[runId]/manual-auth",
+      "symbol": "POST",
+      "sourceFile": "src/app/api/admin/trr-api/social/profiles/[platform]/[handle]/catalog/runs/[runId]/manual-auth/route.ts",
+      "sourceLocator": {
+        "line": 10,
+        "symbol": "POST"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:app_api_route"
+      ],
+      "usageTier": "manual",
+      "polls": false,
+      "pollCadenceMs": null,
+      "automatic": false,
+      "loadsLargeDatasets": true,
+      "usesPagination": false,
+      "returnsWideRowsOrBlobsOrRawJson": false,
+      "fansOutQueries": false,
+      "postgresAccess": "none",
+      "viewKinds": [
+        "list",
+        "detail"
+      ],
+      "staticOnly": false,
+      "payloadRisk": "high",
+      "fanoutRisk": "low"
+    },
+    {
       "id": "route:POST:/api/admin/trr-api/social/profiles/[platform]/[handle]/catalog/runs/[runId]/repair-auth",
       "kind": "api_route",
       "title": "POST /api/admin/trr-api/social/profiles/[platform]/[handle]/catalog/runs/[runId]/repair-auth",
@@ -17347,7 +17762,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "POST",
       "sourceFile": "src/app/api/admin/trr-api/social/profiles/[platform]/[handle]/catalog/runs/[runId]/repair-auth/route.ts",
       "sourceLocator": {
-        "line": 14,
+        "line": 10,
         "symbol": "POST"
       },
       "provenance": "static_scan",
@@ -17448,6 +17863,74 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "pathPattern": "/api/admin/trr-api/social/profiles/[platform]/[handle]/comments/runs/[runId]/cancel",
       "symbol": "POST",
       "sourceFile": "src/app/api/admin/trr-api/social/profiles/[platform]/[handle]/comments/runs/[runId]/cancel/route.ts",
+      "sourceLocator": {
+        "line": 15,
+        "symbol": "POST"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:app_api_route"
+      ],
+      "usageTier": "manual",
+      "polls": false,
+      "pollCadenceMs": null,
+      "automatic": false,
+      "loadsLargeDatasets": false,
+      "usesPagination": false,
+      "returnsWideRowsOrBlobsOrRawJson": false,
+      "fansOutQueries": false,
+      "postgresAccess": "none",
+      "viewKinds": [
+        "list",
+        "detail"
+      ],
+      "staticOnly": false,
+      "payloadRisk": "low",
+      "fanoutRisk": "low"
+    },
+    {
+      "id": "route:POST:/api/admin/trr-api/social/profiles/[platform]/[handle]/comments/runs/[runId]/jobs/[jobId]/cancel",
+      "kind": "api_route",
+      "title": "POST /api/admin/trr-api/social/profiles/[platform]/[handle]/comments/runs/[runId]/jobs/[jobId]/cancel",
+      "pathPattern": "/api/admin/trr-api/social/profiles/[platform]/[handle]/comments/runs/[runId]/jobs/[jobId]/cancel",
+      "symbol": "POST",
+      "sourceFile": "src/app/api/admin/trr-api/social/profiles/[platform]/[handle]/comments/runs/[runId]/jobs/[jobId]/cancel/route.ts",
+      "sourceLocator": {
+        "line": 15,
+        "symbol": "POST"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:app_api_route"
+      ],
+      "usageTier": "manual",
+      "polls": false,
+      "pollCadenceMs": null,
+      "automatic": false,
+      "loadsLargeDatasets": false,
+      "usesPagination": false,
+      "returnsWideRowsOrBlobsOrRawJson": false,
+      "fansOutQueries": false,
+      "postgresAccess": "none",
+      "viewKinds": [
+        "list",
+        "detail"
+      ],
+      "staticOnly": false,
+      "payloadRisk": "low",
+      "fanoutRisk": "low"
+    },
+    {
+      "id": "route:POST:/api/admin/trr-api/social/profiles/[platform]/[handle]/comments/runs/[runId]/resume",
+      "kind": "api_route",
+      "title": "POST /api/admin/trr-api/social/profiles/[platform]/[handle]/comments/runs/[runId]/resume",
+      "pathPattern": "/api/admin/trr-api/social/profiles/[platform]/[handle]/comments/runs/[runId]/resume",
+      "symbol": "POST",
+      "sourceFile": "src/app/api/admin/trr-api/social/profiles/[platform]/[handle]/comments/runs/[runId]/resume/route.ts",
       "sourceLocator": {
         "line": 15,
         "symbol": "POST"
@@ -18258,7 +18741,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "PUT",
       "sourceFile": "src/app/api/admin/trr-api/media-links/[linkId]/tags/route.ts",
       "sourceLocator": {
-        "line": 151,
+        "line": 24,
         "symbol": "PUT"
       },
       "provenance": "static_scan",
@@ -18273,16 +18756,16 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "automatic": false,
       "loadsLargeDatasets": false,
       "usesPagination": false,
-      "returnsWideRowsOrBlobsOrRawJson": true,
-      "fansOutQueries": true,
+      "returnsWideRowsOrBlobsOrRawJson": false,
+      "fansOutQueries": false,
       "postgresAccess": "none",
       "viewKinds": [
         "list",
         "detail"
       ],
       "staticOnly": false,
-      "payloadRisk": "high",
-      "fanoutRisk": "high"
+      "payloadRisk": "low",
+      "fanoutRisk": "low"
     },
     {
       "id": "route:PUT:/api/admin/trr-api/people/[personId]/cover-photo",
@@ -18327,7 +18810,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "PUT",
       "sourceFile": "src/app/api/admin/trr-api/people/[personId]/external-ids/route.ts",
       "sourceLocator": {
-        "line": 73,
+        "line": 76,
         "symbol": "PUT"
       },
       "provenance": "static_scan",
@@ -18942,8 +19425,98 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/components/admin/BravotvImageRunPanel.tsx",
       "sourceLocator": {
-        "line": 119,
+        "line": 220,
         "matchedText": "`/api/admin/trr-api/bravotv/images/runs/${runId}/artifacts/${artifactName}?offset=0&limit=10`"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:ui_request_call"
+      ]
+    },
+    {
+      "id": "originates_request:component:src/components/admin/BravotvImageRunPanel.tsx::BravotvImageRunPanel:route:GET:/api/admin/trr-api/bravotv/images/runs/[runId]/review",
+      "kind": "originates_request",
+      "from": "component:src/components/admin/BravotvImageRunPanel.tsx::BravotvImageRunPanel",
+      "to": "route:GET:/api/admin/trr-api/bravotv/images/runs/[runId]/review",
+      "title": null,
+      "sourceFile": "src/components/admin/BravotvImageRunPanel.tsx",
+      "sourceLocator": {
+        "line": 251,
+        "matchedText": "`/api/admin/trr-api/bravotv/images/runs/${runId}/review?${params.toString()}`"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:ui_request_call"
+      ]
+    },
+    {
+      "id": "originates_request:component:src/components/admin/BravotvImageRunPanel.tsx::BravotvImageRunPanel:route:POST:/api/admin/trr-api/bravotv/images/runs/[runId]/backfill",
+      "kind": "originates_request",
+      "from": "component:src/components/admin/BravotvImageRunPanel.tsx::BravotvImageRunPanel",
+      "to": "route:POST:/api/admin/trr-api/bravotv/images/runs/[runId]/backfill",
+      "title": null,
+      "sourceFile": "src/components/admin/BravotvImageRunPanel.tsx",
+      "sourceLocator": {
+        "line": 451,
+        "matchedText": "`/api/admin/trr-api/bravotv/images/runs/${runId}/backfill`"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:ui_request_call"
+      ]
+    },
+    {
+      "id": "originates_request:component:src/components/admin/BravotvImageRunPanel.tsx::BravotvImageRunPanel:route:POST:/api/admin/trr-api/bravotv/images/runs/[runId]/duplicates/resolve",
+      "kind": "originates_request",
+      "from": "component:src/components/admin/BravotvImageRunPanel.tsx::BravotvImageRunPanel",
+      "to": "route:POST:/api/admin/trr-api/bravotv/images/runs/[runId]/duplicates/resolve",
+      "title": null,
+      "sourceFile": "src/components/admin/BravotvImageRunPanel.tsx",
+      "sourceLocator": {
+        "line": 415,
+        "matchedText": "`/api/admin/trr-api/bravotv/images/runs/${runId}/duplicates/resolve`"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:ui_request_call"
+      ]
+    },
+    {
+      "id": "originates_request:component:src/components/admin/BravotvImageRunPanel.tsx::BravotvImageRunPanel:route:POST:/api/admin/trr-api/bravotv/images/runs/[runId]/replacement-candidates/[groupId]/approve",
+      "kind": "originates_request",
+      "from": "component:src/components/admin/BravotvImageRunPanel.tsx::BravotvImageRunPanel",
+      "to": "route:POST:/api/admin/trr-api/bravotv/images/runs/[runId]/replacement-candidates/[groupId]/approve",
+      "title": null,
+      "sourceFile": "src/components/admin/BravotvImageRunPanel.tsx",
+      "sourceLocator": {
+        "line": 327,
+        "matchedText": "`/api/admin/trr-api/bravotv/images/runs/${runId}/replacement-candidates/${groupId}/approve`"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:ui_request_call"
+      ]
+    },
+    {
+      "id": "originates_request:component:src/components/admin/BravotvImageRunPanel.tsx::BravotvImageRunPanel:route:POST:/api/admin/trr-api/bravotv/images/runs/[runId]/replacement-candidates/approve-bulk",
+      "kind": "originates_request",
+      "from": "component:src/components/admin/BravotvImageRunPanel.tsx::BravotvImageRunPanel",
+      "to": "route:POST:/api/admin/trr-api/bravotv/images/runs/[runId]/replacement-candidates/approve-bulk",
+      "title": null,
+      "sourceFile": "src/components/admin/BravotvImageRunPanel.tsx",
+      "sourceLocator": {
+        "line": 372,
+        "matchedText": "`/api/admin/trr-api/bravotv/images/runs/${runId}/replacement-candidates/approve-bulk`"
       },
       "provenance": "static_scan",
       "confidence": "high",
@@ -19500,7 +20073,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx",
       "sourceLocator": {
-        "line": 1687,
+        "line": 1679,
         "matchedText": "`/api/admin/trr-api/shows/${showId}/cast?limit=500&photo_fallback=none&exclude_zero_episode_members=1`"
       },
       "provenance": "static_scan",
@@ -19518,7 +20091,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx",
       "sourceLocator": {
-        "line": 1716,
+        "line": 1708,
         "matchedText": "`/api/admin/trr-api/shows/${showId}/credits`"
       },
       "provenance": "static_scan",
@@ -19590,7 +20163,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx",
       "sourceLocator": {
-        "line": 1533,
+        "line": 1525,
         "matchedText": "`/api/admin/trr-api/shows/resolve-slug?slug=${encodeURIComponent(raw)}`"
       },
       "provenance": "static_scan",
@@ -19943,24 +20516,6 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       ]
     },
     {
-      "id": "proxies_to:route:GET:/api/admin/health/app-db-pressure:backend:GET:/api/v1/admin/health/db-pressure",
-      "kind": "proxies_to",
-      "from": "route:GET:/api/admin/health/app-db-pressure",
-      "to": "backend:GET:/api/v1/admin/health/db-pressure",
-      "title": null,
-      "sourceFile": "src/app/api/admin/health/app-db-pressure/route.ts",
-      "sourceLocator": {
-        "line": 62,
-        "matchedText": "\"/admin/health/db-pressure\""
-      },
-      "provenance": "static_scan",
-      "confidence": "high",
-      "verificationStatus": "verified",
-      "basis": [
-        "static_scan:getBackendApiUrl"
-      ]
-    },
-    {
       "id": "proxies_to:route:GET:/api/admin/networks-streaming/overrides:backend:GET:/api/v1/admin/shows/networks-streaming/overrides",
       "kind": "proxies_to",
       "from": "route:GET:/api/admin/networks-streaming/overrides",
@@ -20213,6 +20768,24 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       ]
     },
     {
+      "id": "proxies_to:route:GET:/api/admin/trr-api/bravotv/images/runs/[runId]/review:backend:GET:/api/v1/admin/bravotv/images/runs/[runId]/review",
+      "kind": "proxies_to",
+      "from": "route:GET:/api/admin/trr-api/bravotv/images/runs/[runId]/review",
+      "to": "backend:GET:/api/v1/admin/bravotv/images/runs/[runId]/review",
+      "title": null,
+      "sourceFile": "src/app/api/admin/trr-api/bravotv/images/runs/[runId]/review/route.ts",
+      "sourceLocator": {
+        "line": 13,
+        "matchedText": "`/admin/bravotv/images/runs/${runId}/review${request.nextUrl.search}`"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:getBackendApiUrl"
+      ]
+    },
+    {
       "id": "proxies_to:route:GET:/api/admin/trr-api/bravotv/images/shows/[showId]/latest:backend:GET:/api/v1/admin/bravotv/images/shows/[showId]/latest",
       "kind": "proxies_to",
       "from": "route:GET:/api/admin/trr-api/bravotv/images/shows/[showId]/latest",
@@ -20310,7 +20883,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/api/admin/trr-api/people/[personId]/social-growth/route.ts",
       "sourceLocator": {
-        "line": 37,
+        "line": 47,
         "matchedText": "`/admin/people/${personId}/socialblade?handle=${encodeURIComponent(handle)}`"
       },
       "provenance": "static_scan",
@@ -20951,6 +21524,78 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       ]
     },
     {
+      "id": "proxies_to:route:POST:/api/admin/trr-api/bravotv/images/runs/[runId]/backfill:backend:POST:/api/v1/admin/bravotv/images/runs/[runId]/backfill",
+      "kind": "proxies_to",
+      "from": "route:POST:/api/admin/trr-api/bravotv/images/runs/[runId]/backfill",
+      "to": "backend:POST:/api/v1/admin/bravotv/images/runs/[runId]/backfill",
+      "title": null,
+      "sourceFile": "src/app/api/admin/trr-api/bravotv/images/runs/[runId]/backfill/route.ts",
+      "sourceLocator": {
+        "line": 13,
+        "matchedText": "`/admin/bravotv/images/runs/${runId}/backfill`"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:getBackendApiUrl"
+      ]
+    },
+    {
+      "id": "proxies_to:route:POST:/api/admin/trr-api/bravotv/images/runs/[runId]/duplicates/resolve:backend:POST:/api/v1/admin/bravotv/images/runs/[runId]/duplicates/resolve",
+      "kind": "proxies_to",
+      "from": "route:POST:/api/admin/trr-api/bravotv/images/runs/[runId]/duplicates/resolve",
+      "to": "backend:POST:/api/v1/admin/bravotv/images/runs/[runId]/duplicates/resolve",
+      "title": null,
+      "sourceFile": "src/app/api/admin/trr-api/bravotv/images/runs/[runId]/duplicates/resolve/route.ts",
+      "sourceLocator": {
+        "line": 17,
+        "matchedText": "`/admin/bravotv/images/runs/${params.runId}/duplicates/resolve`"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:createAdminBackendProxyRoute"
+      ]
+    },
+    {
+      "id": "proxies_to:route:POST:/api/admin/trr-api/bravotv/images/runs/[runId]/replacement-candidates/[groupId]/approve:backend:POST:/api/v1/admin/bravotv/images/runs/[runId]/replacement-candidates/[groupId]/approve",
+      "kind": "proxies_to",
+      "from": "route:POST:/api/admin/trr-api/bravotv/images/runs/[runId]/replacement-candidates/[groupId]/approve",
+      "to": "backend:POST:/api/v1/admin/bravotv/images/runs/[runId]/replacement-candidates/[groupId]/approve",
+      "title": null,
+      "sourceFile": "src/app/api/admin/trr-api/bravotv/images/runs/[runId]/replacement-candidates/[groupId]/approve/route.ts",
+      "sourceLocator": {
+        "line": 21,
+        "matchedText": "`/admin/bravotv/images/runs/${params.runId}/replacement-candidates/${params.groupId}/approve`"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:createAdminBackendProxyRoute"
+      ]
+    },
+    {
+      "id": "proxies_to:route:POST:/api/admin/trr-api/bravotv/images/runs/[runId]/replacement-candidates/approve-bulk:backend:POST:/api/v1/admin/bravotv/images/runs/[runId]/replacement-candidates/approve-bulk",
+      "kind": "proxies_to",
+      "from": "route:POST:/api/admin/trr-api/bravotv/images/runs/[runId]/replacement-candidates/approve-bulk",
+      "to": "backend:POST:/api/v1/admin/bravotv/images/runs/[runId]/replacement-candidates/approve-bulk",
+      "title": null,
+      "sourceFile": "src/app/api/admin/trr-api/bravotv/images/runs/[runId]/replacement-candidates/approve-bulk/route.ts",
+      "sourceLocator": {
+        "line": 17,
+        "matchedText": "`/admin/bravotv/images/runs/${params.runId}/replacement-candidates/approve-bulk`"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:createAdminBackendProxyRoute"
+      ]
+    },
+    {
       "id": "proxies_to:route:POST:/api/admin/trr-api/bravotv/images/shows/[showId]/stream:backend:POST:/api/v1/admin/bravotv/images/shows/[showId]/stream",
       "kind": "proxies_to",
       "from": "route:POST:/api/admin/trr-api/bravotv/images/shows/[showId]/stream",
@@ -21336,7 +21981,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/api/admin/trr-api/people/[personId]/social-growth/refresh/route.ts",
       "sourceLocator": {
-        "line": 36,
+        "line": 46,
         "matchedText": "`/admin/people/${personId}/socialblade/refresh`"
       },
       "provenance": "static_scan",
@@ -21786,7 +22431,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/api/admin/trr-api/social-growth/refresh-batch/route.ts",
       "sourceLocator": {
-        "line": 31,
+        "line": 41,
         "matchedText": "\"/admin/people/socialblade/refresh-batch\""
       },
       "provenance": "static_scan",
@@ -21911,6 +22556,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
         "page:/admin",
         "page:/admin/api-references",
         "page:/admin/brands",
+        "page:/admin/cast-reference-review",
         "page:/admin/cast-screentime",
         "page:/admin/design-docs/athletic-articles",
         "page:/admin/dev-dashboard",
@@ -22063,8 +22709,10 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
         "route:GET:/api/admin/trr-api/brands/shows-franchises",
         "route:GET:/api/admin/trr-api/bravotv/images/people/[personId]/latest",
         "route:GET:/api/admin/trr-api/bravotv/images/runs/[runId]/artifacts/[...artifactName]",
+        "route:GET:/api/admin/trr-api/bravotv/images/runs/[runId]/review",
         "route:GET:/api/admin/trr-api/bravotv/images/shows/[showId]/latest",
         "route:GET:/api/admin/trr-api/cast-screentime/[...path]",
+        "route:GET:/api/admin/trr-api/face-references/[...path]",
         "route:GET:/api/admin/trr-api/media-links",
         "route:GET:/api/admin/trr-api/operations/[operationId]",
         "route:GET:/api/admin/trr-api/operations/[operationId]/stream",
@@ -22217,12 +22865,17 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
         "route:POST:/api/admin/trr-api/brands/logos/options/source-query",
         "route:POST:/api/admin/trr-api/brands/logos/sync",
         "route:POST:/api/admin/trr-api/bravotv/images/people/[personId]/stream",
+        "route:POST:/api/admin/trr-api/bravotv/images/runs/[runId]/backfill",
+        "route:POST:/api/admin/trr-api/bravotv/images/runs/[runId]/duplicates/resolve",
+        "route:POST:/api/admin/trr-api/bravotv/images/runs/[runId]/replacement-candidates/[groupId]/approve",
+        "route:POST:/api/admin/trr-api/bravotv/images/runs/[runId]/replacement-candidates/approve-bulk",
         "route:POST:/api/admin/trr-api/bravotv/images/shows/[showId]/stream",
         "route:POST:/api/admin/trr-api/cast-photos/[photoId]/auto-count",
         "route:POST:/api/admin/trr-api/cast-photos/[photoId]/detect-text-overlay",
         "route:POST:/api/admin/trr-api/cast-photos/[photoId]/mirror",
         "route:POST:/api/admin/trr-api/cast-photos/[photoId]/variants",
         "route:POST:/api/admin/trr-api/cast-screentime/[...path]",
+        "route:POST:/api/admin/trr-api/face-references/[...path]",
         "route:POST:/api/admin/trr-api/media-assets/[assetId]/auto-count",
         "route:POST:/api/admin/trr-api/media-assets/[assetId]/detect-text-overlay",
         "route:POST:/api/admin/trr-api/media-assets/[assetId]/mirror",
@@ -22284,7 +22937,6 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
         "route:POST:/api/admin/trr-api/social/ingest/reset-health",
         "route:POST:/api/admin/trr-api/social/ingest/stuck-jobs/cancel",
         "route:POST:/api/admin/trr-api/social/ingest/workers/purge-inactive",
-        "route:POST:/api/admin/trr-api/social/profiles/[platform]/[handle]/catalog/apify-backfill",
         "route:POST:/api/admin/trr-api/social/profiles/[platform]/[handle]/catalog/backfill",
         "route:POST:/api/admin/trr-api/social/profiles/[platform]/[handle]/catalog/freshness",
         "route:POST:/api/admin/trr-api/social/profiles/[platform]/[handle]/catalog/gap-analysis/run",
@@ -22293,10 +22945,13 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
         "route:POST:/api/admin/trr-api/social/profiles/[platform]/[handle]/catalog/review-queue/[itemId]/resolve",
         "route:POST:/api/admin/trr-api/social/profiles/[platform]/[handle]/catalog/runs/[runId]/cancel",
         "route:POST:/api/admin/trr-api/social/profiles/[platform]/[handle]/catalog/runs/[runId]/dismiss",
+        "route:POST:/api/admin/trr-api/social/profiles/[platform]/[handle]/catalog/runs/[runId]/manual-auth",
         "route:POST:/api/admin/trr-api/social/profiles/[platform]/[handle]/catalog/runs/[runId]/repair-auth",
         "route:POST:/api/admin/trr-api/social/profiles/[platform]/[handle]/catalog/sync-newer",
         "route:POST:/api/admin/trr-api/social/profiles/[platform]/[handle]/catalog/sync-recent",
         "route:POST:/api/admin/trr-api/social/profiles/[platform]/[handle]/comments/runs/[runId]/cancel",
+        "route:POST:/api/admin/trr-api/social/profiles/[platform]/[handle]/comments/runs/[runId]/jobs/[jobId]/cancel",
+        "route:POST:/api/admin/trr-api/social/profiles/[platform]/[handle]/comments/runs/[runId]/resume",
         "route:POST:/api/admin/trr-api/social/profiles/[platform]/[handle]/comments/scrape",
         "route:POST:/api/admin/trr-api/social/profiles/[platform]/[handle]/cookies/refresh",
         "route:POST:/api/admin/trr-api/social/profiles/[platform]/[handle]/socialblade/refresh",
@@ -22348,9 +23003,9 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
         "backend:GET:/api/v1/admin/brands/logos/options/source-suggestions",
         "backend:GET:/api/v1/admin/brands/logos/options/sources",
         "backend:GET:/api/v1/admin/bravotv/images/people/[personId]/latest",
+        "backend:GET:/api/v1/admin/bravotv/images/runs/[runId]/review",
         "backend:GET:/api/v1/admin/bravotv/images/shows/[showId]/latest",
         "backend:GET:/api/v1/admin/covered-shows/[showId]",
-        "backend:GET:/api/v1/admin/health/db-pressure",
         "backend:GET:/api/v1/admin/operations/[operationId]",
         "backend:GET:/api/v1/admin/operations/[operationId]/stream",
         "backend:GET:/api/v1/admin/operations/health",
@@ -22388,6 +23043,10 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
         "backend:POST:/api/v1/admin/brands/logos/options/source-query",
         "backend:POST:/api/v1/admin/brands/logos/sync",
         "backend:POST:/api/v1/admin/bravotv/images/people/[personId]/stream",
+        "backend:POST:/api/v1/admin/bravotv/images/runs/[runId]/backfill",
+        "backend:POST:/api/v1/admin/bravotv/images/runs/[runId]/duplicates/resolve",
+        "backend:POST:/api/v1/admin/bravotv/images/runs/[runId]/replacement-candidates/[groupId]/approve",
+        "backend:POST:/api/v1/admin/bravotv/images/runs/[runId]/replacement-candidates/approve-bulk",
         "backend:POST:/api/v1/admin/bravotv/images/shows/[showId]/stream",
         "backend:POST:/api/v1/admin/cast-photos/[photoId]/auto-count",
         "backend:POST:/api/v1/admin/cast-photos/[photoId]/detect-text-overlay",
@@ -22475,6 +23134,11 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
         "originates_request:component:src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx::PersonProfilePage:route:PUT:/api/admin/trr-api/people/[personId]/photos/[photoId]/thumbnail-crop",
         "originates_request:component:src/components/admin/AdminGlobalSearch.tsx::AdminGlobalSearch:route:GET:/api/admin/trr-api/search",
         "originates_request:component:src/components/admin/BravotvImageRunPanel.tsx::BravotvImageRunPanel:route:GET:/api/admin/trr-api/bravotv/images/runs/[runId]/artifacts/[...artifactName]",
+        "originates_request:component:src/components/admin/BravotvImageRunPanel.tsx::BravotvImageRunPanel:route:GET:/api/admin/trr-api/bravotv/images/runs/[runId]/review",
+        "originates_request:component:src/components/admin/BravotvImageRunPanel.tsx::BravotvImageRunPanel:route:POST:/api/admin/trr-api/bravotv/images/runs/[runId]/backfill",
+        "originates_request:component:src/components/admin/BravotvImageRunPanel.tsx::BravotvImageRunPanel:route:POST:/api/admin/trr-api/bravotv/images/runs/[runId]/duplicates/resolve",
+        "originates_request:component:src/components/admin/BravotvImageRunPanel.tsx::BravotvImageRunPanel:route:POST:/api/admin/trr-api/bravotv/images/runs/[runId]/replacement-candidates/[groupId]/approve",
+        "originates_request:component:src/components/admin/BravotvImageRunPanel.tsx::BravotvImageRunPanel:route:POST:/api/admin/trr-api/bravotv/images/runs/[runId]/replacement-candidates/approve-bulk",
         "originates_request:component:src/components/admin/design-system/BrandFontMatchesPanel.tsx::BrandFontMatchesPanel:route:GET:/api/admin/design-system/brand-font-matches",
         "originates_request:component:src/components/admin/design-system/DesignSystemPageClient.tsx::DesignSystemPageClient:route:GET:/api/admin/design-system/typography",
         "originates_request:component:src/components/admin/GameProblemReports.tsx::GameProblemReports:route:GET:/api/admin/games/problem-reports",
@@ -22538,7 +23202,6 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
         "proxies_to:route:DELETE:/api/admin/trr-api/media-assets/[assetId]:backend:DELETE:/api/v1/admin/media-assets/[assetId]",
         "proxies_to:route:DELETE:/api/admin/trr-api/shows/[showId]/links/[linkId]:backend:DELETE:/api/v1/admin/shows/[showId]/links/[linkId]",
         "proxies_to:route:GET:/api/admin/covered-shows/[showId]:backend:GET:/api/v1/admin/covered-shows/[showId]",
-        "proxies_to:route:GET:/api/admin/health/app-db-pressure:backend:GET:/api/v1/admin/health/db-pressure",
         "proxies_to:route:GET:/api/admin/networks-streaming/overrides:backend:GET:/api/v1/admin/shows/networks-streaming/overrides",
         "proxies_to:route:GET:/api/admin/shows/[showKey]/icons:backend:GET:/api/v1/admin/shows/[showKey]/icons",
         "proxies_to:route:GET:/api/admin/social-posts/[postId]:backend:GET:/api/v1/admin/social-posts/[postId]",
@@ -22553,6 +23216,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
         "proxies_to:route:GET:/api/admin/trr-api/brands/logos/options/source-suggestions:backend:GET:/api/v1/admin/brands/logos/options/source-suggestions",
         "proxies_to:route:GET:/api/admin/trr-api/brands/logos/options/sources:backend:GET:/api/v1/admin/brands/logos/options/sources",
         "proxies_to:route:GET:/api/admin/trr-api/bravotv/images/people/[personId]/latest:backend:GET:/api/v1/admin/bravotv/images/people/[personId]/latest",
+        "proxies_to:route:GET:/api/admin/trr-api/bravotv/images/runs/[runId]/review:backend:GET:/api/v1/admin/bravotv/images/runs/[runId]/review",
         "proxies_to:route:GET:/api/admin/trr-api/bravotv/images/shows/[showId]/latest:backend:GET:/api/v1/admin/bravotv/images/shows/[showId]/latest",
         "proxies_to:route:GET:/api/admin/trr-api/operations/[operationId]:backend:GET:/api/v1/admin/operations/[operationId]",
         "proxies_to:route:GET:/api/admin/trr-api/operations/[operationId]/stream:backend:GET:/api/v1/admin/operations/[operationId]/stream",
@@ -22594,6 +23258,10 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
         "proxies_to:route:POST:/api/admin/trr-api/brands/logos/options/source-query:backend:POST:/api/v1/admin/brands/logos/options/source-query",
         "proxies_to:route:POST:/api/admin/trr-api/brands/logos/sync:backend:POST:/api/v1/admin/brands/logos/sync",
         "proxies_to:route:POST:/api/admin/trr-api/bravotv/images/people/[personId]/stream:backend:POST:/api/v1/admin/bravotv/images/people/[personId]/stream",
+        "proxies_to:route:POST:/api/admin/trr-api/bravotv/images/runs/[runId]/backfill:backend:POST:/api/v1/admin/bravotv/images/runs/[runId]/backfill",
+        "proxies_to:route:POST:/api/admin/trr-api/bravotv/images/runs/[runId]/duplicates/resolve:backend:POST:/api/v1/admin/bravotv/images/runs/[runId]/duplicates/resolve",
+        "proxies_to:route:POST:/api/admin/trr-api/bravotv/images/runs/[runId]/replacement-candidates/[groupId]/approve:backend:POST:/api/v1/admin/bravotv/images/runs/[runId]/replacement-candidates/[groupId]/approve",
+        "proxies_to:route:POST:/api/admin/trr-api/bravotv/images/runs/[runId]/replacement-candidates/approve-bulk:backend:POST:/api/v1/admin/bravotv/images/runs/[runId]/replacement-candidates/approve-bulk",
         "proxies_to:route:POST:/api/admin/trr-api/bravotv/images/shows/[showId]/stream:backend:POST:/api/v1/admin/bravotv/images/shows/[showId]/stream",
         "proxies_to:route:POST:/api/admin/trr-api/cast-photos/[photoId]/auto-count:backend:POST:/api/v1/admin/cast-photos/[photoId]/auto-count",
         "proxies_to:route:POST:/api/admin/trr-api/cast-photos/[photoId]/detect-text-overlay:backend:POST:/api/v1/admin/cast-photos/[photoId]/detect-text-overlay",
@@ -22653,27 +23321,27 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "renders_view": []
     },
     "summary": {
-      "totalNodes": 548,
-      "totalEdges": 186,
+      "totalNodes": 562,
+      "totalEdges": 195,
       "nodesByKind": {
-        "ui_surface": 58,
-        "api_route": 373,
-        "backend_endpoint": 112,
+        "ui_surface": 59,
+        "api_route": 382,
+        "backend_endpoint": 116,
         "repository_surface": 2,
         "polling_loop": 3
       },
       "edgesByKind": {
-        "originates_request": 67,
+        "originates_request": 72,
         "contains_polling": 3,
         "calls": 0,
-        "proxies_to": 112,
+        "proxies_to": 116,
         "touches_repository": 4,
         "renders_view": 0
       },
       "automaticNodes": 36,
       "pollingNodes": 36,
       "directPostgresNodes": 2,
-      "indirectPostgresNodes": 133
+      "indirectPostgresNodes": 137
     }
   }
 } satisfies AdminApiReferenceInventory;

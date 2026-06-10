@@ -2,9 +2,19 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
 import { getBackendApiUrl } from "@/lib/server/trr-api/backend";
 import { getInternalAdminBearerToken } from "@/lib/server/trr-api/internal-admin-auth";
+import {
+  isTimeoutSafeFetchTimeoutError,
+  timeoutSafeFetch,
+} from "@/lib/server/timeout-safe-fetch";
+import {
+  buildSocialBladeBackendErrorPayload,
+  buildSocialBladeTimeoutResponse,
+} from "@/lib/server/trr-api/socialblade-proxy";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
+
+const SOCIALBLADE_BATCH_REFRESH_TIMEOUT_MS = 55_000;
 
 interface BatchRefreshItem {
   personId: string;
@@ -41,7 +51,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Backend auth not configured" }, { status: 502 });
     }
 
-    const upstream = await fetch(backendUrl, {
+    const upstream = await timeoutSafeFetch(backendUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -53,19 +63,24 @@ export async function POST(request: NextRequest) {
         force,
         ...(sourceScope !== undefined ? { source_scope: sourceScope } : {}),
       }),
+      timeoutMs: SOCIALBLADE_BATCH_REFRESH_TIMEOUT_MS,
+      timeoutName: "socialblade-batch-refresh",
     });
 
     const data = await upstream.json().catch(() => ({ error: "Invalid response from backend" }));
 
     if (!upstream.ok) {
       return NextResponse.json(
-        { error: data.detail || data.error || `Backend returned ${upstream.status}` },
+        buildSocialBladeBackendErrorPayload(data, `Backend returned ${upstream.status}`),
         { status: upstream.status }
       );
     }
 
     return NextResponse.json(data);
   } catch (error) {
+    if (isTimeoutSafeFetchTimeoutError(error)) {
+      return buildSocialBladeTimeoutResponse(error, SOCIALBLADE_BATCH_REFRESH_TIMEOUT_MS);
+    }
     console.error("[api] Failed to refresh SocialBlade batch", error);
     const message = error instanceof Error ? error.message : "failed";
     const status =

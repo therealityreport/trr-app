@@ -1254,7 +1254,7 @@ export function ImageScrapeDrawer({
               </h2>
               <p className="text-sm text-zinc-500">{entityDisplayName}</p>
             </div>
-            <button
+            <button type="button"
               onClick={onClose}
               disabled={importing}
               className="rounded-lg p-2 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600 disabled:opacity-50"
@@ -1271,7 +1271,7 @@ export function ImageScrapeDrawer({
           {error && (
             <div className="mb-6 rounded-lg border border-red-200 bg-red-50 p-4">
               <p className="text-sm text-red-700">{error}</p>
-              <button
+              <button type="button"
                 onClick={() => setError(null)}
                 className="mt-2 text-xs font-semibold text-red-600 hover:underline"
               >
@@ -1295,7 +1295,7 @@ export function ImageScrapeDrawer({
                   className="flex-1 rounded-lg border border-zinc-200 px-3 py-2 text-sm focus:border-zinc-900 focus:outline-none focus:ring-1 focus:ring-zinc-900"
                   disabled={scraping || importing}
                 />
-                <button
+                <button type="button"
                   onClick={handleScrape}
                   disabled={scraping || importing || !url.trim()}
                   className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50"
@@ -1316,7 +1316,7 @@ export function ImageScrapeDrawer({
                   </p>
                 </div>
                 <div className="flex items-center gap-4">
-                  <button
+                  <button type="button"
                     onClick={toggleSelectAll}
                     className="text-sm font-semibold text-zinc-600 hover:text-zinc-900"
                   >
@@ -1784,7 +1784,7 @@ export function ImageScrapeDrawer({
               )}
 
               {/* Import Button */}
-              <button
+              <button type="button"
                 onClick={handleImport}
                 disabled={importing || selectedImages.size === 0 || Boolean(logoSelectionValidationError())}
                 className="w-full rounded-lg bg-green-600 px-6 py-2.5 text-sm font-semibold text-white transition hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50"
@@ -1865,7 +1865,7 @@ export function ImageScrapeDrawer({
                       Link Existing Images ({duplicates.filter((d) => !d.linked).length} available)
                     </p>
                     {duplicates.some((d) => !d.linked && !d.linking) && (
-                      <button
+                      <button type="button"
                         onClick={linkAllDuplicates}
                         className="rounded bg-amber-600 px-2 py-1 text-xs font-semibold text-white transition hover:bg-amber-700"
                       >
@@ -1894,7 +1894,7 @@ export function ImageScrapeDrawer({
                             Linking...
                           </span>
                         ) : (
-                          <button
+                          <button type="button"
                             onClick={() => linkDuplicate(dup)}
                             className="rounded bg-amber-100 px-2 py-1 text-xs font-medium text-amber-700 transition hover:bg-amber-200"
                           >
@@ -1908,7 +1908,7 @@ export function ImageScrapeDrawer({
               )}
 
               <div className="flex gap-2">
-                <button
+                <button type="button"
                   onClick={() => {
                     setUrl("");
                     setImportResult(null);
@@ -1918,7 +1918,7 @@ export function ImageScrapeDrawer({
                 >
                   Import More
                 </button>
-                <button
+                <button type="button"
                   onClick={onClose}
                   className="flex-1 rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-green-700"
                 >

@@ -1,6 +1,5 @@
 // @ts-nocheck - Test files use different module resolution
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { captureExpectedConsoleLog } from './helpers/expected-console';
 
 // Mock cookies and redirects
 vi.mock('next/navigation', () => ({
@@ -14,21 +13,29 @@ vi.mock('next/headers', () => ({
 describe('SSR guards', () => {
   beforeEach(() => {
     vi.resetModules();
+    delete process.env.TRR_HUB_GUARD_DIAGNOSTICS;
   });
 
-  it('returns hub shell when guard is disabled (incomplete profile)', async () => {
-    const expectedLog = captureExpectedConsoleLog(/^Hub guard: Server-side auth check disabled/);
+  it('returns hub shell when guard is disabled without logging by default (incomplete profile)', async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     const hub = await import('@/app/hub/layout');
     const out = await hub.default({ children: 'x' } as any);
     expect(out).toMatchObject({ props: { children: 'x' } });
-    expectedLog.expectCalled();
+    expect(logSpy).not.toHaveBeenCalledWith(
+      "Hub guard: Server-side auth check disabled - using client-side auth only",
+    );
+    logSpy.mockRestore();
   });
 
-  it('returns hub shell when guard is disabled (complete profile)', async () => {
-    const expectedLog = captureExpectedConsoleLog(/^Hub guard: Server-side auth check disabled/);
+  it('returns hub shell when guard diagnostics are enabled', async () => {
+    process.env.TRR_HUB_GUARD_DIAGNOSTICS = "true";
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     const hub = await import('@/app/hub/layout');
     const out = await hub.default({ children: 'ok' } as any);
     expect(out).toMatchObject({ props: { children: 'ok' } });
-    expectedLog.expectCalled();
+    expect(logSpy).toHaveBeenCalledWith(
+      "Hub guard: Server-side auth check disabled - using client-side auth only",
+    );
+    logSpy.mockRestore();
   });
 });

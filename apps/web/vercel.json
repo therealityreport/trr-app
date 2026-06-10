@@ -1,4 +1,6 @@
 {
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "installCommand": "corepack enable && corepack prepare pnpm@11.5.2 --activate && pnpm install --frozen-lockfile",
   "crons": [
     {
       "path": "/api/cron/episode-progression",

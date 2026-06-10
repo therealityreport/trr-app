@@ -33,18 +33,18 @@ describe("season episodes route parity", () => {
       status: 200,
       data: {
         episodes: [{ id: "episode-1", episode_number: 1, title: "Pilot", air_date: null }],
-        pagination: { limit: 250, offset: 0, count: 1 },
+        pagination: { limit: 500, offset: 0, count: 1 },
       },
       durationMs: 5,
     });
 
-    const request = new NextRequest("http://localhost/api/admin/trr-api/seasons/season-1/episodes?limit=250");
+    const request = new NextRequest("http://localhost/api/admin/trr-api/seasons/season-1/episodes?limit=500");
     const response = await GET(request, { params: Promise.resolve({ seasonId: "season-1" }) });
     const payload = await response.json();
 
     expect(response.status).toBe(200);
     expect(fetchAdminBackendJsonMock).toHaveBeenCalledWith(
-      "/admin/trr-api/seasons/season-1/episodes?limit=250&offset=0",
+      "/admin/trr-api/seasons/season-1/episodes?limit=500&offset=0",
       expect.objectContaining({ routeName: "season-episodes" }),
     );
     expect(payload.episodes[0]).toMatchObject({ episode_number: 1, title: "Pilot" });

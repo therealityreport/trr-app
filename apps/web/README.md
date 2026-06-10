@@ -17,6 +17,25 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
+## Local Production Builds
+
+`pnpm run build` uses a local safety wrapper before `next build --webpack`.
+Outside CI, the wrapper refuses to start when the Mac is already under memory
+pressure, lowers the build priority, and caps Next build workers to avoid
+overheating an already busy machine.
+
+Run the lightweight pre-build validation first:
+
+```bash
+pnpm run validate:quick
+```
+
+Useful overrides:
+
+- `TRR_FORCE_BUILD=1 pnpm run build` starts anyway.
+- `TRR_NEXT_BUILD_CPUS=4 pnpm run build` changes the local worker cap.
+- `TRR_BUILD_MIN_FREE_GB=4 pnpm run build` requires more free memory before start.
+
 ## Firebase Emulator (Auth + Firestore)
 
 - Enable: set `NEXT_PUBLIC_USE_FIREBASE_EMULATORS=true` (see `.env.example`). Optionally set `NEXT_PUBLIC_FIREBASE_EMULATOR_PROJECT_ID=demo-trr` so the Emulator UI shows your data.
@@ -42,6 +61,13 @@ ADMIN_APP_ORIGIN=http://admin.localhost:3000
 ADMIN_APP_HOSTS=admin.localhost,localhost,127.0.0.1,[::1]
 ADMIN_ENFORCE_HOST=true
 ADMIN_STRICT_HOST_ROUTING=false
+```
+
+For production, prefer `ADMIN_APP_ORIGIN=https://admin.<domain>`. If the same build needs to derive the admin host from a configured domain, set:
+
+```bash
+ADMIN_APP_BASE_DOMAIN=thereality.report
+ADMIN_APP_HOST_PREFIX=admin
 ```
 
 Behavior:

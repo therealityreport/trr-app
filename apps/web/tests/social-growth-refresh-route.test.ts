@@ -107,4 +107,79 @@ describe("social growth person refresh proxy route", () => {
     expect(payload).toEqual({ error: "Backend auth not configured" });
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it("preserves structured backend refresh errors with a string error", async () => {
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          detail: {
+            message: "SocialBlade scrape failed before history was captured",
+            code: "SOCIALBLADE_SCRAPE_FAILED",
+            retryable: false,
+            trace_id: "trace-socialblade-1",
+          },
+        }),
+        {
+          status: 502,
+          headers: { "content-type": "application/json" },
+        },
+      ),
+    );
+
+    const request = new NextRequest("http://localhost/api/admin/trr-api/people/person-1/social-growth/refresh", {
+      method: "POST",
+      body: JSON.stringify({
+        handle: "heathergay",
+      }),
+    });
+
+    const response = await POST(request, {
+      params: Promise.resolve({ personId: "person-1" }),
+    });
+    const payload = await response.json();
+
+    expect(response.status).toBe(502);
+    expect(payload).toEqual({
+      error: "SocialBlade scrape failed before history was captured",
+      detail: {
+        message: "SocialBlade scrape failed before history was captured",
+        code: "SOCIALBLADE_SCRAPE_FAILED",
+        retryable: false,
+        trace_id: "trace-socialblade-1",
+      },
+      code: "SOCIALBLADE_SCRAPE_FAILED",
+      retryable: false,
+      trace_id: "trace-socialblade-1",
+    });
+    expect(typeof payload.error).toBe("string");
+  });
+
+  it("returns a typed 504 when the SocialBlade refresh backend request times out", async () => {
+    const abortError = Object.assign(new Error("aborted"), { name: "AbortError" });
+    fetchMock.mockRejectedValue(abortError);
+
+    const request = new NextRequest("http://localhost/api/admin/trr-api/people/person-1/social-growth/refresh", {
+      method: "POST",
+      body: JSON.stringify({
+        handle: "heathergay",
+      }),
+    });
+
+    const response = await POST(request, {
+      params: Promise.resolve({ personId: "person-1" }),
+    });
+    const payload = await response.json();
+
+    expect(response.status).toBe(504);
+    expect(payload).toMatchObject({
+      error: "SocialBlade backend request timed out",
+      code: "SOCIALBLADE_UPSTREAM_TIMEOUT",
+      retryable: true,
+      detail: {
+        code: "SOCIALBLADE_UPSTREAM_TIMEOUT",
+        timeout_ms: 210_000,
+      },
+    });
+    expect(typeof payload.error).toBe("string");
+  });
 });

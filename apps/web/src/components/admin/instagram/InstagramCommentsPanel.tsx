@@ -45,6 +45,11 @@ type Props = {
   summary: SocialAccountProfileSummary | null;
   onSummaryRefresh?: () => Promise<void> | void;
   hideActiveRunProgress?: boolean;
+  onCoverageMetricsChange?: (metrics: {
+    availablePosts: number;
+    commentablePosts: number;
+    incompletePosts: number | null;
+  }) => void;
 };
 
 type ProxyErrorPayload = InstagramCommentsProxyErrorPayload & {
@@ -68,7 +73,7 @@ type CommentsSortState = {
   direction: CommentsSortDirection;
 };
 
-const ACTIVE_RUN_STATUSES = new Set(["queued", "pending", "retrying", "running"]);
+const ACTIVE_RUN_STATUSES = new Set(["queued", "pending", "retrying", "running", "cancelling"]);
 const TERMINAL_RUN_STATUSES = new Set(["completed", "failed", "cancelled"]);
 // P2-8: 2s matches the existing admin polling cadence used elsewhere on the profile page.
 const COMMENTS_PROGRESS_POLL_INTERVAL_MS = 2_000;
@@ -150,6 +155,19 @@ const readProgressTruthy = (value: unknown): boolean => {
     return ["1", "true", "yes", "on", "enabled"].includes(value.trim().toLowerCase());
   }
   return false;
+};
+
+const isCommentsProgressNonAuthoritative = (progress?: SocialAccountCommentsRunProgress | null): boolean => {
+  if (!progress || typeof progress !== "object") return false;
+  const record = progress as Record<string, unknown>;
+  return (
+    readProgressTruthy(record.stale) ||
+    readProgressTruthy(record.progress_stale) ||
+    readProgressTruthy(record.degraded) ||
+    readProgressTruthy(record.progress_degraded) ||
+    record.progress_authoritative === false ||
+    record.authoritative === false
+  );
 };
 
 const readNonNegativeInteger = (value: unknown): number | null => {
@@ -422,6 +440,9 @@ const formatShardProgressMetrics = (row: SocialAccountCommentsShardProgress): st
 
 const formatCommentsProgressWarning = (progress?: SocialAccountCommentsRunProgress | null): string | null => {
   if (!progress) return null;
+  if (isCommentsProgressNonAuthoritative(progress)) {
+    return "Comments progress is temporarily stale. Live controls are locked until a fresh progress response arrives.";
+  }
   const explicitWarning =
     (typeof progress.warning_message === "string" && progress.warning_message.trim()) ||
     (progress.warnings ?? []).filter((warning) => typeof warning === "string" && warning.trim()).slice(0, 2).join(" ");
@@ -484,7 +505,7 @@ const formatCommentsLaunchQueuedMessage = (
   fallback: string,
 ): string => {
   if (data.auth_repair_attempted && data.auth_repair_status === "succeeded") {
-    return `Instagram auth repaired. ${fallback}`;
+    return `Manual Instagram Auth validated. ${fallback}`;
   }
   return fallback;
 };
@@ -566,6 +587,7 @@ export default function InstagramCommentsPanel({
   summary,
   onSummaryRefresh,
   hideActiveRunProgress = false,
+  onCoverageMetricsChange,
 }: Props) {
   const { user, checking, hasAccess } = useAdminGuard();
   const pathname = usePathname();
@@ -596,6 +618,7 @@ export default function InstagramCommentsPanel({
   const [scrapeRunId, setScrapeRunId] = useState<string | null>(null);
   const [commentsLaunchPending, setCommentsLaunchPending] = useState(false);
   const [cancelPending, setCancelPending] = useState(false);
+  const [cancelRequestedRunId, setCancelRequestedRunId] = useState<string | null>(null);
   const [catalogRefreshPending, setCatalogRefreshPending] = useState(false);
   const [selectedPost, setSelectedPost] = useState<SocialAccountProfilePost | null>(null);
   const [modalRefreshKey, setModalRefreshKey] = useState(0);
@@ -721,6 +744,7 @@ export default function InstagramCommentsPanel({
     setScrapeMessage("Repairing Instagram auth if needed...");
     setCommentsLaunchPending(true);
     handledTerminalRunRef.current = null;
+    setCancelRequestedRunId(null);
     const body: SocialAccountCommentsScrapeRequest = {
       mode: "profile",
       source_scope: "network",
@@ -769,6 +793,7 @@ export default function InstagramCommentsPanel({
     setScrapeMessage("Repairing Instagram auth if needed...");
     setCommentsLaunchPending(true);
     handledTerminalRunRef.current = null;
+    setCancelRequestedRunId(null);
     const body: SocialAccountCommentsScrapeRequest = {
       mode: "profile",
       source_scope: "network",
@@ -842,7 +867,7 @@ export default function InstagramCommentsPanel({
         : "Refresh queued for saved posts and discussion.";
       setScrapeMessage(
         data.auth_repair_attempted && data.auth_repair_status === "succeeded"
-          ? `Instagram auth repaired. ${queuedMessage}`
+          ? `Manual Instagram Auth validated. ${queuedMessage}`
           : queuedMessage,
       );
       void refreshPosts();
@@ -872,18 +897,17 @@ export default function InstagramCommentsPanel({
         throw new Error(readInstagramCommentsErrorMessage(data, "Failed to cancel comments sync"));
       }
       const cancelledRunId = String(data.run_id || runId).trim() || runId;
-      handledTerminalRunRef.current = cancelledRunId;
       terminalCoverageRefreshRunRef.current = null;
-      setScrapeRunId(null);
-      setScrapeMessage(`Comments sync cancelled. Run ${cancelledRunId.slice(0, 8)}.`);
-      void refreshPosts();
-      void onSummaryRefresh?.();
+      setCancelRequestedRunId(cancelledRunId);
+      setScrapeRunId(cancelledRunId);
+      setScrapeMessage(`Cancel requested. Waiting for run ${cancelledRunId.slice(0, 8)} to finish cancelling.`);
+      refetchRunProgress({ cause: "manual", forceRefresh: true });
     } catch (error) {
       setScrapeError(error instanceof Error ? error.message : "Failed to cancel comments sync");
     } finally {
       setCancelPending(false);
     }
-  }, [fetchAdminWithAuth, handle, onSummaryRefresh, platform, refreshPosts, scrapeRunId, user]);
+  }, [fetchAdminWithAuth, handle, platform, refetchRunProgress, scrapeRunId, user]);
 
   const coverage = summary?.comments_coverage;
   const savedSummary = summary?.comments_saved_summary;
@@ -894,6 +918,7 @@ export default function InstagramCommentsPanel({
   }, [coverage, coverageStatus]);
   const rawRunProgressStatus = normalizeRunStatus(runProgress.data?.run_status);
   const rawRunProgressRunId = String(runProgress.data?.run_id || "").trim();
+  const runProgressIsStale = isCommentsProgressNonAuthoritative(runProgress.data);
   const runProgressLastSuccessMs = runProgress.lastSuccessAt?.getTime() ?? 0;
   const rawRunProgressFromThisMount = runProgressLastSuccessMs >= mountedAtMsRef.current;
   const suppressStaleTerminalProgress =
@@ -901,15 +926,19 @@ export default function InstagramCommentsPanel({
     rawRunProgressRunId === coverageActiveRunId &&
     TERMINAL_RUN_STATUSES.has(rawRunProgressStatus) &&
     !rawRunProgressFromThisMount;
+  const authoritativeRunProgress = suppressStaleTerminalProgress || runProgressIsStale ? null : runProgress.data;
   const displayedRunProgress = suppressStaleTerminalProgress ? null : runProgress.data;
 
   useEffect(() => {
-    const progress = runProgress.data;
+    const progress = authoritativeRunProgress;
     if (!progress) return;
     const runId = String(progress.run_id || "").trim();
     const status = normalizeRunStatus(progress.run_status);
     if (!runId) return;
     if (ACTIVE_RUN_STATUSES.has(status)) {
+      if (status === "cancelling") {
+        setCancelRequestedRunId(runId);
+      }
       setScrapeMessage(formatCommentsProgressMessage(progress, runId, status));
       setScrapeError(null);
       return;
@@ -938,11 +967,19 @@ export default function InstagramCommentsPanel({
     if (status === "completed") {
       setScrapeMessage(`Comments sync completed. Run ${runId.slice(0, 8)}.`);
       setScrapeError(null);
+      setCancelRequestedRunId(null);
       void refreshPosts();
       setModalRefreshKey((current) => current + 1);
       void onSummaryRefresh?.();
+    } else if (status === "cancelled") {
+      setScrapeMessage(`Comments sync cancelled. Run ${runId.slice(0, 8)}.`);
+      setScrapeError(formatCommentsTerminalError(progress, status));
+      setCancelRequestedRunId(null);
+      void refreshPosts();
+      void onSummaryRefresh?.();
     } else {
       setScrapeError(formatCommentsTerminalError(progress, status));
+      setCancelRequestedRunId(null);
     }
     if (coverageStillClaimsRunActive) {
       void onSummaryRefresh?.();
@@ -954,7 +991,7 @@ export default function InstagramCommentsPanel({
     onSummaryRefresh,
     rawRunProgressFromThisMount,
     refreshPosts,
-    runProgress.data,
+    authoritativeRunProgress,
     scrapeRunId,
   ]);
 
@@ -986,12 +1023,33 @@ export default function InstagramCommentsPanel({
     commentsPostFilter === "not_commentable" && activePostsFilterTotal !== null
       ? activePostsFilterTotal
       : Math.max(availablePosts - commentablePosts, 0);
+
+  useEffect(() => {
+    onCoverageMetricsChange?.({
+      availablePosts,
+      commentablePosts,
+      incompletePosts,
+    });
+  }, [availablePosts, commentablePosts, incompletePosts, onCoverageMetricsChange]);
   const effectiveCoverageLabel = String(coverage?.effective_label || "").trim()
     || (savedSummary ? "Rows saved" : formatStatusLabel(coverage?.effective_status ?? coverage?.last_comments_run_status));
   const historicalFailure = Boolean(coverage?.historical_failure);
   const lastAttemptStatus = normalizeRunStatus(coverage?.last_attempt_status);
   const lastAttemptAt = coverage?.last_attempt_at ?? coverage?.last_comments_run_at;
   const isScraping = Boolean(scrapeRunId);
+  const displayedRunProgressStatus = normalizeRunStatus(displayedRunProgress?.run_status);
+  const commentsProgressControlsLocked =
+    isCommentsProgressNonAuthoritative(displayedRunProgress) ||
+    displayedRunProgressStatus === "cancelling" ||
+    (Boolean(coverageActiveRunId) && TERMINAL_RUN_STATUSES.has(displayedRunProgressStatus));
+  const cancelActionDisabled =
+    cancelPending ||
+    !scrapeRunId ||
+    checking ||
+    !user ||
+    !hasAccess ||
+    commentsProgressControlsLocked ||
+    cancelRequestedRunId === scrapeRunId;
   const commentsActionDisabled = commentsLaunchPending || isScraping || checking || !user || !hasAccess;
   const catalogActionDisabled = catalogRefreshPending || checking || !user || !hasAccess;
   const primaryActionPending = supportsInlineCommentsSync ? commentsLaunchPending || isScraping : catalogRefreshPending;
@@ -1135,7 +1193,7 @@ export default function InstagramCommentsPanel({
                   <button
                     type="button"
                     onClick={() => void cancelCommentsRun()}
-                    disabled={cancelPending || !scrapeRunId || checking || !user || !hasAccess}
+                    disabled={cancelActionDisabled}
                     className={SECONDARY_BUTTON_CLASS}
                   >
                     {cancelPending ? "Cancelling..." : "Cancel"}

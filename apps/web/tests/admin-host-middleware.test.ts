@@ -5,6 +5,9 @@ import { proxy } from "@/proxy";
 const originalEnv = {
   NODE_ENV: process.env.NODE_ENV,
   ADMIN_APP_ORIGIN: process.env.ADMIN_APP_ORIGIN,
+  ADMIN_APP_BASE_DOMAIN: process.env.ADMIN_APP_BASE_DOMAIN,
+  ADMIN_APP_DERIVE_FROM_REQUEST_HOST: process.env.ADMIN_APP_DERIVE_FROM_REQUEST_HOST,
+  ADMIN_APP_HOST_PREFIX: process.env.ADMIN_APP_HOST_PREFIX,
   ADMIN_APP_HOSTS: process.env.ADMIN_APP_HOSTS,
   ADMIN_ENFORCE_HOST: process.env.ADMIN_ENFORCE_HOST,
   ADMIN_STRICT_HOST_ROUTING: process.env.ADMIN_STRICT_HOST_ROUTING,
@@ -20,6 +23,21 @@ afterEach(() => {
     delete process.env.ADMIN_APP_ORIGIN;
   } else {
     process.env.ADMIN_APP_ORIGIN = originalEnv.ADMIN_APP_ORIGIN;
+  }
+  if (typeof originalEnv.ADMIN_APP_BASE_DOMAIN === "undefined") {
+    delete process.env.ADMIN_APP_BASE_DOMAIN;
+  } else {
+    process.env.ADMIN_APP_BASE_DOMAIN = originalEnv.ADMIN_APP_BASE_DOMAIN;
+  }
+  if (typeof originalEnv.ADMIN_APP_DERIVE_FROM_REQUEST_HOST === "undefined") {
+    delete process.env.ADMIN_APP_DERIVE_FROM_REQUEST_HOST;
+  } else {
+    process.env.ADMIN_APP_DERIVE_FROM_REQUEST_HOST = originalEnv.ADMIN_APP_DERIVE_FROM_REQUEST_HOST;
+  }
+  if (typeof originalEnv.ADMIN_APP_HOST_PREFIX === "undefined") {
+    delete process.env.ADMIN_APP_HOST_PREFIX;
+  } else {
+    process.env.ADMIN_APP_HOST_PREFIX = originalEnv.ADMIN_APP_HOST_PREFIX;
   }
   if (typeof originalEnv.ADMIN_APP_HOSTS === "undefined") {
     delete process.env.ADMIN_APP_HOSTS;
@@ -51,6 +69,51 @@ describe("admin host proxy", () => {
 
     expect(response.status).toBe(307);
     expect(response.headers.get("location")).toBe("http://admin.localhost:3000/admin/fonts");
+  });
+
+  it("derives the local admin origin by prefixing the public host with admin", () => {
+    process.env.NODE_ENV = "development";
+    delete process.env.ADMIN_ENFORCE_HOST;
+    delete process.env.ADMIN_APP_ORIGIN;
+    delete process.env.ADMIN_APP_HOSTS;
+    process.env.ADMIN_STRICT_HOST_ROUTING = "false";
+
+    const request = new NextRequest("http://thereality.test:3000/admin/fonts");
+    const response = proxy(request);
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe("http://admin.thereality.test:3000/admin/fonts");
+  });
+
+  it("can derive the production admin origin from a configured base domain", () => {
+    process.env.NODE_ENV = "production";
+    delete process.env.ADMIN_APP_ORIGIN;
+    process.env.ADMIN_APP_BASE_DOMAIN = "thereality.report";
+    process.env.ADMIN_APP_HOST_PREFIX = "admin";
+    process.env.ADMIN_ENFORCE_HOST = "true";
+    process.env.ADMIN_STRICT_HOST_ROUTING = "false";
+
+    const request = new NextRequest("https://thereality.report/admin/fonts");
+    const response = proxy(request);
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe("https://admin.thereality.report/admin/fonts");
+  });
+
+  it("can derive the production admin origin from the request host when explicitly enabled", () => {
+    process.env.NODE_ENV = "production";
+    delete process.env.ADMIN_APP_ORIGIN;
+    delete process.env.ADMIN_APP_BASE_DOMAIN;
+    process.env.ADMIN_APP_DERIVE_FROM_REQUEST_HOST = "true";
+    process.env.ADMIN_APP_HOST_PREFIX = "admin";
+    process.env.ADMIN_ENFORCE_HOST = "true";
+    process.env.ADMIN_STRICT_HOST_ROUTING = "false";
+
+    const request = new NextRequest("https://thereality.report/admin/fonts");
+    const response = proxy(request);
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe("https://admin.thereality.report/admin/fonts");
   });
 
   it("allows /api/admin requests on localhost in development by default allowlist", () => {
@@ -225,6 +288,20 @@ describe("admin host proxy", () => {
 
   it("rewrites the canonical admin-host root to the admin dashboard implementation", () => {
     process.env.ADMIN_APP_ORIGIN = "http://admin.localhost:3000";
+    process.env.ADMIN_ENFORCE_HOST = "true";
+    process.env.ADMIN_STRICT_HOST_ROUTING = "false";
+
+    const request = new NextRequest("http://admin.localhost:3000/");
+    const response = proxy(request);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-middleware-rewrite")).toBe("http://admin.localhost:3000/admin");
+  });
+
+  it("treats admin.localhost as a default local admin UI host in development", () => {
+    process.env.NODE_ENV = "development";
+    delete process.env.ADMIN_APP_ORIGIN;
+    delete process.env.ADMIN_APP_HOSTS;
     process.env.ADMIN_ENFORCE_HOST = "true";
     process.env.ADMIN_STRICT_HOST_ROUTING = "false";
 

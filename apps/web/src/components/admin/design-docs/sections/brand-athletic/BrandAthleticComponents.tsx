@@ -724,7 +724,7 @@ export default function BrandAthleticComponents() {
             }}
           >
             {/* Hamburger */}
-            <button
+            <button type="button"
               style={{
                 background: "none",
                 border: "none",
@@ -1919,8 +1919,8 @@ export default function BrandAthleticComponents() {
         <div style={{ background: "#1a1a1a", borderRadius: 6, padding: "10px 16px", marginTop: 8, display: "flex", alignItems: "center", gap: 12 }}>
           <svg width="20" height="20" viewBox="0 0 28 28" fill="none"><path d="M20.5335 8.8407L19.1596 7.4668L14.005 12.6214L8.8407 7.4668L7.4668 8.8407L12.6214 14.005L7.4668 19.1596L8.8407 20.5335L14.005 15.3789L19.1596 20.5335L20.5335 19.1596L15.3789 14.005L20.5335 8.8407Z" fill="#969693" /></svg>
           <span style={{ color: "#DBDBD9", fontFamily: "var(--dd-font-sans)", fontSize: 12, flex: 1 }}>You are viewing our U.S. edition. You may be interested in our International edition.</span>
-          <button style={{ background: "#fff", color: "#121212", border: "none", borderRadius: 4, padding: "6px 12px", fontFamily: "var(--dd-font-sans)", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>International</button>
-          <button style={{ background: "transparent", color: "#DBDBD9", border: "none", fontFamily: "var(--dd-font-sans)", fontSize: 11, cursor: "pointer" }}>Stay on this edition</button>
+          <button type="button" style={{ background: "#fff", color: "#121212", border: "none", borderRadius: 4, padding: "6px 12px", fontFamily: "var(--dd-font-sans)", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>International</button>
+          <button type="button" style={{ background: "transparent", color: "#DBDBD9", border: "none", fontFamily: "var(--dd-font-sans)", fontSize: 11, cursor: "pointer" }}>Stay on this edition</button>
         </div>
 
         <div style={{ fontFamily: "var(--dd-font-mono)", fontSize: 9, color: "#969693", marginTop: 8 }}>
@@ -2084,12 +2084,12 @@ export default function BrandAthleticComponents() {
         <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "center" }}>
           {/* Primary Dark */}
           <div style={{ textAlign: "center" }}>
-            <button style={{ background: "#121212", color: "#fff", border: "none", borderRadius: 4, padding: "8px 20px", fontFamily: "var(--dd-font-sans)", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>International</button>
+            <button type="button" style={{ background: "#121212", color: "#fff", border: "none", borderRadius: 4, padding: "8px 20px", fontFamily: "var(--dd-font-sans)", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>International</button>
             <div style={{ fontFamily: "var(--dd-font-mono)", fontSize: 9, color: "#969693", marginTop: 4 }}>Button_DarkPrimaryDefault</div>
           </div>
           {/* Secondary Text */}
           <div style={{ textAlign: "center" }}>
-            <button style={{ background: "transparent", color: "#121212", border: "none", padding: "8px 12px", fontFamily: "var(--dd-font-sans)", fontSize: 13, cursor: "pointer" }}>Stay on this edition</button>
+            <button type="button" style={{ background: "transparent", color: "#121212", border: "none", padding: "8px 12px", fontFamily: "var(--dd-font-sans)", fontSize: 13, cursor: "pointer" }}>Stay on this edition</button>
             <div style={{ fontFamily: "var(--dd-font-mono)", fontSize: 9, color: "#969693", marginTop: 4 }}>RegionBanner_secondaryButton</div>
           </div>
           {/* Puzzle CTA */}
@@ -2107,7 +2107,7 @@ export default function BrandAthleticComponents() {
           </div>
           {/* Subscribe */}
           <div style={{ textAlign: "center" }}>
-            <button style={{ background: "#F24A4A", color: "#fff", border: "none", borderRadius: 4, padding: "8px 20px", fontFamily: "var(--dd-font-sans)", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Subscribe Now</button>
+            <button type="button" style={{ background: "#F24A4A", color: "#fff", border: "none", borderRadius: 4, padding: "8px 20px", fontFamily: "var(--dd-font-sans)", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Subscribe Now</button>
             <div style={{ fontFamily: "var(--dd-font-mono)", fontSize: 9, color: "#969693", marginTop: 4 }}>Primary CTA (--primary-main)</div>
           </div>
         </div>

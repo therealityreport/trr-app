@@ -12,12 +12,12 @@ vi.mock("@/lib/server/auth", () => ({
 }));
 
 vi.mock("@/lib/server/trr-api/social-admin-proxy", () => ({
-  SOCIAL_PROXY_SHORT_TIMEOUT_MS: 25_000,
+  SOCIAL_PROXY_LONG_TIMEOUT_MS: 60_000,
   fetchSocialBackendJson: fetchSocialBackendJsonMock,
   socialProxyErrorResponse: socialProxyErrorResponseMock,
 }));
 
-import { GET } from "@/app/api/admin/trr-api/social/profiles/[platform]/[handle]/catalog/gap-analysis/route";
+import { GET, maxDuration } from "@/app/api/admin/trr-api/social/profiles/[platform]/[handle]/catalog/gap-analysis/route";
 
 describe("social account catalog gap-analysis proxy route", () => {
   beforeEach(() => {
@@ -54,6 +54,10 @@ describe("social account catalog gap-analysis proxy route", () => {
     );
   });
 
+  it("allows status reads to wait longer than the short proxy budget", () => {
+    expect(maxDuration).toBe(120);
+  });
+
   it("forwards gap-analysis lookups to TRR-Backend", async () => {
     const request = new NextRequest(
       "http://localhost/api/admin/trr-api/social/profiles/instagram/bravotv/catalog/gap-analysis",
@@ -78,7 +82,7 @@ describe("social account catalog gap-analysis proxy route", () => {
       expect.objectContaining({
         fallbackError: "Failed to fetch social account catalog gap analysis",
         retries: 0,
-        timeoutMs: 25_000,
+        timeoutMs: 60_000,
         headers: expect.any(Headers),
       }),
     );

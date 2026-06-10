@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { getBackendApiBase, getBackendApiUrl } from "@/lib/server/trr-api/backend";
+import { getBackendApiBase, getBackendApiUrl, getBackendRootBase, getBackendRootUrl } from "@/lib/server/trr-api/backend";
 
 const originalNodeEnv = process.env.NODE_ENV;
 
@@ -21,17 +21,37 @@ afterEach(() => {
   it("returns null for blank TRR_API_URL values", () => {
     process.env.TRR_API_URL = "   ";
 
+    expect(getBackendRootBase()).toBeNull();
     expect(getBackendApiBase()).toBeNull();
+    expect(getBackendRootUrl("/health")).toBeNull();
     expect(getBackendApiUrl("/admin/socials/ingest/queue-status")).toBeNull();
   });
 
   it("trims whitespace and normalizes localhost to 127.0.0.1", () => {
     process.env.TRR_API_URL = "  http://localhost:8000/  ";
 
+    expect(getBackendRootBase()).toBe("http://127.0.0.1:8000");
+    expect(getBackendRootUrl("/admin/health/db-pressure")).toBe("http://127.0.0.1:8000/admin/health/db-pressure");
     expect(getBackendApiBase()).toBe("http://127.0.0.1:8000/api/v1");
     expect(getBackendApiUrl("admin/socials/ingest/queue-status")).toBe(
       "http://127.0.0.1:8000/api/v1/admin/socials/ingest/queue-status",
     );
+  });
+
+  it("normalizes API-prefixed backend URLs back to the root for root-level health routes", () => {
+    process.env.TRR_API_URL = "http://localhost:8000/api/v1/";
+
+    expect(getBackendRootBase()).toBe("http://127.0.0.1:8000");
+    expect(getBackendRootUrl("/health")).toBe("http://127.0.0.1:8000/health");
+    expect(getBackendApiBase()).toBe("http://127.0.0.1:8000/api/v1");
+  });
+
+  it("supports Portless backend aliases for root health and API routes", () => {
+    process.env.TRR_API_URL = "https://api.trr.localhost";
+
+    expect(getBackendRootBase()).toBe("https://api.trr.localhost");
+    expect(getBackendRootUrl("/admin/health/db-pressure")).toBe("https://api.trr.localhost/admin/health/db-pressure");
+    expect(getBackendApiUrl("/admin/socials")).toBe("https://api.trr.localhost/api/v1/admin/socials");
   });
 
   it("warns once when TRR_API_URL points at a remote host in development", () => {
@@ -39,6 +59,7 @@ afterEach(() => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     process.env.TRR_API_URL = "https://backend.example.com";
 
+    expect(getBackendRootBase()).toBe("https://backend.example.com");
     expect(getBackendApiBase()).toBe("https://backend.example.com/api/v1");
     expect(getBackendApiBase()).toBe("https://backend.example.com/api/v1");
     expect(warnSpy).toHaveBeenCalledTimes(1);

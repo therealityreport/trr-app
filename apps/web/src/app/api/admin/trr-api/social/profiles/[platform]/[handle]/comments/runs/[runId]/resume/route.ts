@@ -2,33 +2,32 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
 import {
   fetchSocialBackendJson,
+  SOCIAL_PROXY_DEFAULT_TIMEOUT_MS,
   socialProxyErrorResponse,
 } from "@/lib/server/trr-api/social-admin-proxy";
 
 export const dynamic = "force-dynamic";
 
 type RouteContext = {
-  params: Promise<{ platform: string; handle: string }>;
+  params: Promise<{ platform: string; handle: string; runId: string }>;
 };
 
 export async function POST(request: NextRequest, context: RouteContext) {
+  const { platform, handle, runId } = await context.params;
+
   try {
     await requireAdmin(request);
-    const { platform, handle } = await context.params;
-    const body = await request.text();
     const data = await fetchSocialBackendJson(
-      `/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/catalog/apify-backfill`,
+      `/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/comments/runs/${encodeURIComponent(runId)}/resume`,
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body,
-        fallbackError: "Failed to start Apify backfill",
+        fallbackError: "Failed to resume social account comments run",
         retries: 0,
-        timeoutMs: 300_000, // 5 min — Apify runs can take a while
+        timeoutMs: SOCIAL_PROXY_DEFAULT_TIMEOUT_MS,
       },
     );
     return NextResponse.json(data);
   } catch (error) {
-    return socialProxyErrorResponse(error, "[api] Failed to start Apify backfill");
+    return socialProxyErrorResponse(error, "[api] Failed to resume social account comments run");
   }
 }

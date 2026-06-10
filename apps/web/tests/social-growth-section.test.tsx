@@ -97,12 +97,7 @@ describe("SocialGrowthSection", () => {
     expect(screen.getByText("+7")).toBeInTheDocument();
   });
 
-  // TODO(ci-shard-isolation): Fallback-text rendering assertion fails under
-  // --shard mode — "No follower chart is stored yet" text not found. Likely
-  // a module-mock state leak from another file that was setting up a
-  // non-null chart value in prior tests. Re-enable after a local beforeEach
-  // clears module mocks or the component's props get set explicitly.
-  it.skip("renders a fallback state when the chart is missing", async () => {
+  it("renders a fallback state when the chart is missing", async () => {
     mocks.fetchAdminWithAuth.mockResolvedValue(
       jsonResponse({
         username: "lisabarlow14",

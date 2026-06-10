@@ -3,12 +3,12 @@ import { NextRequest } from "next/server";
 
 const {
   buildInternalAdminHeadersMock,
-  getBackendApiUrlMock,
+  getBackendRootUrlMock,
   requireAdminMock,
   readPostgresPoolPressureSnapshotMock,
 } = vi.hoisted(() => ({
   buildInternalAdminHeadersMock: vi.fn(),
-  getBackendApiUrlMock: vi.fn(),
+  getBackendRootUrlMock: vi.fn(),
   requireAdminMock: vi.fn(),
   readPostgresPoolPressureSnapshotMock: vi.fn(),
 }));
@@ -27,7 +27,7 @@ vi.mock("@/lib/server/postgres", () => ({
 }));
 
 vi.mock("@/lib/server/trr-api/backend", () => ({
-  getBackendApiUrl: getBackendApiUrlMock,
+  getBackendRootUrl: getBackendRootUrlMock,
 }));
 
 vi.mock("@/lib/server/trr-api/internal-admin-auth", () => ({
@@ -39,12 +39,12 @@ import { GET } from "@/app/api/admin/health/app-db-pressure/route";
 describe("admin app DB pressure route", () => {
   beforeEach(() => {
     buildInternalAdminHeadersMock.mockReset();
-    getBackendApiUrlMock.mockReset();
+    getBackendRootUrlMock.mockReset();
     requireAdminMock.mockReset();
     readPostgresPoolPressureSnapshotMock.mockReset();
     vi.stubGlobal("fetch", vi.fn());
     buildInternalAdminHeadersMock.mockReturnValue(new Headers({ authorization: "Bearer test" }));
-    getBackendApiUrlMock.mockReturnValue(null);
+    getBackendRootUrlMock.mockReturnValue(null);
     requireAdminMock.mockResolvedValue({ uid: "admin-1", email: "admin@example.com" });
     readPostgresPoolPressureSnapshotMock.mockReturnValue({
       application_name: "trr-app:web",
@@ -82,7 +82,7 @@ describe("admin app DB pressure route", () => {
   });
 
   it("includes sanitized backend holder groups when the backend pressure route is available", async () => {
-    getBackendApiUrlMock.mockReturnValue("https://backend.example.com/api/v1/admin/health/db-pressure");
+    getBackendRootUrlMock.mockReturnValue("https://backend.example.com/admin/health/db-pressure");
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -126,7 +126,7 @@ describe("admin app DB pressure route", () => {
   });
 
   it("returns an explicit permission-blocked backend pressure shape on protected backend denial", async () => {
-    getBackendApiUrlMock.mockReturnValue("https://backend.example.com/api/v1/admin/health/db-pressure");
+    getBackendRootUrlMock.mockReturnValue("https://backend.example.com/admin/health/db-pressure");
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("forbidden", { status: 403 })));
 
     const response = await GET(new NextRequest("http://localhost/api/admin/health/app-db-pressure"));

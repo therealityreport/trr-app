@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { requireAdmin } from "@/lib/server/auth";
+import {
+  type GeminiModelVariant,
+  resolveGeminiImageModel,
+} from "@/lib/server/design-docs/gemini-image-model";
 
 /* ------------------------------------------------------------------ */
 /*  Design Docs — AI Image Generation API                              */
@@ -23,12 +27,9 @@ interface GenerateRequest {
 
 async function generateWithGemini(
   prompt: string,
-  modelVariant: "flash" | "pro",
+  modelVariant: GeminiModelVariant,
 ): Promise<string> {
-  const model =
-    modelVariant === "flash"
-      ? "gemini-3.1-flash-image-preview"
-      : "gemini-3-pro-image-preview";
+  const model = resolveGeminiImageModel(modelVariant);
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`;
 

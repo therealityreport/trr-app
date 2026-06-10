@@ -6,7 +6,9 @@ async function guard() {
   // 1. No Firebase admin credentials are configured in production
   // 2. Session cookies aren't being set properly
   // 3. Client-side auth is working fine
-  console.log("Hub guard: Server-side auth check disabled - using client-side auth only");
+  if (process.env.TRR_HUB_GUARD_DIAGNOSTICS === "true") {
+    console.log("Hub guard: Server-side auth check disabled - using client-side auth only");
+  }
   return;
   
   /* DISABLED SERVER-SIDE AUTH - keeping code for reference

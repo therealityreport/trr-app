@@ -86,7 +86,7 @@ function NavArrow({
   onClick?: () => void;
 }) {
   return (
-    <button
+    <button type="button"
       onClick={onClick}
       style={{
         width: 36,

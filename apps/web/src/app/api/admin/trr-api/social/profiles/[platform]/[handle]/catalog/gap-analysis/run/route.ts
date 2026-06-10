@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
 import {
-  SOCIAL_PROXY_SHORT_TIMEOUT_MS,
+  SOCIAL_PROXY_LONG_TIMEOUT_MS,
   fetchSocialBackendJson,
   socialProxyErrorResponse,
 } from "@/lib/server/trr-api/social-admin-proxy";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 120;
 
 type RouteContext = {
   params: Promise<{ platform: string; handle: string }>;
@@ -39,7 +40,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
         method: "POST",
         fallbackError: "Failed to start social account catalog gap analysis",
         retries: 0,
-        timeoutMs: SOCIAL_PROXY_SHORT_TIMEOUT_MS,
+        timeoutMs: SOCIAL_PROXY_LONG_TIMEOUT_MS,
         headers: forwardAdminRequestHeaders(request),
       },
     );

@@ -18,7 +18,7 @@ const warnOnRemoteBackendBase = (normalizedBase: string, hostname: string): void
   );
 };
 
-const normalizeBackendBase = (rawUrl: string): string => {
+const normalizeBackendRoot = (rawUrl: string): string => {
   const trimmed = rawUrl.trim().replace(/\/+$/, "");
   let normalized = trimmed;
   try {
@@ -32,13 +32,26 @@ const normalizeBackendBase = (rawUrl: string): string => {
   } catch {
     normalized = trimmed;
   }
-  return normalized.endsWith("/api/v1") ? normalized : `${normalized}/api/v1`;
+  return normalized.endsWith("/api/v1") ? normalized.slice(0, -"/api/v1".length) : normalized;
+};
+
+export const getBackendRootBase = (): string | null => {
+  const raw = process.env.TRR_API_URL?.trim();
+  if (!raw) return null;
+  return normalizeBackendRoot(raw);
+};
+
+export const getBackendRootUrl = (path: string): string | null => {
+  const base = getBackendRootBase();
+  if (!base) return null;
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  return `${base}${normalizedPath}`;
 };
 
 export const getBackendApiBase = (): string | null => {
-  const raw = process.env.TRR_API_URL?.trim();
-  if (!raw) return null;
-  return normalizeBackendBase(raw);
+  const base = getBackendRootBase();
+  if (!base) return null;
+  return `${base}/api/v1`;
 };
 
 export const getBackendApiUrl = (path: string): string | null => {

@@ -869,7 +869,7 @@ export default function ScrapeImagesPage() {
           {error && (
             <div className="mb-6 rounded-lg border border-red-200 bg-red-50 p-4">
               <p className="text-sm text-red-700">{error}</p>
-              <button
+              <button type="button"
                 onClick={() => setError(null)}
                 className="mt-2 text-xs font-semibold text-red-600 hover:underline"
               >
@@ -1080,7 +1080,7 @@ export default function ScrapeImagesPage() {
 
             {/* Scrape Button */}
             <div className="mt-6">
-              <button
+              <button type="button"
                 onClick={handleScrape}
                 disabled={scraping || !url.trim()}
                 className="rounded-lg bg-zinc-900 px-6 py-2.5 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50"
@@ -1114,7 +1114,7 @@ export default function ScrapeImagesPage() {
                   </p>
                 </div>
                 <div className="flex items-center gap-4">
-                  <button
+                  <button type="button"
                     onClick={toggleSelectAll}
                     className="text-sm font-semibold text-zinc-600 hover:text-zinc-900"
                   >
@@ -1589,7 +1589,7 @@ export default function ScrapeImagesPage() {
                 )}
 
                 <div className="flex items-center gap-4">
-                  <button
+                  <button type="button"
                     onClick={handleImport}
                     disabled={
                       importing ||
@@ -1699,7 +1699,7 @@ export default function ScrapeImagesPage() {
 
               {/* Start Over Button */}
               <div className="mt-6">
-                <button
+                <button type="button"
                   onClick={() => {
                     setUrl("");
                     setPreviewData(null);

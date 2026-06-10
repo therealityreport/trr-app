@@ -1,6 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+
+const testDir = path.dirname(fileURLToPath(import.meta.url));
 
 const readEnvKeys = (contents: string): Set<string> => {
   const keys = new Set<string>();
@@ -16,13 +19,7 @@ const readEnvKeys = (contents: string): Set<string> => {
 };
 
 describe("workspace shared env contract", () => {
-  // TODO(ci-shard-isolation): Test opens the workspace-level
-  // shared-env-manifest.json via ../../../ path resolution, which doesn't
-  // exist inside the `trr-app` GitHub Actions checkout (only the per-repo
-  // tree is present). Under singleFork the error didn't surface (possibly
-  // masked by fs.existsSync caching). Re-enable after the test either
-  // inlines the expected keys or checks repo layout before loading.
-  it.skip("keeps the app env example aligned to the workspace manifest", () => {
+  it("keeps the app env example aligned to the workspace manifest", () => {
     const envExamplePath = path.join(process.cwd(), ".env.example");
     const expectedKeys = [
       "TRR_API_URL",
@@ -59,5 +56,23 @@ describe("workspace shared env contract", () => {
     for (const key of manifest?.repo_validation["TRR-APP"].required_env_example_keys ?? expectedKeys) {
       expect(envKeys.has(key), `missing ${key} in apps/web/.env.example`).toBe(true);
     }
+  });
+
+  it("documents runtime failure lanes and the remote debug-log kill switch", () => {
+    const contractCandidates = [
+      path.resolve(process.cwd(), "docs/workspace/env-contract.md"),
+      path.resolve(process.cwd(), "../../docs/workspace/env-contract.md"),
+      path.resolve(process.cwd(), "../../../docs/workspace/env-contract.md"),
+      path.resolve(process.cwd(), "../../../../docs/workspace/env-contract.md"),
+      path.resolve(testDir, "../../../docs/workspace/env-contract.md"),
+    ];
+    const contractPath = contractCandidates.find((candidate) => fs.existsSync(candidate));
+    expect(contractPath, "missing workspace env contract").toBeTruthy();
+
+    const contract = fs.readFileSync(contractPath!, "utf-8");
+    expect(contract).toContain("## Operator Failure Lanes");
+    expect(contract).toContain("Modal deployment state");
+    expect(contract).toContain("TRR_REMOTE_DEBUG_LOG_ENABLED");
+    expect(contract).toContain("Hard kill switch for remote /api/debug-log writes");
   });
 });

@@ -83,7 +83,7 @@ function GameTile({ card }: { card: GameCard }) {
             <>
               <span className={baseButtonClasses + " " + disabledButtonClasses}>{card.cta ?? "Play"}</span>
               {card.archiveHref && (
-                <button disabled className={baseButtonClasses + " " + disabledButtonClasses}>
+                <button type="button" disabled className={baseButtonClasses + " " + disabledButtonClasses}>
                   {secondaryLabel()}
                 </button>
               )}

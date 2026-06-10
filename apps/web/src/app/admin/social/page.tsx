@@ -12,6 +12,7 @@ import {
   ChevronDown,
   ChevronsUpDown,
   CircleCheck,
+  ExternalLink,
   Pencil,
   Plus,
   Search,
@@ -52,7 +53,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { buildAdminSectionBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
-import { ADMIN_SOCIAL_PATH, buildSocialPath } from "@/lib/admin/admin-route-paths";
+import { ADMIN_ROOT_PATH, ADMIN_SOCIAL_PATH, buildSocialPath } from "@/lib/admin/admin-route-paths";
 import { PALETTE } from "@/lib/design-system/tokens";
 import type {
   CastSocialBladeAccountSummary,
@@ -877,6 +878,30 @@ const HandleChip = ({ handle }: { handle: SocialHandleSummary }) => {
   return (
     <Link href={handle.href as Route} className={className}>
       {content}
+    </Link>
+  );
+};
+
+const SharedSourceHandleLink = ({
+  source,
+}: {
+  source: SharedAccountSourceSummary;
+}) => {
+  const href = buildSocialAccountProfileUrl({
+    platform: source.platform,
+    handle: source.account_handle,
+  });
+  const label = `${formatPlatformLabel(source.platform)} @${source.account_handle}`;
+
+  return (
+    <Link
+      href={href as Route}
+      aria-label={`Open ${label} account page`}
+      className="inline-flex w-fit items-center gap-2 rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-800 transition hover:border-zinc-300 hover:bg-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500/60"
+    >
+      <SocialPlatformTabIcon tab={getPlatformIconKey(source.platform)} />
+      <span>{`@${source.account_handle}`}</span>
+      <ExternalLink aria-hidden="true" className="size-3.5 text-zinc-500" />
     </Link>
   );
 };
@@ -1799,10 +1824,7 @@ const NetworkSourceGroupCard = ({
               key={`${group.key}:${source.platform}:${source.account_handle}`}
               className="grid gap-3 rounded-xl border border-zinc-200 bg-zinc-50 p-3"
             >
-              <span className="inline-flex w-fit items-center gap-2 rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-800">
-                <SocialPlatformTabIcon tab={getPlatformIconKey(source.platform)} />
-                @{source.account_handle}
-              </span>
+              <SharedSourceHandleLink source={source} />
               <SocialProgressSummary
                 progress={source.progress}
                 platform={source.platform}
@@ -2109,7 +2131,7 @@ export default function AdminSocialMediaPage() {
           </p>
           <div className="mt-4">
             <Link
-              href="/"
+              href={ADMIN_ROOT_PATH}
               className="inline-flex rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm font-semibold text-amber-800 hover:bg-amber-100"
             >
               Back to Admin
@@ -2147,7 +2169,7 @@ export default function AdminSocialMediaPage() {
             <div className="flex items-start gap-2 sm:items-end">
               <div className="flex flex-col gap-2">
                 <Link
-                  href="/"
+                  href={ADMIN_ROOT_PATH}
                   className="inline-flex justify-center rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100"
                 >
                   Back to Admin

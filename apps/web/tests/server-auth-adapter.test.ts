@@ -39,6 +39,10 @@ function requestWithBearerAt(url: string, token: string): NextRequest {
   });
 }
 
+function requestWithoutAuthAt(url: string): NextRequest {
+  return new NextRequest(url);
+}
+
 describe("server auth adapter", () => {
   beforeEach(() => {
     vi.resetModules();
@@ -51,6 +55,7 @@ describe("server auth adapter", () => {
 
     process.env.TRR_AUTH_PROVIDER = "firebase";
     process.env.TRR_AUTH_SHADOW_MODE = "false";
+    delete process.env.TRR_DEV_ADMIN_BYPASS;
     process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATORS = "true";
     process.env.NEXT_PUBLIC_FIREBASE_API_KEY = "";
     process.env.ADMIN_EMAIL_ALLOWLIST = "";
@@ -464,6 +469,51 @@ describe("server auth adapter", () => {
       email: "admin@example.com",
       provider: "firebase",
     });
+  });
+
+  it("allows local non-production admin bypass even when TRR_DEV_ADMIN_BYPASS is false", async () => {
+    const previousNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = "development";
+    process.env.TRR_DEV_ADMIN_BYPASS = "false";
+    process.env.ADMIN_ENFORCE_HOST = "true";
+    process.env.ADMIN_APP_HOSTS = "admin.localhost";
+
+    try {
+      const auth = await import("@/lib/server/auth");
+      const user = await auth.requireAdmin(requestWithoutAuthAt("http://admin.localhost:3000/api/admin/auth/status"));
+      expect(user).toMatchObject({
+        uid: "dev-admin-bypass",
+        email: "codex@thereality.report",
+        provider: "firebase",
+      });
+    } finally {
+      if (typeof previousNodeEnv === "undefined") {
+        delete process.env.NODE_ENV;
+      } else {
+        process.env.NODE_ENV = previousNodeEnv;
+      }
+    }
+  });
+
+  it("keeps local production admin bypass behind explicit enable", async () => {
+    const previousNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = "production";
+    process.env.TRR_DEV_ADMIN_BYPASS = "false";
+    process.env.ADMIN_ENFORCE_HOST = "true";
+    process.env.ADMIN_APP_HOSTS = "admin.localhost";
+
+    try {
+      const auth = await import("@/lib/server/auth");
+      await expect(
+        auth.requireAdmin(requestWithoutAuthAt("http://admin.localhost:3000/api/admin/auth/status")),
+      ).rejects.toThrow("unauthorized");
+    } finally {
+      if (typeof previousNodeEnv === "undefined") {
+        delete process.env.NODE_ENV;
+      } else {
+        process.env.NODE_ENV = previousNodeEnv;
+      }
+    }
   });
 
   it("allows requireAdmin on bracketed IPv6 admin host when allowlisted", async () => {

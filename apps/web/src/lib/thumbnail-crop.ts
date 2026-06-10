@@ -1,3 +1,5 @@
+import type { CSSProperties } from "react";
+
 export type ThumbnailCropMode = "manual" | "auto";
 
 export interface ThumbnailCrop {
@@ -14,7 +16,7 @@ export interface ThumbnailViewportRect {
   heightPct: number;
 }
 
-export interface ThumbnailViewportImageStyle {
+export interface ThumbnailViewportImageStyle extends CSSProperties {
   width: string;
   height: string;
   left: string;

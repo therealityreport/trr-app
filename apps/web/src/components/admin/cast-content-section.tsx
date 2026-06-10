@@ -19,9 +19,13 @@ interface CastMemberWithSocial {
   display_name: string | null;
   photo_url: string | null;
   instagram_handle: string | null;
+  instagram_handle_source: string | null;
   tiktok_handle: string | null;
+  tiktok_handle_source: string | null;
   twitter_handle: string | null;
+  twitter_handle_source: string | null;
   youtube_handle: string | null;
+  youtube_handle_source: string | null;
   role_effective: string | null;
   billing_order_effective: number | null;
   roles: string[];
@@ -72,12 +76,20 @@ const PLATFORM_META: Record<string, { label: string; urlPrefix: string; accent: 
   },
 };
 
-function getSocialHandles(member: CastMemberWithSocial): { platform: string; handle: string }[] {
-  const handles: { platform: string; handle: string }[] = [];
-  if (member.instagram_handle) handles.push({ platform: "instagram", handle: member.instagram_handle });
-  if (member.tiktok_handle) handles.push({ platform: "tiktok", handle: member.tiktok_handle });
-  if (member.twitter_handle) handles.push({ platform: "twitter", handle: member.twitter_handle });
-  if (member.youtube_handle) handles.push({ platform: "youtube", handle: member.youtube_handle });
+function getSocialHandles(member: CastMemberWithSocial): { platform: string; handle: string; source: string | null }[] {
+  const handles: { platform: string; handle: string; source: string | null }[] = [];
+  if (member.instagram_handle) {
+    handles.push({ platform: "instagram", handle: member.instagram_handle, source: member.instagram_handle_source });
+  }
+  if (member.tiktok_handle) {
+    handles.push({ platform: "tiktok", handle: member.tiktok_handle, source: member.tiktok_handle_source });
+  }
+  if (member.twitter_handle) {
+    handles.push({ platform: "twitter", handle: member.twitter_handle, source: member.twitter_handle_source });
+  }
+  if (member.youtube_handle) {
+    handles.push({ platform: "youtube", handle: member.youtube_handle, source: member.youtube_handle_source });
+  }
   return handles;
 }
 
@@ -114,9 +126,13 @@ export default function CastContentSection({
             display_name: typeof r.display_name === "string" ? r.display_name : null,
             photo_url: typeof r.photo_url === "string" ? r.photo_url : null,
             instagram_handle: typeof r.instagram_handle === "string" ? r.instagram_handle : null,
+            instagram_handle_source: typeof r.instagram_handle_source === "string" ? r.instagram_handle_source : null,
             tiktok_handle: typeof r.tiktok_handle === "string" ? r.tiktok_handle : null,
+            tiktok_handle_source: typeof r.tiktok_handle_source === "string" ? r.tiktok_handle_source : null,
             twitter_handle: typeof r.twitter_handle === "string" ? r.twitter_handle : null,
+            twitter_handle_source: typeof r.twitter_handle_source === "string" ? r.twitter_handle_source : null,
             youtube_handle: typeof r.youtube_handle === "string" ? r.youtube_handle : null,
+            youtube_handle_source: typeof r.youtube_handle_source === "string" ? r.youtube_handle_source : null,
             role_effective: typeof r.role_effective === "string" ? r.role_effective : null,
             billing_order_effective: typeof r.billing_order_effective === "number" ? r.billing_order_effective : null,
             roles: Array.isArray(r.roles)
@@ -170,7 +186,7 @@ export default function CastContentSection({
       <div className="rounded-2xl border border-red-200 bg-red-50 p-6">
         <p className="text-sm font-semibold text-red-800">Failed to load cast</p>
         <p className="mt-1 text-xs text-red-600">{error}</p>
-        <button
+        <button type="button"
           onClick={fetchCast}
           className="mt-3 rounded-lg border border-red-300 bg-white px-3 py-1.5 text-xs font-semibold text-red-800 hover:bg-red-100"
         >
@@ -205,7 +221,7 @@ export default function CastContentSection({
         </div>
         <nav className="flex gap-1 rounded-lg bg-zinc-100 p-0.5">
           {SUB_VIEWS.map((view) => (
-            <button
+            <button type="button"
               key={view.id}
               onClick={() => setSubView(view.id)}
               className={`rounded-md px-3 py-1.5 text-[11px] font-bold tracking-wide transition ${
@@ -272,9 +288,10 @@ export default function CastContentSection({
 
                     {/* Social handles */}
                     <div className="mt-2 flex flex-wrap gap-1.5">
-                      {socialHandles.map(({ platform, handle }) => {
+                      {socialHandles.map(({ platform, handle, source }) => {
                         const meta = PLATFORM_META[platform];
                         if (!meta) return null;
+                        const sourceLabel = source || "Profile";
                         return (
                           <a
                             key={platform}
@@ -282,7 +299,7 @@ export default function CastContentSection({
                             target="_blank"
                             rel="noopener noreferrer"
                             className="inline-flex items-center gap-1 rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-semibold text-zinc-600 transition hover:bg-zinc-200"
-                            title={`${meta.label}: @${handle}`}
+                            title={`${meta.label}: @${handle} · ${sourceLabel}`}
                           >
                             <span
                               className={`inline-flex h-4 w-4 items-center justify-center rounded-full bg-gradient-to-br ${meta.accent} text-[9px] font-black text-white`}
@@ -290,6 +307,9 @@ export default function CastContentSection({
                               {meta.icon}
                             </span>
                             <span className="max-w-[120px] truncate">@{handle}</span>
+                            <span className="max-w-[72px] truncate border-l border-zinc-300 pl-1 text-[10px] font-bold uppercase tracking-wide text-zinc-400">
+                              {sourceLabel}
+                            </span>
                           </a>
                         );
                       })}

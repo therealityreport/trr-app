@@ -1258,7 +1258,7 @@ export function SurveyQuestionsEditor({
       {error && (
         <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-red-700">
           {error}
-          <button onClick={() => setError(null)} className="ml-2 text-red-800 underline">
+          <button type="button" onClick={() => setError(null)} className="ml-2 text-red-800 underline">
             Dismiss
           </button>
         </div>

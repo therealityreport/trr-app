@@ -1406,7 +1406,7 @@ function MetadataPanel({
               : "—"}
           </p>
           {metadata.caption && needsTruncation && (
-            <button
+            <button type="button"
               onClick={() => setShowFullCaption(!showFullCaption)}
               className="mt-1 flex items-center gap-1 text-xs text-white/60 hover:text-white/90"
             >
@@ -1559,7 +1559,7 @@ function MetadataPanel({
           <div className="mt-2 space-y-2">
             {(canSync || canCount || canCrop || canIdText || canResize) && (
               <div className="grid grid-cols-2 gap-2">
-                <button
+                <button type="button"
                   onClick={() => handleAction("sync", management.onSync)}
                   disabled={actionLoading !== null || Boolean(syncDisabledReason)}
                   title={syncDisabledReason ?? undefined}
@@ -1567,7 +1567,7 @@ function MetadataPanel({
                 >
                   {actionLoading === "sync" ? "Syncing..." : "Sync"}
                 </button>
-                <button
+                <button type="button"
                   onClick={() => handleAction("count", management.onCount)}
                   disabled={actionLoading !== null || Boolean(countDisabledReason)}
                   title={countDisabledReason ?? undefined}
@@ -1575,7 +1575,7 @@ function MetadataPanel({
                 >
                   {actionLoading === "count" ? "Tagging..." : "Tagging"}
                 </button>
-                <button
+                <button type="button"
                   onClick={() => handleAction("crop", management.onCrop)}
                   disabled={actionLoading !== null || Boolean(cropDisabledReason)}
                   title={cropDisabledReason ?? undefined}
@@ -1583,7 +1583,7 @@ function MetadataPanel({
                 >
                   {actionLoading === "crop" ? "Cropping..." : "Crop"}
                 </button>
-                <button
+                <button type="button"
                   onClick={() => handleAction("id_text", management.onIdText)}
                   disabled={actionLoading !== null || Boolean(idTextDisabledReason)}
                   title={idTextDisabledReason ?? undefined}
@@ -1591,7 +1591,7 @@ function MetadataPanel({
                 >
                   {actionLoading === "id_text" ? "Detecting..." : "ID Text"}
                 </button>
-                <button
+                <button type="button"
                   onClick={() => handleAction("resize", management.onResize)}
                   disabled={actionLoading !== null || Boolean(resizeDisabledReason)}
                   title={
@@ -1604,7 +1604,7 @@ function MetadataPanel({
                 </button>
               </div>
             )}
-            <button
+            <button type="button"
               onClick={() => handleAction("refresh", management.onRefresh)}
               disabled={actionLoading !== null || starLoading || Boolean(refreshDisabledReason)}
               title={refreshDisabledReason ?? undefined}
@@ -1613,7 +1613,7 @@ function MetadataPanel({
               {actionLoading === "refresh" ? "Refreshing..." : "Refresh Full Pipeline"}
             </button>
             {management.isArchived ? (
-              <button
+              <button type="button"
                 onClick={() => handleAction("unarchive", management.onUnarchive)}
                 disabled={actionLoading !== null || Boolean(archiveDisabledReason)}
                 title={archiveDisabledReason ?? undefined}
@@ -1622,7 +1622,7 @@ function MetadataPanel({
                 {actionLoading === "unarchive" ? "Unarchiving..." : "Unarchive"}
               </button>
             ) : (
-              <button
+              <button type="button"
                 onClick={() => handleAction("archive", management.onArchive)}
                 disabled={actionLoading !== null || Boolean(archiveDisabledReason)}
                 title={archiveDisabledReason ?? undefined}
@@ -1631,7 +1631,7 @@ function MetadataPanel({
                 {actionLoading === "archive" ? "Archiving..." : "Archive"}
               </button>
             )}
-            <button
+            <button type="button"
               onClick={handleToggleStar}
               disabled={actionLoading !== null || starLoading || Boolean(starDisabledReason)}
               title={starDisabledReason ?? undefined}
@@ -1644,7 +1644,7 @@ function MetadataPanel({
                   : "Star/Flag"}
             </button>
             {showFeaturedPosterAction && (
-              <button
+              <button type="button"
                 onClick={() =>
                   handleAction(
                     "featuredPoster",
@@ -1663,7 +1663,7 @@ function MetadataPanel({
               </button>
             )}
             {showFeaturedBackdropAction && (
-              <button
+              <button type="button"
                 onClick={() =>
                   handleAction(
                     "featuredBackdrop",
@@ -1682,7 +1682,7 @@ function MetadataPanel({
               </button>
             )}
             {showFeaturedLogoAction && (
-              <button
+              <button type="button"
                 onClick={() => handleAction("featuredLogo", management.onSetFeaturedLogo)}
                 disabled={
                   actionLoading !== null ||
@@ -1700,7 +1700,7 @@ function MetadataPanel({
                     : "Set as Featured Logo"}
               </button>
             )}
-            <button
+            <button type="button"
               onClick={() => onToggleExtras?.()}
               disabled={Boolean(editDisabledReason)}
               title={editDisabledReason ?? undefined}
@@ -1710,7 +1710,7 @@ function MetadataPanel({
             </button>
             {metadata.source?.toLowerCase() === "getty" && management?.imageId && (
               <>
-                <button
+                <button type="button"
                   onClick={() => setShowReplaceGetty((prev) => !prev)}
                   disabled={actionLoading !== null}
                   className="w-full rounded bg-amber-500/20 px-3 py-2 text-left text-sm text-amber-300 hover:bg-amber-500/30 disabled:opacity-50"
@@ -1729,7 +1729,7 @@ function MetadataPanel({
                 )}
               </>
             )}
-            <button
+            <button type="button"
               onClick={() => management.onReassign?.()}
               disabled={actionLoading !== null || !canReassign}
               className="w-full rounded bg-white/10 px-3 py-2 text-left text-sm text-white hover:bg-white/20 disabled:opacity-50"
@@ -1737,7 +1737,7 @@ function MetadataPanel({
             >
               Re-assign
             </button>
-            <button
+            <button type="button"
               onClick={async () => {
                 if (
                   confirm(
@@ -2105,7 +2105,7 @@ export function ImageLightbox({
   return (
     <LightboxShell modalRef={modalRef} alt={alt} onBackdropClick={onClose}>
       {/* Close button */}
-      <button
+      <button type="button"
         ref={closeButtonRef}
         onClick={onClose}
         className="absolute right-4 top-4 z-20 rounded-full bg-white/20 p-2 text-white transition-colors hover:bg-white/30"
@@ -2116,7 +2116,7 @@ export function ImageLightbox({
 
       {/* Metadata toggle button */}
       {metadata && (
-        <button
+        <button type="button"
           onClick={(e) => {
             e.stopPropagation();
             setShowMetadata((prev) => !prev);
@@ -2133,7 +2133,7 @@ export function ImageLightbox({
 
       {/* Previous arrow */}
       {hasPrevious && onPrevious && (
-        <button
+        <button type="button"
           onClick={(e) => {
             e.stopPropagation();
             onPrevious();
@@ -2147,7 +2147,7 @@ export function ImageLightbox({
 
       {/* Next arrow */}
       {hasNext && onNext && (
-        <button
+        <button type="button"
           onClick={(e) => {
             e.stopPropagation();
             onNext();
@@ -2491,7 +2491,7 @@ export function ClickableImage({
 
   return (
     <>
-      <button
+      <button type="button"
         onClick={() => setIsOpen(true)}
         className={`cursor-zoom-in ${className}`}
       >

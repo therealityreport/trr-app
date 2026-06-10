@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin, toVerifiedAdminContext } from "@/lib/server/auth";
 import { readPostgresPoolPressureSnapshot } from "@/lib/server/postgres";
-import { getBackendApiUrl } from "@/lib/server/trr-api/backend";
+import { getBackendRootUrl } from "@/lib/server/trr-api/backend";
 import { buildInternalAdminHeaders } from "@/lib/server/trr-api/internal-admin-auth";
 
 export const dynamic = "force-dynamic";
@@ -59,7 +59,7 @@ const sanitizePressurePayload = (value: unknown): unknown => {
 const readBackendDbPressureSnapshot = async (
   user: Awaited<ReturnType<typeof requireAdmin>>,
 ): Promise<Record<string, unknown>> => {
-  const backendUrl = getBackendApiUrl("/admin/health/db-pressure");
+  const backendUrl = getBackendRootUrl("/admin/health/db-pressure");
   if (!backendUrl) {
     return unavailableBackendPressure("backend_not_configured");
   }

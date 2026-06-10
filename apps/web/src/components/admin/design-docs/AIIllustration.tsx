@@ -237,7 +237,7 @@ export default function AIIllustration({
             padding: 1,
           }}
         >
-          <button
+          <button type="button"
             onClick={() => setPromptMode("original")}
             style={{
               fontFamily: "var(--dd-font-sans)",
@@ -253,7 +253,7 @@ export default function AIIllustration({
           >
             Original
           </button>
-          <button
+          <button type="button"
             onClick={() => setPromptMode("trr")}
             style={{
               fontFamily: "var(--dd-font-sans)",
@@ -285,7 +285,7 @@ export default function AIIllustration({
             const isActive = activeTab === t.id;
             const hasImage = !!images[t.id];
             return (
-              <button
+              <button type="button"
                 key={t.id}
                 onClick={() => handleTabSwitch(t.id)}
                 style={{
@@ -352,7 +352,7 @@ export default function AIIllustration({
                 style={{ width: "100%", height: "100%", objectFit: "cover", cursor: "zoom-in" }}
               />
               {/* Analyze button overlay */}
-              <button
+              <button type="button"
                 onClick={analyzeOriginalImage}
                 disabled={analyzing}
                 style={{
@@ -451,7 +451,7 @@ export default function AIIllustration({
               }}
             />
             {/* Refresh overlay button */}
-            <button
+            <button type="button"
               onClick={() => handleRefresh(activeTab)}
               style={{
                 position: "absolute" as const,
@@ -549,7 +549,7 @@ export default function AIIllustration({
             >
               {error}
             </span>
-            <button
+            <button type="button"
               onClick={() => {
                 setErrors((prev) => {
                   const next = { ...prev };
@@ -575,7 +575,7 @@ export default function AIIllustration({
             </button>
           </div>
         ) : (
-          <button
+          <button type="button"
             onClick={() => generateImage(activeTab)}
             style={{
               display: "flex",
@@ -709,7 +709,7 @@ export default function AIIllustration({
               boxShadow: "0 8px 48px rgba(0,0,0,0.5)",
             }}
           />
-          <button
+          <button type="button"
             onClick={(e) => {
               e.stopPropagation();
               setLightboxUrl(null);

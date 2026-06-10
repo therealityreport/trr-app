@@ -40,6 +40,7 @@ vi.mock("@/lib/server/trr-api/social-admin-proxy", () => ({
 }));
 
 import { GET as getComments } from "@/app/api/admin/trr-api/social/profiles/[platform]/[handle]/comments/route";
+import { GET as getReviewQueue } from "@/app/api/admin/trr-api/social/profiles/[platform]/[handle]/catalog/review-queue/route";
 import { GET as getPosts } from "@/app/api/admin/trr-api/social/profiles/[platform]/[handle]/posts/route";
 
 describe("social account profile read proxy routes", () => {
@@ -75,20 +76,69 @@ describe("social account profile read proxy routes", () => {
     );
   });
 
-  it("forwards profile comments query params to TRR-Backend", async () => {
+  it("uses the snapshot cache for profile comments and strips refresh before proxying", async () => {
     const response = await getComments(
       new NextRequest(
-        "http://localhost/api/admin/trr-api/social/profiles/instagram/bravotv/comments?limit=25&cursor=abc",
+        "http://localhost/api/admin/trr-api/social/profiles/instagram/bravotv/comments?limit=25&cursor=abc&refresh=1",
       ),
       { params: Promise.resolve({ platform: "instagram", handle: "bravotv" }) },
     );
 
     expect(response.status).toBe(200);
+    expect(response.headers.get("x-trr-cache")).toBe("miss");
+    expect(buildAdminSnapshotCacheKeyMock).toHaveBeenCalledWith({
+      authPartition: "firebase:admin-1",
+      pageFamily: "social-profile",
+      scope: "instagram:bravotv:comments",
+      query: new URLSearchParams("limit=25&cursor=abc"),
+    });
+    expect(getOrCreateAdminSnapshotMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cacheKey: "posts-cache-key",
+        ttlMs: 60_000,
+        staleIfErrorTtlMs: 300_000,
+        forceRefresh: true,
+      }),
+    );
     expect(fetchSocialBackendJsonMock).toHaveBeenCalledWith(
       "/profiles/instagram/bravotv/comments",
       expect.objectContaining({
         fallbackError: "Failed to fetch social account comments",
         queryString: "limit=25&cursor=abc",
+        retries: 0,
+        timeoutMs: 30_000,
+      }),
+    );
+  });
+
+  it("uses the snapshot cache for catalog review queue reads", async () => {
+    const response = await getReviewQueue(
+      new NextRequest(
+        "http://localhost/api/admin/trr-api/social/profiles/instagram/bravotv/catalog/review-queue?assignment_status=pending",
+      ),
+      { params: Promise.resolve({ platform: "instagram", handle: "bravotv" }) },
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-trr-cache")).toBe("miss");
+    expect(buildAdminSnapshotCacheKeyMock).toHaveBeenCalledWith({
+      authPartition: "firebase:admin-1",
+      pageFamily: "social-profile",
+      scope: "instagram:bravotv:catalog-review-queue",
+      query: new URLSearchParams("assignment_status=pending"),
+    });
+    expect(getOrCreateAdminSnapshotMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cacheKey: "posts-cache-key",
+        ttlMs: 60_000,
+        staleIfErrorTtlMs: 300_000,
+      }),
+    );
+    expect(fetchSocialBackendJsonMock).toHaveBeenCalledWith(
+      "/profiles/instagram/bravotv/catalog/review-queue",
+      expect.objectContaining({
+        fallbackError: "Failed to fetch social account catalog review queue",
+        queryString: "assignment_status=pending",
         retries: 0,
         timeoutMs: 30_000,
       }),

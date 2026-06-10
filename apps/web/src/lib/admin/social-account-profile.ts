@@ -480,6 +480,14 @@ export type SocialAccountCommentsCancelResponse = {
   summary?: Record<string, unknown> | null;
 };
 
+export type SocialAccountCommentsJobCancelResponse = {
+  run_id: string;
+  job_id: string;
+  status?: string | null;
+  accepted?: boolean;
+  cancel_requested_at?: string | null;
+};
+
 export type SocialAccountCommentsDryRunPreviewResponse = {
   dry_run?: boolean;
   platform?: SocialPlatformSlug | string;
@@ -566,7 +574,9 @@ export type SocialAccountCommentsRunProgress = {
   recommended_comments_shard_count?: number;
   active_comment_jobs?: number;
   queued_comment_jobs?: number;
+  retrying_comment_jobs?: number;
   completed_comment_jobs?: number;
+  cancelled_comment_jobs?: number;
   failed_comment_jobs?: number;
   post_progress?: {
     completed_posts?: number;
@@ -588,6 +598,7 @@ export type SocialAccountCommentsRunProgress = {
     resume_recommendation?: "stale_or_missing" | null;
   };
   timing?: Record<string, unknown> | null;
+  auto_rebalance?: Record<string, unknown> | null;
   comment_shards?: SocialAccountCommentsShardProgress[];
   shards?: SocialAccountCommentsShardProgress[];
   shard_progress?: SocialAccountCommentsShardProgress[];
@@ -1036,6 +1047,10 @@ export type SocialAccountCatalogRunProgressSnapshot = {
   launch_state?: "pending" | "finalizing" | "ready" | "failed" | "blocked_auth" | null;
   catalog_action?: SocialAccountCatalogAction | null;
   catalog_action_scope?: SocialAccountCatalogActionScope | null;
+  date_start?: string | null;
+  date_end?: string | null;
+  posts_auth_mode?: "anonymous" | "authenticated" | string | null;
+  instagram_posts_auth_mode?: "anonymous" | "authenticated" | string | null;
   selected_tasks?: CatalogBackfillSelectedTask[];
   effective_selected_tasks?: CatalogBackfillSelectedTask[];
   pipeline_strategy?: "stage_graph" | string | null;
@@ -1286,6 +1301,9 @@ export type CatalogBackfillRequest = {
   allow_inline_dev_fallback?: boolean;
   execution_preference?: "auto" | "prefer_local_inline";
   selected_tasks?: CatalogBackfillSelectedTask[];
+  detail_worker_count?: number | null;
+  comments_worker_count?: number | null;
+  comments_enable_media_followups?: boolean | null;
 };
 
 export type CatalogBackfillLaunchResponse = {
@@ -1338,6 +1356,8 @@ export type CatalogRemediateDriftResponse = {
 
 export type CatalogRepairAuthRequest = {
   allow_inline_dev_fallback?: boolean;
+  operator_confirmation?: string;
+  allow_cookie_refresh?: boolean;
 };
 
 export type CatalogReviewResolveRequest = {
@@ -1503,6 +1523,9 @@ export type SocialProfileCookieRefreshResult = {
   remote_auth_probe?: Record<string, unknown> | null;
   instagram_posts_auth_probe?: Record<string, unknown> | null;
   instagram_comments_auth_probe?: Record<string, unknown> | null;
+  cooldown?: Record<string, unknown> | null;
+  safety_stop?: boolean;
+  automated_cookie_refresh_allowed?: boolean;
   warning_code?: string;
   warning_message?: string;
 };

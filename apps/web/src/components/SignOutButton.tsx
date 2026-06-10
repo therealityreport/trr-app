@@ -11,7 +11,7 @@ export default function SignOutButton() {
     }
   };
   return (
-    <button className="px-3 py-1 rounded border text-sm" onClick={handle}>
+    <button type="button" className="px-3 py-1 rounded border text-sm" onClick={handle}>
       Sign out
     </button>
   );

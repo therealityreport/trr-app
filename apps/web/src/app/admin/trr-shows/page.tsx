@@ -8,6 +8,7 @@ import ClientOnly from "@/components/ClientOnly";
 import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
 import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
 import { buildAdminSectionBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
+import { ADMIN_ROOT_PATH } from "@/lib/admin/admin-route-paths";
 import { fetchAdminWithAuth } from "@/lib/admin/client-auth";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 import { buildShowAdminUrl } from "@/lib/admin/show-admin-routes";
@@ -479,7 +480,7 @@ export default function TrrShowsPage() {
                 {syncingLists ? "Syncing..." : "Sync from Lists"}
               </button>
               <Link
-                href="/"
+                href={ADMIN_ROOT_PATH}
                 className="rounded-lg border border-zinc-200 px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100"
               >
                 Back to Admin
@@ -583,7 +584,7 @@ export default function TrrShowsPage() {
                                 <span className="sr-only">In Shows</span>
                               </span>
                             ) : (
-                              <button
+                              <button type="button"
                                 onClick={() => addToCoveredShows(show)}
                                 disabled={addingShowId === show.id}
                                 className="rounded-full bg-zinc-900 px-3 py-1 text-xs font-semibold text-white transition hover:bg-zinc-800 disabled:opacity-50"
@@ -744,7 +745,7 @@ export default function TrrShowsPage() {
                           </span>
                         </div>
                       </Link>
-                      <button
+                      <button type="button"
                         onClick={() => removeFromCoveredShows(show.trr_show_id)}
                         disabled={removingShowId === show.trr_show_id}
                         className="ml-2 flex-shrink-0 rounded px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"

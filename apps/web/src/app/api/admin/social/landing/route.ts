@@ -21,7 +21,10 @@ import {
   invalidateSocialLandingRouteCacheForUser,
   isSocialLandingRouteCacheVersionCurrent,
 } from "@/lib/server/admin/social-landing-route-cache";
-import { getSocialLandingPayloadResult } from "@/lib/server/admin/social-landing-repository";
+import {
+  getSocialLandingPayloadResult,
+  type SocialLandingPayloadResult,
+} from "@/lib/server/admin/social-landing-repository";
 import { normalizePersonExternalIdValue, type PersonExternalIdInput } from "@/lib/admin/person-external-ids";
 import { normalizeSocialAccountProfileHandle } from "@/lib/admin/show-admin-routes";
 import { fetchSocialBackendJson } from "@/lib/server/trr-api/social-admin-proxy";
@@ -382,27 +385,38 @@ export async function GET(request: NextRequest) {
           cacheKey,
         );
 
-    const result = await getOrCreateRouteResponsePromise(
-      SOCIAL_LANDING_CACHE_NAMESPACE,
-      cacheKey,
-      async () => {
-        const cacheVersion = getSocialLandingRouteCacheVersion(user.uid);
-        const nextResult = await getSocialLandingPayloadResult(adminContext);
-        if (
-          nextResult.cacheable &&
-          isSocialLandingRouteCacheVersionCurrent(user.uid, cacheVersion)
-        ) {
-          setRouteResponseCache(
-            SOCIAL_LANDING_CACHE_NAMESPACE,
-            cacheKey,
-            nextResult.payload,
-            SOCIAL_LANDING_CACHE_TTL_MS,
-            SOCIAL_LANDING_STALE_CACHE_TTL_MS,
-          );
-        }
-        return nextResult;
-      },
-    );
+    let result: SocialLandingPayloadResult;
+    try {
+      result = await getOrCreateRouteResponsePromise(
+        SOCIAL_LANDING_CACHE_NAMESPACE,
+        cacheKey,
+        async () => {
+          const cacheVersion = getSocialLandingRouteCacheVersion(user.uid);
+          const nextResult = await getSocialLandingPayloadResult(adminContext);
+          if (
+            nextResult.cacheable &&
+            isSocialLandingRouteCacheVersionCurrent(user.uid, cacheVersion)
+          ) {
+            setRouteResponseCache(
+              SOCIAL_LANDING_CACHE_NAMESPACE,
+              cacheKey,
+              nextResult.payload,
+              SOCIAL_LANDING_CACHE_TTL_MS,
+              SOCIAL_LANDING_STALE_CACHE_TTL_MS,
+            );
+          }
+          return nextResult;
+        },
+      );
+    } catch (error) {
+      if (staleCached && !shouldRefresh) {
+        console.warn("[api] Failed to rebuild social landing payload; serving stale cache", error);
+        return NextResponse.json(staleCached, {
+          headers: { "x-trr-cache": "stale", "x-trr-cacheable": "0" },
+        });
+      }
+      throw error;
+    }
     if (!result.cacheable && staleCached && !shouldRefresh) {
       return NextResponse.json(staleCached, {
         headers: { "x-trr-cache": "stale", "x-trr-cacheable": "0" },
@@ -595,7 +609,7 @@ export async function POST(request: NextRequest) {
             is_primary: true,
           }) satisfies PersonExternalIdInput,
       );
-      await syncPersonExternalIds(targetId, inputs);
+      await syncPersonExternalIds(targetId, inputs, { adminContext });
       invalidateRouteResponseCache("admin-person-detail", `${user.uid}:person:${targetId}:`);
       await invalidateAdminBackendCache(`/admin/people/${targetId}/cache/invalidate`, {
         routeName: "person-detail",

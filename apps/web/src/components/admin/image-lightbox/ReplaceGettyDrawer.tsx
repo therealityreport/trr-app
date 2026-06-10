@@ -83,7 +83,7 @@ export function ReplaceGettyDrawer({ assetId, onClose, onReplaced }: ReplaceGett
     <div className="mt-4 rounded-lg border border-white/10 bg-white/5 p-4">
       <div className="flex items-center justify-between">
         <span className="text-sm font-medium text-white">Remove Watermarks</span>
-        <button
+        <button type="button"
           onClick={onClose}
           className="text-white/50 hover:text-white"
           aria-label="Close"
@@ -149,7 +149,7 @@ export function ReplaceGettyDrawer({ assetId, onClose, onReplaced }: ReplaceGett
                   </p>
                 </div>
                 {meetsMin && (
-                  <button
+                  <button type="button"
                     onClick={() => handleReplace(candidate)}
                     disabled={replacing !== null}
                     className="flex-shrink-0 rounded bg-blue-500/80 px-2 py-1 text-[10px] font-medium text-white hover:bg-blue-500 disabled:opacity-50"

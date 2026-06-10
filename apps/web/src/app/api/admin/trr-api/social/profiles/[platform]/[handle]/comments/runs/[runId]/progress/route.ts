@@ -23,6 +23,17 @@ const COMMENTS_PROGRESS_CACHE_NAMESPACE = "admin-social-profile-comments-progres
 const COMMENTS_PROGRESS_CACHE_TTL_MS = 2_000;
 const COMMENTS_PROGRESS_STALE_TTL_MS = 15_000;
 
+const markCommentsProgressPayloadStale = (payload: Record<string, unknown>): Record<string, unknown> => ({
+  ...payload,
+  stale: true,
+  degraded: true,
+  progress_stale: true,
+  progress_degraded: true,
+  progress_degraded_reason: "stale_comments_progress_cache",
+  progress_degraded_at: new Date().toISOString(),
+  progress_authoritative: false,
+});
+
 export async function GET(request: NextRequest, context: RouteContext) {
   try {
     const user = await requireAdmin(request);
@@ -71,7 +82,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
       return NextResponse.json(data, { headers: { "x-trr-cache": "miss" } });
     } catch (error) {
       if (stalePayload) {
-        return NextResponse.json(stalePayload, {
+        return NextResponse.json(markCommentsProgressPayloadStale(stalePayload), {
           headers: { "x-trr-cache": "stale", "x-trr-cacheable": "0" },
         });
       }

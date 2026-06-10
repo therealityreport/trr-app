@@ -526,6 +526,11 @@ function parseHostAllowlist(raw: string | undefined): Set<string> {
 
 function resolveDefaultAdminOrigin(): string | null {
   if (process.env.NODE_ENV === "development") return "http://admin.localhost:3000";
+  const configuredBaseDomain = normalizeHost(process.env.ADMIN_APP_BASE_DOMAIN);
+  if (configuredBaseDomain) {
+    const adminHostPrefix = process.env.ADMIN_APP_HOST_PREFIX?.trim() || "admin";
+    return `https://${adminHostPrefix}.${configuredBaseDomain}`;
+  }
   return null;
 }
 
@@ -568,15 +573,13 @@ function isRequestHostAllowedForAdmin(request: NextRequest): boolean {
 }
 
 function isDevAdminBypassEnabled(request: NextRequest): boolean {
-  const explicitBypass = parseOptionalBoolean(process.env.TRR_DEV_ADMIN_BYPASS);
-  const bypassEnabled = explicitBypass ?? process.env.NODE_ENV === "development";
-  if (!bypassEnabled) return false;
   const requestHost = request.nextUrl.hostname;
-  if (isLocalHostname(requestHost)) return true;
   const hostHeader = request.headers.get("host");
-  if (!hostHeader) return false;
-  const hostWithoutPort = hostHeader.split(":")[0] ?? hostHeader;
-  return isLocalHostname(hostWithoutPort);
+  const hostWithoutPort = hostHeader?.split(":")[0] ?? hostHeader;
+  const isLocalRequest = isLocalHostname(requestHost) || isLocalHostname(hostWithoutPort);
+  if (!isLocalRequest) return false;
+  if (process.env.NODE_ENV !== "production") return true;
+  return parseOptionalBoolean(process.env.TRR_DEV_ADMIN_BYPASS) === true;
 }
 
 function buildDevBypassUser(provider: AuthProvider = "firebase"): AuthenticatedUser {

@@ -17,8 +17,6 @@ jobs:
         include:
           - node-version: 24
             lane: full
-          - node-version: 22
-            lane: compat
     defaults:
       run:
         working-directory: apps/web
@@ -64,16 +62,6 @@ jobs:
       - name: Run unit tests (Node 24 full lane)
         if: matrix.lane == 'full'
         run: pnpm run test:ci
-      - name: Run smoke tests (Node 22 compatibility lane)
-        if: matrix.lane == 'compat'
-        run: pnpm exec vitest run -c vitest.config.mts tests/validation.test.ts tests/cdn-fonts.test.ts
-      - name: Run auth endpoint smoke tests (Node 22 compatibility lane)
-        if: matrix.lane == 'compat'
-        run: |
-          pnpm exec vitest run -c vitest.config.mts \
-            tests/admin-auth-status-route.test.ts \
-            tests/admin-auth-status-reset-route.test.ts \
-            tests/admin-auth-drill-report-route.test.ts
       - name: Build (no DATABASE_URL)
         run: pnpm run build
         env:

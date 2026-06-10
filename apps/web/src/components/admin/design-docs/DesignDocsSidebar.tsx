@@ -112,7 +112,7 @@ function AccordionNav({
         return (
           <div key={group.label}>
             {/* Group header */}
-            <button
+            <button type="button"
               onClick={() => toggle(groupIdx)}
               style={{
                 display: "flex",
@@ -448,7 +448,7 @@ export default function DesignDocsSidebar({
           Design Docs
         </span>
         {isMobile && (
-          <button
+          <button type="button"
             onClick={onClose}
             style={{
               background: "none",

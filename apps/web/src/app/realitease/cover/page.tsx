@@ -227,7 +227,7 @@ export default function RealiteaseCover() {
       <GameHeader showStatsButton={false} showHelpMenu={false} onSettingsClick={() => setSettingsOpen(true)} />
       <main className="px-4 py-8 sm:px-8 sm:py-12">
       <div className="mx-auto flex w-full max-w-[600px] flex-col gap-12">
-        <button
+        <button type="button"
           onClick={handleBack}
           className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-black/40 bg-black/10 text-black hover:bg-black/20"
           aria-label="Go back"
@@ -259,7 +259,7 @@ export default function RealiteaseCover() {
           </div>
 
           <div className="w-full space-y-4 px-2">
-            <button
+            <button type="button"
               onClick={handlePrimaryCta}
               disabled={isCtaDisabled}
               className="mx-auto inline-flex w-full max-w-[240px] items-center justify-center rounded-full bg-black px-8 py-3 text-base font-semibold text-white shadow hover:bg-gray-900 disabled:cursor-not-allowed disabled:bg-gray-600"

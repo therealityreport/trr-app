@@ -10143,7 +10143,7 @@ export default function PersonProfilePage() {
                   { id: "social", label: "Social" },
                 ] as const
               ).map((tab) => (
-                <button
+                <button type="button"
                   key={tab.id}
                   onClick={() => setTab(tab.id)}
                   className={`border-b-2 py-4 text-sm font-semibold transition ${
@@ -10241,7 +10241,7 @@ export default function PersonProfilePage() {
                 <div className="mb-4 flex items-center justify-between">
                   <h3 className="text-lg font-bold text-zinc-900">Photos</h3>
                   {photos.length > 6 && (
-                    <button
+                    <button type="button"
                       onClick={() => setTab("gallery")}
                       className="text-sm font-semibold text-zinc-600 hover:text-zinc-900"
                     >
@@ -10251,7 +10251,7 @@ export default function PersonProfilePage() {
                 </div>
                 <div className="grid grid-cols-3 gap-2">
                   {photos.slice(0, 6).map((photo, index) => (
-                    <button
+                    <button type="button"
                       key={photo.id}
                       onClick={(e) => openLightbox(photo, index, e.currentTarget)}
                       className="relative aspect-[3/4] overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
@@ -10274,7 +10274,7 @@ export default function PersonProfilePage() {
                 <div className="mb-4 flex items-center justify-between">
                   <h3 className="text-lg font-bold text-zinc-900">Credits</h3>
                   {creditsByShow.length > 5 && (
-                    <button
+                    <button type="button"
                       onClick={() => setTab("credits")}
                       className="text-sm font-semibold text-zinc-600 hover:text-zinc-900"
                     >
@@ -10325,7 +10325,7 @@ export default function PersonProfilePage() {
                 <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm lg:col-span-2">
                   <div className="mb-4 flex items-center justify-between">
                     <h3 className="text-lg font-bold text-zinc-900">Fandom Info</h3>
-                    <button
+                    <button type="button"
                       onClick={() => setTab("fandom")}
                       className="text-sm font-semibold text-zinc-600 hover:text-zinc-900"
                     >
@@ -10657,7 +10657,7 @@ export default function PersonProfilePage() {
                   })}
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  <button
+                  <button type="button"
                     onClick={() => void handleRefreshImages()}
                     disabled={refreshingImages || reprocessingImages}
                     title={
@@ -10672,7 +10672,7 @@ export default function PersonProfilePage() {
                       ? "Getting..."
                       : `Get Images (${getImagesSelectionLabel(getImagesSourceSelection)})`}
                   </button>
-                  <button
+                  <button type="button"
                     onClick={() =>
                       stalePersonPipelineSession?.operationId
                         ? void handleClearStalePersonPipeline()
@@ -10732,7 +10732,7 @@ export default function PersonProfilePage() {
                     <span className="px-1 text-[10px] font-semibold uppercase tracking-[0.25em] text-zinc-500">
                       Stages
                     </span>
-                    <button
+                    <button type="button"
                       onClick={() => void handleRefreshImages("sync")}
                       disabled={refreshingImages || reprocessingImages}
                       title="Sync source + mirror stages."
@@ -10740,7 +10740,7 @@ export default function PersonProfilePage() {
                     >
                       Sync
                     </button>
-                    <button
+                    <button type="button"
                       onClick={() => void handleReprocessImages("tagging")}
                       disabled={refreshingImages || reprocessingImages}
                       title="Run Tagging stage (face boxes + identity + owner focus) for existing images."
@@ -10748,7 +10748,7 @@ export default function PersonProfilePage() {
                     >
                       Tagging
                     </button>
-                    <button
+                    <button type="button"
                       onClick={() => void handleReprocessImages("crop")}
                       disabled={refreshingImages || reprocessingImages}
                       title="Run Crop (save thumbnail framing/focus metadata) for existing images."
@@ -10756,7 +10756,7 @@ export default function PersonProfilePage() {
                     >
                       Crop
                     </button>
-                    <button
+                    <button type="button"
                       onClick={() => void handleReprocessImages("id_text")}
                       disabled={refreshingImages || reprocessingImages}
                       title="Run ID Text stage for existing images."
@@ -10764,7 +10764,7 @@ export default function PersonProfilePage() {
                     >
                       ID Text
                     </button>
-                    <button
+                    <button type="button"
                       onClick={() => void handleReprocessImages("resize")}
                       disabled={refreshingImages || reprocessingImages}
                       title="Run Auto-Crop (resize variants) stage for existing images."
@@ -10773,7 +10773,7 @@ export default function PersonProfilePage() {
                       Auto-Crop
                     </button>
                   </div>
-                  <button
+                  <button type="button"
                     onClick={() => setAdvancedFiltersOpen(true)}
                     className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50"
                   >
@@ -10793,7 +10793,7 @@ export default function PersonProfilePage() {
                   >
                     {showBrokenRows ? "Hide Broken" : "Show Broken"}
                   </button>
-                  <button
+                  <button type="button"
                     onClick={() => setScrapeDrawerOpen(true)}
                     className="flex items-center gap-2 rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800"
                   >

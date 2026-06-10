@@ -1082,7 +1082,7 @@ export default function RealiteaseGamePage() {
         <div className="max-w-md w-full bg-white p-8 rounded-lg shadow-lg text-center space-y-4">
           <h1 className="text-2xl font-bold text-gray-900">Something went wrong</h1>
           <p className="text-gray-600">{blockingErrorMessage}</p>
-          <button
+          <button type="button"
             onClick={() => router.push("/realitease/cover")}
             className="mt-2 inline-flex items-center justify-center rounded-full bg-black px-6 py-3 text-white hover:bg-gray-800"
           >

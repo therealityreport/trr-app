@@ -84,7 +84,7 @@ function ClickableImage({ src, alt, style, className }: { src: string; alt: stri
           <LightboxImageStage>
             <div style={{ position: "relative", maxWidth: "90vw", maxHeight: "90vh" }} onClick={(e) => e.stopPropagation()}>
               <img src={src} alt={alt} style={{ maxWidth: "90vw", maxHeight: "85vh", objectFit: "contain", borderRadius: 4 }} />
-              <button
+              <button type="button"
                 onClick={() => setOpen(false)}
                 style={{
                   position: "absolute", top: -12, right: -12, width: 32, height: 32, borderRadius: "50%",
@@ -1703,7 +1703,7 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
           >
             View Page ↗
           </a>
-          <button
+          <button type="button"
             onClick={() => setShowCss((s) => !s)}
             style={{
               fontFamily: "var(--dd-font-mono, 'SF Mono', monospace)",
@@ -3772,7 +3772,7 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
                     </p>
                   </div>
                   {/* Button: nyt-cheltenham 14px/500, with chevron-right SVG */}
-                  <button style={{
+                  <button type="button" style={{
                     fontFamily: 'nyt-cheltenham, georgia, "times new roman", times, serif',
                     fontSize: 14, fontWeight: 500, color: "#000000",
                     display: "flex", alignItems: "center", gap: 4,

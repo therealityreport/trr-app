@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/server/auth";
+import { requireAdmin, toVerifiedAdminContext } from "@/lib/server/auth";
 import {
   listPersonExternalIds,
   syncPersonExternalIds,
@@ -9,7 +9,10 @@ import {
   type PersonExternalIdInput,
 } from "@/lib/admin/person-external-ids";
 import { invalidateRouteResponseCache } from "@/lib/server/admin/route-response-cache";
-import { invalidateAdminBackendCache } from "@/lib/server/trr-api/admin-read-proxy";
+import {
+  AdminReadProxyError,
+  invalidateAdminBackendCache,
+} from "@/lib/server/trr-api/admin-read-proxy";
 
 export const dynamic = "force-dynamic";
 const PERSON_DETAIL_CACHE_NAMESPACE = "admin-person-detail";
@@ -88,7 +91,9 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       );
     }
 
-    const saved = await syncPersonExternalIds(personId, externalIds);
+    const saved = await syncPersonExternalIds(personId, externalIds, {
+      adminContext: toVerifiedAdminContext(user),
+    });
     invalidateRouteResponseCache(PERSON_DETAIL_CACHE_NAMESPACE, `${user.uid}:person:${personId}:`);
     await invalidateAdminBackendCache(`/admin/people/${personId}/cache/invalidate`, {
       routeName: "person-detail",
@@ -98,7 +103,9 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     console.error("[api] Failed to sync person external IDs", error);
     const message = error instanceof Error ? error.message : "failed";
     const status =
-      message === "unauthorized"
+      error instanceof AdminReadProxyError
+        ? error.status
+        : message === "unauthorized"
         ? 401
         : message === "forbidden"
           ? 403

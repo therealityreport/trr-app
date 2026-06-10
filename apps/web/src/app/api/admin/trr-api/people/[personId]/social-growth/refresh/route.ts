@@ -2,9 +2,19 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
 import { getBackendApiUrl } from "@/lib/server/trr-api/backend";
 import { buildInternalAdminHeaders } from "@/lib/server/trr-api/internal-admin-auth";
+import {
+  isTimeoutSafeFetchTimeoutError,
+  timeoutSafeFetch,
+} from "@/lib/server/timeout-safe-fetch";
+import {
+  buildSocialBladeBackendErrorPayload,
+  buildSocialBladeTimeoutResponse,
+} from "@/lib/server/trr-api/socialblade-proxy";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300; // 5 minutes — Modal scrape can take a while
+
+const SOCIALBLADE_REFRESH_TIMEOUT_MS = 210_000;
 
 interface RouteParams {
   params: Promise<{ personId: string }>;
@@ -53,7 +63,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       );
     }
 
-    const upstream = await fetch(backendUrl, {
+    const upstream = await timeoutSafeFetch(backendUrl, {
       method: "POST",
       headers,
       body: JSON.stringify({
@@ -61,18 +71,23 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         force,
         ...(sourceScope !== undefined ? { source_scope: sourceScope } : {}),
       }),
+      timeoutMs: SOCIALBLADE_REFRESH_TIMEOUT_MS,
+      timeoutName: "socialblade-refresh",
     });
     const data = await upstream.json().catch(() => ({ error: "Invalid response from backend" }));
 
     if (!upstream.ok) {
       return NextResponse.json(
-        { error: data.detail || data.error || `Backend returned ${upstream.status}` },
+        buildSocialBladeBackendErrorPayload(data, `Backend returned ${upstream.status}`),
         { status: upstream.status }
       );
     }
 
     return NextResponse.json(data);
   } catch (error) {
+    if (isTimeoutSafeFetchTimeoutError(error)) {
+      return buildSocialBladeTimeoutResponse(error, SOCIALBLADE_REFRESH_TIMEOUT_MS);
+    }
     console.error("[api] Failed to refresh social growth data", error);
     const message = error instanceof Error ? error.message : "failed";
     const status =

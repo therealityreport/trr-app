@@ -65,7 +65,49 @@ describe("ShowSeasonCards runtime", () => {
       "Social Media",
     ]);
 
-    fireEvent.click(screen.getByRole("button", { name: /Season 1/i }));
+    fireEvent.click(screen.getByRole("link", { name: "Season 1" }));
+    expect(onToggleSeason).not.toHaveBeenCalled();
+
+    const expandButton = screen.getByRole("button", { name: "Expand Season 1 details" });
+    fireEvent.click(expandButton);
+    expect(onToggleSeason).toHaveBeenCalledWith("season-1");
+  });
+
+  it("uses a semantic expand button without wrapping season links", () => {
+    const onToggleSeason = vi.fn();
+
+    render(
+      <ShowSeasonCards
+        seasons={[
+          {
+            id: "season-1",
+            season_number: 1,
+            overview: "Season one overview",
+            air_date: "2024-01-01",
+            tmdb_season_id: null,
+          },
+        ]}
+        seasonEpisodeSummaries={{}}
+        openSeasonId={null}
+        onToggleSeason={onToggleSeason}
+        seasonPageTabs={[{ tab: "overview", label: "Overview" }]}
+        buildSeasonHref={(seasonNumber, tab) => `/admin/trr-shows/show/seasons/${seasonNumber}?tab=${tab}`}
+        showTmdbId={null}
+        formatDateRange={(premiere, finale) => `${premiere ?? "-"}..${finale ?? "-"}`}
+      />
+    );
+
+    const expandButton = screen.getByRole("button", { name: "Expand Season 1 details" });
+
+    expect(expandButton).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByRole("link", { name: "Season 1" })).toHaveAttribute(
+      "href",
+      "/admin/trr-shows/show/seasons/1?tab=overview",
+    );
+    expect(expandButton.tagName).toBe("BUTTON");
+    expect(expandButton).toHaveAttribute("type", "button");
+
+    fireEvent.click(expandButton);
     expect(onToggleSeason).toHaveBeenCalledWith("season-1");
   });
 });

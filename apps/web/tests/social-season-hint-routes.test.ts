@@ -232,6 +232,26 @@ describe("social routes season_id hint forwarding", () => {
     expect(String(options.queryString ?? "")).not.toContain("timeout_profile=");
   });
 
+  it("uses the default timeout tier for normal analytics route requests", async () => {
+    const request = new NextRequest(
+      `http://localhost/api/admin/trr-api/shows/${showId}/seasons/6/social/analytics?season_id=${seasonId}&source_scope=bravo`,
+      { method: "GET" },
+    );
+
+    const response = await getAnalytics(request, { params: Promise.resolve({ showId, seasonNumber: "6" }) });
+    expect(response.status).toBe(200);
+    expect(fetchSeasonBackendJsonMock).toHaveBeenCalledWith(
+      showId,
+      "6",
+      "/analytics",
+      expect.objectContaining({
+        seasonIdHint: seasonId,
+        retries: 0,
+        timeoutMs: SOCIAL_PROXY_DEFAULT_TIMEOUT_MS_MOCK,
+      }),
+    );
+  });
+
   it("returns degraded empty analytics instead of a 504 when the backend analytics read times out", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     fetchSeasonBackendJsonMock.mockRejectedValue(
