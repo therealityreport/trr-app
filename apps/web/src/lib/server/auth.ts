@@ -28,7 +28,9 @@ export type AuthTokenClaims = {
   uid: string;
   sub?: string;
   email?: string;
+  email_verified?: boolean;
   name?: string;
+  admin?: boolean;
   [key: string]: unknown;
 };
 
@@ -573,6 +575,9 @@ function isRequestHostAllowedForAdmin(request: NextRequest): boolean {
 }
 
 function isDevAdminBypassEnabled(request: NextRequest): boolean {
+  // Production deployments never honor the bypass, regardless of flags or
+  // host: Host headers are attacker-controllable and provide no security.
+  if (process.env.VERCEL_ENV === "production") return false;
   const requestHost = request.nextUrl.hostname;
   const hostHeader = request.headers.get("host");
   const hostWithoutPort = hostHeader?.split(":")[0] ?? hostHeader;
@@ -580,6 +585,17 @@ function isDevAdminBypassEnabled(request: NextRequest): boolean {
   if (!isLocalRequest) return false;
   if (process.env.NODE_ENV !== "production") return true;
   return parseOptionalBoolean(process.env.TRR_DEV_ADMIN_BYPASS) === true;
+}
+
+// Refuse to serve if a production deployment is configured with the dev
+// bypass flag — fail loudly at module load instead of silently ignoring it.
+if (
+  process.env.VERCEL_ENV === "production" &&
+  parseOptionalBoolean(process.env.TRR_DEV_ADMIN_BYPASS) === true
+) {
+  throw new Error(
+    "TRR_DEV_ADMIN_BYPASS must not be set on production deployments (VERCEL_ENV=production).",
+  );
 }
 
 function buildDevBypassUser(provider: AuthProvider = "firebase"): AuthenticatedUser {
@@ -678,6 +694,9 @@ const allowedUids = new Set<string>([
   ...parseAllowlist(process.env.NEXT_PUBLIC_ADMIN_UIDS, false),
 ]);
 
+// Diagnostics/observability only — display names are NOT an authorization
+// input (removed from requireAdmin: attacker-controlled Firebase displayName
+// was a privilege-escalation vector).
 const allowedDisplayNameKeys = new Set<string>(
   [
     ...DEFAULT_ADMIN_DISPLAY_NAMES,
@@ -751,12 +770,11 @@ export async function requireAdmin(request: NextRequest): Promise<AuthenticatedU
 
   const user = await requireUser(request);
   const email = user.email?.toLowerCase();
-  const emailAllowed = Boolean(email && allowedEmails.has(email));
+  const emailVerified = user.token.email_verified === true;
+  const emailAllowed = Boolean(email && emailVerified && allowedEmails.has(email));
   const uidAllowed = Boolean(user.uid && allowedUids.has(user.uid));
-  const displayName = typeof user.token.name === "string" ? user.token.name : undefined;
-  const displayNameKey = normalizeDisplayNameKey(displayName);
-  const displayNameAllowed = Boolean(displayNameKey && allowedDisplayNameKeys.has(displayNameKey));
-  const isAllowed = emailAllowed || uidAllowed || displayNameAllowed;
+  const customClaimAdmin = user.token.admin === true;
+  const isAllowed = emailAllowed || uidAllowed || customClaimAdmin;
   if (!isAllowed) {
     throw new Error("forbidden");
   }
@@ -764,6 +782,12 @@ export async function requireAdmin(request: NextRequest): Promise<AuthenticatedU
 }
 
 export async function requireAdminContext(request: NextRequest): Promise<VerifiedAdminContext> {
+  // Host allowlist applies to every admin entry point, including the
+  // propagated internal-admin JWT — a leaked shared secret must not become a
+  // host-independent admin credential.
+  if (!isRequestHostAllowedForAdmin(request)) {
+    throw new Error("forbidden");
+  }
   const propagatedContext = resolveVerifiedAdminContext(request.headers);
   if (propagatedContext) {
     return propagatedContext;

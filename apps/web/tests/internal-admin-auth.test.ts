@@ -1,3 +1,5 @@
+import { createHmac } from "node:crypto";
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -101,5 +103,28 @@ describe("internal-admin-auth", () => {
       email: "admin@example.com",
       verifiedAt: 1_700_000_000_000,
     });
+  });
+
+  it("rejects tokens whose header does not declare HS256 even when the signature matches", () => {
+    const headers = buildInternalAdminHeaders(
+      {
+        uid: "admin-123",
+        email: "admin@example.com",
+        verifiedAt: 1_700_000_000_000,
+      },
+      {},
+    );
+    const token = headers.get("Authorization")!.slice("Bearer ".length);
+    const [, payload] = token.split(".");
+    // Re-sign with the real secret so only the declared alg differs.
+    const forgedHeader = Buffer.from(JSON.stringify({ alg: "none", typ: "JWT" }), "utf8").toString(
+      "base64url",
+    );
+    const forgedSignature = createHmac("sha256", "internal-secret-for-tests")
+      .update(`${forgedHeader}.${payload}`)
+      .digest("base64url");
+    headers.set("Authorization", `Bearer ${forgedHeader}.${payload}.${forgedSignature}`);
+
+    expect(resolveVerifiedAdminContext(headers)).toBeNull();
   });
 });

@@ -77,6 +77,16 @@ const verifySignedPayload = (token: string, secret: string): InternalAdminPayloa
   if (!encodedHeader || !encodedPayload || !signature) {
     return null;
   }
+  // Only HS256 is ever minted; reject any other declared alg instead of
+  // silently ignoring the header.
+  try {
+    const header = JSON.parse(base64UrlDecode(encodedHeader)) as { alg?: unknown };
+    if (header?.alg !== "HS256") {
+      return null;
+    }
+  } catch {
+    return null;
+  }
   const expectedSignature = signHs256(`${encodedHeader}.${encodedPayload}`, secret);
   if (expectedSignature.length !== signature.length) {
     return null;

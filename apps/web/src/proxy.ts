@@ -1,3 +1,10 @@
+// This IS the active Next.js 16 middleware (Next 16 renamed `middleware.ts`
+// to `proxy.ts`; it auto-loads via the exported `proxy` + `config.matcher`).
+// It performs HOST ISOLATION AND ROUTING ONLY — no authentication happens
+// here. Identity/authorization is enforced per-route by `requireAdmin` /
+// `requireAdminContext` in `src/lib/server/auth.ts`. Host headers are
+// attacker-controllable, so nothing in this file may be treated as a
+// security boundary on its own.
 import { NextResponse, type NextRequest } from "next/server";
 import {
   ADMIN_API_REFERENCES_PATH,

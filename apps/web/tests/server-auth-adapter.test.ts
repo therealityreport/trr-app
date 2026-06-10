@@ -56,6 +56,8 @@ describe("server auth adapter", () => {
     process.env.TRR_AUTH_PROVIDER = "firebase";
     process.env.TRR_AUTH_SHADOW_MODE = "false";
     delete process.env.TRR_DEV_ADMIN_BYPASS;
+    delete process.env.VERCEL_ENV;
+    delete process.env.TRR_INTERNAL_ADMIN_SHARED_SECRET;
     process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATORS = "true";
     process.env.NEXT_PUBLIC_FIREBASE_API_KEY = "";
     process.env.ADMIN_EMAIL_ALLOWLIST = "";
@@ -412,6 +414,7 @@ describe("server auth adapter", () => {
     verifyIdTokenMock.mockResolvedValue({
       uid: "firebase-admin-prod-current-host",
       email: "admin@example.com",
+      email_verified: true,
       name: "Admin User",
     });
 
@@ -560,6 +563,188 @@ describe("server auth adapter", () => {
       uid: "firebase-admin-host-header",
       email: "admin@example.com",
       provider: "firebase",
+    });
+  });
+
+  it("rejects requireAdmin when only the Firebase displayName matches an admin allowlist in production", async () => {
+    const previousNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = "production";
+    delete process.env.ADMIN_ENFORCE_HOST;
+    delete process.env.ADMIN_APP_HOSTS;
+    delete process.env.ADMIN_APP_ORIGIN;
+    process.env.ADMIN_EMAIL_ALLOWLIST = "admin@example.com";
+    // Attacker-controlled token: non-allowlisted (but verified) email and uid,
+    // with displayName set to a seeded admin name. Must NOT grant admin.
+    verifyIdTokenMock.mockResolvedValue({
+      uid: "attacker-uid",
+      email: "attacker@evil.com",
+      email_verified: true,
+      name: "Codex Huli",
+    });
+
+    try {
+      const auth = await import("@/lib/server/auth");
+      await expect(
+        auth.requireAdmin(requestWithBearerAt("https://trr-app.vercel.app/api/test", "token-displayname-only")),
+      ).rejects.toThrow("forbidden");
+    } finally {
+      if (typeof previousNodeEnv === "undefined") {
+        delete process.env.NODE_ENV;
+      } else {
+        process.env.NODE_ENV = previousNodeEnv;
+      }
+    }
+  });
+
+  it("rejects requireAdmin when the allowlisted email is not verified", async () => {
+    delete process.env.ADMIN_APP_HOSTS;
+    process.env.ADMIN_EMAIL_ALLOWLIST = "admin@example.com";
+    verifyIdTokenMock.mockResolvedValue({
+      uid: "unverified-admin",
+      email: "admin@example.com",
+      email_verified: false,
+      name: "Admin User",
+    });
+
+    const auth = await import("@/lib/server/auth");
+    await expect(
+      auth.requireAdmin(requestWithBearerAt("https://trr-app.vercel.app/api/test", "token-unverified-email")),
+    ).rejects.toThrow("forbidden");
+  });
+
+  it("allows requireAdmin when an allowlisted email is verified", async () => {
+    delete process.env.ADMIN_APP_HOSTS;
+    process.env.ADMIN_EMAIL_ALLOWLIST = "admin@example.com";
+    verifyIdTokenMock.mockResolvedValue({
+      uid: "verified-admin",
+      email: "admin@example.com",
+      email_verified: true,
+      name: "Admin User",
+    });
+
+    const auth = await import("@/lib/server/auth");
+    const user = await auth.requireAdmin(
+      requestWithBearerAt("https://trr-app.vercel.app/api/test", "token-verified-email"),
+    );
+    expect(user).toMatchObject({
+      uid: "verified-admin",
+      email: "admin@example.com",
+      provider: "firebase",
+    });
+  });
+
+  it("allows requireAdmin when the Firebase token carries an admin custom claim", async () => {
+    delete process.env.ADMIN_APP_HOSTS;
+    process.env.ADMIN_EMAIL_ALLOWLIST = "";
+    // Neither email nor uid is allowlisted; only the server-set custom claim grants access.
+    verifyIdTokenMock.mockResolvedValue({
+      uid: "claim-admin",
+      email: "noone@example.com",
+      email_verified: true,
+      admin: true,
+    });
+
+    const auth = await import("@/lib/server/auth");
+    const user = await auth.requireAdmin(
+      requestWithBearerAt("https://trr-app.vercel.app/api/test", "token-custom-claim"),
+    );
+    expect(user).toMatchObject({
+      uid: "claim-admin",
+      provider: "firebase",
+    });
+  });
+
+  it("allows requireAdmin for an allowlisted uid even without a verified email", async () => {
+    delete process.env.ADMIN_APP_HOSTS;
+    process.env.ADMIN_EMAIL_ALLOWLIST = "";
+    // Seeded admin UID from DEFAULT_ADMIN_UIDS; email leg is intentionally unverified.
+    verifyIdTokenMock.mockResolvedValue({
+      uid: "MyoUFNjl9VP5iVGBi7tVqxUb8np2",
+      email: "unverified@example.com",
+      email_verified: false,
+      name: "Some Name",
+    });
+
+    const auth = await import("@/lib/server/auth");
+    const user = await auth.requireAdmin(
+      requestWithBearerAt("https://trr-app.vercel.app/api/test", "token-uid-allow"),
+    );
+    expect(user).toMatchObject({
+      uid: "MyoUFNjl9VP5iVGBi7tVqxUb8np2",
+      provider: "firebase",
+    });
+  });
+
+  it("never honors the dev admin bypass on production deployments (VERCEL_ENV=production)", async () => {
+    const previousNodeEnv = process.env.NODE_ENV;
+    // Local-looking host + non-production NODE_ENV would normally enable the
+    // bypass; VERCEL_ENV=production must override everything.
+    process.env.NODE_ENV = "development";
+    process.env.VERCEL_ENV = "production";
+    process.env.ADMIN_ENFORCE_HOST = "true";
+    process.env.ADMIN_APP_HOSTS = "admin.localhost";
+
+    try {
+      const auth = await import("@/lib/server/auth");
+      await expect(
+        auth.requireAdmin(requestWithoutAuthAt("http://admin.localhost:3000/api/admin/auth/status")),
+      ).rejects.toThrow("unauthorized");
+    } finally {
+      delete process.env.VERCEL_ENV;
+      if (typeof previousNodeEnv === "undefined") {
+        delete process.env.NODE_ENV;
+      } else {
+        process.env.NODE_ENV = previousNodeEnv;
+      }
+    }
+  });
+
+  it("refuses to load when TRR_DEV_ADMIN_BYPASS is set on a production deployment", async () => {
+    process.env.VERCEL_ENV = "production";
+    process.env.TRR_DEV_ADMIN_BYPASS = "true";
+
+    try {
+      await expect(import("@/lib/server/auth")).rejects.toThrow(
+        /TRR_DEV_ADMIN_BYPASS must not be set/,
+      );
+    } finally {
+      delete process.env.VERCEL_ENV;
+      delete process.env.TRR_DEV_ADMIN_BYPASS;
+    }
+  });
+
+  it("denies requireAdminContext on a non-admin host even with a valid internal-admin token", async () => {
+    process.env.ADMIN_ENFORCE_HOST = "true";
+    process.env.ADMIN_APP_HOSTS = "admin.localhost";
+    process.env.TRR_INTERNAL_ADMIN_SHARED_SECRET = "internal-secret-for-tests";
+
+    const auth = await import("@/lib/server/auth");
+    const { buildInternalAdminHeaders } = await import("@/lib/server/trr-api/internal-admin-auth");
+    const headers = buildInternalAdminHeaders(
+      { uid: "admin-123", email: "admin@example.com", verifiedAt: Date.now() },
+      {},
+    );
+
+    const request = new NextRequest("http://evil.example/api/test", { headers });
+    await expect(auth.requireAdminContext(request)).rejects.toThrow("forbidden");
+  });
+
+  it("returns the propagated context for requireAdminContext on an allowlisted host", async () => {
+    process.env.ADMIN_ENFORCE_HOST = "true";
+    process.env.ADMIN_APP_HOSTS = "admin.localhost";
+    process.env.TRR_INTERNAL_ADMIN_SHARED_SECRET = "internal-secret-for-tests";
+
+    const auth = await import("@/lib/server/auth");
+    const { buildInternalAdminHeaders } = await import("@/lib/server/trr-api/internal-admin-auth");
+    const headers = buildInternalAdminHeaders(
+      { uid: "admin-123", email: "admin@example.com", verifiedAt: Date.now() },
+      {},
+    );
+
+    const request = new NextRequest("http://admin.localhost:3000/api/test", { headers });
+    await expect(auth.requireAdminContext(request)).resolves.toMatchObject({
+      uid: "admin-123",
+      email: "admin@example.com",
     });
   });
 });
