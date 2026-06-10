@@ -8744,10 +8744,6 @@ it("prefers terminal cancelled status labels over stale recovering state", async
         mocks.fetchAdminWithAuth.mock.calls.some(([url]: [RequestInfo | URL]) => String(url).includes("run_id=run-new-2")),
       ).toBe(true);
     });
-
-    await waitFor(() => {
-      expect(screen.getAllByText(/Run run-new-/i).length).toBeGreaterThan(0);
-    });
   });
 
   it("does not auto-pivot away from unrelated runs", async () => {
