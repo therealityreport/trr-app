@@ -12,6 +12,8 @@ function runSafeBuild(env: NodeJS.ProcessEnv, args: string[] = []) {
     encoding: "utf8",
     env: {
       ...process.env,
+      CI: undefined,
+      GITHUB_ACTIONS: undefined,
       ...env,
       npm_execpath: undefined,
     },
