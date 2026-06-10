@@ -719,11 +719,12 @@ describe("server auth adapter", () => {
     process.env.TRR_INTERNAL_ADMIN_SHARED_SECRET = "internal-secret-for-tests";
 
     const auth = await import("@/lib/server/auth");
-    const { buildInternalAdminHeaders } = await import("@/lib/server/trr-api/internal-admin-auth");
-    const headers = buildInternalAdminHeaders(
+    const { getInternalAdminBearerToken } = await import("@/lib/server/trr-api/internal-admin-auth");
+    const token = getInternalAdminBearerToken(
       { uid: "admin-123", email: "admin@example.com", verifiedAt: Date.now() },
-      {},
+      { host: "evil.example" },
     );
+    const headers = { authorization: `Bearer ${token}` };
 
     const request = new NextRequest("http://evil.example/api/test", { headers });
     await expect(auth.requireAdminContext(request)).rejects.toThrow("forbidden");
@@ -738,7 +739,7 @@ describe("server auth adapter", () => {
     const { buildInternalAdminHeaders } = await import("@/lib/server/trr-api/internal-admin-auth");
     const headers = buildInternalAdminHeaders(
       { uid: "admin-123", email: "admin@example.com", verifiedAt: Date.now() },
-      {},
+      { host: "admin.localhost:3000" },
     );
 
     const request = new NextRequest("http://admin.localhost:3000/api/test", { headers });

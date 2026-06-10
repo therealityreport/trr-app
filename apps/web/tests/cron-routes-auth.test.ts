@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { captureExpectedConsoleError } from "./helpers/expected-console";
 
@@ -58,6 +58,10 @@ describe("cron route auth guards", () => {
     });
     delete process.env.CRON_SECRET;
     vi.spyOn(console, "log").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   describe("episode-progression", () => {

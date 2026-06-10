@@ -574,6 +574,10 @@ function isRequestHostAllowedForAdmin(request: NextRequest): boolean {
   return Array.from(adminAllowedHosts).some((allowedHost) => isLoopbackHost(allowedHost));
 }
 
+function requestAdminHost(request: NextRequest): string | null {
+  return request.headers.get("x-forwarded-host") ?? request.headers.get("host") ?? request.nextUrl.hostname;
+}
+
 function isDevAdminBypassEnabled(request: NextRequest): boolean {
   // Production deployments never honor the bypass, regardless of flags or
   // host: Host headers are attacker-controllable and provide no security.
@@ -754,7 +758,7 @@ export async function requireAdmin(request: NextRequest): Promise<AuthenticatedU
     throw new Error("forbidden");
   }
 
-  const propagatedContext = resolveVerifiedAdminContext(request.headers);
+  const propagatedContext = resolveVerifiedAdminContext(request.headers, requestAdminHost(request));
   if (propagatedContext) {
     return buildPropagatedAuthenticatedUser(propagatedContext);
   }
@@ -788,7 +792,7 @@ export async function requireAdminContext(request: NextRequest): Promise<Verifie
   if (!isRequestHostAllowedForAdmin(request)) {
     throw new Error("forbidden");
   }
-  const propagatedContext = resolveVerifiedAdminContext(request.headers);
+  const propagatedContext = resolveVerifiedAdminContext(request.headers, requestAdminHost(request));
   if (propagatedContext) {
     return propagatedContext;
   }

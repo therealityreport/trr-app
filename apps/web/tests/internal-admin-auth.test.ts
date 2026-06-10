@@ -105,6 +105,38 @@ describe("internal-admin-auth", () => {
     });
   });
 
+  it("rejects malformed tokens with extra segments", () => {
+    const headers = buildInternalAdminHeaders(
+      {
+        uid: "admin-123",
+        email: "admin@example.com",
+        verifiedAt: 1_700_000_000_000,
+      },
+      {},
+    );
+    headers.set("Authorization", `${headers.get("Authorization")}.extra`);
+
+    expect(resolveVerifiedAdminContext(headers)).toBeNull();
+  });
+
+  it("requires the token host to match when an expected host is supplied", () => {
+    const headers = buildInternalAdminHeaders(
+      {
+        uid: "admin-123",
+        email: "admin@example.com",
+        verifiedAt: 1_700_000_000_000,
+      },
+      { host: "admin.localhost:3000" },
+    );
+
+    expect(resolveVerifiedAdminContext(headers, "admin.localhost:3000")).toEqual({
+      uid: "admin-123",
+      email: "admin@example.com",
+      verifiedAt: 1_700_000_000_000,
+    });
+    expect(resolveVerifiedAdminContext(headers, "localhost:3000")).toBeNull();
+  });
+
   it("rejects tokens whose header does not declare HS256 even when the signature matches", () => {
     const headers = buildInternalAdminHeaders(
       {
