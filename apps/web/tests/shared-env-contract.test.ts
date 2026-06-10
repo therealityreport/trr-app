@@ -57,6 +57,7 @@ describe("workspace shared env contract", () => {
 
   it("documents runtime failure lanes and the remote debug-log kill switch", () => {
     const contractCandidates = [
+      path.resolve(process.cwd(), "../../docs/workspace/env-contract.md"),
       path.resolve(process.cwd(), "../../../docs/workspace/env-contract.md"),
       path.resolve(process.cwd(), "../../../../docs/workspace/env-contract.md"),
     ];
