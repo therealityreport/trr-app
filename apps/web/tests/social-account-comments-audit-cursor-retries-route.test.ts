@@ -44,7 +44,7 @@ describe("social account comments audit cursor retry proxy route", () => {
   it("forwards recovery rows reads to TRR-Backend", async () => {
     const response = await GET(
       new NextRequest(
-        "http://localhost/api/admin/trr-api/social/profiles/instagram/bravotv/comments/audit-cursor-retries?limit=18",
+        "http://localhost/api/admin/trr-api/social/profiles/instagram/bravotv/comments/audit-cursor-retries?limit=18&show_filter=SummerHouse",
       ),
       {
         params: Promise.resolve({ platform: "instagram", handle: "bravotv" }),
@@ -56,7 +56,7 @@ describe("social account comments audit cursor retry proxy route", () => {
       "/profiles/instagram/bravotv/comments/audit-cursor-retries",
       expect.objectContaining({
         method: "GET",
-        queryString: "limit=18",
+        queryString: "limit=18&show_filter=SummerHouse",
       }),
     );
   });
@@ -67,6 +67,8 @@ describe("social account comments audit cursor retry proxy route", () => {
       batch_size: 1,
       max_comments_per_post: 0,
       attach_to_active_run: true,
+      force_rerun_existing: true,
+      show_filter: "SummerHouse",
     };
     const response = await POST(
       new NextRequest(

@@ -484,6 +484,10 @@ export type SocialAccountCommentsScrapeResponse = {
 export type SocialAccountCommentsAuditCursorRetryRow = {
   shortcode: string;
   post_id?: string | null;
+  show_id?: string | null;
+  season_id?: string | null;
+  show_slug?: string | null;
+  show_name?: string | null;
   cursor_stop_reason?: string | null;
   created_at?: string | null;
   has_top_level_cursor?: boolean;
@@ -509,6 +513,11 @@ export type SocialAccountCommentsAuditCursorRetriesResponse = {
   selected_target_source_ids_count?: number;
   inspected_audit_rows_count?: number;
   eligible_stop_reasons?: string[];
+  show_filter?: {
+    show_ids?: string[];
+    season_ids?: string[];
+    terms?: string[];
+  } | null;
   active_run?: Record<string, unknown> | null;
   progress_rows?: SocialAccountCommentsAuditCursorRetryRow[];
   rows?: SocialAccountCommentsAuditCursorRetryRow[];
@@ -527,6 +536,10 @@ export type SocialAccountCommentsAuditCursorRetryRequest = {
   limit?: number;
   shortcodes?: string[];
   stop_reasons?: string[];
+  show_ids?: string[];
+  season_ids?: string[];
+  show_filters?: string[];
+  show_filter?: string;
   batch_size?: number;
   comments_worker_count?: number;
   max_comments_per_post?: number;
@@ -534,6 +547,7 @@ export type SocialAccountCommentsAuditCursorRetryRequest = {
   skip_launch_auth_probe?: boolean;
   attach_to_active_run?: boolean;
   dispatch_immediately?: boolean;
+  force_rerun_existing?: boolean;
   dry_run?: boolean;
 };
 

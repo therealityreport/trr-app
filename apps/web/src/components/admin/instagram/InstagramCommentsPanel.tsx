@@ -716,7 +716,9 @@ export default function InstagramCommentsPanel({
     useState<SocialAccountCommentsAuditCursorRetriesResponse | null>(null);
   const [auditCursorRecoveryLoading, setAuditCursorRecoveryLoading] = useState(false);
   const [auditCursorRecoveryPending, setAuditCursorRecoveryPending] = useState(false);
+  const [auditCursorRerunShortcode, setAuditCursorRerunShortcode] = useState<string | null>(null);
   const [auditCursorRecoveryError, setAuditCursorRecoveryError] = useState<string | null>(null);
+  const [auditCursorShowFilter, setAuditCursorShowFilter] = useState("");
   const [selectedPost, setSelectedPost] = useState<SocialAccountProfilePost | null>(null);
   const [modalRefreshKey, setModalRefreshKey] = useState(0);
   const handledTerminalRunRef = useRef<string | null>(null);
@@ -801,8 +803,13 @@ export default function InstagramCommentsPanel({
     setAuditCursorRecoveryLoading(true);
     setAuditCursorRecoveryError(null);
     try {
+      const params = new URLSearchParams({ limit: "50" });
+      const trimmedShowFilter = auditCursorShowFilter.trim();
+      if (trimmedShowFilter) {
+        params.set("show_filter", trimmedShowFilter);
+      }
       const response = await fetchAdminWithAuth(
-        `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/comments/audit-cursor-retries?limit=50`,
+        `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/comments/audit-cursor-retries?${params.toString()}`,
         undefined,
         { preferredUser: user },
       );
@@ -817,7 +824,7 @@ export default function InstagramCommentsPanel({
     } finally {
       setAuditCursorRecoveryLoading(false);
     }
-  }, [checking, fetchAdminWithAuth, handle, hasAccess, platform, supportsInlineCommentsSync, user]);
+  }, [auditCursorShowFilter, checking, fetchAdminWithAuth, handle, hasAccess, platform, supportsInlineCommentsSync, user]);
 
   useEffect(() => {
     if (!supportsInlineCommentsSync) return;
@@ -976,6 +983,10 @@ export default function InstagramCommentsPanel({
       attach_to_active_run: true,
       dispatch_immediately: true,
     };
+    const trimmedShowFilter = auditCursorShowFilter.trim();
+    if (trimmedShowFilter) {
+      body.show_filter = trimmedShowFilter;
+    }
     try {
       const response = await fetchAdminWithAuth(
         `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/comments/audit-cursor-retries`,
@@ -1017,7 +1028,89 @@ export default function InstagramCommentsPanel({
     } finally {
       setAuditCursorRecoveryPending(false);
     }
-  }, [fetchAdminWithAuth, handle, onSummaryRefresh, platform, refreshAuditCursorRecovery, refreshPosts, user]);
+  }, [
+    auditCursorShowFilter,
+    fetchAdminWithAuth,
+    handle,
+    onSummaryRefresh,
+    platform,
+    refreshAuditCursorRecovery,
+    refreshPosts,
+    user,
+  ]);
+
+  const rerunAuditCursorTarget = useCallback(
+    async (row: SocialAccountCommentsAuditCursorRetryRow) => {
+      if (!user || !row.shortcode) return;
+      setScrapeError(null);
+      setAuditCursorRecoveryError(null);
+      setScrapeMessage(`Queueing ${row.shortcode} now...`);
+      setAuditCursorRerunShortcode(row.shortcode);
+      const body: SocialAccountCommentsAuditCursorRetryRequest = {
+        limit: 1,
+        shortcodes: [row.shortcode],
+        batch_size: 1,
+        max_comments_per_post: 0,
+        comments_load_strategy: "cursor_api",
+        attach_to_active_run: true,
+        dispatch_immediately: true,
+        force_rerun_existing: true,
+      };
+      const trimmedShowFilter = auditCursorShowFilter.trim();
+      if (trimmedShowFilter) {
+        body.show_filter = trimmedShowFilter;
+      }
+      try {
+        const response = await fetchAdminWithAuth(
+          `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/comments/audit-cursor-retries`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          },
+          { preferredUser: user },
+        );
+        const data = (await response.json().catch(() => ({}))) as SocialAccountCommentsAuditCursorRetriesResponse &
+          ProxyErrorPayload;
+        if (!response.ok || data.ok === false) {
+          throw new Error(readInstagramCommentsErrorMessage(data, "Failed to queue target now"));
+        }
+        setAuditCursorRecovery(data);
+        const runId =
+          readCommentsRunId(data.enqueue?.result) ??
+          readCommentsRunId(data.active_run) ??
+          readCommentsRunId(data);
+        if (runId) {
+          setScrapeRunId(runId);
+        }
+        const createdCount = readNonNegativeInteger(data.enqueue?.result?.created_target_job_count) ?? 0;
+        setScrapeMessage(
+          createdCount > 0
+            ? `${row.shortcode} queued now. ${formatInteger(createdCount)} fresh recovery job${createdCount === 1 ? "" : "s"}.`
+            : `${row.shortcode} recovery requested.`,
+        );
+        void refreshPosts();
+        void refreshAuditCursorRecovery();
+        void onSummaryRefresh?.();
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Failed to queue target now";
+        setAuditCursorRecoveryError(message);
+        setScrapeError(message);
+      } finally {
+        setAuditCursorRerunShortcode(null);
+      }
+    },
+    [
+      auditCursorShowFilter,
+      fetchAdminWithAuth,
+      handle,
+      onSummaryRefresh,
+      platform,
+      refreshAuditCursorRecovery,
+      refreshPosts,
+      user,
+    ],
+  );
 
   const startCatalogRefresh = useCallback(async () => {
     if (!user) return;
@@ -1246,6 +1339,7 @@ export default function InstagramCommentsPanel({
   const auditCursorRecoveryActiveRunId = readCommentsRunId(auditCursorRecovery?.active_run);
   const auditCursorActionDisabled =
     auditCursorRecoveryPending ||
+    Boolean(auditCursorRerunShortcode) ||
     auditCursorRecoveryLoading ||
     auditCursorRecoveryTargetCount <= 0 ||
     checking ||
@@ -1462,10 +1556,25 @@ export default function InstagramCommentsPanel({
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
+                <input
+                  type="search"
+                  value={auditCursorShowFilter}
+                  onChange={(event) => setAuditCursorShowFilter(event.target.value)}
+                  placeholder="Show filter"
+                  className="h-9 min-w-[160px] rounded-lg border border-zinc-200 bg-white px-3 text-sm text-zinc-900 placeholder:text-zinc-400 disabled:cursor-not-allowed disabled:opacity-50"
+                  disabled={auditCursorRecoveryPending || Boolean(auditCursorRerunShortcode)}
+                />
                 <button
                   type="button"
                   onClick={() => void refreshAuditCursorRecovery()}
-                  disabled={auditCursorRecoveryLoading || checking || !user || !hasAccess}
+                  disabled={
+                    auditCursorRecoveryLoading ||
+                    auditCursorRecoveryPending ||
+                    Boolean(auditCursorRerunShortcode) ||
+                    checking ||
+                    !user ||
+                    !hasAccess
+                  }
                   className={SECONDARY_BUTTON_CLASS}
                 >
                   {auditCursorRecoveryLoading ? "Refreshing..." : "Refresh"}
@@ -1490,7 +1599,8 @@ export default function InstagramCommentsPanel({
                       <th className="pb-2 pr-4">Gap</th>
                       <th className="pb-2 pr-4">Saved</th>
                       <th className="pb-2 pr-4">Cursor</th>
-                      <th className="pb-2">Queue</th>
+                      <th className="pb-2 pr-4">Queue</th>
+                      <th className="pb-2">Action</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-zinc-200">
@@ -1498,6 +1608,7 @@ export default function InstagramCommentsPanel({
                       const activeJobCount = readNonNegativeInteger(row.active_run_job_count) ?? 0;
                       const activeJobTargetCounts = row.active_job_target_counts ?? [];
                       const smallestBatch = activeJobTargetCounts.length > 0 ? Math.min(...activeJobTargetCounts) : null;
+                      const rowRerunPending = auditCursorRerunShortcode === row.shortcode;
                       return (
                         <tr key={row.shortcode}>
                           <td className="py-2 pr-4 align-top text-xs font-semibold text-blue-700">{row.shortcode}</td>
@@ -1511,12 +1622,22 @@ export default function InstagramCommentsPanel({
                             {formatCompactReason(row.cursor_stop_reason)}
                             {row.reply_resume_count ? ` / ${formatInteger(row.reply_resume_count)} replies` : ""}
                           </td>
-                          <td className="py-2 align-top text-xs text-zinc-600">
+                          <td className="py-2 pr-4 align-top text-xs text-zinc-600">
                             {activeJobCount > 0
                               ? `${formatInteger(activeJobCount)} job${activeJobCount === 1 ? "" : "s"}${
                                   smallestBatch ? ` / min batch ${formatInteger(smallestBatch)}` : ""
                                 }`
                               : "Not queued"}
+                          </td>
+                          <td className="py-2 align-top">
+                            <button
+                              type="button"
+                              onClick={() => void rerunAuditCursorTarget(row)}
+                              disabled={auditCursorActionDisabled || rowRerunPending}
+                              className="inline-flex rounded-md border border-zinc-200 px-2 py-1 text-xs font-semibold text-zinc-700 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              {rowRerunPending ? "Queueing..." : "Run Now"}
+                            </button>
                           </td>
                         </tr>
                       );
