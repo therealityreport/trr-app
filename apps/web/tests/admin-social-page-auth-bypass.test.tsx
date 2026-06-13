@@ -411,7 +411,7 @@ const saveProducerThreadsHandle = async (): Promise<void> => {
 };
 
 describe("admin social page auth bypass", () => {
-  const landingCacheKey = "trr-admin-social-landing:v6";
+  const landingCacheKey = "trr-admin-social-landing:v7";
 
   beforeEach(() => {
     window.localStorage.clear();
@@ -553,7 +553,7 @@ describe("admin social page auth bypass", () => {
 
     await waitFor(() => {
       expect(mocks.fetchAdminWithAuth).toHaveBeenCalledWith(
-        "/api/admin/social/landing?refresh=1",
+        "/api/admin/social/landing",
         undefined,
         expect.objectContaining({
           allowDevAdminBypass: true,

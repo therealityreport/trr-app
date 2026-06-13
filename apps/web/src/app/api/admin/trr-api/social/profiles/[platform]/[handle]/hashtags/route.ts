@@ -20,6 +20,7 @@ export const GET = createSocialProfileReadRoute({
   fallbackError: "Failed to fetch social account profile hashtags",
   logLabel: "[api] Failed to fetch social account profile hashtags",
   queryString: "strip-refresh",
+  routeTimingHeaders: true,
   cache: {
     kind: "admin-snapshot",
     pageFamily: "social-profile",

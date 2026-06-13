@@ -24,6 +24,7 @@ export const GET = createSocialProfileReadRoute({
   timeoutMs: SOCIAL_PROXY_LONG_TIMEOUT_MS,
   queryString: "forward",
   forwardAdminContext: true,
+  routeTimingHeaders: true,
   cache: {
     kind: "route-response",
     namespace: SOCIAL_PROFILE_SUMMARY_CACHE_NAMESPACE,

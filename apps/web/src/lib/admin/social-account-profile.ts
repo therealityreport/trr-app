@@ -333,9 +333,20 @@ export type SocialAccountProfilePagination = {
   total_pages: number;
 };
 
+export type SocialAccountProfilePostsSortMetadata = {
+  sort_by?: string | null;
+  sort_dir?: string | null;
+  rollup_table?: string | null;
+  rollup_available?: boolean | null;
+  mode?: string | null;
+  exact?: boolean | null;
+  candidate_limit?: number | null;
+};
+
 export type SocialAccountProfilePostsResponse = {
   items: SocialAccountProfilePost[];
   pagination: SocialAccountProfilePagination;
+  sort_metadata?: SocialAccountProfilePostsSortMetadata | null;
 };
 
 export type SocialAccountCommentsCoverage = {
@@ -470,6 +481,62 @@ export type SocialAccountCommentsScrapeResponse = {
   timing?: Record<string, unknown> | null;
 } & InstagramCommentsLaunchAuthMetadata;
 
+export type SocialAccountCommentsAuditCursorRetryRow = {
+  shortcode: string;
+  post_id?: string | null;
+  cursor_stop_reason?: string | null;
+  created_at?: string | null;
+  has_top_level_cursor?: boolean;
+  reply_resume_count?: number;
+  reported_comment_count?: number;
+  saved_comment_count?: number;
+  missing_comment_gap?: number;
+  active_run_id?: string | null;
+  active_run_job_count?: number;
+  active_run_queued_count?: number;
+  active_run_running_count?: number;
+  active_run_completed_count?: number;
+  active_run_failed_count?: number;
+  active_run_cancelled_count?: number;
+  active_job_ids?: string[];
+  active_job_target_counts?: number[];
+};
+
+export type SocialAccountCommentsAuditCursorRetriesResponse = {
+  ok?: boolean;
+  account?: string;
+  selected_target_source_ids?: string[];
+  selected_target_source_ids_count?: number;
+  inspected_audit_rows_count?: number;
+  eligible_stop_reasons?: string[];
+  active_run?: Record<string, unknown> | null;
+  progress_rows?: SocialAccountCommentsAuditCursorRetryRow[];
+  rows?: SocialAccountCommentsAuditCursorRetryRow[];
+  mode?: "dry_run" | "enqueue" | string;
+  batch_size?: number;
+  enqueue?: {
+    requested?: boolean;
+    performed?: boolean;
+    mode?: "new_run" | "active_run_split" | string;
+    result?: Record<string, unknown> | null;
+  };
+  failure_reason?: string | null;
+};
+
+export type SocialAccountCommentsAuditCursorRetryRequest = {
+  limit?: number;
+  shortcodes?: string[];
+  stop_reasons?: string[];
+  batch_size?: number;
+  comments_worker_count?: number;
+  max_comments_per_post?: number;
+  comments_load_strategy?: "cursor_api" | "single_session_load_all";
+  skip_launch_auth_probe?: boolean;
+  attach_to_active_run?: boolean;
+  dispatch_immediately?: boolean;
+  dry_run?: boolean;
+};
+
 export type SocialAccountCommentsCancelResponse = {
   run_id: string;
   status?: string | null;
@@ -548,7 +615,64 @@ export type SocialAccountCommentsShardProgress = {
   stop_reason_counts?: Record<string, number | null | undefined> | null;
   completion_reason_counts?: Record<string, number | null | undefined> | null;
   retry_reason_counts?: Record<string, number | null | undefined> | null;
+  network_spend?: SocialAccountCommentsNetworkSpend | null;
   error_message?: string | null;
+};
+
+export type SocialAccountCommentsNetworkSpendHost = {
+  host?: string | null;
+  bytes?: number | null;
+  request_count?: number | null;
+  blocked_request_count?: number | null;
+  blocked_bytes_estimate?: number | null;
+};
+
+export type SocialAccountCommentsNetworkSpend = {
+  observed_proxy_bytes?: number | null;
+  observed_proxy_megabytes?: number | null;
+  observed_request_count?: number | null;
+  static_cdninstagram_bytes?: number | null;
+  static_cdninstagram_megabytes?: number | null;
+  static_cdninstagram_request_count?: number | null;
+  static_cdninstagram_blocked_request_count?: number | null;
+  blocked_request_count?: number | null;
+  blocked_bytes_estimate?: number | null;
+  bytes_by_host?: Record<string, number | null | undefined> | null;
+  request_count_by_host?: Record<string, number | null | undefined> | null;
+  blocked_request_count_by_host?: Record<string, number | null | undefined> | null;
+  blocked_bytes_estimate_by_host?: Record<string, number | null | undefined> | null;
+  top_hosts?: SocialAccountCommentsNetworkSpendHost[];
+  network_policy_modes?: Record<string, number | null | undefined> | null;
+  spend_basis?: string | null;
+};
+
+export type SocialAccountCommentsTargetProgressRow = {
+  source_id?: string | null;
+  shortcode?: string | null;
+  job_id?: string | null;
+  job_ids?: string[];
+  status?: string | null;
+  statuses?: Record<string, number | null | undefined> | null;
+  target_index?: number | null;
+  job_target_count?: number | null;
+  shard_index?: number | null;
+  shard_count?: number | null;
+  latest_reason?: string | null;
+  fetch_reason?: string | null;
+  latest_stop_reason?: string | null;
+  reported_comment_count?: number | null;
+  saved_comment_count?: number | null;
+  observed_comment_count?: number | null;
+  missing_comment_gap?: number | null;
+  remaining?: boolean | null;
+  retryable?: boolean | null;
+  auth_failed?: boolean | null;
+  network_stopped?: boolean | null;
+  current_phase?: string | null;
+  has_top_level_cursor?: boolean | null;
+  reply_resume_count?: number | null;
+  cursor_stop_reason?: string | null;
+  pages_seen?: number | null;
 };
 
 export type SocialAccountCommentsRunProgress = {
@@ -573,11 +697,29 @@ export type SocialAccountCommentsRunProgress = {
   comments_proxy_shard_sessions?: boolean;
   recommended_comments_shard_count?: number;
   active_comment_jobs?: number;
+  running_comment_jobs?: number;
   queued_comment_jobs?: number;
   retrying_comment_jobs?: number;
   completed_comment_jobs?: number;
   cancelled_comment_jobs?: number;
   failed_comment_jobs?: number;
+  stale_comment_jobs?: number;
+  partial_comment_jobs?: number;
+  stale_comment_shards?: number;
+  partial_comment_shards?: number;
+  partial_fallback_count?: number;
+  rendered_fallback_partial_count?: number;
+  incomplete_targets_count?: number;
+  auth_blocked_targets_count?: number;
+  top_incomplete_reasons?: Record<string, number | null | undefined> | Array<Record<string, unknown>>;
+  incomplete_reason_counts?: Record<string, number | null | undefined>;
+  retry_reason_counts?: Record<string, number | null | undefined>;
+  largest_remaining_gaps?: Array<Record<string, unknown>>;
+  largest_gaps?: Array<Record<string, unknown>>;
+  incomplete_targets?: Array<Record<string, unknown>>;
+  recommended_next_action?: string | null;
+  operator_next_action?: string | null;
+  recommended_action?: string | null;
   post_progress?: {
     completed_posts?: number;
     complete_posts?: number;
@@ -597,8 +739,21 @@ export type SocialAccountCommentsRunProgress = {
     remaining_target_source_ids_count?: number;
     resume_recommendation?: "stale_or_missing" | null;
   };
+  retry_progress?: {
+    retry_target_count?: number | null;
+    retry_source_job_ids?: string[];
+    targeted_retry_target_count?: number | null;
+    network_stopped_target_count?: number | null;
+    network_stopped_target_source_ids?: string[];
+    largest_remaining_gaps?: Array<Record<string, unknown>>;
+    target_progress_rows?: SocialAccountCommentsTargetProgressRow[];
+    top_incomplete_reasons?: Record<string, number | null | undefined> | null;
+  } | null;
   timing?: Record<string, unknown> | null;
   auto_rebalance?: Record<string, unknown> | null;
+  network_spend?: SocialAccountCommentsNetworkSpend | null;
+  target_progress_rows?: SocialAccountCommentsTargetProgressRow[];
+  target_progress?: SocialAccountCommentsTargetProgressRow[];
   comment_shards?: SocialAccountCommentsShardProgress[];
   shards?: SocialAccountCommentsShardProgress[];
   shard_progress?: SocialAccountCommentsShardProgress[];

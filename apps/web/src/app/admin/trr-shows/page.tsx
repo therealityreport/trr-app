@@ -1,15 +1,17 @@
 "use client";
 
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useRef, type MouseEvent } from "react";
 import Link from "next/link";
 import Image from "next/image";
+import { useRouter } from "next/navigation";
 import type { Route } from "next";
 import ClientOnly from "@/components/ClientOnly";
 import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
 import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
 import { buildAdminSectionBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
 import { ADMIN_ROOT_PATH } from "@/lib/admin/admin-route-paths";
-import { fetchAdminWithAuth } from "@/lib/admin/client-auth";
+import { fetchAdminWithAuth, getClientAuthHeaders } from "@/lib/admin/client-auth";
+import { adminStream } from "@/lib/admin/admin-fetch";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 import { buildShowAdminUrl } from "@/lib/admin/show-admin-routes";
 import { resolvePreferredShowRouteSlug } from "@/lib/admin/show-route-slug";
@@ -161,7 +163,22 @@ const COVERED_SHOWS_FETCH_RETRY_DELAYS_MS = [300, 900] as const;
 const isCoveredShowsRetryableError = (message: string) =>
   message === "Not authenticated" || message === "unauthorized" || message === "forbidden";
 
+const shouldUseNormalLinkNavigation = (event: MouseEvent<HTMLAnchorElement>): boolean =>
+  event.defaultPrevented ||
+  event.button !== 0 ||
+  event.metaKey ||
+  event.altKey ||
+  event.ctrlKey ||
+  event.shiftKey;
+
+type PreNavigationShowCoreState = {
+  showId: string;
+  operationId: string | null;
+  paused: boolean;
+};
+
 export default function TrrShowsPage() {
+  const router = useRouter();
   const { user, userKey, checking, hasAccess } = useAdminGuard();
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchResult | null>(null);
@@ -175,6 +192,7 @@ export default function TrrShowsPage() {
   const [syncingLists, setSyncingLists] = useState(false);
   const [syncListsNotice, setSyncListsNotice] = useState<string | null>(null);
   const [syncListsError, setSyncListsError] = useState<string | null>(null);
+  const [preNavigationShowCore, setPreNavigationShowCore] = useState<PreNavigationShowCoreState | null>(null);
 
   // Covered shows state
   const [coveredShows, setCoveredShows] = useState<CoveredShow[]>([]);
@@ -191,6 +209,86 @@ export default function TrrShowsPage() {
         allowDevAdminBypass: true,
       }),
     [user],
+  );
+
+  const enqueueShowCoreBeforeNavigation = useCallback(
+    async (showId: string): Promise<{ operationId: string | null; paused: boolean }> => {
+      const settingsResponse = await fetchWithAuth(
+        "/api/admin/trr-api/shows/settings/show-core-auto-refresh",
+      );
+      const settings = (await settingsResponse.json().catch(() => ({}))) as { paused?: unknown };
+      if (settingsResponse.ok && settings.paused === true) {
+        return { operationId: null, paused: true };
+      }
+
+      const controller = new AbortController();
+      let sawOperationStart = false;
+      let operationId: string | null = null;
+      try {
+        const headers = await getClientAuthHeaders({
+          preferredUser: user,
+          allowDevAdminBypass: true,
+        });
+        await adminStream(`/api/admin/trr-api/shows/${showId}/refresh/stream`, {
+          method: "POST",
+          headers: {
+            ...headers,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            targets: ["show_core"],
+            force_new_operation: true,
+            auto_refresh: true,
+            source: "admin_show_list_pre_navigation",
+          }),
+          timeoutMs: 3_000,
+          externalSignal: controller.signal,
+          onEvent: ({ event, payload }) => {
+            if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+              const rawOperationId = (payload as { operation_id?: unknown }).operation_id;
+              if (typeof rawOperationId === "string" && rawOperationId.trim().length > 0) {
+                operationId = rawOperationId.trim();
+              }
+            }
+            if (event === "operation" || event === "progress" || event === "complete") {
+              sawOperationStart = true;
+              controller.abort();
+            }
+          },
+        });
+      } catch (err) {
+        if (!sawOperationStart) {
+          console.warn("Failed to enqueue show core before navigation:", err);
+        }
+      }
+      return { operationId, paused: false };
+    },
+    [fetchWithAuth, user],
+  );
+
+  const handleShowNavigation = useCallback(
+    (event: MouseEvent<HTMLAnchorElement>, showId: string, href: Route) => {
+      if (shouldUseNormalLinkNavigation(event)) return;
+      event.preventDefault();
+
+      setPreNavigationShowCore({ showId, operationId: null, paused: false });
+      void enqueueShowCoreBeforeNavigation(showId)
+        .catch((err) => {
+          console.warn("Failed to check or start show core before navigation:", err);
+          return { operationId: null, paused: false };
+        })
+        .then((result) => {
+          setPreNavigationShowCore({ showId, operationId: result.operationId, paused: result.paused });
+          const targetHref = result.operationId
+            ? (`${href}${String(href).includes("?") ? "&" : "?"}showCoreOperationId=${encodeURIComponent(result.operationId)}` as Route)
+            : href;
+          setTimeout(() => {
+            setPreNavigationShowCore((current) => (current?.showId === showId ? null : current));
+            router.push(targetHref);
+          }, result.operationId || result.paused ? 650 : 0);
+        });
+    },
+    [enqueueShowCoreBeforeNavigation, router],
   );
 
   // Fetch covered shows
@@ -540,14 +638,16 @@ export default function TrrShowsPage() {
                             ? `${show.show_total_seasons} seasons`
                             : null;
                         const metaText = [networks || null, seasonsText].filter(Boolean).join(" · ");
+                        const showHref = buildShowAdminUrl({
+                          showSlug: routeSlug,
+                        }) as Route;
 
                         return (
                           <li key={show.id} className="flex items-start justify-between gap-3 p-3">
                             <div className="min-w-0 flex-1">
                               <Link
-                                href={buildShowAdminUrl({
-                                  showSlug: routeSlug,
-                                }) as Route}
+                                href={showHref}
+                                onClick={(event) => handleShowNavigation(event, show.id, showHref)}
                                 className="block rounded-md px-1 py-0.5 transition hover:bg-zinc-50"
                               >
                                 <p className="truncate text-sm font-semibold text-zinc-900">
@@ -560,6 +660,15 @@ export default function TrrShowsPage() {
                                 )}
                                 {metaText && (
                                   <p className="mt-1 text-xs text-zinc-500">{metaText}</p>
+                                )}
+                                {preNavigationShowCore?.showId === show.id && (
+                                  <p className="mt-1 text-xs font-medium text-amber-700">
+                                    {preNavigationShowCore.paused
+                                      ? "Show core auto-refresh paused"
+                                      : preNavigationShowCore.operationId
+                                        ? `Show core op ${preNavigationShowCore.operationId.slice(0, 8)}`
+                                        : "Starting show core..."}
+                                  </p>
                                 )}
                               </Link>
                             </div>
@@ -697,15 +806,17 @@ export default function TrrShowsPage() {
                     canonicalSlug: show.canonical_slug,
                     fallback: show.show_name || show.trr_show_id,
                   });
+                  const showHref = buildShowAdminUrl({
+                    showSlug: routeSlug,
+                  }) as Route;
                   return (
                     <div
                       key={show.id}
                       className="flex items-start justify-between gap-3 rounded-lg border border-zinc-200 bg-zinc-50 p-3"
                     >
                       <Link
-                        href={buildShowAdminUrl({
-                          showSlug: routeSlug,
-                        }) as Route}
+                        href={showHref}
+                        onClick={(event) => handleShowNavigation(event, show.trr_show_id, showHref)}
                         className="group flex min-w-0 flex-1 items-start gap-3"
                       >
                         <div className="relative w-20 flex-shrink-0 aspect-[4/5] overflow-hidden rounded-md bg-zinc-200">
@@ -743,6 +854,15 @@ export default function TrrShowsPage() {
                               ? totalEpisodes.toLocaleString()
                               : "—"}
                           </span>
+                          {preNavigationShowCore?.showId === show.trr_show_id && (
+                            <span className="mt-1 block text-xs font-medium text-amber-700">
+                              {preNavigationShowCore.paused
+                                ? "Show core auto-refresh paused"
+                                : preNavigationShowCore.operationId
+                                  ? `Show core op ${preNavigationShowCore.operationId.slice(0, 8)}`
+                                  : "Starting show core..."}
+                            </span>
+                          )}
                         </div>
                       </Link>
                       <button type="button"

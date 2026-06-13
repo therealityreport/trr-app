@@ -565,6 +565,33 @@ export function query<T extends QueryResultRow = QueryResultRow>(
   return withOperationSlot(() => withPoolRetry((pool) => pool.query<T>(text, params)));
 }
 
+export function queryWithStatementTimeout<T extends QueryResultRow = QueryResultRow>(
+  text: string,
+  params: unknown[] | undefined,
+  timeoutMs: number,
+): Promise<QueryResult<T>> {
+  const safeTimeoutMs = Math.max(1, Math.trunc(timeoutMs));
+  return withOperationSlot(() =>
+    withPoolRetry(async (pool) => {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query("SELECT set_config('statement_timeout', $1, true)", [
+          `${safeTimeoutMs}ms`,
+        ]);
+        const result = await client.query<T>(text, params);
+        await client.query("COMMIT");
+        return result;
+      } catch (error) {
+        await client.query("ROLLBACK").catch(() => undefined);
+        throw error;
+      } finally {
+        client.release();
+      }
+    }),
+  );
+}
+
 export async function withTransaction<T>(callback: (client: PoolClient) => Promise<T>): Promise<T> {
   return withOperationSlot(() =>
     withPoolRetry(async (pool) => {

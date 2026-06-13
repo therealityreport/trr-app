@@ -15,6 +15,7 @@ import {
   setRouteResponseCache,
 } from "@/lib/server/admin/route-response-cache";
 import { buildAdminReadResponseHeaders } from "@/lib/server/trr-api/admin-read-proxy";
+import { adminJsonResponse } from "@/lib/server/trr-api/local-api-document-response";
 import {
   fetchSocialBackendJson,
   socialProxyErrorResponse,
@@ -85,6 +86,7 @@ type SocialProfileProxyRouteConfig = {
   bodyFallback?: string;
   forwardAdminContext?: boolean;
   cache?: RouteResponseCacheConfig | AdminSnapshotCacheConfig;
+  routeTimingHeaders?: boolean;
   invalidateCache?: (input: SocialProfileProxyRouteInput & { data: Record<string, unknown> }) => void | Promise<void>;
 };
 
@@ -166,6 +168,28 @@ const resolveHeaders = (
   headers: HeadersFactory | undefined,
 ): HeadersInit | undefined => (typeof headers === "function" ? headers(input) : headers);
 
+const routeTimingHeaders = (
+  config: SocialProfileProxyRouteConfig,
+  startedAt: number,
+): Record<string, string> => {
+  if (!config.routeTimingHeaders) {
+    return {};
+  }
+  return {
+    "x-trr-admin-proxy-route-ms": String(Math.max(0, Math.round(performance.now() - startedAt))),
+    "x-trr-admin-proxy-endpoint": config.endpoint,
+  };
+};
+
+const socialProfileJsonResponse = (
+  input: SocialProfileProxyRouteInput,
+  config: SocialProfileProxyRouteConfig,
+  data: Record<string, unknown>,
+  headers: Record<string, string> = {},
+): NextResponse => {
+  return adminJsonResponse(input.request, data, { headers, title: `TRR API ${config.endpoint}` });
+};
+
 const readBody = async (
   request: NextRequest,
   method: string,
@@ -207,6 +231,7 @@ const respondWithRouteResponseCache = async (
   config: SocialProfileProxyRouteConfig,
   cache: RouteResponseCacheConfig,
 ): Promise<NextResponse> => {
+  const startedAt = performance.now();
   const cacheKey = buildUserScopedRouteCacheKey(
     input.user.uid,
     resolveRouteScope(cache.scope, input.params),
@@ -214,7 +239,10 @@ const respondWithRouteResponseCache = async (
   );
   const cachedPayload = getRouteResponseCache<Record<string, unknown>>(cache.namespace, cacheKey);
   if (cachedPayload) {
-    return NextResponse.json(cachedPayload, { headers: { "x-trr-cache": "hit" } });
+    return socialProfileJsonResponse(input, config, cachedPayload, {
+      "x-trr-cache": "hit",
+      ...routeTimingHeaders(config, startedAt),
+    });
   }
   const stalePayload = getStaleRouteResponseCache<Record<string, unknown>>(cache.namespace, cacheKey);
   try {
@@ -223,11 +251,16 @@ const respondWithRouteResponseCache = async (
       setRouteResponseCache(cache.namespace, cacheKey, payload, cache.ttlMs, cache.staleTtlMs);
       return payload;
     });
-    return NextResponse.json(data, { headers: { "x-trr-cache": "miss" } });
+    return socialProfileJsonResponse(input, config, data, {
+      "x-trr-cache": "miss",
+      ...routeTimingHeaders(config, startedAt),
+    });
   } catch (error) {
     if (stalePayload) {
-      return NextResponse.json(stalePayload, {
-        headers: { "x-trr-cache": "stale", "x-trr-cacheable": "0" },
+      return socialProfileJsonResponse(input, config, stalePayload, {
+        "x-trr-cache": "stale",
+        "x-trr-cacheable": "0",
+        ...routeTimingHeaders(config, startedAt),
       });
     }
     throw error;
@@ -252,6 +285,7 @@ const respondWithAdminSnapshotCache = async (
   config: SocialProfileProxyRouteConfig,
   cache: AdminSnapshotCacheConfig,
 ): Promise<NextResponse> => {
+  const startedAt = performance.now();
   const snapshot = await getOrCreateAdminSnapshot({
     cacheKey: buildAdminSnapshotCacheKey({
       authPartition: buildAdminAuthPartition(input.user),
@@ -264,8 +298,9 @@ const respondWithAdminSnapshotCache = async (
     forceRefresh: readForceRefresh(input.request.nextUrl.searchParams, cache.forceRefreshParam),
     fetcher: () => fetchProfilePayload(input, config),
   });
-  return NextResponse.json(snapshot.data, {
-    headers: buildAdminReadResponseHeaders({ cacheStatus: snapshot.meta.cacheStatus }),
+  return socialProfileJsonResponse(input, config, snapshot.data, {
+      ...buildAdminReadResponseHeaders({ cacheStatus: snapshot.meta.cacheStatus }),
+      ...routeTimingHeaders(config, startedAt),
   });
 };
 
@@ -290,7 +325,10 @@ export const createSocialProfileProxyRoute = (config: SocialProfileProxyRouteCon
         return await respondWithAdminSnapshotCache(input, config, config.cache);
       }
 
-      return NextResponse.json(await fetchProfilePayload(input, config));
+      const startedAt = performance.now();
+      return socialProfileJsonResponse(input, config, await fetchProfilePayload(input, config), {
+        ...routeTimingHeaders(config, startedAt),
+      });
     } catch (error) {
       return socialProxyErrorResponse(error, config.logLabel);
     }

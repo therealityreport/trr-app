@@ -68,6 +68,15 @@ export interface SharedAccountSourceSet {
   sources: SharedAccountSourceSummary[];
 }
 
+export interface SharedAccountSourceLoadStatus {
+  source_scope: SharedAccountSourceSetScope;
+  load_source: "backend" | "local_db_fallback";
+  backend_endpoint?: string | null;
+  warning: string | null;
+  error_code?: string | null;
+  error_message?: string | null;
+}
+
 export interface SharedRunSummary {
   id: string;
   status: string;
@@ -192,6 +201,7 @@ export interface SocialLandingPayload {
   cast_socialblade_shows: CastSocialBladeShowSummary[];
   shared_source_sets: SharedAccountSourceSet[];
   shared_pipeline: SharedPipelineSummary;
+  shared_source_status?: SharedAccountSourceLoadStatus[];
   scrape_job_health: ScrapeJobHealthSummary;
   reddit_dashboard: RedditDashboardSummary;
 }

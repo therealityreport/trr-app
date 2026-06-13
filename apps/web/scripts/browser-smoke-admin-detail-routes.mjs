@@ -4,7 +4,10 @@ import { chromium } from "@playwright/test";
 import { mkdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 
-const DEFAULT_BASE_URL = "http://admin.localhost:3000";
+const DEFAULT_BASE_URL =
+  process.env.ADMIN_APP_ORIGIN ||
+  process.env.PORTLESS_ADMIN_URL ||
+  "https://admin.trr.localhost";
 const DEFAULT_TIMEOUT_MS = 45_000;
 const DEFAULT_ROUTES = [
   {

@@ -67,6 +67,7 @@ describe("server auth adapter", () => {
     delete process.env.ADMIN_APP_ORIGIN;
     delete process.env.ADMIN_ENFORCE_HOST;
     delete process.env.ADMIN_AUTH_EXTERNAL_TIMEOUT_MS;
+    delete process.env.TRR_LEGACY_LOCAL_ADMIN_FALLBACK;
 
     createClientMock.mockReturnValue({
       auth: {

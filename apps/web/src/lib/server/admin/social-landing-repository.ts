@@ -25,6 +25,7 @@ import type {
   SharedAccountSourceSummary,
   SharedAccountSourceSet,
   SharedAccountSourceSetScope,
+  SharedAccountSourceLoadStatus,
   SharedPipelineSummary,
   SharedReviewItemSummary,
   SharedRunSummary,
@@ -37,16 +38,22 @@ import type {
   SocialLandingPlatform,
 } from "@/lib/admin/social-landing";
 import { listRedditCommunities } from "@/lib/server/admin/reddit-sources-repository";
+import { parseCacheTtlMs } from "@/lib/server/admin/route-response-cache";
 import {
   getCoveredShows,
   type CoveredShow,
 } from "@/lib/server/admin/covered-shows-repository";
-import { query } from "@/lib/server/postgres";
+import { loadSharedAccountSourcesFromLocalDb } from "@/lib/server/admin/shared-account-sources";
+import { query, queryWithStatementTimeout } from "@/lib/server/postgres";
 import {
   ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
   fetchAdminBackendJson,
 } from "@/lib/server/trr-api/admin-read-proxy";
-import { fetchSocialBackendJson } from "@/lib/server/trr-api/social-admin-proxy";
+import {
+  fetchSocialBackendJson,
+  SOCIAL_PROXY_DEFAULT_TIMEOUT_MS,
+  SOCIAL_PROXY_PROGRESS_TIMEOUT_MS,
+} from "@/lib/server/trr-api/social-admin-proxy";
 import type { VerifiedAdminContext } from "@/lib/server/trr-api/internal-admin-auth";
 import {
   listPrimaryPersonExternalIdsByPersonIds,
@@ -100,6 +107,12 @@ type SocialBladeRowsPayload = {
 
 type SocialBladeProgressCountsPayload = {
   rows?: SocialBladeProgressCountRow[];
+};
+
+type SocialProgressRollupPayload = {
+  rows?: SocialProgressRow[];
+  cache_status?: string | null;
+  generated_at?: string | Date | null;
 };
 
 const SCRAPE_JOB_HEALTH_WINDOW_HOURS = 8;
@@ -166,6 +179,10 @@ type CacheableValue<T> = {
   cacheable: boolean;
 };
 
+type SharedSourcesResult = CacheableValue<SharedAccountSourceSummary[]> & {
+  status: SharedAccountSourceLoadStatus;
+};
+
 type LandingSummaryResult = {
   coveredShows: CoveredShow[];
   redditDashboard: RedditDashboardSummary;
@@ -181,6 +198,86 @@ const uncacheableValue = <T>(value: T): CacheableValue<T> => ({
   value,
   cacheable: false,
 });
+
+const toCacheableValue = async <T>(promise: Promise<T>): Promise<CacheableValue<T>> =>
+  cacheableValue(await promise);
+
+const logSocialLandingTiming = (
+  label: string,
+  startedAt: number,
+  status: "ok" | "timeout" | "error",
+  extra?: Record<string, unknown>,
+): void => {
+  console.info("[social-landing] timing", {
+    step: label,
+    status,
+    elapsed_ms: Date.now() - startedAt,
+    ...(extra ?? {}),
+  });
+};
+
+const withSocialLandingTiming = async <T>(
+  label: string,
+  promise: Promise<T>,
+): Promise<T> => {
+  const startedAt = Date.now();
+  try {
+    const value = await promise;
+    logSocialLandingTiming(label, startedAt, "ok");
+    return value;
+  } catch (error) {
+    logSocialLandingTiming(label, startedAt, "error", {
+      error: error instanceof Error ? error.name : typeof error,
+    });
+    throw error;
+  }
+};
+
+const withOptionalLandingTimeout = async <T>(
+  label: string,
+  promise: Promise<CacheableValue<T>>,
+  fallbackValue: T,
+  timeoutMs = SOCIAL_LANDING_OPTIONAL_ENRICHMENT_TIMEOUT_MS,
+): Promise<CacheableValue<T>> => {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  let timedOut = false;
+  const startedAt = Date.now();
+  const trackedPromise = promise.then(
+    (value) => {
+      if (!timedOut) {
+        logSocialLandingTiming(label, startedAt, "ok", {
+          cacheable: value.cacheable,
+        });
+      }
+      return value;
+    },
+    (error) => {
+      if (!timedOut) {
+        logSocialLandingTiming(label, startedAt, "error", {
+          error: error instanceof Error ? error.name : typeof error,
+        });
+      }
+      throw error;
+    },
+  );
+  try {
+    return await Promise.race([
+      trackedPromise,
+      new Promise<CacheableValue<T>>((resolve) => {
+        timeoutId = setTimeout(() => {
+          timedOut = true;
+          logSocialLandingTiming(label, startedAt, "timeout", {
+            timeout_ms: timeoutMs,
+          });
+          console.warn(`[social-landing] Timed out optional ${label} enrichment`);
+          resolve(uncacheableValue(fallbackValue));
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
+};
 
 const PERSON_SOCIAL_SOURCES: readonly SupportedPersonSocialSource[] = [
   "facebook",
@@ -232,6 +329,11 @@ const CAST_SOCIALBLADE_PLATFORMS =
   );
 
 const SOCIAL_LANDING_PROGRESS_MAX_TARGETS = 96;
+const SOCIAL_LANDING_PROGRESS_STATEMENT_TIMEOUT_MS = 1_200;
+const SOCIAL_LANDING_OPTIONAL_ENRICHMENT_TIMEOUT_MS = parseCacheTtlMs(
+  process.env.TRR_ADMIN_SOCIAL_LANDING_OPTIONAL_ENRICHMENT_TIMEOUT_MS,
+  2_500,
+);
 
 const sqlJsonTextNonNegativeInt = (expr: string): string =>
   `coalesce(nullif(regexp_replace(coalesce(${expr}, ''), '[^0-9]', '', 'g'), '')::bigint, 0)`;
@@ -700,11 +802,68 @@ const safeLoadSocialBladeProgressCounts = async (
   }
 };
 
+const buildSocialProgressMap = (
+  rows: readonly SocialProgressRow[],
+  overridesByKey: ReadonlyMap<string, Partial<SocialProgressRow>> = new Map(),
+): ReadonlyMap<string, SocialAccountProgressSummary> => {
+  const progressByKey = new Map<string, SocialAccountProgressSummary>();
+  for (const row of rows) {
+    const platform = normalizePlatform(row.platform ?? "");
+    const handle =
+      typeof row.account_handle === "string"
+        ? row.account_handle.trim().replace(/^@+/, "")
+        : "";
+    if (!platform || !handle) continue;
+    const key = buildSocialProgressKey(platform, handle);
+    const progress = buildProgressFromCounts(row.saved_count, row.scraped_count, {
+      ...row,
+      ...(overridesByKey.get(key) ?? {}),
+    });
+    if (!progress) continue;
+    progressByKey.set(key, progress);
+  }
+  return progressByKey;
+};
+
+const safeLoadBackendSocialProgressRollup = async (
+  targets: readonly SocialProgressTarget[],
+  adminContext: VerifiedAdminContext,
+): Promise<CacheableValue<ReadonlyMap<string, SocialAccountProgressSummary>>> => {
+  try {
+    const payload = (await fetchSocialBackendJson("/landing-progress-rollup", {
+      adminContext,
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        platforms: targets.map((target) => target.platform),
+        account_handles: targets.map((target) => target.handle),
+      }),
+      fallbackError: "Failed to fetch social landing progress rollup",
+      retries: 0,
+      timeoutMs: SOCIAL_PROXY_PROGRESS_TIMEOUT_MS,
+    })) as SocialProgressRollupPayload;
+
+    console.info("[social-landing] backend progress rollup", {
+      cache_status: payload.cache_status ?? null,
+      row_count: Array.isArray(payload.rows) ? payload.rows.length : 0,
+    });
+
+    return cacheableValue(buildSocialProgressMap(Array.isArray(payload.rows) ? payload.rows : []));
+  } catch (error) {
+    console.warn("[social-landing] Failed to load backend social progress rollup", error);
+    return uncacheableValue(new Map());
+  }
+};
+
 const safeLoadSocialProgressSummaries = async (
   targets: readonly SocialProgressTarget[],
   adminContext?: VerifiedAdminContext,
 ): Promise<CacheableValue<ReadonlyMap<string, SocialAccountProgressSummary>>> => {
   if (targets.length === 0) return cacheableValue(new Map());
+
+  if (adminContext) {
+    return safeLoadBackendSocialProgressRollup(targets, adminContext);
+  }
 
   const platforms = targets.map((target) => target.platform);
   const handles = targets.map((target) => target.handle);
@@ -715,8 +874,8 @@ const safeLoadSocialProgressSummaries = async (
   try {
     const [socialBladeCountsResult, result] = await Promise.all([
       safeLoadSocialBladeProgressCounts(targets, adminContext),
-      query<SocialProgressRow>(
-      `
+      queryWithStatementTimeout<SocialProgressRow>(
+        `
         /* landing_social_progress */
         WITH targets AS (
           SELECT DISTINCT
@@ -879,43 +1038,6 @@ const safeLoadSocialProgressSummaries = async (
           WHERE rows.account_handle <> ''
           GROUP BY rows.platform, rows.account_handle
         ),
-        comment_rows AS (
-          SELECT 'instagram'::text AS platform, lower(regexp_replace(coalesce(source_account, ''), '^@+', '')) AS account_handle, id::text AS comment_id
-          FROM social.instagram_comments
-          WHERE coalesce(is_missing, false) = false
-          UNION ALL
-          SELECT 'tiktok'::text AS platform, lower(regexp_replace(coalesce(source_account, ''), '^@+', '')) AS account_handle, id::text AS comment_id
-          FROM social.tiktok_comments
-          WHERE coalesce(is_missing, false) = false
-          UNION ALL
-          SELECT 'youtube'::text AS platform, lower(regexp_replace(coalesce(source_account, ''), '^@+', '')) AS account_handle, id::text AS comment_id
-          FROM social.youtube_comments
-          WHERE coalesce(is_missing, false) = false
-          UNION ALL
-          SELECT 'facebook'::text AS platform, lower(regexp_replace(coalesce(source_account, ''), '^@+', '')) AS account_handle, id::text AS comment_id
-          FROM social.facebook_comments
-          UNION ALL
-          SELECT 'threads'::text AS platform, lower(regexp_replace(coalesce(source_account, ''), '^@+', '')) AS account_handle, id::text AS comment_id
-          FROM social.meta_threads_comments
-          UNION ALL
-          SELECT 'twitter'::text AS platform, lower(regexp_replace(coalesce(source_account, ''), '^@+', '')) AS account_handle, tweet_id AS comment_id
-          FROM social.twitter_tweets
-          WHERE coalesce(is_missing, false) = false
-            AND (coalesce(is_reply, false) = true OR coalesce(is_quote, false) = true)
-        ),
-        comment_counts AS (
-          SELECT
-            rows.platform,
-            rows.account_handle,
-            count(DISTINCT rows.comment_id)::int AS comments_saved_count
-          FROM comment_rows rows
-          INNER JOIN targets
-            ON targets.platform = rows.platform
-           AND targets.account_handle = rows.account_handle
-          WHERE rows.account_handle <> ''
-            AND nullif(rows.comment_id, '') IS NOT NULL
-          GROUP BY rows.platform, rows.account_handle
-        ),
         instagram_profile_targets AS (
           SELECT DISTINCT ON (targets.account_handle)
             targets.account_handle,
@@ -953,11 +1075,10 @@ const safeLoadSocialProgressSummaries = async (
           0::int AS socialblade_saved_count,
           coalesce(following_counts.following_saved_count, 0)::int AS following_saved_count,
           coalesce(following_counts.following_total_count, 0)::int AS following_total_count,
-          coalesce(comment_counts.comments_saved_count, 0)::int AS comments_saved_count,
+          0::int AS comments_saved_count,
           greatest(
             coalesce(materialized_counts.comments_total_count, 0),
-            coalesce(catalog_counts.comments_total_count, 0),
-            coalesce(comment_counts.comments_saved_count, 0)
+            coalesce(catalog_counts.comments_total_count, 0)
           )::int AS comments_total_count,
           coalesce(materialized_counts.media_saved_count, 0)::int AS media_saved_count,
           greatest(coalesce(catalog_counts.media_total_count, 0), coalesce(materialized_counts.media_saved_count, 0))::int AS media_total_count
@@ -968,36 +1089,18 @@ const safeLoadSocialProgressSummaries = async (
         LEFT JOIN catalog_counts
           ON catalog_counts.platform = targets.platform
          AND catalog_counts.account_handle = targets.account_handle
-        LEFT JOIN comment_counts
-          ON comment_counts.platform = targets.platform
-         AND comment_counts.account_handle = targets.account_handle
         LEFT JOIN following_counts
           ON following_counts.platform = targets.platform
          AND following_counts.account_handle = targets.account_handle
-      `,
-      [platforms, handles],
+        `,
+        [platforms, handles],
+        SOCIAL_LANDING_PROGRESS_STATEMENT_TIMEOUT_MS,
       ),
     ]);
 
-    const progressByKey = new Map<string, SocialAccountProgressSummary>();
     const socialBladeCountsByKey = socialBladeCountsResult.value;
-    for (const row of result.rows) {
-      const platform = normalizePlatform(row.platform ?? "");
-      const handle =
-        typeof row.account_handle === "string"
-          ? row.account_handle.trim().replace(/^@+/, "")
-          : "";
-      if (!platform || !handle) continue;
-      const key = buildSocialProgressKey(platform, handle);
-      const progress = buildProgressFromCounts(row.saved_count, row.scraped_count, {
-        ...row,
-        ...(socialBladeCountsByKey.get(key) ?? {}),
-      });
-      if (!progress) continue;
-      progressByKey.set(key, progress);
-    }
     return {
-      value: progressByKey,
+      value: buildSocialProgressMap(result.rows, socialBladeCountsByKey),
       cacheable: socialBladeCountsResult.cacheable,
     };
   } catch (error) {
@@ -1056,19 +1159,32 @@ const hydrateSharedSourceSetProgress = (
   ),
 });
 
+const readSharedSourceErrorCode = (error: unknown): string | null => {
+  const code = (error as { code?: unknown } | null)?.code;
+  return typeof code === "string" && code.trim() ? code.trim() : null;
+};
+
+const readSharedSourceErrorMessage = (error: unknown): string | null =>
+  error instanceof Error && error.message.trim() ? error.message.trim() : null;
+
+const buildSharedSourcesBackendEndpoint = (
+  sourceScope: SharedAccountSourceSetScope,
+): string => `/shared/sources?source_scope=${sourceScope}&include_inactive=true`;
+
 const safeLoadSharedSources = async (
   adminContext?: VerifiedAdminContext,
   sourceScope: SharedAccountSourceSetScope = "network",
-): Promise<SharedAccountSourceSummary[]> => {
+): Promise<SharedSourcesResult> => {
+  const backendEndpoint = buildSharedSourcesBackendEndpoint(sourceScope);
   try {
     const payload = await fetchSocialBackendJson("/shared/sources", {
       adminContext,
       queryString: `source_scope=${sourceScope}&include_inactive=true`,
       fallbackError: "Failed to fetch shared social account sources",
       retries: 0,
-      timeoutMs: ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
+      timeoutMs: SOCIAL_PROXY_DEFAULT_TIMEOUT_MS,
     });
-    return Array.isArray((payload as SharedSourcesPayload).sources)
+    const sources = Array.isArray((payload as SharedSourcesPayload).sources)
       ? ((payload as SharedSourcesPayload).sources ?? [])
           .map((source) => {
             const platform = normalizePlatform(source.platform);
@@ -1085,9 +1201,37 @@ const safeLoadSharedSources = async (
             (source): source is SharedAccountSourceSummary => source !== null,
           )
       : [];
+    return {
+      value: sources,
+      cacheable: true,
+      status: {
+        source_scope: sourceScope,
+        load_source: "backend",
+        backend_endpoint: backendEndpoint,
+        warning: null,
+      },
+    };
   } catch (error) {
-    console.warn("[social-landing] Failed to load shared sources", error);
-    return [];
+    console.warn("[social-landing] Failed to load shared sources; using local fallback", error);
+    const sources = await loadSharedAccountSourcesFromLocalDb({
+      sourceScope,
+      includeInactive: true,
+    }).catch((fallbackError) => {
+      console.warn("[social-landing] Failed to load local shared sources fallback", fallbackError);
+      return [];
+    });
+    return {
+      value: sources,
+      cacheable: false,
+      status: {
+        source_scope: sourceScope,
+        load_source: "local_db_fallback",
+        backend_endpoint: backendEndpoint,
+        warning: "TRR-Backend shared-source API is unavailable; showing saved Supabase rows.",
+        error_code: readSharedSourceErrorCode(error),
+        error_message: readSharedSourceErrorMessage(error),
+      },
+    };
   }
 };
 
@@ -2436,26 +2580,67 @@ export async function getSocialLandingPayloadResult(
   adminContext?: VerifiedAdminContext,
 ): Promise<SocialLandingPayloadResult> {
   const { coveredShows, redditDashboard, cacheable: landingSummaryCacheable } =
-    await safeLoadBackendLandingSummary(adminContext);
-  const scrapeJobHealthPromise = safeLoadScrapeJobHealth();
+    await withSocialLandingTiming(
+      "backend landing summary",
+      safeLoadBackendLandingSummary(adminContext),
+    );
+  const scrapeJobHealthPromise = withSocialLandingTiming(
+    "scrape job health",
+    safeLoadScrapeJobHealth(),
+  );
   const coveredShowIds = coveredShows.map((show) => show.trr_show_id);
   const [
-    networkSharedSources,
-    creatorSharedSources,
-    newsSharedSources,
-    sharedRuns,
-    sharedReviewItems,
+    networkSharedSourcesResult,
+    creatorSharedSourcesResult,
+    newsSharedSourcesResult,
+    sharedRunsResult,
+    sharedReviewItemsResult,
     showExternalIdsByIdResult,
     castByShowIdResult,
   ] = await Promise.all([
-    safeLoadSharedSources(adminContext, "network"),
-    safeLoadSharedSources(adminContext, "creator"),
-    safeLoadSharedSources(adminContext, "news"),
-    safeLoadSharedRuns(adminContext),
-    safeLoadSharedReviewItems(adminContext),
-    safeLoadShowExternalIdsMap(coveredShowIds),
-    safeLoadShowCastSummaryMap(coveredShowIds, adminContext),
+    withSocialLandingTiming(
+      "network shared sources",
+      safeLoadSharedSources(adminContext, "network"),
+    ),
+    withSocialLandingTiming(
+      "creator shared sources",
+      safeLoadSharedSources(adminContext, "creator"),
+    ),
+    withSocialLandingTiming(
+      "news shared sources",
+      safeLoadSharedSources(adminContext, "news"),
+    ),
+    withOptionalLandingTimeout(
+      "shared runs",
+      toCacheableValue(safeLoadSharedRuns(adminContext)),
+      [],
+    ),
+    withOptionalLandingTimeout(
+      "shared review items",
+      toCacheableValue(safeLoadSharedReviewItems(adminContext)),
+      [],
+    ),
+    withOptionalLandingTimeout(
+      "show external IDs",
+      safeLoadShowExternalIdsMap(coveredShowIds),
+      new Map(),
+    ),
+    withOptionalLandingTimeout(
+      "show cast summary",
+      safeLoadShowCastSummaryMap(coveredShowIds, adminContext),
+      new Map(),
+    ),
   ]);
+  const networkSharedSources = networkSharedSourcesResult.value;
+  const creatorSharedSources = creatorSharedSourcesResult.value;
+  const newsSharedSources = newsSharedSourcesResult.value;
+  const sharedRuns = sharedRunsResult.value;
+  const sharedReviewItems = sharedReviewItemsResult.value;
+  const sharedSourceStatus = [
+    networkSharedSourcesResult.status,
+    creatorSharedSourcesResult.status,
+    newsSharedSourcesResult.status,
+  ];
   const sourcesByScope = new Map<SharedAccountSourceSetScope, readonly SharedAccountSourceSummary[]>([
     ["network", networkSharedSources],
     ["creator", creatorSharedSources],
@@ -2468,13 +2653,20 @@ export async function getSocialLandingPayloadResult(
     personTargets,
     personHandlesByPersonId,
     socialBladeRawHandleCandidatesByPersonId,
-  } = await buildPeopleProfiles(coveredShows, castByShowId);
-  const castSocialBladeShowsResult = await buildCastSocialBladeShows(
-    coveredShows,
-    castByShowId,
-    personHandlesByPersonId,
-    socialBladeRawHandleCandidatesByPersonId,
-    adminContext,
+  } = await withSocialLandingTiming(
+    "people profiles",
+    buildPeopleProfiles(coveredShows, castByShowId),
+  );
+  const castSocialBladeShowsResult = await withOptionalLandingTimeout(
+    "cast SocialBlade",
+    buildCastSocialBladeShows(
+      coveredShows,
+      castByShowId,
+      personHandlesByPersonId,
+      socialBladeRawHandleCandidatesByPersonId,
+      adminContext,
+    ),
+    [],
   );
   const networkSets = buildNetworkSets(networkSharedSources);
   const showSets = buildShowSets(
@@ -2483,13 +2675,17 @@ export async function getSocialLandingPayloadResult(
     networkSharedSources,
   );
   const sharedSourceSets = buildSharedSourceSets(sourcesByScope);
-  const progressResult = await safeLoadSocialProgressSummaries(
-    collectSocialProgressTargets({
-      networkSets,
-      showSets,
-      sharedSourceSets,
-    }),
-    adminContext,
+  const progressResult = await withOptionalLandingTimeout(
+    "social progress",
+    safeLoadSocialProgressSummaries(
+      collectSocialProgressTargets({
+        networkSets,
+        showSets,
+        sharedSourceSets,
+      }),
+      adminContext,
+    ),
+    new Map(),
   );
   const progressByKey = progressResult.value;
   const hydratedNetworkSets = networkSets.map((set) =>
@@ -2519,11 +2715,17 @@ export async function getSocialLandingPayloadResult(
         runs: sharedRuns,
         review_items: sharedReviewItems,
       } satisfies SharedPipelineSummary,
+      shared_source_status: sharedSourceStatus,
       scrape_job_health: scrapeJobHealth,
       reddit_dashboard: redditDashboard,
     },
     cacheable:
       landingSummaryCacheable &&
+      networkSharedSourcesResult.cacheable &&
+      creatorSharedSourcesResult.cacheable &&
+      newsSharedSourcesResult.cacheable &&
+      sharedRunsResult.cacheable &&
+      sharedReviewItemsResult.cacheable &&
       showExternalIdsByIdResult.cacheable &&
       castByShowIdResult.cacheable &&
       castSocialBladeShowsResult.cacheable &&

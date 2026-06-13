@@ -9,7 +9,7 @@ export interface SafeExecResult {
   exitCode: number;
 }
 
-const ALLOWED_COMMANDS = new Set(["git", "gh", "grep", "find"]);
+const ALLOWED_COMMANDS = new Set(["git", "gh", "grep", "find", "portless"]);
 
 const WORKSPACE_ROOT = "/Users/thomashulihan/Projects/TRR";
 const TRR_BACKEND_DIR = "/Users/thomashulihan/Projects/TRR/TRR-Backend";

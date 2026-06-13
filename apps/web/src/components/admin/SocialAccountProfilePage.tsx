@@ -54,6 +54,7 @@ import {
   type SocialAccountProfileHashtagTimeline,
   type SocialAccountLiveProfileTotal,
   type SocialAccountProfilePost,
+  type SocialAccountProfilePostsSortMetadata,
   type SocialAccountProfileSummaryDetail,
   type SocialAccountProfileSummary,
   type SocialAccountProfileTab,
@@ -117,6 +118,7 @@ type PostsResponse = {
     total: number;
     total_pages: number;
   };
+  sort_metadata?: SocialAccountProfilePostsSortMetadata | null;
 };
 
 type CatalogPostsResponse = {
@@ -127,6 +129,19 @@ type CatalogPostsResponse = {
     total: number;
     total_pages: number;
   };
+};
+
+const formatPostsSortMode = (mode: string | null | undefined): string => {
+  switch (mode) {
+    case "persisted_rollup":
+      return "Persisted rollup";
+    case "bounded_page_score":
+      return "Bounded page score";
+    case "live_comment_count":
+      return "Live comment count";
+    default:
+      return "Unknown";
+  }
 };
 
 type HashtagsResponse = {
@@ -1833,6 +1848,18 @@ const isCommentsEndpointProbeAdvisoryActive = (progress?: SocialAccountCommentsR
   );
 };
 
+const isTransientCommentsProgressPollError = (message: unknown): boolean => {
+  const normalized = String(message || "").trim().toLowerCase();
+  if (!normalized) return false;
+  return (
+    normalized === "failed to fetch" ||
+    normalized === "load failed" ||
+    normalized.includes("networkerror") ||
+    normalized.includes("network request failed") ||
+    normalized.includes("the network connection was lost")
+  );
+};
+
 const formatActiveCommentsProgressWarning = (progress?: SocialAccountCommentsRunProgress | null): string | null => {
   if (!progress) return null;
   if (isCommentsProgressNonAuthoritative(progress)) {
@@ -3163,6 +3190,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   );
   const shouldShowCatalogRunProgressCard = selectedTab !== "comments";
   const hasSummary = summary !== null;
+  const postsSortMetadata = posts?.sort_metadata ?? null;
   const summaryInitialStatePending = !hasSummary && !summaryError && !summaryUninitialized;
   const summarySourceMetadata = useMemo(
     () => resolveSummarySourceMetadata(summary, platform, handle),
@@ -5208,6 +5236,15 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     return ACTIVE_CATALOG_RUN_STATUSES.has(activeCommentsRunEffectiveStatus);
   }, [activeCommentsRunEffectiveStatus]);
 
+  const activeCommentsRunProgressPollError = useMemo(() => {
+    const error = activeCommentsRunProgress.error;
+    if (!error) return null;
+    if (activeCommentsRunIsActive && isTransientCommentsProgressPollError(error)) {
+      return null;
+    }
+    return error;
+  }, [activeCommentsRunIsActive, activeCommentsRunProgress.error]);
+
   const activeCommentsRunIsTerminal = useMemo(() => {
     return TERMINAL_CATALOG_RUN_STATUSES.has(activeCommentsRunEffectiveStatus);
   }, [activeCommentsRunEffectiveStatus]);
@@ -6654,11 +6691,11 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
         tone: displayedCatalogRunStatus === "failed" ? "red" : "amber",
       });
     }
-    if (activeCommentsRunProgress.error) {
+    if (activeCommentsRunProgressPollError) {
       issues.push({
         key: "comments-progress-error",
         title: "Comments progress poll is retrying",
-        detail: String(activeCommentsRunProgress.error),
+        detail: String(activeCommentsRunProgressPollError),
         recommendation: "Wait for the next comments progress refresh before cancelling shards.",
         tone: "amber",
       });
@@ -6712,7 +6749,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     return issues.slice(0, 6);
   }, [
     activeCommentsProgressWarning,
-    activeCommentsRunProgress.error,
+    activeCommentsRunProgressPollError,
     catalogAutoRequeueActive,
     catalogDispatchStatusMessage,
     catalogStuckQueueRecoveryRecommended,
@@ -8919,9 +8956,9 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                         ) : null}
                       </div>
                     </div>
-                    {activeCommentsRunProgress.error ? (
+                    {activeCommentsRunProgressPollError ? (
                       <p className="mt-2 text-xs text-amber-700">
-                        Progress poll is retrying: {activeCommentsRunProgress.error}
+                        Progress poll is retrying: {activeCommentsRunProgressPollError}
                       </p>
                     ) : null}
                     {activeCommentsRunCanCancel ? (
@@ -10395,6 +10432,17 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                   <p className="text-sm text-zinc-500">
                     Every post touching @{handle}, including owned posts, collaborator matches, and catalog-only history.
                   </p>
+                  {postsSortMetadata ? (
+                    <p className="mt-1 text-xs text-zinc-500">
+                      Sort: {postsSortMetadata.sort_by ?? "default"} {postsSortMetadata.sort_dir ?? "desc"} /{" "}
+                      {formatPostsSortMode(postsSortMetadata.mode)} /{" "}
+                      {postsSortMetadata.exact ? "Exact" : "Approximate"}
+                      {postsSortMetadata.rollup_available === false ? " / Rollup unavailable" : null}
+                      {typeof postsSortMetadata.candidate_limit === "number"
+                        ? ` / Candidate limit ${postsSortMetadata.candidate_limit}`
+                        : null}
+                    </p>
+                  ) : null}
                 </div>
                 <div className="text-sm text-zinc-500">
                   Page {posts?.pagination.page ?? page} of {posts?.pagination.total_pages ?? 1}

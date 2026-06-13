@@ -6,6 +6,7 @@ import {
   buildInternalAdminHeaders,
   type VerifiedAdminContext,
 } from "@/lib/server/trr-api/internal-admin-auth";
+import { adminJsonResponse } from "@/lib/server/trr-api/local-api-document-response";
 import { SocialProxyError, type ProxyErrorCode } from "@/lib/server/trr-api/social-admin-proxy";
 
 export type AdminSnapshotEnvelope<T extends Record<string, unknown>> = {
@@ -86,26 +87,32 @@ export const readRouteJsonOrThrow = async <T,>(response: Response, fallbackMessa
 };
 
 export const buildSnapshotResponse = <T extends Record<string, unknown>>(input: {
+  request?: NextRequest;
   data: T;
   cacheStatus: "hit" | "miss" | "refresh";
   generatedAt: string;
   cacheAgeMs: number;
   stale: boolean;
 }): NextResponse => {
-  return NextResponse.json(
-    {
-      data: input.data,
-      generated_at: input.generatedAt,
-      cache_age_ms: input.cacheAgeMs,
-      stale: input.stale,
-    } satisfies AdminSnapshotEnvelope<T>,
-    {
-      headers: {
-        ...buildAdminReadResponseHeaders({ cacheStatus: input.cacheStatus }),
-        "x-trr-generated-at": input.generatedAt,
-        "x-trr-cache-age-ms": String(input.cacheAgeMs),
-        "x-trr-cache-stale": input.stale ? "1" : "0",
-      },
-    },
-  );
+  const payload = {
+    data: input.data,
+    generated_at: input.generatedAt,
+    cache_age_ms: input.cacheAgeMs,
+    stale: input.stale,
+  } satisfies AdminSnapshotEnvelope<T>;
+  const headers = {
+    ...buildAdminReadResponseHeaders({ cacheStatus: input.cacheStatus }),
+    "x-trr-generated-at": input.generatedAt,
+    "x-trr-cache-age-ms": String(input.cacheAgeMs),
+    "x-trr-cache-stale": input.stale ? "1" : "0",
+  };
+  if (input.request) {
+    return adminJsonResponse(input.request, payload, {
+      headers,
+      title: "TRR API snapshot",
+    });
+  }
+  return NextResponse.json(payload, {
+    headers,
+  });
 };

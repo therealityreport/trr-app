@@ -12,6 +12,12 @@ import {
   ADMIN_DEV_DASHBOARD_PATH,
   ADMIN_SOCIAL_PATH,
 } from "@/lib/admin/admin-route-paths";
+import {
+  isLoopbackAdminHost,
+  normalizeAdminHost,
+  parseAdminHostAllowlist,
+  resolveAdminOriginFromRequest,
+} from "@/lib/admin/admin-url-defaults";
 import { toFriendlyBrandSlug } from "@/lib/admin/brand-profile";
 
 const DEFAULT_DEV_ADMIN_API_HOSTS = ["admin.localhost", "localhost", "127.0.0.1", "[::1]", "::1"];
@@ -21,7 +27,6 @@ const CANONICAL_SOCIAL_PATH = "/social";
 const CANONICAL_API_REFERENCES_PATH = "/api-references";
 const CANONICAL_DEV_DASHBOARD_PATH = "/dev-dashboard";
 const CAST_SCREENTIME_ADMIN_PATH = "/admin/cast-screentime";
-const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
 const ROOT_SHOW_ROUTE_RESERVED_FIRST_SEGMENTS = new Set([
   "admin",
   "api",
@@ -180,88 +185,47 @@ function parseOptionalBoolean(value: string | undefined): boolean | null {
   return null;
 }
 
-function normalizeHost(value: string | null | undefined): string | null {
-  if (!value) return null;
-  const normalized = value.trim().toLowerCase();
-  if (!normalized) return null;
-
-  // Bracketed IPv6 form from URL.hostname / Host header.
-  if (normalized.startsWith("[")) {
-    const closingBracket = normalized.indexOf("]");
-    if (closingBracket >= 0) {
-      return normalized.slice(0, closingBracket + 1);
-    }
-  }
-
-  // host:port (single-colon non-IPv6 host)
-  const firstColon = normalized.indexOf(":");
-  const lastColon = normalized.lastIndexOf(":");
-  if (firstColon > -1 && firstColon === lastColon) {
-    const maybePort = normalized.slice(lastColon + 1);
-    if (/^\d+$/.test(maybePort)) {
-      return normalized.slice(0, lastColon);
-    }
-  }
-
-  return normalized;
+function getForwardedRequestHost(request: NextRequest): string | null {
+  return request.headers.get("x-forwarded-host") ?? request.headers.get("host") ?? request.nextUrl.hostname;
 }
 
 function resolveAdminOrigin(request: NextRequest): string | null {
-  const configuredOrigin = process.env.ADMIN_APP_ORIGIN?.trim();
-  if (configuredOrigin) return configuredOrigin;
-
-  const shouldDeriveAdminOrigin =
-    process.env.NODE_ENV === "development" ||
-    parseOptionalBoolean(process.env.ADMIN_APP_DERIVE_FROM_REQUEST_HOST) === true ||
-    Boolean(process.env.ADMIN_APP_BASE_DOMAIN?.trim());
-  if (shouldDeriveAdminOrigin) {
-    const adminHostPrefix = process.env.ADMIN_APP_HOST_PREFIX?.trim() || "admin";
-    const configuredBaseDomain = normalizeHost(process.env.ADMIN_APP_BASE_DOMAIN);
-    const requestHost = configuredBaseDomain
-      ?? normalizeHost(request.headers.get("host"))
-      ?? normalizeHost(request.nextUrl.hostname);
-    if (!requestHost) return request.nextUrl.origin;
-    const adminHost = requestHost.startsWith(`${adminHostPrefix}.`)
-      ? requestHost
-      : isLoopbackHost(requestHost)
-        ? `${adminHostPrefix}.localhost`
-        : `${adminHostPrefix}.${requestHost}`;
-    const port = request.nextUrl.port ? `:${request.nextUrl.port}` : "";
-    return `${request.nextUrl.protocol}//${adminHost}${port}`;
-  }
-  return request.nextUrl.origin;
+  return resolveAdminOriginFromRequest({
+    nodeEnv: process.env.NODE_ENV,
+    requestHost: getForwardedRequestHost(request),
+    requestHostname: request.nextUrl.hostname,
+    requestOrigin: request.nextUrl.origin,
+    requestPort: request.nextUrl.port,
+    requestProtocol: request.nextUrl.protocol,
+    deriveFromRequestHost: parseOptionalBoolean(process.env.ADMIN_APP_DERIVE_FROM_REQUEST_HOST) === true,
+  });
 }
 
 function resolveAdminHost(adminOrigin: string | null): string | null {
   if (!adminOrigin) return null;
   try {
-    return normalizeHost(new URL(adminOrigin).hostname);
+    return normalizeAdminHost(new URL(adminOrigin).hostname);
   } catch {
     return null;
   }
 }
 
 function parseHostAllowlist(raw: string | undefined): Set<string> {
-  return new Set(
-    (raw ?? "")
-      .split(",")
-      .map((entry) => normalizeHost(entry))
-      .filter((entry): entry is string => Boolean(entry)),
-  );
+  return parseAdminHostAllowlist(raw);
 }
 
 function resolveAdminApiAllowedHosts(adminOrigin: string | null): Set<string> {
   const hosts = parseHostAllowlist(process.env.ADMIN_APP_HOSTS);
   if (hosts.size === 0 && process.env.NODE_ENV === "development") {
     for (const host of DEFAULT_DEV_ADMIN_API_HOSTS) {
-      const normalizedHost = normalizeHost(host);
+      const normalizedHost = normalizeAdminHost(host);
       if (normalizedHost) hosts.add(normalizedHost);
     }
   }
   if (!adminOrigin) return hosts;
 
   try {
-    const originHost = normalizeHost(new URL(adminOrigin).hostname);
+    const originHost = normalizeAdminHost(new URL(adminOrigin).hostname);
     if (originHost) hosts.add(originHost);
   } catch {
     // Ignore invalid origin values; API allowlist can still come from ADMIN_APP_HOSTS.
@@ -271,8 +235,7 @@ function resolveAdminApiAllowedHosts(adminOrigin: string | null): Set<string> {
 }
 
 function isLoopbackHost(host: string | null | undefined): boolean {
-  if (!host) return false;
-  return LOOPBACK_HOSTS.has(host);
+  return isLoopbackAdminHost(host);
 }
 
 function hostsMatch(expectedHost: string | null, requestHost: string | null): boolean {
@@ -585,10 +548,6 @@ function mapCanonicalAdminUiRedirect(pathname: string, searchParams?: URLSearchP
   const legacyAdminSocialPath = mapLegacyAdminSocialPath(pathname, searchParams);
   if (legacyAdminSocialPath) {
     return legacyAdminSocialPath;
-  }
-
-  if (pathname === "/admin") {
-    return appendSearch("/", searchParams);
   }
 
   for (const [legacyPrefix, canonicalPrefix] of NESTED_ADMIN_SECTION_CANONICAL_PREFIXES) {
@@ -1057,7 +1016,7 @@ export function proxy(request: NextRequest): NextResponse {
   const adminOrigin = resolveAdminOrigin(request);
   const canonicalAdminHost = resolveAdminHost(adminOrigin);
   const allowedAdminApiHosts = resolveAdminApiAllowedHosts(adminOrigin);
-  const requestHost = normalizeHost(request.headers.get("host")) ?? normalizeHost(request.nextUrl.hostname);
+  const requestHost = normalizeAdminHost(getForwardedRequestHost(request)) ?? normalizeAdminHost(request.nextUrl.hostname);
   const onCanonicalAdminHost = hostsMatch(canonicalAdminHost, requestHost);
   const isInternalAdminRewrite = request.headers.get(INTERNAL_ADMIN_REWRITE_HEADER) === "1";
   const legacyScreenalyticsPath = mapLegacyScreenalyticsRoute(pathname, request.nextUrl.searchParams);
@@ -1110,6 +1069,10 @@ export function proxy(request: NextRequest): NextResponse {
   }
 
   if (onCanonicalAdminHost) {
+    if (pathname === "/") {
+      return NextResponse.redirect(new URL(`/admin${request.nextUrl.search}`, adminOrigin ?? request.nextUrl.origin), 307);
+    }
+
     if (!isInternalAdminRewrite) {
       const canonicalPath = mapCanonicalAdminUiRedirect(pathname, request.nextUrl.searchParams);
       const currentPath = appendSearch(pathname, request.nextUrl.searchParams);

@@ -14,6 +14,7 @@ export const GET = createSocialProfileReadRoute({
   logLabel: "[api] Failed to fetch social account profile posts",
   queryString: "strip-refresh",
   timeoutMs: SOCIAL_PROXY_LONG_TIMEOUT_MS,
+  routeTimingHeaders: true,
   cache: {
     kind: "admin-snapshot",
     pageFamily: "social-profile",

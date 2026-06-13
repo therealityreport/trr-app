@@ -10,6 +10,7 @@ export const GET = createSocialProfileReadRoute({
   fallbackError: "Failed to fetch social account profile collaborators and tags",
   logLabel: "[api] Failed to fetch social account profile collaborators and tags",
   queryString: "none",
+  routeTimingHeaders: true,
   cache: {
     kind: "admin-snapshot",
     pageFamily: "social-profile",

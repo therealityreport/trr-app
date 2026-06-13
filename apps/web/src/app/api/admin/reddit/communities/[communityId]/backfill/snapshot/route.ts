@@ -62,6 +62,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
     });
 
     return buildSnapshotResponse({
+      request,
       data: snapshot.data,
       cacheStatus: snapshot.meta.cacheStatus,
       generatedAt: snapshot.meta.generatedAt,

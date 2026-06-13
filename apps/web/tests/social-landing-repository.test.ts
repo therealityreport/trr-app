@@ -34,6 +34,8 @@ vi.mock("@/lib/server/trr-api/trr-shows-repository", () => ({
 
 vi.mock("@/lib/server/trr-api/social-admin-proxy", () => ({
   fetchSocialBackendJson: fetchSocialBackendJsonMock,
+  SOCIAL_PROXY_DEFAULT_TIMEOUT_MS: 25_000,
+  SOCIAL_PROXY_PROGRESS_TIMEOUT_MS: 30_000,
 }));
 
 vi.mock("@/lib/server/admin/reddit-sources-repository", () => ({
@@ -47,6 +49,7 @@ vi.mock("@/lib/server/trr-api/admin-read-proxy", () => ({
 
 vi.mock("@/lib/server/postgres", () => ({
   query: queryMock,
+  queryWithStatementTimeout: queryMock,
 }));
 
 import {
@@ -170,6 +173,10 @@ describe("social landing repository", () => {
     ]);
 
     fetchSocialBackendJsonMock.mockImplementation(async (path: string) => {
+      if (path === "/landing-progress-rollup") {
+        return { rows: [] };
+      }
+
       if (path === "/landing-socialblade-progress-counts") {
         return { rows: [] };
       }
@@ -757,6 +764,88 @@ describe("social landing repository", () => {
     );
   });
 
+  it("loads authenticated social progress from the cached backend rollup", async () => {
+    const defaultSocialBackend = fetchSocialBackendJsonMock.getMockImplementation();
+    if (!defaultSocialBackend) throw new Error("Missing default social backend mock");
+    fetchSocialBackendJsonMock.mockImplementation(async (path: string, options?: unknown) => {
+      if (path === "/landing-summary") {
+        return {
+          covered_shows: await getCoveredShowsMock(),
+          reddit_dashboard: {
+            active_community_count: 2,
+            archived_community_count: 1,
+            show_count: 2,
+          },
+        };
+      }
+      if (path === "/landing-progress-rollup") {
+        return {
+          rows: [
+            {
+              platform: "instagram",
+              account_handle: "bravotv",
+              saved_count: 7,
+              scraped_count: 9,
+              socialblade_supported: true,
+              socialblade_scraped_count: 1,
+              socialblade_saved_count: 1,
+              following_saved_count: 25,
+              following_total_count: 30,
+              comments_saved_count: 100,
+              comments_total_count: 120,
+              media_saved_count: 4,
+              media_total_count: 6,
+            },
+          ],
+        };
+      }
+      return defaultSocialBackend(path, options);
+    });
+
+    const result = await getSocialLandingPayloadResult({
+      uid: "admin-user",
+      email: "admin@example.test",
+      verifiedAt: 1_776_000_000,
+    });
+
+    const rollupCall = fetchSocialBackendJsonMock.mock.calls.find(
+      ([path]) => path === "/landing-progress-rollup",
+    );
+    const rollupOptions = rollupCall?.[1] as { body?: string; method?: string } | undefined;
+    const rollupBody = JSON.parse(rollupOptions?.body ?? "{}") as {
+      platforms?: string[];
+      account_handles?: string[];
+    };
+
+    expect(
+      queryMock.mock.calls.some(([sql]) =>
+        String(sql).includes("landing_social_progress"),
+      ),
+    ).toBe(false);
+    expect(rollupOptions?.method).toBe("POST");
+    expect(rollupBody.platforms?.length).toBe(rollupBody.account_handles?.length);
+    expect(rollupBody.account_handles).toEqual(expect.arrayContaining(["bravotv"]));
+    expect(result.payload.network_sets[0]?.handles).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          platform: "instagram",
+          handle: "bravotv",
+          progress: expect.objectContaining({
+            saved_count: 7,
+            scraped_count: 9,
+            lanes: expect.arrayContaining([
+              expect.objectContaining({
+                key: "comments",
+                saved_count: 100,
+                total_count: 120,
+              }),
+            ]),
+          }),
+        }),
+      ]),
+    );
+  });
+
   it("includes recent scrape job health for the social landing badge", async () => {
     queryMock.mockImplementation(async (sql: string) => {
       if (String(sql).includes("landing_social_scrape_job_health")) {
@@ -901,7 +990,7 @@ describe("social landing repository", () => {
       "/shared/sources",
       expect.objectContaining({
         queryString: "source_scope=network&include_inactive=true",
-        timeoutMs: 5_000,
+        timeoutMs: 25_000,
       }),
     );
 
@@ -915,6 +1004,74 @@ describe("social landing repository", () => {
       }),
     ]);
     expect(result.cacheable).toBe(true);
+  });
+
+  it("falls back to local shared-source rows when backend shared-source reads fail", async () => {
+    const expectedWarn = captureExpectedConsoleWarn(
+      /^\[social-landing\] Failed to load shared sources; using local fallback /,
+    );
+    const defaultSocialBackend = fetchSocialBackendJsonMock.getMockImplementation();
+    if (!defaultSocialBackend) throw new Error("Missing default social backend mock");
+
+    fetchSocialBackendJsonMock.mockImplementation(async (path: string, options?: unknown) => {
+      if (path.startsWith("/shared/sources")) {
+        throw new Error("TRR-Backend request timed out.");
+      }
+      return defaultSocialBackend(path, options);
+    });
+    queryMock.mockImplementation(async (sql: string, params?: unknown[]) => {
+      if (String(sql).toLowerCase().includes("from social.shared_account_sources")) {
+        const sourceScope = String(params?.[0] ?? "");
+        return {
+          rows:
+            sourceScope === "network"
+              ? [
+                  {
+                    id: "source-bravo",
+                    platform: "instagram",
+                    source_scope: "network",
+                    account_handle: "bravotv",
+                    is_active: true,
+                    scrape_priority: 10,
+                    metadata: {
+                      network_key: "bravo-tv",
+                      network_name: "Bravo TV",
+                      profile_kind: "network_official",
+                    },
+                  },
+                ]
+              : [],
+        };
+      }
+      return { rows: [] };
+    });
+
+    const result = await getSocialLandingPayloadResult();
+
+    expect(result.payload.network_sets[0]).toEqual(
+      expect.objectContaining({
+        key: "bravo-tv",
+        handles: expect.arrayContaining([
+          expect.objectContaining({ platform: "instagram", handle: "bravotv" }),
+        ]),
+      }),
+    );
+    expect(result.payload.shared_source_sets[0].sources).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ platform: "instagram", account_handle: "bravotv" }),
+      ]),
+    );
+    expect(result.payload.shared_source_status).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          source_scope: "network",
+          load_source: "local_db_fallback",
+          backend_endpoint:
+            "/shared/sources?source_scope=network&include_inactive=true",
+        }),
+      ]),
+    );
+    expectedWarn.expectCalled();
   });
 
   it("places show-assigned shared sources on the show instead of the Bravo network", async () => {
