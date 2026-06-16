@@ -93,7 +93,6 @@ for (const [index, batch] of batches.entries()) {
       '-c',
       'vitest.config.mts',
       '--pool=forks',
-      '--poolOptions.forks.singleFork=true',
       ...extraArgs,
       ...batch,
     ],
