@@ -4,8 +4,9 @@ import { act, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { captureExpectedConsoleError } from "./helpers/expected-console";
 
-const { fetchAdminWithAuthMock, useAdminGuardMock } = vi.hoisted(() => ({
+const { fetchAdminWithAuthMock, routerPushMock, useAdminGuardMock } = vi.hoisted(() => ({
   fetchAdminWithAuthMock: vi.fn(),
+  routerPushMock: vi.fn(),
   useAdminGuardMock: vi.fn(),
 }));
 
@@ -23,6 +24,10 @@ vi.mock("next/link", () => ({
 
 vi.mock("next/image", () => ({
   default: (props: React.ImgHTMLAttributes<HTMLImageElement>) => <img alt="" {...props} />,
+}));
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: routerPushMock }),
 }));
 
 vi.mock("@/components/ClientOnly", () => ({
@@ -63,6 +68,7 @@ import TrrShowsPage from "@/app/admin/trr-shows/page";
 describe("TRR shows page covered shows loading", () => {
   beforeEach(() => {
     fetchAdminWithAuthMock.mockReset();
+    routerPushMock.mockReset();
     useAdminGuardMock.mockReset();
     useAdminGuardMock.mockReturnValue({
       user: { uid: "admin-uid" },
