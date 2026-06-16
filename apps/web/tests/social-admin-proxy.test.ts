@@ -107,6 +107,28 @@ describe("social-admin-proxy", () => {
     expect(typeof firstHeaders.get("x-trace-id")).toBe("string");
     expect((firstHeaders.get("x-trace-id") ?? "").length).toBeGreaterThan(0);
     expect(firstHeaders.get("Authorization")).toMatch(/^Bearer /);
+    expect(firstHeaders.get("x-trr-local-admin-proxy")).toBeNull();
+  });
+
+  it("marks loopback backend requests as local admin proxy calls", async () => {
+    getBackendApiUrlMock.mockImplementation((path: string) => `http://127.0.0.1:8000/api/v1${path}`);
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ ok: true }),
+    } as Response);
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    await fetchSocialBackendJson("/profiles/instagram/bravotv/posts", {
+      fallbackError: "Failed to fetch posts",
+      timeoutMs: 1000,
+    });
+
+    const requestInit = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined;
+    const headers = new Headers(requestInit?.headers);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("http://127.0.0.1:8000/api/v1/admin/socials/profiles/instagram/bravotv/posts");
+    expect(headers.get("Authorization")).toMatch(/^Bearer /);
+    expect(headers.get("x-trr-local-admin-proxy")).toBe("1");
   });
 
   it("does not retry mutating POST requests even when the upstream error is retryable", async () => {

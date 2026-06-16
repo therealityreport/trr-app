@@ -10,6 +10,7 @@ export const GET = createSocialProfileReadRoute({
   fallbackError: "Failed to fetch social account catalog review queue",
   logLabel: "[api] Failed to fetch social account catalog review queue",
   queryString: "strip-refresh",
+  routeTimingHeaders: true,
   cache: {
     kind: "admin-snapshot",
     pageFamily: "social-profile",

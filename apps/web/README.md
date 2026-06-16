@@ -11,7 +11,16 @@ pnpm install
 pnpm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+For stable local HTTPS routes, start the workspace-level Portless target from
+the repo root:
+
+```bash
+make dev-portless
+```
+
+Then open the public app at `https://trr.localhost` or the admin dashboard at
+`https://admin.trr.localhost/admin`. See
+`../../docs/workspace/portless-clean-urls.md` for the shared local URL runbook.
 
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
@@ -51,17 +60,21 @@ Notes
 
 Use a dedicated local admin origin to mirror production isolation:
 
-- Public app: `http://localhost:3000`
-- Admin app: `http://admin.localhost:3000`
+- Public app: `https://trr.localhost`
+- Admin app: `https://admin.trr.localhost/admin`
 
 Add these values in `.env.local`:
 
 ```bash
-ADMIN_APP_ORIGIN=http://admin.localhost:3000
-ADMIN_APP_HOSTS=admin.localhost,localhost,127.0.0.1,[::1]
+ADMIN_APP_ORIGIN=https://admin.trr.localhost
+ADMIN_APP_HOSTS=admin.trr.localhost,trr.localhost,localhost,127.0.0.1,[::1]
 ADMIN_ENFORCE_HOST=true
 ADMIN_STRICT_HOST_ROUTING=false
 ```
+
+The classic portful admin fallback is legacy-only. Re-enable it only for
+compatibility work with `TRR_LEGACY_LOCAL_ADMIN_FALLBACK=1` and add the legacy
+admin host to `ADMIN_APP_HOSTS` only for that run.
 
 For production, prefer `ADMIN_APP_ORIGIN=https://admin.<domain>`. If the same build needs to derive the admin host from a configured domain, set:
 
@@ -75,7 +88,8 @@ Behavior:
 - Requests to `/admin/*` are canonicalized to `ADMIN_APP_ORIGIN` host.
 - Requests to `/api/admin/*` use `ADMIN_APP_HOSTS` allowlist (plus `ADMIN_APP_ORIGIN` host).
 - `ADMIN_ENFORCE_HOST` defaults to enabled when unset.
-- In development, if `ADMIN_APP_HOSTS` is unset, localhost-family hosts are allowed by default (`admin.localhost,localhost,127.0.0.1,[::1],::1`).
+- In development, if `ADMIN_APP_HOSTS` is unset, loopback API hosts remain available for direct local tooling; Portless browser work should set the clean hosts above.
+- Classic portful admin fallback routing is legacy-only. Set `TRR_LEGACY_LOCAL_ADMIN_FALLBACK=1` only when intentionally testing that old local path.
 - With `ADMIN_STRICT_HOST_ROUTING=true`, only non-admin page routes redirect to `/admin`; `/api/*` always passes through.
 - This is the same code path used later for `https://admin.<domain>` in production.
 

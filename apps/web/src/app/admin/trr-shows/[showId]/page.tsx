@@ -233,7 +233,27 @@ import {
   ShowNameOrLogo,
 } from "./ShowPageMedia";
 
+const EPISODE_ID_GAP_WARNING_CODE = "episodes_tmdb_missing_imdb_ids";
+const EPISODE_ID_IGNORED_SEASON_ZERO_WARNING_CODE = "episodes_tmdb_season_zero_ignored_specials";
+
 // Types
+type ShowSyncWarningSample = {
+  season_number?: number | null;
+  episode_number?: number | null;
+  title?: string | null;
+  air_date?: string | null;
+  tmdb_episode_id?: number | null;
+};
+
+type ShowSyncWarning = {
+  code: string;
+  severity?: "info" | "warning" | "error" | string;
+  message: string;
+  count?: number | null;
+  ignored_season_zero_count?: number | null;
+  samples?: ShowSyncWarningSample[] | null;
+};
+
 interface TrrShow {
   id: string;
   name: string;
@@ -276,6 +296,7 @@ interface TrrShow {
   streaming_providers?: string[] | null;
   overview_streaming_providers?: string[] | null;
   watch_providers?: string[] | null;
+  sync_warnings?: ShowSyncWarning[] | null;
 }
 
 interface ShowRedditCommunity {
@@ -2796,6 +2817,9 @@ export default function TrrShowDetailPage() {
   );
   const [refreshLogEntries, setRefreshLogEntries] = useState<RefreshLogEntry[]>([]);
   const [refreshLogOpen, setRefreshLogOpen] = useState(false);
+  const [autoShowCorePaused, setAutoShowCorePaused] = useState(false);
+  const [autoShowCorePauseSaving, setAutoShowCorePauseSaving] = useState(false);
+  const [autoShowCorePauseError, setAutoShowCorePauseError] = useState<string | null>(null);
   const healthCenterScrollTopRef = useRef(0);
 
   // Image scrape drawer state
@@ -10216,6 +10240,13 @@ export default function TrrShowDetailPage() {
                     await fetchShow();
                   } else if (target === "seasons_episodes") {
                     await Promise.all([fetchShow(), fetchSeasons()]);
+                  } else if (target === "show_core") {
+                    await Promise.all([
+                      fetchShow(),
+                      fetchSeasons(),
+                      fetchCast({ rosterMode: "imdb_show_membership", minEpisodes: 1 }),
+                      fetchShowCredits(),
+                    ]);
                   } else if (target === "photos") {
                     if (activeTab === "assets" && assetsView === "images") {
                       await loadGalleryAssets(selectedGallerySeason);
@@ -10364,6 +10395,13 @@ export default function TrrShowDetailPage() {
             await fetchShow();
           } else if (target === "seasons_episodes") {
             await Promise.all([fetchShow(), fetchSeasons()]);
+          } else if (target === "show_core") {
+            await Promise.all([
+              fetchShow(),
+              fetchSeasons(),
+              fetchCast({ rosterMode: "imdb_show_membership", minEpisodes: 1 }),
+              fetchShowCredits(),
+            ]);
           } else if (target === "cast_credits") {
             await Promise.all([
               fetchCast({ rosterMode: "imdb_show_membership", minEpisodes: 1 }),
@@ -10454,6 +10492,128 @@ export default function TrrShowDetailPage() {
       showId,
     ]
   );
+
+  const episodeIdGapWarning = useMemo(() => {
+    const warnings = Array.isArray(show?.sync_warnings) ? show.sync_warnings : [];
+    return warnings.find((warning) => warning.code === EPISODE_ID_GAP_WARNING_CODE) ?? null;
+  }, [show?.sync_warnings]);
+
+  const episodeIdIgnoredSeasonZeroWarning = useMemo(() => {
+    const warnings = Array.isArray(show?.sync_warnings) ? show.sync_warnings : [];
+    return (
+      warnings.find((warning) => warning.code === EPISODE_ID_IGNORED_SEASON_ZERO_WARNING_CODE) ??
+      null
+    );
+  }, [show?.sync_warnings]);
+
+  const ignoredSeasonZeroCount =
+    (typeof episodeIdGapWarning?.ignored_season_zero_count === "number" &&
+    Number.isFinite(episodeIdGapWarning.ignored_season_zero_count)
+      ? episodeIdGapWarning.ignored_season_zero_count
+      : null) ??
+    (typeof episodeIdIgnoredSeasonZeroWarning?.count === "number" &&
+    Number.isFinite(episodeIdIgnoredSeasonZeroWarning.count)
+      ? episodeIdIgnoredSeasonZeroWarning.count
+      : null);
+
+  const preNavigationShowCoreOperationId = useMemo(() => {
+    const value = searchParams.get("showCoreOperationId");
+    return value && value.trim().length > 0 ? value.trim() : null;
+  }, [searchParams]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadAutoShowCoreSettings = async () => {
+      try {
+        setAutoShowCorePauseError(null);
+        const headers = await getAuthHeaders();
+        const response = await fetch(`/api/admin/trr-api/shows/settings/show-core-auto-refresh`, {
+          method: "GET",
+          headers,
+        });
+        const data = (await response.json().catch(() => ({}))) as { paused?: unknown; error?: unknown };
+        if (!response.ok) {
+          throw new Error(typeof data.error === "string" ? data.error : "Failed to load auto-refresh setting");
+        }
+        if (!cancelled) {
+          setAutoShowCorePaused(data.paused === true);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setAutoShowCorePauseError(
+            err instanceof Error ? err.message : "Failed to load auto-refresh setting",
+          );
+        }
+      }
+    };
+    void loadAutoShowCoreSettings();
+    return () => {
+      cancelled = true;
+    };
+  }, [getAuthHeaders]);
+
+  const toggleAutoShowCorePaused = useCallback(() => {
+    const nextPaused = !autoShowCorePaused;
+    setAutoShowCorePauseSaving(true);
+    setAutoShowCorePauseError(null);
+    void (async () => {
+      try {
+        const headers = await getAuthHeaders();
+        const response = await fetch(`/api/admin/trr-api/shows/settings/show-core-auto-refresh`, {
+          method: "PUT",
+          headers: { ...headers, "Content-Type": "application/json" },
+          body: JSON.stringify({ paused: nextPaused }),
+        });
+        const data = (await response.json().catch(() => ({}))) as { paused?: unknown; error?: unknown };
+        if (!response.ok) {
+          throw new Error(typeof data.error === "string" ? data.error : "Failed to update auto-refresh setting");
+        }
+        setAutoShowCorePaused(data.paused === true);
+      } catch (err) {
+        setAutoShowCorePauseError(
+          err instanceof Error ? err.message : "Failed to update auto-refresh setting",
+        );
+      } finally {
+        setAutoShowCorePauseSaving(false);
+      }
+    })();
+  }, [autoShowCorePaused, getAuthHeaders]);
+
+  useEffect(() => {
+    if (!showId || !episodeIdGapWarning) return;
+    if (autoShowCorePaused) return;
+    if (refreshingShowAll || refreshingTargets.show_core) return;
+
+    const warningCount =
+      typeof episodeIdGapWarning.count === "number" && Number.isFinite(episodeIdGapWarning.count)
+        ? episodeIdGapWarning.count
+        : 0;
+    const storageKey = `trr:show-core-auto-refresh:${showId}:${warningCount}`;
+    try {
+      if (window.sessionStorage.getItem(storageKey) === "1") return;
+      window.sessionStorage.setItem(storageKey, "1");
+    } catch {
+      // Session storage is best-effort; a blocked storage API should not block repair.
+    }
+
+    appendRefreshLog({
+      category: "Show Core",
+      message: "Episode ID gaps detected; starting show core refresh.",
+      current: null,
+      total: null,
+      topic: "show_core",
+    });
+    setRefreshLogOpen(true);
+    void refreshShow("show_core");
+  }, [
+    appendRefreshLog,
+    episodeIdGapWarning,
+    autoShowCorePaused,
+    refreshShow,
+    refreshingShowAll,
+    refreshingTargets.show_core,
+    showId,
+  ]);
 
   const retryRefreshTarget = useCallback(
     async (target: string, parentOperationId: string) => {
@@ -11843,6 +12003,26 @@ export default function TrrShowDetailPage() {
   const imdbRatingText = formatFixed1(show.imdb_rating_value);
   const primaryNetwork = show.networks?.[0] ?? null;
   const networkLabel = show.networks?.slice(0, 2).join(" · ") || "TRR Core";
+  const episodeIdGapSamples = Array.isArray(episodeIdGapWarning?.samples)
+    ? episodeIdGapWarning.samples.slice(0, 3)
+    : [];
+  const episodeIdGapSampleLabel = episodeIdGapSamples
+    .map((sample) => {
+      const season = typeof sample.season_number === "number" ? sample.season_number : null;
+      const episode = typeof sample.episode_number === "number" ? sample.episode_number : null;
+      const title = typeof sample.title === "string" && sample.title.trim() ? sample.title.trim() : null;
+      const numberLabel =
+        season !== null && episode !== null
+          ? `S${season}E${episode}`
+          : season !== null
+            ? `S${season}`
+            : episode !== null
+              ? `E${episode}`
+              : null;
+      return [numberLabel, title].filter(Boolean).join(" ");
+    })
+    .filter(Boolean)
+    .join(", ");
   const creditsPipelineFlowScope = showId ? buildCreditsPipelineFlowScope(showId) : null;
   const activeCreditsOperationSession = creditsPipelineFlowScope
     ? getAutoResumableAdminOperationSession(creditsPipelineFlowScope)
@@ -12353,6 +12533,80 @@ export default function TrrShowDetailPage() {
                 </div>
               )}
             </div>
+            {preNavigationShowCoreOperationId && (
+              <div className="mt-4 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900">
+                <p className="font-semibold">Show core refresh started before navigation.</p>
+                <p className="mt-0.5 text-xs text-blue-800">
+                  Active operation ID:{" "}
+                  <span className="font-mono">{preNavigationShowCoreOperationId}</span>
+                </p>
+              </div>
+            )}
+            {(episodeIdGapWarning || ignoredSeasonZeroCount !== null) && (
+              <div
+                className={`mt-4 rounded-md border px-3 py-2 text-sm ${
+                  episodeIdGapWarning
+                    ? "border-amber-200 bg-amber-50 text-amber-900"
+                    : "border-zinc-200 bg-zinc-50 text-zinc-800"
+                }`}
+              >
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0">
+                    <p className="font-semibold">
+                      {episodeIdGapWarning
+                        ? "Episode ID gaps need a show core refresh."
+                        : "Season 0 specials are being ignored."}
+                    </p>
+                    <p
+                      className={`mt-0.5 text-xs ${
+                        episodeIdGapWarning ? "text-amber-800" : "text-zinc-600"
+                      }`}
+                    >
+                      {episodeIdGapWarning?.message ??
+                        episodeIdIgnoredSeasonZeroWarning?.message ??
+                        "TMDb season 0 specials are ignored unless IMDb lists them in a numbered season."}
+                      {episodeIdGapSampleLabel ? ` Samples: ${episodeIdGapSampleLabel}.` : ""}
+                      {ignoredSeasonZeroCount !== null
+                        ? ` Ignored season 0 specials: ${ignoredSeasonZeroCount.toLocaleString()}.`
+                        : ""}
+                      {autoShowCorePaused && episodeIdGapWarning
+                        ? " Automatic show core refreshes are paused."
+                        : ""}
+                      {autoShowCorePauseError ? ` ${autoShowCorePauseError}` : ""}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 flex-wrap gap-2">
+                    {episodeIdGapWarning && (
+                      <button
+                        type="button"
+                        onClick={toggleAutoShowCorePaused}
+                        disabled={autoShowCorePauseSaving}
+                        className="rounded-md border border-amber-300 bg-white px-3 py-1.5 text-xs font-semibold text-amber-900 transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {autoShowCorePauseSaving
+                          ? "Saving..."
+                          : autoShowCorePaused
+                            ? "Resume Auto"
+                            : "Pause Auto"}
+                      </button>
+                    )}
+                    {episodeIdGapWarning && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setRefreshLogOpen(true);
+                          void refreshShow("show_core");
+                        }}
+                        disabled={refreshingTargets.show_core || refreshingShowAll}
+                        className="rounded-md border border-amber-300 bg-white px-3 py-1.5 text-xs font-semibold text-amber-900 transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {refreshingTargets.show_core || refreshingShowAll ? "Refreshing..." : "Run Show Core"}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
             <div className="mt-4">
               <ShowTabsNav
                 tabs={SHOW_PAGE_TABS}

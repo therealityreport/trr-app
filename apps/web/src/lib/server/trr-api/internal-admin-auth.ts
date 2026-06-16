@@ -12,6 +12,10 @@ export type VerifiedAdminContext = {
   verifiedAt: number;
 };
 
+type InternalAdminTokenOptions = {
+  host?: string | null;
+};
+
 type InternalAdminPayload = {
   iss?: unknown;
   aud?: unknown;
@@ -23,6 +27,7 @@ type InternalAdminPayload = {
   admin_uid?: unknown;
   admin_email?: unknown;
   verified_at?: unknown;
+  admin_host?: unknown;
 };
 
 const base64UrlEncode = (value: string): string =>
@@ -72,9 +77,46 @@ const normalizeEmail = (value: unknown): string | null => {
   return normalized ? normalized : null;
 };
 
+const normalizeAdminHost = (value: unknown): string | null => {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const trimmed = value.trim().toLowerCase();
+  if (!trimmed) {
+    return null;
+  }
+  if (trimmed.startsWith("[") && trimmed.includes("]")) {
+    return trimmed.slice(0, trimmed.indexOf("]") + 1);
+  }
+  const host = trimmed.split(":")[0];
+  return host || null;
+};
+
+const readHeaderHost = (headersLike: HeadersInit | Headers | undefined): string | null => {
+  if (!headersLike) {
+    return null;
+  }
+  const headers = new Headers(headersLike);
+  return headers.get("x-forwarded-host") ?? headers.get("host") ?? headers.get("Host");
+};
+
 const verifySignedPayload = (token: string, secret: string): InternalAdminPayload | null => {
-  const [encodedHeader, encodedPayload, signature] = token.split(".");
+  const parts = token.split(".");
+  if (parts.length !== 3) {
+    return null;
+  }
+  const [encodedHeader, encodedPayload, signature] = parts;
   if (!encodedHeader || !encodedPayload || !signature) {
+    return null;
+  }
+  // Only HS256 is ever minted; reject any other declared alg instead of
+  // silently ignoring the header.
+  try {
+    const header = JSON.parse(base64UrlDecode(encodedHeader)) as { alg?: unknown };
+    if (header?.alg !== "HS256") {
+      return null;
+    }
+  } catch {
     return null;
   }
   const expectedSignature = signHs256(`${encodedHeader}.${encodedPayload}`, secret);
@@ -94,7 +136,10 @@ const verifySignedPayload = (token: string, secret: string): InternalAdminPayloa
   }
 };
 
-export const peekInternalAdminBearerToken = (context?: VerifiedAdminContext): string | null => {
+export const peekInternalAdminBearerToken = (
+  context?: VerifiedAdminContext,
+  options?: InternalAdminTokenOptions,
+): string | null => {
   const secret = getSigningSecret();
   if (!secret) return null;
 
@@ -113,6 +158,10 @@ export const peekInternalAdminBearerToken = (context?: VerifiedAdminContext): st
     payload.admin_email = context.email;
     payload.verified_at = context.verifiedAt;
   }
+  const adminHost = normalizeAdminHost(options?.host);
+  if (adminHost) {
+    payload.admin_host = adminHost;
+  }
 
   const header = {
     alg: "HS256",
@@ -126,8 +175,11 @@ export const peekInternalAdminBearerToken = (context?: VerifiedAdminContext): st
   return `${unsigned}.${signature}`;
 };
 
-export const getInternalAdminBearerToken = (context?: VerifiedAdminContext): string => {
-  const token = peekInternalAdminBearerToken(context);
+export const getInternalAdminBearerToken = (
+  context?: VerifiedAdminContext,
+  options?: InternalAdminTokenOptions,
+): string => {
+  const token = peekInternalAdminBearerToken(context, options);
   if (!token) {
     throw new Error("TRR_INTERNAL_ADMIN_SHARED_SECRET is not configured");
   }
@@ -136,6 +188,7 @@ export const getInternalAdminBearerToken = (context?: VerifiedAdminContext): str
 
 export const resolveVerifiedAdminContext = (
   headersLike: HeadersInit | Headers,
+  expectedHost?: string | null,
 ): VerifiedAdminContext | null => {
   const secret = getSigningSecret();
   if (!secret) {
@@ -164,6 +217,13 @@ export const resolveVerifiedAdminContext = (
   ) {
     return null;
   }
+  const normalizedExpectedHost = normalizeAdminHost(expectedHost);
+  if (normalizedExpectedHost) {
+    const normalizedTokenHost = normalizeAdminHost(payload.admin_host);
+    if (!normalizedTokenHost || normalizedTokenHost !== normalizedExpectedHost) {
+      return null;
+    }
+  }
   const verifiedAt =
     typeof payload.verified_at === "number" && Number.isFinite(payload.verified_at)
       ? payload.verified_at
@@ -184,7 +244,7 @@ export const buildInternalAdminHeaders = (
 ): Headers => {
   const context = isVerifiedAdminContext(contextOrHeaders) ? contextOrHeaders : undefined;
   const initialHeaders = isVerifiedAdminContext(contextOrHeaders) ? extraHeaders : contextOrHeaders;
-  const token = getInternalAdminBearerToken(context);
+  const token = getInternalAdminBearerToken(context, { host: readHeaderHost(initialHeaders) });
   const headers = new Headers(initialHeaders);
   headers.delete("X-TRR-Internal-Admin-Secret");
   headers.delete("X-Internal-Admin-Secret");

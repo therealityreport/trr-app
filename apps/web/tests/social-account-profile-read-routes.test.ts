@@ -86,6 +86,8 @@ describe("social account profile read proxy routes", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("x-trr-cache")).toBe("miss");
+    expect(response.headers.get("x-trr-admin-proxy-route-ms")).toMatch(/^\d+$/);
+    expect(response.headers.get("x-trr-admin-proxy-endpoint")).toBe("comments");
     expect(buildAdminSnapshotCacheKeyMock).toHaveBeenCalledWith({
       authPartition: "firebase:admin-1",
       pageFamily: "social-profile",
@@ -121,6 +123,8 @@ describe("social account profile read proxy routes", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("x-trr-cache")).toBe("miss");
+    expect(response.headers.get("x-trr-admin-proxy-route-ms")).toMatch(/^\d+$/);
+    expect(response.headers.get("x-trr-admin-proxy-endpoint")).toBe("catalog/review-queue");
     expect(buildAdminSnapshotCacheKeyMock).toHaveBeenCalledWith({
       authPartition: "firebase:admin-1",
       pageFamily: "social-profile",
@@ -155,6 +159,8 @@ describe("social account profile read proxy routes", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("x-trr-cache")).toBe("miss");
+    expect(response.headers.get("x-trr-admin-proxy-route-ms")).toMatch(/^\d+$/);
+    expect(response.headers.get("x-trr-admin-proxy-endpoint")).toBe("posts");
     expect(buildAdminSnapshotCacheKeyMock).toHaveBeenCalledWith({
       authPartition: "firebase:admin-1",
       pageFamily: "social-profile",
@@ -178,5 +184,38 @@ describe("social account profile read proxy routes", () => {
         timeoutMs: 60_000,
       }),
     );
+  });
+
+  it("renders local dev browser document responses for direct API navigation", async () => {
+    const previousLocalDev = process.env.TRR_LOCAL_DEV;
+    process.env.TRR_LOCAL_DEV = "1";
+    fetchSocialBackendJsonMock.mockResolvedValueOnce({
+      items: [{ source_id: "DZaAVVLiAog" }],
+      pagination: { page: 1, page_size: 20, total: 1, total_pages: 1 },
+    });
+
+    try {
+      const response = await getPosts(
+        new NextRequest("http://localhost/api/admin/trr-api/social/profiles/instagram/bravotv/posts?limit=20", {
+          headers: {
+            accept: "text/html,application/xhtml+xml",
+            "sec-fetch-dest": "document",
+          },
+        }),
+        { params: Promise.resolve({ platform: "instagram", handle: "bravotv" }) },
+      );
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get("content-type")).toContain("text/html");
+      expect(response.headers.get("x-trr-local-api-document")).toBe("1");
+      expect(response.headers.get("x-trr-admin-proxy-route-ms")).toMatch(/^\d+$/);
+      await expect(response.text()).resolves.toContain("&quot;source_id&quot;: &quot;DZaAVVLiAog&quot;");
+    } finally {
+      if (previousLocalDev === undefined) {
+        delete process.env.TRR_LOCAL_DEV;
+      } else {
+        process.env.TRR_LOCAL_DEV = previousLocalDev;
+      }
+    }
   });
 });

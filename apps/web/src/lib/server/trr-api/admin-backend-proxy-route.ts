@@ -12,6 +12,7 @@ import {
   buildInternalAdminHeaders,
   type VerifiedAdminContext,
 } from "@/lib/server/trr-api/internal-admin-auth";
+import { adminJsonResponse } from "@/lib/server/trr-api/local-api-document-response";
 
 export type AdminBackendProxyMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 export type AdminBackendProxyResponseMode = "json" | "passthrough";
@@ -248,7 +249,7 @@ export async function executeAdminBackendProxy<TParams extends Record<string, st
 ): Promise<NextResponse> {
   for (const requiredParam of config.requiredParams ?? []) {
     if (!params[requiredParam.key]) {
-      return NextResponse.json({ error: requiredParam.message }, { status: 400 });
+      return adminJsonResponse(request, { error: requiredParam.message }, { status: 400, title: config.routeName });
     }
   }
 
@@ -263,7 +264,7 @@ export async function executeAdminBackendProxy<TParams extends Record<string, st
   const backendPath = await config.backendPath({ request, params });
   const backendBaseUrl = getBackendApiUrl(backendPath);
   if (!backendBaseUrl) {
-    return NextResponse.json({ error: "Backend API not configured" }, { status: 500 });
+    return adminJsonResponse(request, { error: "Backend API not configured" }, { status: 500, title: config.routeName });
   }
 
   const queryValue =
@@ -305,19 +306,22 @@ export async function executeAdminBackendProxy<TParams extends Record<string, st
 
     const data = await readJsonRecord(response);
     if (!response.ok) {
-      return NextResponse.json(buildBackendErrorPayload(data, context, config.jsonErrorFallback), {
+      return adminJsonResponse(request, buildBackendErrorPayload(data, context, config.jsonErrorFallback), {
         status: response.status,
         headers: responseHeaders,
+        title: config.routeName,
       });
     }
 
-    return NextResponse.json(data, {
+    return adminJsonResponse(request, data, {
       ...(config.preserveBackendSuccessStatus ? { status: response.status } : {}),
       headers: responseHeaders,
+      title: config.routeName,
     });
   } catch (error) {
     if (isTimeoutSafeFetchTimeoutError(error)) {
-      return NextResponse.json(
+      return adminJsonResponse(
+        request,
         {
           error: readErrorMessage(config.timeoutError, context),
           detail: config.timeoutDetail({
@@ -326,10 +330,10 @@ export async function executeAdminBackendProxy<TParams extends Record<string, st
             timeoutTier: timeout.name,
           }),
         },
-        { status: 504 },
+        { status: 504, title: config.routeName },
       );
     }
-    return NextResponse.json(buildBackendFetchFailedPayload(error), { status: 502 });
+    return adminJsonResponse(request, buildBackendFetchFailedPayload(error), { status: 502, title: config.routeName });
   }
 }
 
@@ -353,7 +357,7 @@ export function createAdminBackendProxyRoute<
       console.error(config.logMessage, error);
       const message = error instanceof Error ? error.message : "failed";
       const status = message === "unauthorized" ? 401 : message === "forbidden" ? 403 : 500;
-      return NextResponse.json({ error: message }, { status });
+      return adminJsonResponse(request, { error: message }, { status, title: config.routeName });
     }
   };
 }

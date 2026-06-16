@@ -113,6 +113,7 @@ export async function GET(request: NextRequest, context: RouteParams) {
     });
 
     return buildSnapshotResponse({
+      request,
       data: snapshot.data,
       cacheStatus: snapshot.meta.cacheStatus,
       generatedAt: snapshot.meta.generatedAt,

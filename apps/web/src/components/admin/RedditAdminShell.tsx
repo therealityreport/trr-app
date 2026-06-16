@@ -1,7 +1,10 @@
 "use client";
 
 import type { ReactNode } from "react";
-import SocialAdminPageHeader from "@/components/admin/SocialAdminPageHeader";
+import Link from "next/link";
+import type { Route } from "next";
+import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
+import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
 
 interface NavLink {
   key: string;
@@ -11,7 +14,7 @@ interface NavLink {
 }
 
 interface RedditAdminShellProps {
-  breadcrumbs: Parameters<typeof SocialAdminPageHeader>[0]["breadcrumbs"];
+  breadcrumbs: Parameters<typeof AdminBreadcrumbs>[0]["items"];
   title: string;
   backHref: string;
   backLabel?: string;
@@ -61,13 +64,20 @@ export default function RedditAdminShell({
 }: RedditAdminShellProps) {
   return (
     <div className="min-h-screen bg-zinc-50">
-      <SocialAdminPageHeader
-        breadcrumbs={breadcrumbs}
-        title={title}
-        backHref={backHref}
-        backLabel={backLabel}
-        bodyClassName="px-6 py-6"
-      />
+      <AdminGlobalHeader bodyClassName="px-6 py-6">
+        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3">
+          <div>
+            <AdminBreadcrumbs items={breadcrumbs} className="mb-1" />
+            <h1 className="text-2xl font-bold text-zinc-900">{title}</h1>
+          </div>
+          <Link
+            href={backHref as Route}
+            className="rounded-lg border border-zinc-200 px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100"
+          >
+            {backLabel}
+          </Link>
+        </div>
+      </AdminGlobalHeader>
 
       <div className="border-b border-zinc-200 bg-white">
         <div className="mx-auto max-w-6xl px-6">

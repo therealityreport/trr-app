@@ -176,6 +176,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
         summary_omitted_reason: "progress_only",
       };
       const response = buildSnapshotResponse({
+        request,
         data: responseData,
         cacheStatus: "miss",
         generatedAt,
@@ -277,6 +278,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
     });
 
     const response = buildSnapshotResponse({
+      request,
       data: responseData,
       cacheStatus: snapshot.meta.cacheStatus,
       generatedAt: snapshot.meta.generatedAt,

@@ -11,6 +11,9 @@ const originalEnv = {
   ADMIN_APP_HOSTS: process.env.ADMIN_APP_HOSTS,
   ADMIN_ENFORCE_HOST: process.env.ADMIN_ENFORCE_HOST,
   ADMIN_STRICT_HOST_ROUTING: process.env.ADMIN_STRICT_HOST_ROUTING,
+  PORTLESS_ADMIN_URL: process.env.PORTLESS_ADMIN_URL,
+  PORTLESS_URL: process.env.PORTLESS_URL,
+  TRR_LEGACY_LOCAL_ADMIN_FALLBACK: process.env.TRR_LEGACY_LOCAL_ADMIN_FALLBACK,
 };
 
 afterEach(() => {
@@ -54,14 +57,45 @@ afterEach(() => {
   } else {
     process.env.ADMIN_STRICT_HOST_ROUTING = originalEnv.ADMIN_STRICT_HOST_ROUTING;
   }
+  if (typeof originalEnv.PORTLESS_ADMIN_URL === "undefined") {
+    delete process.env.PORTLESS_ADMIN_URL;
+  } else {
+    process.env.PORTLESS_ADMIN_URL = originalEnv.PORTLESS_ADMIN_URL;
+  }
+  if (typeof originalEnv.PORTLESS_URL === "undefined") {
+    delete process.env.PORTLESS_URL;
+  } else {
+    process.env.PORTLESS_URL = originalEnv.PORTLESS_URL;
+  }
+  if (typeof originalEnv.TRR_LEGACY_LOCAL_ADMIN_FALLBACK === "undefined") {
+    delete process.env.TRR_LEGACY_LOCAL_ADMIN_FALLBACK;
+  } else {
+    process.env.TRR_LEGACY_LOCAL_ADMIN_FALLBACK = originalEnv.TRR_LEGACY_LOCAL_ADMIN_FALLBACK;
+  }
 });
 
 describe("admin host proxy", () => {
-  it("defaults to enforcing host routing in development when ADMIN_ENFORCE_HOST is unset", () => {
+  it("keeps loopback admin paths local unless the legacy local admin fallback is enabled", () => {
     process.env.NODE_ENV = "development";
     delete process.env.ADMIN_ENFORCE_HOST;
     delete process.env.ADMIN_APP_ORIGIN;
     delete process.env.ADMIN_APP_HOSTS;
+    delete process.env.TRR_LEGACY_LOCAL_ADMIN_FALLBACK;
+    process.env.ADMIN_STRICT_HOST_ROUTING = "false";
+
+    const request = new NextRequest("http://localhost:3000/admin/fonts");
+    const response = proxy(request);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-middleware-next")).toBe("1");
+  });
+
+  it("can still redirect loopback admin paths through the explicit legacy local admin fallback", () => {
+    process.env.NODE_ENV = "development";
+    delete process.env.ADMIN_ENFORCE_HOST;
+    delete process.env.ADMIN_APP_ORIGIN;
+    delete process.env.ADMIN_APP_HOSTS;
+    process.env.TRR_LEGACY_LOCAL_ADMIN_FALLBACK = "1";
     process.env.ADMIN_STRICT_HOST_ROUTING = "false";
 
     const request = new NextRequest("http://localhost:3000/admin/fonts");
@@ -76,6 +110,7 @@ describe("admin host proxy", () => {
     delete process.env.ADMIN_ENFORCE_HOST;
     delete process.env.ADMIN_APP_ORIGIN;
     delete process.env.ADMIN_APP_HOSTS;
+    delete process.env.TRR_LEGACY_LOCAL_ADMIN_FALLBACK;
     process.env.ADMIN_STRICT_HOST_ROUTING = "false";
 
     const request = new NextRequest("http://thereality.test:3000/admin/fonts");
@@ -141,6 +176,71 @@ describe("admin host proxy", () => {
     expect(response.status).toBe(307);
     expect(response.headers.get("location")).toBe(
       "http://admin.localhost:3000/admin/fonts?tab=buttons",
+    );
+  });
+
+  it("keeps Portless admin redirects on the clean admin host when Next uses an alternate port", () => {
+    process.env.ADMIN_APP_ORIGIN = "https://admin.trr.localhost";
+    process.env.ADMIN_APP_HOSTS = "admin.trr.localhost,trr.localhost,admin.localhost,localhost,127.0.0.1,[::1]";
+    process.env.ADMIN_ENFORCE_HOST = "true";
+    process.env.ADMIN_STRICT_HOST_ROUTING = "false";
+
+    const request = new NextRequest("http://localhost:3001/admin/social/instagram/bravotv/posts");
+    const response = proxy(request);
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe(
+      "https://admin.trr.localhost/admin/social/instagram/bravotv/posts",
+    );
+  });
+
+  it("redirects the clean Portless admin host root to the admin dashboard", () => {
+    process.env.NODE_ENV = "development";
+    process.env.ADMIN_APP_ORIGIN = "https://admin.trr.localhost";
+    process.env.ADMIN_APP_HOSTS = "admin.trr.localhost,trr.localhost,admin.localhost,localhost,127.0.0.1,[::1]";
+    process.env.ADMIN_ENFORCE_HOST = "true";
+    process.env.ADMIN_STRICT_HOST_ROUTING = "false";
+
+    const request = new NextRequest("https://admin.trr.localhost/");
+    const response = proxy(request);
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe("https://admin.trr.localhost/admin");
+  });
+
+  it("recognizes the clean Portless admin host from forwarded host headers", () => {
+    process.env.NODE_ENV = "development";
+    process.env.ADMIN_APP_ORIGIN = "https://admin.trr.localhost";
+    process.env.ADMIN_APP_HOSTS = "admin.trr.localhost,trr.localhost,admin.localhost,localhost,127.0.0.1,[::1]";
+    process.env.ADMIN_ENFORCE_HOST = "true";
+    process.env.ADMIN_STRICT_HOST_ROUTING = "false";
+
+    const request = new NextRequest("http://127.0.0.1:3001/", {
+      headers: {
+        "x-forwarded-host": "admin.trr.localhost",
+      },
+    });
+    const response = proxy(request);
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe("https://admin.trr.localhost/admin");
+  });
+
+  it("derives Portless admin origin without carrying the underlying Next port", () => {
+    process.env.NODE_ENV = "development";
+    delete process.env.ADMIN_APP_ORIGIN;
+    delete process.env.PORTLESS_ADMIN_URL;
+    process.env.PORTLESS_URL = "https://trr.localhost";
+    process.env.ADMIN_APP_HOSTS = "admin.trr.localhost,trr.localhost,admin.localhost,localhost,127.0.0.1,[::1]";
+    process.env.ADMIN_ENFORCE_HOST = "true";
+    process.env.ADMIN_STRICT_HOST_ROUTING = "false";
+
+    const request = new NextRequest("http://localhost:3001/admin/social/instagram/bravotv/posts");
+    const response = proxy(request);
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe(
+      "https://admin.trr.localhost/admin/social/instagram/bravotv/posts",
     );
   });
 
@@ -286,7 +386,7 @@ describe("admin host proxy", () => {
     expect(response.headers.get("x-middleware-next")).toBe("1");
   });
 
-  it("rewrites the canonical admin-host root to the admin dashboard implementation", () => {
+  it("redirects the canonical admin-host root to the admin dashboard", () => {
     process.env.ADMIN_APP_ORIGIN = "http://admin.localhost:3000";
     process.env.ADMIN_ENFORCE_HOST = "true";
     process.env.ADMIN_STRICT_HOST_ROUTING = "false";
@@ -294,11 +394,11 @@ describe("admin host proxy", () => {
     const request = new NextRequest("http://admin.localhost:3000/");
     const response = proxy(request);
 
-    expect(response.status).toBe(200);
-    expect(response.headers.get("x-middleware-rewrite")).toBe("http://admin.localhost:3000/admin");
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe("http://admin.localhost:3000/admin");
   });
 
-  it("treats admin.localhost as a default local admin UI host in development", () => {
+  it("redirects the default local admin UI host root to the admin dashboard in development", () => {
     process.env.NODE_ENV = "development";
     delete process.env.ADMIN_APP_ORIGIN;
     delete process.env.ADMIN_APP_HOSTS;
@@ -308,11 +408,11 @@ describe("admin host proxy", () => {
     const request = new NextRequest("http://admin.localhost:3000/");
     const response = proxy(request);
 
-    expect(response.status).toBe(200);
-    expect(response.headers.get("x-middleware-rewrite")).toBe("http://admin.localhost:3000/admin");
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe("http://admin.localhost:3000/admin");
   });
 
-  it("redirects /admin to the canonical admin-host root", () => {
+  it("keeps /admin on the canonical admin host as the dashboard route", () => {
     process.env.ADMIN_APP_ORIGIN = "http://admin.localhost:3000";
     process.env.ADMIN_ENFORCE_HOST = "true";
     process.env.ADMIN_STRICT_HOST_ROUTING = "false";
@@ -320,8 +420,8 @@ describe("admin host proxy", () => {
     const request = new NextRequest("http://admin.localhost:3000/admin");
     const response = proxy(request);
 
-    expect(response.status).toBe(307);
-    expect(response.headers.get("location")).toBe("http://admin.localhost:3000/");
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-middleware-next")).toBe("1");
   });
 
   it.each([
@@ -550,7 +650,7 @@ describe("admin host proxy", () => {
     expect(response.headers.get("x-middleware-next")).toBe("1");
   });
 
-  it("redirects /admin requests to / on the current production host when no explicit admin origin is configured", () => {
+  it("keeps /admin requests on the current production host when no explicit admin origin is configured", () => {
     process.env.NODE_ENV = "production";
     delete process.env.ADMIN_APP_ORIGIN;
     delete process.env.ADMIN_APP_HOSTS;
@@ -560,8 +660,8 @@ describe("admin host proxy", () => {
     const request = new NextRequest("https://trr-app.vercel.app/admin");
     const response = proxy(request);
 
-    expect(response.status).toBe(307);
-    expect(response.headers.get("location")).toBe("https://trr-app.vercel.app/");
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-middleware-next")).toBe("1");
   });
 
   it("allows /api/admin requests on the current production host when no explicit admin origin is configured", () => {

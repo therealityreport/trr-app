@@ -10,6 +10,12 @@ import { Button } from "@/components/ui/button";
 import { buildAdminRootBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
 import { fetchAdminWithAuth } from "@/lib/admin/client-auth";
 import { ADMIN_DASHBOARD_TOOLS } from "@/lib/admin/admin-navigation";
+import {
+  PORTLESS_ADMIN_DASHBOARD_URL,
+  PORTLESS_ADMIN_ORIGIN,
+  PORTLESS_API_ORIGIN,
+  PORTLESS_APP_ORIGIN,
+} from "@/lib/admin/admin-url-defaults";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 
 const RECENT_UPDATES = [
@@ -54,6 +60,28 @@ type DbPressureSnapshot = {
   };
 };
 
+type PortlessRouteStatus = {
+  id: string;
+  label: string;
+  url: string;
+  expectedPath: string;
+  target: string | null;
+  kind: string | null;
+  present: boolean;
+  staticAlias: boolean;
+};
+
+type PortlessStatusSnapshot = {
+  status: "ok" | "unavailable";
+  checked_at: string;
+  routes: PortlessRouteStatus[];
+  static_alias_count: number;
+  uses_static_aliases: boolean;
+  repair_command: string;
+  open_admin_command: string;
+  raw_error?: string;
+};
+
 const TRANSIENT_BACKEND_PRESSURE_REASONS = new Set([
   "pool_capacity",
   "pool_near_capacity",
@@ -64,6 +92,11 @@ function isPortlessHost() {
   if (typeof window === "undefined") return false;
   const hostname = window.location.hostname;
   return hostname === "trr.localhost" || hostname.endsWith(".trr.localhost");
+}
+
+function isWrongAdminHost() {
+  if (typeof window === "undefined") return false;
+  return window.location.hostname !== "admin.trr.localhost";
 }
 
 function summarizePressurePools(backendSnapshot?: DbPressureSnapshot["backend_db_pressure"]) {
@@ -291,6 +324,169 @@ function BackendEnvironmentReadinessCard() {
   );
 }
 
+function PortlessUrlCard() {
+  const [currentUrl, setCurrentUrl] = useState<string | null>(null);
+  const [wrongAdminHost, setWrongAdminHost] = useState(false);
+  const [snapshot, setSnapshot] = useState<PortlessStatusSnapshot | null>(null);
+  const [state, setState] = useState<"loading" | "ready" | "error">("loading");
+  const [diagnosticsState, setDiagnosticsState] = useState<"idle" | "copying" | "copied" | "error">("idle");
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    setCurrentUrl(window.location.href);
+    setWrongAdminHost(isWrongAdminHost());
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const response = await fetchAdminWithAuth("/api/admin/portless/status", {
+          cache: "no-store",
+        }, { allowDevAdminBypass: true });
+        if (!response.ok) throw new Error(`status ${response.status}`);
+        const payload = (await response.json()) as PortlessStatusSnapshot;
+        if (!cancelled) {
+          setSnapshot(payload);
+          setState("ready");
+        }
+      } catch {
+        if (!cancelled) {
+          setSnapshot(null);
+          setState("error");
+        }
+      }
+    };
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const links = [
+    ["Admin", PORTLESS_ADMIN_DASHBOARD_URL],
+    ["App", PORTLESS_APP_ORIGIN],
+    ["API", `${PORTLESS_API_ORIGIN}/health/live`],
+  ] as const;
+  const usesStaticAliases = snapshot?.uses_static_aliases === true;
+  const statusLabel =
+    wrongAdminHost ? "Wrong host" : usesStaticAliases ? "Aliases" : state === "ready" ? "Clean" : state.toUpperCase();
+  const actionLabel =
+    diagnosticsState === "copying"
+      ? "Copying..."
+      : diagnosticsState === "copied"
+        ? "Diagnostics copied"
+        : diagnosticsState === "error"
+          ? "Copy failed"
+          : "Open clean admin + copy diagnostics";
+
+  const openCleanAdminWithDiagnostics = async () => {
+    if (typeof window === "undefined") return;
+    setDiagnosticsState("copying");
+    const diagnostics = {
+      copied_at: new Date().toISOString(),
+      current_url: window.location.href,
+      expected_admin_url: PORTLESS_ADMIN_DASHBOARD_URL,
+      expected_app_url: PORTLESS_APP_ORIGIN,
+      expected_api_url: `${PORTLESS_API_ORIGIN}/health/live`,
+      wrong_admin_host: isWrongAdminHost(),
+      status_state: state,
+      portless_status: snapshot,
+      user_agent: window.navigator.userAgent,
+    };
+
+    try {
+      await window.navigator.clipboard.writeText(JSON.stringify(diagnostics, null, 2));
+      setDiagnosticsState("copied");
+      window.location.assign(PORTLESS_ADMIN_DASHBOARD_URL);
+    } catch {
+      setDiagnosticsState("error");
+    }
+  };
+
+  return (
+    <section className="rounded-[1.8rem] border border-black bg-white p-6">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.24em]" style={{ color: ACCENT }}>
+            Portless URLs
+          </p>
+          <h2 className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-black">
+            Clean local routes
+          </h2>
+        </div>
+        <span className="rounded-none border border-black px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-black">
+          {statusLabel}
+        </span>
+      </div>
+      <p className="mt-4 text-sm leading-7 text-black/70">
+        Use these stable HTTPS names for admin browser work instead of numeric local ports.
+      </p>
+      {(wrongAdminHost || usesStaticAliases || state === "error" || snapshot?.status === "unavailable") ? (
+        <div className="mt-4 border-2 border-black bg-[#FFF7D6] px-4 py-3 text-sm leading-6 text-black">
+          {wrongAdminHost ? (
+            <p>
+              This admin page is loaded from the wrong local host. Open the clean admin dashboard at{" "}
+              <a className="font-semibold underline" href={`${PORTLESS_ADMIN_ORIGIN}/admin`}>
+                {PORTLESS_ADMIN_ORIGIN}/admin
+              </a>
+              .
+            </p>
+          ) : usesStaticAliases ? (
+            <p>
+              Portless is still serving at least one TRR route through a static alias. Run{" "}
+              <code className="font-mono text-xs">make portless-repair</code>, then restart with{" "}
+              <code className="font-mono text-xs">make dev-portless</code>.
+            </p>
+          ) : (
+            <p>
+              Portless status is unavailable from the app process. Run{" "}
+              <code className="font-mono text-xs">make portless-repair</code> before opening admin.
+            </p>
+          )}
+        </div>
+      ) : null}
+      <div className="mt-5 grid gap-2">
+        {links.map(([label, href]) => (
+          <a
+            key={label}
+            href={href}
+            className="group flex items-center justify-between gap-3 border border-black px-3 py-3 text-sm transition hover:bg-black hover:text-white"
+          >
+            <span className="font-semibold">{label}</span>
+            <span className="min-w-0 truncate font-mono text-xs opacity-70 group-hover:opacity-100">{href}</span>
+          </a>
+        ))}
+      </div>
+      <Button
+        onClick={() => {
+          void openCleanAdminWithDiagnostics();
+        }}
+        disabled={diagnosticsState === "copying"}
+        size="sm"
+        variant="outline"
+        className={`mt-4 w-full ${ADMIN_DASHBOARD_BUTTON_CLASS}`}
+      >
+        {actionLabel}
+      </Button>
+      <p className="mt-4 break-words text-xs leading-6 text-black/60">
+        Current route: {currentUrl ?? "checking"}
+      </p>
+      <dl className="mt-4 grid gap-2 text-xs">
+        {(snapshot?.routes ?? []).map((route) => (
+          <div key={route.id} className="grid grid-cols-[5rem_minmax(0,1fr)_5rem] gap-2 border border-black px-3 py-2">
+            <dt className="font-semibold uppercase tracking-[0.12em] text-black/60">{route.label}</dt>
+            <dd className="min-w-0 truncate font-mono text-black/70">{route.target ?? route.url}</dd>
+            <dd className="text-right font-semibold uppercase tracking-[0.12em] text-black/60">
+              {route.present ? route.kind ?? "route" : "missing"}
+            </dd>
+          </div>
+        ))}
+      </dl>
+    </section>
+  );
+}
+
 export default function AdminDashboardPage() {
   const { user, checking, hasAccess } = useAdminGuard();
 
@@ -466,6 +662,7 @@ export default function AdminDashboardPage() {
           </section>
 
           <aside className="space-y-6">
+            <PortlessUrlCard />
             <BackendEnvironmentReadinessCard />
             <ConnectionBudgetCard />
 

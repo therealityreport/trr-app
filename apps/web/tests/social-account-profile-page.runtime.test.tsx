@@ -1860,6 +1860,30 @@ describe("SocialAccountProfilePage", () => {
           throughput: {
             posts_per_minute: 15.5,
           },
+          network_spend: {
+            observed_proxy_bytes: 12345678,
+            observed_request_count: 42,
+            static_cdninstagram_bytes: 250000,
+            static_cdninstagram_request_count: 4,
+            static_cdninstagram_blocked_request_count: 38,
+            top_hosts: [{ host: "i.instagram.com", bytes: 12000000, request_count: 38 }],
+            network_policy_modes: { production: 2 },
+            spend_basis: "observed_proxy_response_bytes",
+          },
+          target_progress_rows: [
+            {
+              source_id: "C123",
+              shortcode: "C123",
+              status: "running",
+              saved_comment_count: 120,
+              reported_comment_count: 200,
+              missing_comment_gap: 80,
+              latest_reason: "network_stopped",
+              network_stopped: true,
+              has_top_level_cursor: true,
+              reply_resume_count: 3,
+            },
+          ],
           comment_shards: [
             {
               shard_index: 1,
@@ -1903,6 +1927,11 @@ describe("SocialAccountProfilePage", () => {
     expect(
       await screen.findByText(/4 shards: 2 active, 1 queued, 1 complete, 0 failed.*5 \/ 12 posts checked.*15\.5 posts\/min/),
     ).toBeInTheDocument();
+    expect(await screen.findByText("Instagram network spend")).toBeInTheDocument();
+    expect(await screen.findByText("12.35 MB")).toBeInTheDocument();
+    expect(await screen.findByText(/static CDN \/ 38 blocked/)).toBeInTheDocument();
+    expect(await screen.findByText("Target recovery progress")).toBeInTheDocument();
+    expect(await screen.findByText("network stopped / Running")).toBeInTheDocument();
     expect(await screen.findByRole("heading", { name: "Active Comments Run" })).toBeInTheDocument();
   });
 
@@ -5820,6 +5849,55 @@ describe("SocialAccountProfilePage", () => {
     ).toBeInTheDocument();
     expect(screen.queryByText(/451cc01e/)).not.toBeInTheDocument();
     expect(screen.queryByText(/function max\(uuid\)/)).not.toBeInTheDocument();
+  }, 10_000);
+
+  it("does not show a blocker for transient comments progress fetch failures while summary says the run is active", async () => {
+    const runId = "comments-transient-fetch-run";
+    const activeSummary = {
+      ...baseSummary,
+      account_handle: "bravotv",
+      profile_url: "https://www.instagram.com/bravotv/",
+      comments_coverage: {
+        ...baseSummary.comments_coverage,
+        active_run_id: runId,
+        effective_status: "running",
+        last_comments_run_status: "running",
+      },
+    };
+
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/snapshot")) {
+        return jsonResponse({
+          summary: activeSummary,
+          catalog_run_progress: null,
+          generated_at: "2026-05-11T18:00:00.000Z",
+        });
+      }
+      if (url.includes("/summary")) {
+        return jsonResponse(activeSummary);
+      }
+      if (url.includes("/cookies/health")) {
+        return jsonResponse(healthyCookieHealth("instagram"));
+      }
+      if (url.includes(`/comments/runs/${runId}/progress`)) {
+        throw new TypeError("Failed to fetch");
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
+
+    expect(await screen.findByRole("heading", { name: "Active Comments Run" })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(
+        mocks.fetchAdminWithAuth.mock.calls.some(([input]) =>
+          String(input).includes(`/comments/runs/${runId}/progress`),
+        ),
+      ).toBe(true);
+    });
+    expect(screen.queryByText(/Progress poll is retrying/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Comments progress poll is retrying/i)).not.toBeInTheDocument();
   }, 10_000);
 
   it("routes Fill Missing Posts to sync-newer for head gaps", async () => {
@@ -12335,13 +12413,13 @@ it("uses the newest inspected catalog run from the summary when discovery outran
         expect(body).toMatchObject({
           source_scope: "network",
           backfill_scope: "bounded_window",
+          date_start: "2025-11-01T00:00:00.000Z",
+          date_end: "2026-06-30T23:59:59.999Z",
           selected_tasks: [...INSTAGRAM_BACKFILL_DEFAULT_TASKS],
           detail_worker_count: 8,
           comments_worker_count: 8,
           comments_enable_media_followups: true,
         });
-        expect(typeof body.date_start).toBe("string");
-        expect(typeof body.date_end).toBe("string");
         return jsonResponse({
           run_id: "catalog-run-drift-12345678",
           status: "queued",
@@ -12373,6 +12451,9 @@ it("uses the newest inspected catalog run from the summary when discovery outran
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Start Backfill" })).toBeInTheDocument();
     });
+    fireEvent.change(screen.getByLabelText(/Start month/i), { target: { value: "2025-11" } });
+    fireEvent.change(screen.getByLabelText(/End month/i), { target: { value: "2026-06" } });
+    expect(screen.getByText(/Selected: 11-2025 to 06-2026/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Start Backfill" }));
 
     await waitFor(() => {

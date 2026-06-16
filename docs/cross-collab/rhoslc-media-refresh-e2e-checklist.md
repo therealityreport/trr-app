@@ -4,15 +4,15 @@
 Validate RHOSLC media refresh behavior across show, season, person, and per-image actions with request-id traceability and degraded Screenalytics handling.
 
 ## RHOSLC Routes
-- Show page: `http://127.0.0.1:3000/admin/trr-shows/the-real-housewives-of-salt-lake-city`
-- Season page (example S4): `http://127.0.0.1:3000/admin/trr-shows/the-real-housewives-of-salt-lake-city/seasons/4`
-- Person page (example cast member): `http://127.0.0.1:3000/admin/trr-shows/people/7f528757-5017-4599-8252-c02f0d0736cf?showId=the-real-housewives-of-salt-lake-city`
+- Show page: `https://admin.trr.localhost/admin/trr-shows/the-real-housewives-of-salt-lake-city`
+- Season page (example S4): `https://admin.trr.localhost/admin/trr-shows/the-real-housewives-of-salt-lake-city/seasons/4`
+- Person page (example cast member): `https://admin.trr.localhost/admin/trr-shows/people/7f528757-5017-4599-8252-c02f0d0736cf?showId=the-real-housewives-of-salt-lake-city`
 
 ## Mode A: Normal (Screenalytics available)
-1. From `/Users/thomashulihan/Projects/TRR`, run `make dev`.
+1. From `/Users/thomashulihan/Projects/TRR`, run `make dev-portless` for browser-facing checks.
 2. Confirm health:
-- TRR-APP: `http://127.0.0.1:3000`
-- TRR-Backend: `http://127.0.0.1:8000`
+- TRR-APP: `https://trr.localhost`
+- TRR-Backend: `https://api.trr.localhost`
 - Screenalytics API: `http://127.0.0.1:8001`
 3. Open browser devtools network tab and preserve logs.
 

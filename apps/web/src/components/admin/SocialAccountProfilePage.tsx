@@ -54,6 +54,7 @@ import {
   type SocialAccountProfileHashtagTimeline,
   type SocialAccountLiveProfileTotal,
   type SocialAccountProfilePost,
+  type SocialAccountProfilePostsSortMetadata,
   type SocialAccountProfileSummaryDetail,
   type SocialAccountProfileSummary,
   type SocialAccountProfileTab,
@@ -117,6 +118,7 @@ type PostsResponse = {
     total: number;
     total_pages: number;
   };
+  sort_metadata?: SocialAccountProfilePostsSortMetadata | null;
 };
 
 type CatalogPostsResponse = {
@@ -127,6 +129,19 @@ type CatalogPostsResponse = {
     total: number;
     total_pages: number;
   };
+};
+
+const formatPostsSortMode = (mode: string | null | undefined): string => {
+  switch (mode) {
+    case "persisted_rollup":
+      return "Persisted rollup";
+    case "bounded_page_score":
+      return "Bounded page score";
+    case "live_comment_count":
+      return "Live comment count";
+    default:
+      return "Unknown";
+  }
 };
 
 type HashtagsResponse = {
@@ -616,20 +631,31 @@ const formatDateTime = (value?: string | null): string => {
   return parsed.toLocaleString();
 };
 
-const buildInstagramBackfillDateDefaults = (now = new Date()): { dateStart: string; dateEnd: string } => {
+const buildInstagramBackfillMonthDefaults = (now = new Date()): { monthStart: string; monthEnd: string } => {
   const year = now.getUTCFullYear();
   return {
-    dateStart: `${year}-01-01`,
-    dateEnd: `${year}-12-31`,
+    monthStart: `${year}-01`,
+    monthEnd: `${year}-12`,
   };
 };
 
-const dateInputToWindowBoundaryIso = (value: string, boundary: "start" | "end"): string | null => {
+const monthInputToWindowBoundaryIso = (value: string, boundary: "start" | "end"): string | null => {
   const normalized = String(value || "").trim();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) return null;
-  const suffix = boundary === "start" ? "T00:00:00.000Z" : "T23:59:59.999Z";
-  const parsed = new Date(`${normalized}${suffix}`);
+  const match = /^(\d{4})-(\d{2})$/.exec(normalized);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const monthIndex = Number(match[2]) - 1;
+  if (!Number.isInteger(year) || monthIndex < 0 || monthIndex > 11) return null;
+  const parsed =
+    boundary === "start"
+      ? new Date(Date.UTC(year, monthIndex, 1, 0, 0, 0, 0))
+      : new Date(Date.UTC(year, monthIndex + 1, 0, 23, 59, 59, 999));
   return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+};
+
+const formatMonthYear = (value: string): string => {
+  const match = /^(\d{4})-(\d{2})$/.exec(String(value || "").trim());
+  return match ? `${match[2]}-${match[1]}` : value;
 };
 
 const formatCatalogRunWindow = (progress?: SocialAccountCatalogRunProgressSnapshot | null): string | null => {
@@ -1635,16 +1661,20 @@ const getCatalogRunDisplayStatusLabel = (
 const formatCommentsShardJobSummary = (progress?: SocialAccountCommentsRunProgress | null): string | null => {
   if (!progress) return null;
   const shardCount = readFiniteNumber(progress.comments_shard_count);
-  const activeJobs = readFiniteNumber(progress.active_comment_jobs);
-  const queuedJobs = readFiniteNumber(progress.queued_comment_jobs);
-  const retryingJobs = readFiniteNumber(progress.retrying_comment_jobs);
-  const completedJobs = readFiniteNumber(progress.completed_comment_jobs);
+  const counters = progress.worker_counters;
+  const runningJobs = readFiniteNumber(counters?.running) ?? readFiniteNumber(progress.running_comment_jobs);
+  const activeJobs = readFiniteNumber(counters?.active) ?? readFiniteNumber(progress.active_comment_jobs);
+  const queuedJobs = readFiniteNumber(counters?.queued) ?? readFiniteNumber(progress.queued_comment_jobs);
+  const retryingJobs = readFiniteNumber(counters?.retrying) ?? readFiniteNumber(progress.retrying_comment_jobs);
+  const completedJobs = readFiniteNumber(counters?.completed) ?? readFiniteNumber(progress.completed_comment_jobs);
   const cancelledJobs =
+    readFiniteNumber(counters?.cancelled) ??
     readFiniteNumber(progress.cancelled_comment_jobs) ??
     readFiniteNumber(progress.cancellation_summary?.cancelled_jobs);
-  const failedJobs = readFiniteNumber(progress.failed_comment_jobs);
+  const failedJobs = readFiniteNumber(counters?.failed) ?? readFiniteNumber(progress.failed_comment_jobs);
   const jobBits = [
-    activeJobs !== null ? `${formatInteger(activeJobs)} active` : null,
+    runningJobs !== null ? `${formatInteger(runningJobs)} running` : null,
+    activeJobs !== null && runningJobs === null ? `${formatInteger(activeJobs)} active` : null,
     retryingJobs !== null && retryingJobs > 0 ? `${formatInteger(retryingJobs)} retrying` : null,
     queuedJobs !== null ? `${formatInteger(queuedJobs)} queued` : null,
     completedJobs !== null ? `${formatInteger(completedJobs)} complete` : null,
@@ -1679,6 +1709,20 @@ const formatCommentsRunMovementLabel = (movement?: CommentsRunMovement | null): 
   return `Current movement: ${parts.join(" · ")} since last refresh`;
 };
 
+const formatInstagramAccessProofLabel = (progress?: SocialAccountCommentsRunProgress | null): string | null => {
+  const proof = progress?.instagram_access_proof;
+  if (!proof) return null;
+  const proofLabel = typeof proof.proof_label === "string" && proof.proof_label.trim() ? proof.proof_label.trim() : null;
+  if (proofLabel) return proofLabel;
+  const parts = [
+    proof.no_cookies === true ? "No cookies" : proof.cookie_state ? `Cookies: ${formatDiagnosticToken(proof.cookie_state)}` : null,
+    proof.no_decodo === true ? "No Decodo" : proof.decodo_state ? `Decodo: ${formatDiagnosticToken(proof.decodo_state)}` : null,
+    proof.auth_state ? `Auth: ${formatDiagnosticToken(proof.auth_state)}` : null,
+    proof.proxy_state ? `Proxy: ${formatDiagnosticToken(proof.proxy_state)}` : null,
+  ];
+  return parts.filter(Boolean).join(" · ") || null;
+};
+
 const getCommentsShardProgressRows = (
   progress?: SocialAccountCommentsRunProgress | null,
 ): SocialAccountCommentsShardProgress[] => {
@@ -1698,6 +1742,16 @@ const formatDurationEstimate = (seconds: number | null): string | null => {
   const hours = Math.floor(roundedMinutes / 60);
   const minutes = roundedMinutes % 60;
   return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
+};
+
+const formatSecondsPerPost = (seconds: number | null): string | null => {
+  if (seconds === null || !Number.isFinite(seconds) || seconds <= 0) return null;
+  return `${seconds < 10 ? seconds.toFixed(1) : seconds.toFixed(0)} sec/post`;
+};
+
+const formatCommentsPerSecond = (value: number | null): string | null => {
+  if (value === null || !Number.isFinite(value) || value < 0) return null;
+  return `${value < 10 ? value.toFixed(2) : value.toFixed(1)} comments/sec`;
 };
 
 const estimateInstagramBackfillMinutes = (
@@ -1743,16 +1797,23 @@ const getCommentsShardDisplay = (row: SocialAccountCommentsShardProgress): Comme
     itemsFound;
   const postsPerMinute = readFiniteNumber(row.posts_per_minute);
   const commentsPerMinute = readFiniteNumber(row.comments_per_minute);
+  const commentsPerSecond = readFiniteNumber(row.comments_per_second);
+  const averageSecondsPerPost = readFiniteNumber(row.average_seconds_per_post);
   const issueLabel =
     readCommentsProgressString(row.latest_stop_reason) ??
     readCommentsProgressString(row.latest_failure_reason) ??
     readCommentsProgressString(row.error_message) ??
     readCommentsProgressString(row.latest_fetch_reason);
   const speedLabel =
-    postsPerMinute !== null || commentsPerMinute !== null
+    postsPerMinute !== null ||
+    commentsPerMinute !== null ||
+    commentsPerSecond !== null ||
+    averageSecondsPerPost !== null
       ? [
           postsPerMinute !== null ? `${postsPerMinute.toFixed(1)} posts/min` : null,
+          formatSecondsPerPost(averageSecondsPerPost),
           commentsPerMinute !== null ? `${commentsPerMinute.toFixed(0)} comments/min` : null,
+          formatCommentsPerSecond(commentsPerSecond),
         ]
           .filter(Boolean)
           .join(" · ")
@@ -1830,6 +1891,18 @@ const isCommentsEndpointProbeAdvisoryActive = (progress?: SocialAccountCommentsR
     typeof endpointProbe === "object" &&
     readCommentsProgressTruthy(endpointProbe.advisory_continue) &&
     commentsProgressHasActiveRows(progress)
+  );
+};
+
+const isTransientCommentsProgressPollError = (message: unknown): boolean => {
+  const normalized = String(message || "").trim().toLowerCase();
+  if (!normalized) return false;
+  return (
+    normalized === "failed to fetch" ||
+    normalized === "load failed" ||
+    normalized.includes("networkerror") ||
+    normalized.includes("network request failed") ||
+    normalized.includes("the network connection was lost")
   );
 };
 
@@ -3034,11 +3107,11 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     INSTAGRAM_BACKFILL_DEFAULT_COMMENTS_WORKER_COUNT,
   );
   const [instagramBackfillCommentMediaFollowups, setInstagramBackfillCommentMediaFollowups] = useState(false);
-  const [instagramBackfillDateStart, setInstagramBackfillDateStart] = useState(
-    () => buildInstagramBackfillDateDefaults().dateStart,
+  const [instagramBackfillMonthStart, setInstagramBackfillMonthStart] = useState(
+    () => buildInstagramBackfillMonthDefaults().monthStart,
   );
-  const [instagramBackfillDateEnd, setInstagramBackfillDateEnd] = useState(
-    () => buildInstagramBackfillDateDefaults().dateEnd,
+  const [instagramBackfillMonthEnd, setInstagramBackfillMonthEnd] = useState(
+    () => buildInstagramBackfillMonthDefaults().monthEnd,
   );
   const [catalogActionMessage, setCatalogActionMessage] = useState<string | null>(null);
   const [runningCatalogAction, setRunningCatalogAction] = useState<
@@ -3163,6 +3236,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   );
   const shouldShowCatalogRunProgressCard = selectedTab !== "comments";
   const hasSummary = summary !== null;
+  const postsSortMetadata = posts?.sort_metadata ?? null;
   const summaryInitialStatePending = !hasSummary && !summaryError && !summaryUninitialized;
   const summarySourceMetadata = useMemo(
     () => resolveSummarySourceMetadata(summary, platform, handle),
@@ -5208,6 +5282,15 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     return ACTIVE_CATALOG_RUN_STATUSES.has(activeCommentsRunEffectiveStatus);
   }, [activeCommentsRunEffectiveStatus]);
 
+  const activeCommentsRunProgressPollError = useMemo(() => {
+    const error = activeCommentsRunProgress.error;
+    if (!error) return null;
+    if (activeCommentsRunIsActive && isTransientCommentsProgressPollError(error)) {
+      return null;
+    }
+    return error;
+  }, [activeCommentsRunIsActive, activeCommentsRunProgress.error]);
+
   const activeCommentsRunIsTerminal = useMemo(() => {
     return TERMINAL_CATALOG_RUN_STATUSES.has(activeCommentsRunEffectiveStatus);
   }, [activeCommentsRunEffectiveStatus]);
@@ -5273,6 +5356,9 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     const commentsChanged = readFiniteNumber(progress?.summary?.comments_changed_total);
     const postsPerMinute = readFiniteNumber(progress?.throughput?.posts_per_minute);
     const commentsPerMinute = readFiniteNumber(progress?.throughput?.comments_per_minute);
+    const commentsPerSecond = readFiniteNumber(progress?.throughput?.comments_per_second);
+    const averageSecondsPerPost = readFiniteNumber(progress?.throughput?.average_seconds_per_post);
+    const backendEstimatedSecondsRemaining = readFiniteNumber(progress?.throughput?.estimated_seconds_remaining);
     const runningCommentJobs = readFiniteNumber(progress?.active_comment_jobs);
     const savedComments = readFiniteNumber(summary?.comments_saved_summary?.saved_comments);
     const reportedComments = readFiniteNumber(summary?.comments_saved_summary?.retrieved_comments);
@@ -5280,13 +5366,15 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     const savedPercent = toProgressPercent(savedComments, reportedComments);
     const remainingPosts =
       completedPosts !== null && totalPosts !== null ? Math.max(0, totalPosts - completedPosts) : null;
-    const estimatedSecondsRemaining =
+    const localEstimatedSecondsRemaining =
       runningCommentJobs !== null && runningCommentJobs > 0 && remainingPosts !== null && postsPerMinute !== null && postsPerMinute > 0
         ? (remainingPosts / postsPerMinute) * 60
         : null;
+    const estimatedSecondsRemaining = backendEstimatedSecondsRemaining ?? localEstimatedSecondsRemaining;
     const etaLabel = formatDurationEstimate(estimatedSecondsRemaining);
     const autoRebalance = progress?.auto_rebalance;
     const autoRebalancedJobCount = getNumberFromRecord(autoRebalance, ["created_job_count"]);
+    const accessProofLabel = formatInstagramAccessProofLabel(progress);
     return {
       status: formatRunStatusLabel(activeCommentsRunEffectiveStatus || "running"),
       jobSummary: formatCommentsShardJobSummary(progress),
@@ -5301,6 +5389,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       savedPercent,
       etaLabel,
       autoRebalancedJobCount,
+      accessProofLabel,
       runningCommentJobs,
       movementLabel: formatCommentsRunMovementLabel(commentsRunMovement),
       currentMovementLabel:
@@ -5333,10 +5422,15 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
               .join(" · ")
           : null,
       throughputLabel:
-        postsPerMinute !== null || commentsPerMinute !== null
+        postsPerMinute !== null ||
+        commentsPerMinute !== null ||
+        commentsPerSecond !== null ||
+        averageSecondsPerPost !== null
           ? [
               postsPerMinute !== null ? `${postsPerMinute.toFixed(1)} posts/min` : null,
+              formatSecondsPerPost(averageSecondsPerPost),
               commentsPerMinute !== null ? `${commentsPerMinute.toFixed(1)} comments/min` : null,
+              formatCommentsPerSecond(commentsPerSecond),
               etaLabel ? `about ${etaLabel} remaining` : null,
             ]
               .filter(Boolean)
@@ -6183,6 +6277,18 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   ]);
 
   const commentsShardHealthSummary = useMemo(() => {
+    const counters = activeCommentsRunProgressData?.worker_counters;
+    if (counters) {
+      return {
+        failed: readFiniteNumber(counters.failed) ?? 0,
+        retrying: readFiniteNumber(counters.retrying) ?? 0,
+        running: readFiniteNumber(counters.running) ?? 0,
+        queued: readFiniteNumber(counters.queued) ?? 0,
+        complete: readFiniteNumber(counters.completed) ?? 0,
+        total: readFiniteNumber(counters.total) ?? 0,
+        issueReasons: [] as string[],
+      };
+    }
     let failed = 0;
     let retrying = 0;
     let running = 0;
@@ -6209,7 +6315,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       total: activeCommentsProgressRankedRows.length,
       issueReasons: Array.from(issueReasons).slice(0, 3),
     };
-  }, [activeCommentsProgressRankedRows]);
+  }, [activeCommentsProgressRankedRows, activeCommentsRunProgressData?.worker_counters]);
 
   const catalogLaneCards = useMemo(
     () =>
@@ -6481,6 +6587,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
           activeCommentsProgressSummary.commentsProcessedLabel,
           activeCommentsProgressSummary.movementLabel,
           activeCommentsProgressSummary.throughputLabel,
+          activeCommentsProgressSummary.accessProofLabel,
           commentsShardStatusLabel,
         ]
           .filter(Boolean)
@@ -6540,6 +6647,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     activeCommentsProgressSummary.movementLabel,
     activeCommentsProgressSummary.postsLabel,
     activeCommentsProgressSummary.postsPercent,
+    activeCommentsProgressSummary.accessProofLabel,
     activeCommentsProgressSummary.status,
     activeCommentsProgressSummary.throughputLabel,
     activeCommentsRunId,
@@ -6654,11 +6762,11 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
         tone: displayedCatalogRunStatus === "failed" ? "red" : "amber",
       });
     }
-    if (activeCommentsRunProgress.error) {
+    if (activeCommentsRunProgressPollError) {
       issues.push({
         key: "comments-progress-error",
         title: "Comments progress poll is retrying",
-        detail: String(activeCommentsRunProgress.error),
+        detail: String(activeCommentsRunProgressPollError),
         recommendation: "Wait for the next comments progress refresh before cancelling shards.",
         tone: "amber",
       });
@@ -6712,7 +6820,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     return issues.slice(0, 6);
   }, [
     activeCommentsProgressWarning,
-    activeCommentsRunProgress.error,
+    activeCommentsRunProgressPollError,
     catalogAutoRequeueActive,
     catalogDispatchStatusMessage,
     catalogStuckQueueRecoveryRecommended,
@@ -7685,24 +7793,24 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   }, []);
 
   const openInstagramBackfillDialog = useCallback(() => {
-    const defaultWindow = buildInstagramBackfillDateDefaults();
+    const defaultWindow = buildInstagramBackfillMonthDefaults();
     setInstagramBackfillSelectedTasks([...INSTAGRAM_BACKFILL_DEFAULT_SELECTED_TASKS]);
     setInstagramBackfillDetailWorkerCount(getDefaultInstagramBackfillDetailWorkerCount(handle));
     setInstagramBackfillCommentsWorkerCount(getDefaultInstagramBackfillCommentsWorkerCount(handle));
     setInstagramBackfillCommentMediaFollowups(getDefaultInstagramBackfillCommentMediaFollowups(handle));
-    setInstagramBackfillDateStart(defaultWindow.dateStart);
-    setInstagramBackfillDateEnd(defaultWindow.dateEnd);
+    setInstagramBackfillMonthStart(defaultWindow.monthStart);
+    setInstagramBackfillMonthEnd(defaultWindow.monthEnd);
     setInstagramBackfillDialogOpen(true);
   }, [handle]);
 
   const applyBravoTvFastBackfillPreset = useCallback(() => {
-    const defaultWindow = buildInstagramBackfillDateDefaults();
+    const defaultWindow = buildInstagramBackfillMonthDefaults();
     setInstagramBackfillSelectedTasks([...INSTAGRAM_BACKFILL_DEFAULT_SELECTED_TASKS]);
     setInstagramBackfillDetailWorkerCount(INSTAGRAM_BRAVOTV_FAST_DETAIL_WORKER_COUNT);
     setInstagramBackfillCommentsWorkerCount(INSTAGRAM_BRAVOTV_FAST_COMMENTS_WORKER_COUNT);
     setInstagramBackfillCommentMediaFollowups(true);
-    setInstagramBackfillDateStart(defaultWindow.dateStart);
-    setInstagramBackfillDateEnd(defaultWindow.dateEnd);
+    setInstagramBackfillMonthStart(defaultWindow.monthStart);
+    setInstagramBackfillMonthEnd(defaultWindow.monthEnd);
   }, []);
 
   const submitInstagramBackfillDialog = useCallback(async () => {
@@ -7710,14 +7818,14 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       setCatalogActionMessage("Select at least one backfill task before starting Instagram backfill.");
       return;
     }
-    const dateStartIso = dateInputToWindowBoundaryIso(instagramBackfillDateStart, "start");
-    const dateEndIso = dateInputToWindowBoundaryIso(instagramBackfillDateEnd, "end");
+    const dateStartIso = monthInputToWindowBoundaryIso(instagramBackfillMonthStart, "start");
+    const dateEndIso = monthInputToWindowBoundaryIso(instagramBackfillMonthEnd, "end");
     if (!dateStartIso || !dateEndIso) {
-      setCatalogActionMessage("Choose valid Instagram backfill start and end dates before starting.");
+      setCatalogActionMessage("Choose valid Instagram backfill start and end months before starting.");
       return;
     }
     if (new Date(dateEndIso).getTime() < new Date(dateStartIso).getTime()) {
-      setCatalogActionMessage("Choose an Instagram backfill end date that is on or after the start date.");
+      setCatalogActionMessage("Choose an Instagram backfill end month that is on or after the start month.");
       return;
     }
     setInstagramBackfillDialogOpen(false);
@@ -7736,8 +7844,8 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     buildBoundedWindowBackfillRequest,
     instagramBackfillCommentMediaFollowups,
     instagramBackfillCommentsWorkerCount,
-    instagramBackfillDateEnd,
-    instagramBackfillDateStart,
+    instagramBackfillMonthEnd,
+    instagramBackfillMonthStart,
     instagramBackfillDetailWorkerCount,
     instagramBackfillSelectedTasks,
     runCatalogAction,
@@ -8919,9 +9027,9 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                         ) : null}
                       </div>
                     </div>
-                    {activeCommentsRunProgress.error ? (
+                    {activeCommentsRunProgressPollError ? (
                       <p className="mt-2 text-xs text-amber-700">
-                        Progress poll is retrying: {activeCommentsRunProgress.error}
+                        Progress poll is retrying: {activeCommentsRunProgressPollError}
                       </p>
                     ) : null}
                     {activeCommentsRunCanCancel ? (
@@ -10395,6 +10503,17 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                   <p className="text-sm text-zinc-500">
                     Every post touching @{handle}, including owned posts, collaborator matches, and catalog-only history.
                   </p>
+                  {postsSortMetadata ? (
+                    <p className="mt-1 text-xs text-zinc-500">
+                      Sort: {postsSortMetadata.sort_by ?? "default"} {postsSortMetadata.sort_dir ?? "desc"} /{" "}
+                      {formatPostsSortMode(postsSortMetadata.mode)} /{" "}
+                      {postsSortMetadata.exact ? "Exact" : "Approximate"}
+                      {postsSortMetadata.rollup_available === false ? " / Rollup unavailable" : null}
+                      {typeof postsSortMetadata.candidate_limit === "number"
+                        ? ` / Candidate limit ${postsSortMetadata.candidate_limit}`
+                        : null}
+                    </p>
+                  ) : null}
                 </div>
                 <div className="text-sm text-zinc-500">
                   Page {posts?.pagination.page ?? page} of {posts?.pagination.total_pages ?? 1}
@@ -10863,34 +10982,35 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                 <div className="mt-5 rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-4">
                   <p className="font-semibold text-zinc-900">Bounded Window</p>
                   <p className="mt-1 text-sm text-zinc-500">
-                    Backfill only posts published from the start date through the end date.
+                    Backfill only posts published from the start month through the end month.
                   </p>
                   <div className="mt-3 grid gap-3 sm:grid-cols-2">
                     <label className="block">
                       <span className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500">
-                        Start date
+                        Start month (MM-YYYY)
                       </span>
                       <input
-                        type="date"
-                        value={instagramBackfillDateStart}
-                        onChange={(event) => setInstagramBackfillDateStart(event.currentTarget.value)}
+                        type="month"
+                        value={instagramBackfillMonthStart}
+                        onChange={(event) => setInstagramBackfillMonthStart(event.currentTarget.value)}
                         className="mt-1 w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 shadow-sm focus:border-zinc-900 focus:outline-none focus:ring-1 focus:ring-zinc-900"
                       />
                     </label>
                     <label className="block">
                       <span className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500">
-                        End date
+                        End month (MM-YYYY)
                       </span>
                       <input
-                        type="date"
-                        value={instagramBackfillDateEnd}
-                        onChange={(event) => setInstagramBackfillDateEnd(event.currentTarget.value)}
+                        type="month"
+                        value={instagramBackfillMonthEnd}
+                        onChange={(event) => setInstagramBackfillMonthEnd(event.currentTarget.value)}
                         className="mt-1 w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 shadow-sm focus:border-zinc-900 focus:outline-none focus:ring-1 focus:ring-zinc-900"
                       />
                     </label>
                   </div>
                   <p className="mt-2 text-xs text-zinc-500">
-                    Dates are sent as UTC boundaries: 00:00:00 on the start date through 23:59:59 on the end date.
+                    Months are sent as UTC boundaries: the first instant of the start month through the last instant of
+                    the end month.
                   </p>
                 </div>
                 {instagramBackfillSelectedTasks.includes("post_details") ? (
@@ -11022,8 +11142,10 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                 <div className="mt-6 flex items-center justify-between gap-3">
                   <p className="text-xs text-zinc-500">
                     {instagramBackfillSelectedTasks.length > 0
-                      ? `Selected: ${instagramBackfillDateStart || "open start"} to ${
-                          instagramBackfillDateEnd || "open end"
+                      ? `Selected: ${
+                          instagramBackfillMonthStart ? formatMonthYear(instagramBackfillMonthStart) : "open start"
+                        } to ${
+                          instagramBackfillMonthEnd ? formatMonthYear(instagramBackfillMonthEnd) : "open end"
                         } · ${instagramBackfillSelectedTasks.map((task) => formatBackfillTaskLabel(task)).join(", ")}${
                           instagramBackfillSelectedTasks.includes("post_details")
                             ? ` · ${instagramBackfillDetailWorkerCount} detail workers`

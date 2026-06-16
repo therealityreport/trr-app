@@ -169,6 +169,48 @@ describe("admin backend proxy route helper", () => {
     );
   });
 
+  it("renders local dev browser document responses for JSON proxy routes", async () => {
+    const previousLocalDev = process.env.TRR_LOCAL_DEV;
+    process.env.TRR_LOCAL_DEV = "1";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ ok: true, source: "backend" }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      ),
+    );
+
+    try {
+      const response = await makeTestRoute()(
+        new NextRequest("http://localhost/api/test?page=2", {
+          method: "PATCH",
+          headers: {
+            accept: "text/html,application/xhtml+xml",
+            "content-type": "application/json",
+            "sec-fetch-dest": "document",
+          },
+          body: JSON.stringify({ force: true }),
+        }),
+        { params: Promise.resolve({ itemId: "item-1" }) },
+      );
+      const body = await response.text();
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get("content-type")).toContain("text/html");
+      expect(response.headers.get("x-trr-local-api-document")).toBe("1");
+      expect(body).toContain("<pre>");
+      expect(body).toContain("&quot;source&quot;: &quot;backend&quot;");
+    } finally {
+      if (typeof previousLocalDev === "undefined") {
+        delete process.env.TRR_LOCAL_DEV;
+      } else {
+        process.env.TRR_LOCAL_DEV = previousLocalDev;
+      }
+    }
+  });
+
   it("rejects missing declared params before proxying", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);

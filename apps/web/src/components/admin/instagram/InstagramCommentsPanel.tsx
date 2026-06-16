@@ -23,11 +23,16 @@ import {
 import type {
   CatalogBackfillLaunchResponse,
   CatalogBackfillRequest,
+  SocialAccountCommentsAuditCursorRetriesResponse,
+  SocialAccountCommentsAuditCursorRetryRequest,
+  SocialAccountCommentsAuditCursorRetryRow,
   SocialAccountCommentsCancelResponse,
+  SocialAccountCommentsNetworkSpend,
   SocialAccountCommentsRunProgress,
   SocialAccountCommentsShardProgress,
   SocialAccountCommentsScrapeRequest,
   SocialAccountCommentsScrapeResponse,
+  SocialAccountCommentsTargetProgressRow,
   SocialAccountCommentBreakdown,
   SocialAccountProfilePost,
   SocialAccountProfilePostsResponse,
@@ -71,6 +76,25 @@ type CommentsSortDirection = "asc" | "desc";
 type CommentsSortState = {
   field: CommentsSortField;
   direction: CommentsSortDirection;
+};
+type JsonRecord = Record<string, unknown>;
+type CommentsHealthMetric = {
+  key: string;
+  label: string;
+  value: string;
+};
+type CommentsHealthGap = {
+  key: string;
+  label: string;
+  detail: string | null;
+};
+type CommentsRunHealth = {
+  metrics: CommentsHealthMetric[];
+  endpointProbe: string | null;
+  endpointProbeAction: string | null;
+  incompleteReasons: string | null;
+  largestGaps: CommentsHealthGap[];
+  recommendedAction: string | null;
 };
 
 const ACTIVE_RUN_STATUSES = new Set(["queued", "pending", "retrying", "running", "cancelling"]);
@@ -122,6 +146,20 @@ const formatInteger = (value: number | null | undefined): string => {
   return new Intl.NumberFormat("en-US").format(Number.isFinite(Number(value)) ? Number(value) : 0);
 };
 
+const formatBytes = (value: number | null | undefined): string => {
+  const bytes = Number.isFinite(Number(value)) ? Math.max(0, Number(value)) : 0;
+  if (bytes >= 1_000_000_000) {
+    return `${new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 }).format(bytes / 1_000_000_000)} GB`;
+  }
+  if (bytes >= 1_000_000) {
+    return `${new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 }).format(bytes / 1_000_000)} MB`;
+  }
+  if (bytes >= 1_000) {
+    return `${new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 }).format(bytes / 1_000)} KB`;
+  }
+  return `${formatInteger(bytes)} B`;
+};
+
 const formatDateTime = (value?: string | null): string => {
   if (!value) return "Never";
   const parsed = new Date(value);
@@ -135,6 +173,12 @@ const formatStatusLabel = (value?: string | null): string => {
   return normalized.replace(/_/g, " ").replace(/^./, (char) => char.toUpperCase());
 };
 
+const formatCompactReason = (value?: string | null): string => {
+  const normalized = String(value || "").trim();
+  if (!normalized) return "Unknown";
+  return normalized.replace(/_/g, " ");
+};
+
 const getCaptionPreview = (post: SocialAccountProfilePost): string => {
   const text = String(post.content || post.excerpt || post.title || "").trim();
   if (!text) return "No caption saved for this post.";
@@ -146,6 +190,10 @@ const normalizeRunStatus = (value?: string | null): string => String(value || ""
 const readFiniteNumber = (value: unknown): number | null => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
+};
+
+const readRecord = (value: unknown): JsonRecord | null => {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as JsonRecord) : null;
 };
 
 const readProgressTruthy = (value: unknown): boolean => {
@@ -181,6 +229,32 @@ const firstNonNegativeInteger = (...values: unknown[]): number | null => {
     if (parsed !== null) return parsed;
   }
   return null;
+};
+
+const readProgressField = (progress: SocialAccountCommentsRunProgress, keys: string[]): unknown => {
+  const records = [
+    progress as unknown as JsonRecord,
+    readRecord(progress.summary),
+    readRecord(progress.job_metadata),
+  ].filter((record): record is JsonRecord => Boolean(record));
+  for (const record of records) {
+    for (const key of keys) {
+      if (record[key] !== undefined && record[key] !== null) return record[key];
+    }
+  }
+  return null;
+};
+
+const readProgressText = (progress: SocialAccountCommentsRunProgress, keys: string[]): string | null => {
+  const value = readProgressField(progress, keys);
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+};
+
+const formatOperatorLabel = (value: string): string => {
+  const normalized = value.trim();
+  if (!normalized) return "";
+  if (/\s/.test(normalized)) return normalized;
+  return normalized.replace(/_/g, " ").replace(/^./, (char) => char.toUpperCase());
 };
 
 const formatCaptureRate = (value: unknown): string | null => {
@@ -354,6 +428,24 @@ const getCommentsShardProgressRows = (
 ): SocialAccountCommentsShardProgress[] => {
   const rows = progress?.comment_shards ?? progress?.shards ?? progress?.shard_progress ?? [];
   return Array.isArray(rows) ? rows.slice(0, 8) : [];
+};
+
+const getCommentsNetworkSpend = (
+  progress?: SocialAccountCommentsRunProgress | null,
+): SocialAccountCommentsNetworkSpend | null => {
+  const spend = progress?.network_spend;
+  return spend && typeof spend === "object" ? spend : null;
+};
+
+const getCommentsTargetProgressRows = (
+  progress?: SocialAccountCommentsRunProgress | null,
+): SocialAccountCommentsTargetProgressRow[] => {
+  const rows = progress?.target_progress_rows ?? progress?.target_progress ?? progress?.retry_progress?.target_progress_rows;
+  return Array.isArray(rows) ? rows.slice(0, 10) : [];
+};
+
+const formatNetworkPolicyModes = (spend: SocialAccountCommentsNetworkSpend): string | null => {
+  return formatReasonCounts(spend.network_policy_modes, 2);
 };
 
 const formatShardProgressLabel = (row: SocialAccountCommentsShardProgress, index: number): string => {
@@ -620,6 +712,13 @@ export default function InstagramCommentsPanel({
   const [cancelPending, setCancelPending] = useState(false);
   const [cancelRequestedRunId, setCancelRequestedRunId] = useState<string | null>(null);
   const [catalogRefreshPending, setCatalogRefreshPending] = useState(false);
+  const [auditCursorRecovery, setAuditCursorRecovery] =
+    useState<SocialAccountCommentsAuditCursorRetriesResponse | null>(null);
+  const [auditCursorRecoveryLoading, setAuditCursorRecoveryLoading] = useState(false);
+  const [auditCursorRecoveryPending, setAuditCursorRecoveryPending] = useState(false);
+  const [auditCursorRerunShortcode, setAuditCursorRerunShortcode] = useState<string | null>(null);
+  const [auditCursorRecoveryError, setAuditCursorRecoveryError] = useState<string | null>(null);
+  const [auditCursorShowFilter, setAuditCursorShowFilter] = useState("");
   const [selectedPost, setSelectedPost] = useState<SocialAccountProfilePost | null>(null);
   const [modalRefreshKey, setModalRefreshKey] = useState(0);
   const handledTerminalRunRef = useRef<string | null>(null);
@@ -698,6 +797,39 @@ export default function InstagramCommentsPanel({
     if (!supportsComments) return;
     void refreshPosts();
   }, [refreshPosts, supportsComments]);
+
+  const refreshAuditCursorRecovery = useCallback(async () => {
+    if (checking || !user || !hasAccess || !supportsInlineCommentsSync) return;
+    setAuditCursorRecoveryLoading(true);
+    setAuditCursorRecoveryError(null);
+    try {
+      const params = new URLSearchParams({ limit: "50" });
+      const trimmedShowFilter = auditCursorShowFilter.trim();
+      if (trimmedShowFilter) {
+        params.set("show_filter", trimmedShowFilter);
+      }
+      const response = await fetchAdminWithAuth(
+        `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/comments/audit-cursor-retries?${params.toString()}`,
+        undefined,
+        { preferredUser: user },
+      );
+      const data = (await response.json().catch(() => ({}))) as SocialAccountCommentsAuditCursorRetriesResponse &
+        ProxyErrorPayload;
+      if (!response.ok) {
+        throw new Error(readInstagramCommentsErrorMessage(data, "Failed to load audit cursor recovery"));
+      }
+      setAuditCursorRecovery(data);
+    } catch (error) {
+      setAuditCursorRecoveryError(error instanceof Error ? error.message : "Failed to load audit cursor recovery");
+    } finally {
+      setAuditCursorRecoveryLoading(false);
+    }
+  }, [auditCursorShowFilter, checking, fetchAdminWithAuth, handle, hasAccess, platform, supportsInlineCommentsSync, user]);
+
+  useEffect(() => {
+    if (!supportsInlineCommentsSync) return;
+    void refreshAuditCursorRecovery();
+  }, [refreshAuditCursorRecovery, supportsInlineCommentsSync]);
 
   useEffect(() => {
     if (!selectedPost || !posts) return;
@@ -836,6 +968,149 @@ export default function InstagramCommentsPanel({
       setCommentsLaunchPending(false);
     }
   }, [fetchAdminWithAuth, handle, platform, user]);
+
+  const startAuditCursorRecovery = useCallback(async () => {
+    if (!user) return;
+    setScrapeError(null);
+    setAuditCursorRecoveryError(null);
+    setScrapeMessage("Queueing cap-free audit cursor recovery...");
+    setAuditCursorRecoveryPending(true);
+    const body: SocialAccountCommentsAuditCursorRetryRequest = {
+      limit: 50,
+      batch_size: 1,
+      max_comments_per_post: 0,
+      comments_load_strategy: "cursor_api",
+      attach_to_active_run: true,
+      dispatch_immediately: true,
+    };
+    const trimmedShowFilter = auditCursorShowFilter.trim();
+    if (trimmedShowFilter) {
+      body.show_filter = trimmedShowFilter;
+    }
+    try {
+      const response = await fetchAdminWithAuth(
+        `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/comments/audit-cursor-retries`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        },
+        { preferredUser: user },
+      );
+      const data = (await response.json().catch(() => ({}))) as SocialAccountCommentsAuditCursorRetriesResponse &
+        ProxyErrorPayload;
+      if (!response.ok || data.ok === false) {
+        throw new Error(readInstagramCommentsErrorMessage(data, "Failed to queue audit cursor recovery"));
+      }
+      setAuditCursorRecovery(data);
+      const runId =
+        readCommentsRunId(data.enqueue?.result) ??
+        readCommentsRunId(data.active_run) ??
+        readCommentsRunId(data);
+      if (runId) {
+        setScrapeRunId(runId);
+      }
+      const createdCount = readNonNegativeInteger(data.enqueue?.result?.created_target_job_count) ?? 0;
+      const selectedCount = readNonNegativeInteger(data.selected_target_source_ids_count) ?? 0;
+      const modeLabel = data.enqueue?.mode === "active_run_split" ? "split into the active run" : "queued";
+      setScrapeMessage(
+        createdCount > 0
+          ? `Audit cursor recovery ${modeLabel}. ${formatInteger(createdCount)} batch jobs for ${formatInteger(selectedCount)} targets.`
+          : `Audit cursor recovery ${modeLabel}. ${formatInteger(selectedCount)} targets selected.`,
+      );
+      void refreshPosts();
+      void refreshAuditCursorRecovery();
+      void onSummaryRefresh?.();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to queue audit cursor recovery";
+      setAuditCursorRecoveryError(message);
+      setScrapeError(message);
+    } finally {
+      setAuditCursorRecoveryPending(false);
+    }
+  }, [
+    auditCursorShowFilter,
+    fetchAdminWithAuth,
+    handle,
+    onSummaryRefresh,
+    platform,
+    refreshAuditCursorRecovery,
+    refreshPosts,
+    user,
+  ]);
+
+  const rerunAuditCursorTarget = useCallback(
+    async (row: SocialAccountCommentsAuditCursorRetryRow) => {
+      if (!user || !row.shortcode) return;
+      setScrapeError(null);
+      setAuditCursorRecoveryError(null);
+      setScrapeMessage(`Queueing ${row.shortcode} now...`);
+      setAuditCursorRerunShortcode(row.shortcode);
+      const body: SocialAccountCommentsAuditCursorRetryRequest = {
+        limit: 1,
+        shortcodes: [row.shortcode],
+        batch_size: 1,
+        max_comments_per_post: 0,
+        comments_load_strategy: "cursor_api",
+        attach_to_active_run: true,
+        dispatch_immediately: true,
+        force_rerun_existing: true,
+      };
+      const trimmedShowFilter = auditCursorShowFilter.trim();
+      if (trimmedShowFilter) {
+        body.show_filter = trimmedShowFilter;
+      }
+      try {
+        const response = await fetchAdminWithAuth(
+          `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/comments/audit-cursor-retries`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          },
+          { preferredUser: user },
+        );
+        const data = (await response.json().catch(() => ({}))) as SocialAccountCommentsAuditCursorRetriesResponse &
+          ProxyErrorPayload;
+        if (!response.ok || data.ok === false) {
+          throw new Error(readInstagramCommentsErrorMessage(data, "Failed to queue target now"));
+        }
+        setAuditCursorRecovery(data);
+        const runId =
+          readCommentsRunId(data.enqueue?.result) ??
+          readCommentsRunId(data.active_run) ??
+          readCommentsRunId(data);
+        if (runId) {
+          setScrapeRunId(runId);
+        }
+        const createdCount = readNonNegativeInteger(data.enqueue?.result?.created_target_job_count) ?? 0;
+        setScrapeMessage(
+          createdCount > 0
+            ? `${row.shortcode} queued now. ${formatInteger(createdCount)} fresh recovery job${createdCount === 1 ? "" : "s"}.`
+            : `${row.shortcode} recovery requested.`,
+        );
+        void refreshPosts();
+        void refreshAuditCursorRecovery();
+        void onSummaryRefresh?.();
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Failed to queue target now";
+        setAuditCursorRecoveryError(message);
+        setScrapeError(message);
+      } finally {
+        setAuditCursorRerunShortcode(null);
+      }
+    },
+    [
+      auditCursorShowFilter,
+      fetchAdminWithAuth,
+      handle,
+      onSummaryRefresh,
+      platform,
+      refreshAuditCursorRecovery,
+      refreshPosts,
+      user,
+    ],
+  );
 
   const startCatalogRefresh = useCallback(async () => {
     if (!user) return;
@@ -1051,6 +1326,25 @@ export default function InstagramCommentsPanel({
     commentsProgressControlsLocked ||
     cancelRequestedRunId === scrapeRunId;
   const commentsActionDisabled = commentsLaunchPending || isScraping || checking || !user || !hasAccess;
+  const auditCursorRecoveryRows = useMemo<SocialAccountCommentsAuditCursorRetryRow[]>(
+    () => auditCursorRecovery?.progress_rows ?? auditCursorRecovery?.rows ?? [],
+    [auditCursorRecovery],
+  );
+  const auditCursorRecoveryTargetCount =
+    readNonNegativeInteger(auditCursorRecovery?.selected_target_source_ids_count) ?? auditCursorRecoveryRows.length;
+  const auditCursorRecoveryGap = auditCursorRecoveryRows.reduce(
+    (total, row) => total + (readNonNegativeInteger(row.missing_comment_gap) ?? 0),
+    0,
+  );
+  const auditCursorRecoveryActiveRunId = readCommentsRunId(auditCursorRecovery?.active_run);
+  const auditCursorActionDisabled =
+    auditCursorRecoveryPending ||
+    Boolean(auditCursorRerunShortcode) ||
+    auditCursorRecoveryLoading ||
+    auditCursorRecoveryTargetCount <= 0 ||
+    checking ||
+    !user ||
+    !hasAccess;
   const catalogActionDisabled = catalogRefreshPending || checking || !user || !hasAccess;
   const primaryActionPending = supportsInlineCommentsSync ? commentsLaunchPending || isScraping : catalogRefreshPending;
   const emptyPostsLabel = supportsInlineCommentsSync
@@ -1084,6 +1378,14 @@ export default function InstagramCommentsPanel({
   const shardProgressRows = useMemo(
     () => (hideActiveRunProgress ? [] : getCommentsShardProgressRows(displayedRunProgress)),
     [displayedRunProgress, hideActiveRunProgress],
+  );
+  const networkSpend = useMemo(
+    () => getCommentsNetworkSpend(displayedRunProgress),
+    [displayedRunProgress],
+  );
+  const targetProgressRows = useMemo(
+    () => getCommentsTargetProgressRows(displayedRunProgress),
+    [displayedRunProgress],
   );
   const openPostComments = useCallback(
     (post: SocialAccountProfilePost, event?: MouseEvent<HTMLAnchorElement | HTMLButtonElement>) => {
@@ -1241,10 +1543,205 @@ export default function InstagramCommentsPanel({
           </div>
         </div>
 
+        {supportsInlineCommentsSync ? (
+          <div className="mt-5 rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+              <div>
+                <h3 className="text-sm font-semibold text-zinc-900">Cap-free Comments Recovery</h3>
+                <p className="mt-1 text-xs text-zinc-500">
+                  {auditCursorRecoveryLoading
+                    ? "Loading audit cursor targets..."
+                    : `${formatInteger(auditCursorRecoveryTargetCount)} cursor targets / ${formatInteger(auditCursorRecoveryGap)} comments still open`}
+                  {auditCursorRecoveryActiveRunId ? ` / active run ${auditCursorRecoveryActiveRunId.slice(0, 8)}` : ""}
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <input
+                  type="search"
+                  value={auditCursorShowFilter}
+                  onChange={(event) => setAuditCursorShowFilter(event.target.value)}
+                  placeholder="Show filter"
+                  className="h-9 min-w-[160px] rounded-lg border border-zinc-200 bg-white px-3 text-sm text-zinc-900 placeholder:text-zinc-400 disabled:cursor-not-allowed disabled:opacity-50"
+                  disabled={auditCursorRecoveryPending || Boolean(auditCursorRerunShortcode)}
+                />
+                <button
+                  type="button"
+                  onClick={() => void refreshAuditCursorRecovery()}
+                  disabled={
+                    auditCursorRecoveryLoading ||
+                    auditCursorRecoveryPending ||
+                    Boolean(auditCursorRerunShortcode) ||
+                    checking ||
+                    !user ||
+                    !hasAccess
+                  }
+                  className={SECONDARY_BUTTON_CLASS}
+                >
+                  {auditCursorRecoveryLoading ? "Refreshing..." : "Refresh"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void startAuditCursorRecovery()}
+                  disabled={auditCursorActionDisabled}
+                  className={PRIMARY_BUTTON_CLASS}
+                >
+                  {auditCursorRecoveryPending ? "Queueing..." : "Retry Cursor Targets"}
+                </button>
+              </div>
+            </div>
+            {auditCursorRecoveryError ? <p className="mt-3 text-sm text-red-700">{auditCursorRecoveryError}</p> : null}
+            {auditCursorRecoveryRows.length > 0 ? (
+              <div className="mt-4 overflow-x-auto">
+                <table className="min-w-full divide-y divide-zinc-200 text-sm">
+                  <thead>
+                    <tr className="text-left text-xs uppercase tracking-[0.14em] text-zinc-500">
+                      <th className="pb-2 pr-4">Post</th>
+                      <th className="pb-2 pr-4">Gap</th>
+                      <th className="pb-2 pr-4">Saved</th>
+                      <th className="pb-2 pr-4">Cursor</th>
+                      <th className="pb-2 pr-4">Queue</th>
+                      <th className="pb-2">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-zinc-200">
+                    {auditCursorRecoveryRows.slice(0, 8).map((row) => {
+                      const activeJobCount = readNonNegativeInteger(row.active_run_job_count) ?? 0;
+                      const activeJobTargetCounts = row.active_job_target_counts ?? [];
+                      const smallestBatch = activeJobTargetCounts.length > 0 ? Math.min(...activeJobTargetCounts) : null;
+                      const rowRerunPending = auditCursorRerunShortcode === row.shortcode;
+                      return (
+                        <tr key={row.shortcode}>
+                          <td className="py-2 pr-4 align-top text-xs font-semibold text-blue-700">{row.shortcode}</td>
+                          <td className="py-2 pr-4 align-top tabular-nums text-amber-700">
+                            {formatInteger(row.missing_comment_gap)}
+                          </td>
+                          <td className="py-2 pr-4 align-top tabular-nums text-zinc-700">
+                            {formatInteger(row.saved_comment_count)} / {formatInteger(row.reported_comment_count)}
+                          </td>
+                          <td className="py-2 pr-4 align-top text-xs text-zinc-600">
+                            {formatCompactReason(row.cursor_stop_reason)}
+                            {row.reply_resume_count ? ` / ${formatInteger(row.reply_resume_count)} replies` : ""}
+                          </td>
+                          <td className="py-2 pr-4 align-top text-xs text-zinc-600">
+                            {activeJobCount > 0
+                              ? `${formatInteger(activeJobCount)} job${activeJobCount === 1 ? "" : "s"}${
+                                  smallestBatch ? ` / min batch ${formatInteger(smallestBatch)}` : ""
+                                }`
+                              : "Not queued"}
+                          </td>
+                          <td className="py-2 align-top">
+                            <button
+                              type="button"
+                              onClick={() => void rerunAuditCursorTarget(row)}
+                              disabled={auditCursorActionDisabled || rowRerunPending}
+                              className="inline-flex rounded-md border border-zinc-200 px-2 py-1 text-xs font-semibold text-zinc-700 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              {rowRerunPending ? "Queueing..." : "Run Now"}
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+                {auditCursorRecoveryRows.length > 8 ? (
+                  <p className="mt-2 text-xs text-zinc-500">
+                    Showing 8 of {formatInteger(auditCursorRecoveryRows.length)} targets.
+                  </p>
+                ) : null}
+              </div>
+            ) : !auditCursorRecoveryLoading ? (
+              <p className="mt-3 text-sm text-zinc-500">No cursor recovery targets found.</p>
+            ) : null}
+          </div>
+        ) : null}
+
         {scrapeMessage ? <p className="mt-4 text-sm text-zinc-600">{scrapeMessage}</p> : null}
         {progressScopeNotice ? <p className="mt-3 text-sm font-medium text-sky-700">{progressScopeNotice}</p> : null}
         {progressWarning ? <p className="mt-3 text-sm font-medium text-amber-700">{progressWarning}</p> : null}
         {scrapeError ? <p className="mt-4 text-sm text-red-700">{scrapeError}</p> : null}
+        {networkSpend &&
+        (readNonNegativeInteger(networkSpend.observed_proxy_bytes) ||
+          readNonNegativeInteger(networkSpend.observed_request_count) ||
+          readNonNegativeInteger(networkSpend.static_cdninstagram_blocked_request_count)) ? (
+          <div className="mt-4 border-l-2 border-emerald-200 pl-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500">
+              Instagram network spend
+            </p>
+            <div className="mt-2 grid gap-2 text-sm text-zinc-700 md:grid-cols-3">
+              <div>
+                <p className="font-semibold text-zinc-900">
+                  {formatBytes(readNonNegativeInteger(networkSpend.observed_proxy_bytes))}
+                </p>
+                <p className="text-xs text-zinc-500">
+                  {formatInteger(readNonNegativeInteger(networkSpend.observed_request_count))} observed requests
+                </p>
+              </div>
+              <div>
+                <p className="font-semibold text-zinc-900">
+                  {formatBytes(readNonNegativeInteger(networkSpend.static_cdninstagram_bytes))}
+                </p>
+                <p className="text-xs text-zinc-500">
+                  static CDN / {formatInteger(readNonNegativeInteger(networkSpend.static_cdninstagram_blocked_request_count))} blocked
+                </p>
+              </div>
+              <div>
+                <p className="font-semibold text-zinc-900">
+                  {networkSpend.top_hosts?.[0]?.host ?? "No host data"}
+                </p>
+                <p className="text-xs text-zinc-500">
+                  {formatNetworkPolicyModes(networkSpend) ?? String(networkSpend.spend_basis ?? "observed bytes")}
+                </p>
+              </div>
+            </div>
+          </div>
+        ) : null}
+        {targetProgressRows.length > 0 ? (
+          <div className="mt-4 border-l-2 border-amber-200 pl-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500">
+              Target recovery progress
+            </p>
+            <div className="mt-2 overflow-x-auto">
+              <table className="min-w-full divide-y divide-zinc-200 text-sm">
+                <thead>
+                  <tr className="text-left text-xs uppercase tracking-[0.14em] text-zinc-500">
+                    <th className="pb-2 pr-4">Post</th>
+                    <th className="pb-2 pr-4">Saved</th>
+                    <th className="pb-2 pr-4">Gap</th>
+                    <th className="pb-2 pr-4">Reason</th>
+                    <th className="pb-2">Cursor</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-zinc-200">
+                  {targetProgressRows.map((row, index) => {
+                    const shortcode = String(row.shortcode || row.source_id || `target-${index + 1}`);
+                    const reason = row.latest_reason || row.fetch_reason || row.latest_stop_reason;
+                    return (
+                      <tr key={`${shortcode}-${row.job_id ?? index}`}>
+                        <td className="py-2 pr-4 align-top text-xs font-semibold text-blue-700">{shortcode}</td>
+                        <td className="py-2 pr-4 align-top tabular-nums text-zinc-700">
+                          {formatInteger(readNonNegativeInteger(row.saved_comment_count))} /{" "}
+                          {formatInteger(readNonNegativeInteger(row.reported_comment_count))}
+                        </td>
+                        <td className="py-2 pr-4 align-top tabular-nums text-amber-700">
+                          {formatInteger(readNonNegativeInteger(row.missing_comment_gap))}
+                        </td>
+                        <td className="py-2 pr-4 align-top text-xs text-zinc-600">
+                          {row.network_stopped ? "network stopped" : formatCompactReason(reason)}
+                          {row.status ? ` / ${formatStatusLabel(row.status)}` : ""}
+                        </td>
+                        <td className="py-2 align-top text-xs text-zinc-600">
+                          {row.has_top_level_cursor ? "top-level cursor" : "no top cursor"}
+                          {row.reply_resume_count ? ` / ${formatInteger(row.reply_resume_count)} replies` : ""}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ) : null}
         {shardProgressRows.length > 0 ? (
           <div className="mt-4 border-l-2 border-sky-200 pl-4">
             <p className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500">Shard progress</p>

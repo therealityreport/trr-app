@@ -2,7 +2,11 @@
 
 import { readFile } from "node:fs/promises";
 
-const DEFAULT_APP_ORIGIN = process.env.TRR_APP_ORIGIN || "http://admin.localhost:3000";
+const DEFAULT_APP_ORIGIN =
+  process.env.TRR_APP_ORIGIN ||
+  process.env.ADMIN_APP_ORIGIN ||
+  process.env.PORTLESS_ADMIN_URL ||
+  "https://admin.trr.localhost";
 const DEFAULT_BACKEND_ORIGIN = process.env.TRR_BACKEND_ORIGIN || "http://127.0.0.1:8000";
 const DEFAULT_TIMEOUT_MS = Number.parseInt(process.env.TRR_CAST_SMOKE_PREFLIGHT_TIMEOUT_MS || "20000", 10);
 

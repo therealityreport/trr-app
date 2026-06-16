@@ -15,6 +15,7 @@ import {
   ExternalLink,
   Pencil,
   Plus,
+  RefreshCw,
   Search,
 } from "lucide-react";
 import ClientOnly from "@/components/ClientOnly";
@@ -63,6 +64,7 @@ import type {
   NetworkProfileSet,
   PersonTargetSummary,
   SharedAccountSourceSummary,
+  SharedAccountSourceLoadStatus,
   SocialAccountProgressLaneKey,
   SocialAccountProgressLaneSummary,
   SocialAccountProgressSummary,
@@ -86,7 +88,9 @@ import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 
 const sectionEyebrowClass =
   "text-xs font-semibold uppercase tracking-[0.25em] text-zinc-500";
-const SOCIAL_LANDING_CACHE_KEY = "trr-admin-social-landing:v6";
+const SOCIAL_LANDING_CACHE_KEY = "trr-admin-social-landing:v7";
+const BRAVO_SHARED_SOURCES_RAW_URL =
+  "/api/admin/trr-api/social/shared/sources?source_scope=network&include_inactive=true";
 const DEFAULT_SCRAPE_JOB_HEALTH: ScrapeJobHealthSummary = {
   window_hours: 8,
   window_started_at: null,
@@ -138,6 +142,10 @@ type SharedSourceDraft = {
   platform: SocialLandingPlatform;
   handle: string;
   displayName: string;
+};
+type CachedLandingData = {
+  payload: SocialLandingPayload;
+  cachedAt: string | null;
 };
 const SHOW_SOCIAL_HANDLE_FIELD_BY_PLATFORM: Record<EditableShowSocialPlatform, string> = {
   instagram: "instagram_handle",
@@ -300,6 +308,50 @@ const buildEmptySharedSourceSets = (): SharedAccountSourceSet[] =>
     sources: [],
   }));
 
+const coerceSharedSourceStatus = (
+  value: unknown,
+): SharedAccountSourceLoadStatus[] => {
+  if (!Array.isArray(value)) return [];
+  const statuses: SharedAccountSourceLoadStatus[] = [];
+  for (const entry of value) {
+    if (!entry || typeof entry !== "object") continue;
+    const record = entry as Record<string, unknown>;
+    const sourceScope = record.source_scope;
+    const loadSource = record.load_source;
+    if (
+      sourceScope !== "network" &&
+      sourceScope !== "creator" &&
+      sourceScope !== "news"
+    ) {
+      continue;
+    }
+    if (loadSource !== "backend" && loadSource !== "local_db_fallback") {
+      continue;
+    }
+    statuses.push({
+      source_scope: sourceScope,
+      load_source: loadSource,
+      backend_endpoint:
+        typeof record.backend_endpoint === "string" && record.backend_endpoint.trim()
+          ? record.backend_endpoint.trim()
+          : null,
+      warning:
+        typeof record.warning === "string" && record.warning.trim()
+          ? record.warning.trim()
+          : null,
+      error_code:
+        typeof record.error_code === "string" && record.error_code.trim()
+          ? record.error_code.trim()
+          : null,
+      error_message:
+        typeof record.error_message === "string" && record.error_message.trim()
+          ? record.error_message.trim()
+          : null,
+    });
+  }
+  return statuses;
+};
+
 const coerceLandingPayload = (
   data: Partial<SocialLandingPayload> | undefined,
 ): SocialLandingPayload => ({
@@ -332,6 +384,7 @@ const coerceLandingPayload = (
       ? data.shared_pipeline.review_items
       : [],
   },
+  shared_source_status: coerceSharedSourceStatus(data?.shared_source_status),
   scrape_job_health: {
     ...DEFAULT_SCRAPE_JOB_HEALTH,
     ...(data?.scrape_job_health ?? {}),
@@ -536,6 +589,31 @@ const IconActionLink = ({
   </Tooltip>
 );
 
+const IconActionAnchor = ({
+  href,
+  label,
+  children,
+}: {
+  href: string;
+  label: string;
+  children: ReactNode;
+}) => (
+  <Tooltip>
+    <TooltipTrigger asChild>
+      <a
+        href={href}
+        target="_blank"
+        rel="noreferrer"
+        aria-label={label}
+        className={iconActionClassName}
+      >
+        {children}
+      </a>
+    </TooltipTrigger>
+    <TooltipContent>{label}</TooltipContent>
+  </Tooltip>
+);
+
 const ScrapeJobHealthBadge = ({
   health,
 }: {
@@ -570,6 +648,81 @@ const ScrapeJobHealthBadge = ({
         Post-deploy watch for recent social scrape job failures and InFailedSqlTransaction hits.
       </TooltipContent>
     </Tooltip>
+  );
+};
+
+const SharedSourceFallbackWarning = ({
+  statuses,
+  reloading,
+  reloadMessage,
+  onReload,
+}: {
+  statuses: readonly SharedAccountSourceLoadStatus[];
+  reloading: boolean;
+  reloadMessage: string | null;
+  onReload: () => void;
+}) => {
+  const fallbackStatuses = statuses.filter(
+    (status) => status.load_source === "local_db_fallback",
+  );
+  if (fallbackStatuses.length === 0) return null;
+  const scopeLabels = fallbackStatuses
+    .map((status) =>
+      status.source_scope === "network"
+        ? "Networks"
+        : status.source_scope === "creator"
+          ? "Creators"
+          : "News",
+    )
+    .join(", ");
+  const errorCode = fallbackStatuses
+    .map((status) => status.error_code)
+    .find((code): code is string => Boolean(code));
+  const backendEndpoints = Array.from(
+    new Set(
+      fallbackStatuses
+        .map((status) => status.backend_endpoint)
+        .filter((endpoint): endpoint is string => Boolean(endpoint)),
+    ),
+  );
+
+  return (
+    <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-amber-950">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex min-w-0 gap-3">
+          <AlertTriangle aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-amber-700" />
+          <div className="min-w-0">
+            <p className="text-sm font-semibold">
+              Shared social sources are loading from Supabase fallback.
+            </p>
+            <p className="mt-1 text-xs text-amber-800">
+              {scopeLabels} are visible, but the backend shared-source API is not the active source
+              {errorCode ? ` (${errorCode})` : ""}.
+            </p>
+            {backendEndpoints.length > 0 ? (
+              <p className="mt-1 text-xs text-amber-800">
+                Backend endpoint{backendEndpoints.length === 1 ? "" : "s"}:{" "}
+                <code className="rounded border border-amber-200 bg-white/70 px-1 py-0.5 font-mono text-[11px] text-amber-950">
+                  {backendEndpoints.join(", ")}
+                </code>
+              </p>
+            ) : null}
+            {reloadMessage ? (
+              <p className="mt-1 text-xs font-semibold text-amber-900">{reloadMessage}</p>
+            ) : null}
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={onReload}
+          disabled={reloading}
+          className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border border-amber-300 bg-white px-3 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-amber-900 transition hover:bg-amber-100 disabled:opacity-60"
+        >
+          <RefreshCw aria-hidden="true" className={`size-3.5 ${reloading ? "animate-spin" : ""}`} />
+          {reloading ? "Reloading" : "Reload from Supabase"}
+        </button>
+      </div>
+    </div>
   );
 };
 
@@ -818,32 +971,53 @@ const loadLandingData = async (
   };
 };
 
-const readCachedLandingData = (): SocialLandingPayload | null => {
+const readCachedLandingData = (): CachedLandingData | null => {
   if (typeof window === "undefined") return null;
   try {
     const raw = window.localStorage.getItem(SOCIAL_LANDING_CACHE_KEY);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as { payload?: SocialLandingPayload } | null;
+    const parsed = JSON.parse(raw) as
+      | { payload?: SocialLandingPayload; cached_at?: unknown }
+      | null;
     const payload = parsed?.payload;
     if (!payload || typeof payload !== "object") return null;
-    return coerceLandingPayload(payload);
+    return {
+      payload: coerceLandingPayload(payload),
+      cachedAt:
+        typeof parsed.cached_at === "string" && parsed.cached_at.trim()
+          ? parsed.cached_at.trim()
+          : null,
+    };
   } catch {
     return null;
   }
 };
 
-const writeCachedLandingData = (payload: SocialLandingPayload): void => {
-  if (typeof window === "undefined") return;
+const writeCachedLandingData = (
+  payload: SocialLandingPayload,
+  cachedAt = new Date().toISOString(),
+): string => {
+  if (typeof window === "undefined") return cachedAt;
   try {
     window.localStorage.setItem(
       SOCIAL_LANDING_CACHE_KEY,
       JSON.stringify({
-        cached_at: new Date().toISOString(),
+        cached_at: cachedAt,
         payload,
       }),
     );
   } catch {
     // Ignore localStorage failures and keep the live response.
+  }
+  return cachedAt;
+};
+
+const clearCachedLandingData = (): void => {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.removeItem(SOCIAL_LANDING_CACHE_KEY);
+  } catch {
+    // Ignore localStorage failures; the server refresh still runs.
   }
 };
 
@@ -1841,8 +2015,11 @@ const NetworkSourceGroupCard = ({
 export default function AdminSocialMediaPage() {
   const { user, checking, hasAccess } = useAdminGuard();
   const [landing, setLanding] = useState<SocialLandingPayload | null>(null);
+  const [landingFreshnessAt, setLandingFreshnessAt] = useState<string | null>(null);
   const [loadingLanding, setLoadingLanding] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [reloadingSharedSources, setReloadingSharedSources] = useState(false);
+  const [sharedSourceReloadMessage, setSharedSourceReloadMessage] = useState<string | null>(null);
   const [addHandleDialogOpen, setAddHandleDialogOpen] = useState(false);
   const [addHandleTargetKey, setAddHandleTargetKey] = useState("");
   const [addHandlePlatform, setAddHandlePlatform] =
@@ -1856,9 +2033,11 @@ export default function AdminSocialMediaPage() {
     if (checking || !user || !hasAccess) return;
 
     let cancelled = false;
-    const cachedPayload = readCachedLandingData();
-    if (cachedPayload) {
-      setLanding(cachedPayload);
+    const cachedLanding = readCachedLandingData();
+    const cachedPayload = cachedLanding?.payload ?? null;
+    if (cachedLanding) {
+      setLanding(cachedLanding.payload);
+      setLandingFreshnessAt(cachedLanding.cachedAt);
       setLoadingLanding(false);
     }
     const load = async () => {
@@ -1867,13 +2046,14 @@ export default function AdminSocialMediaPage() {
         setLoadError(null);
       }
       try {
-        const { payload, cacheable } = await loadLandingData(user, {
-          refresh: Boolean(cachedPayload),
-        });
+        const { payload, cacheable } = await loadLandingData(user);
         if (cancelled) return;
         setLanding(payload);
+        const loadedAt = new Date().toISOString();
         if (cacheable) {
-          writeCachedLandingData(payload);
+          setLandingFreshnessAt(writeCachedLandingData(payload, loadedAt));
+        } else {
+          setLandingFreshnessAt(loadedAt);
         }
         setLoadError(null);
       } catch (error) {
@@ -1933,15 +2113,18 @@ export default function AdminSocialMediaPage() {
           entry.show_id === show.show_id ? optimisticShow : entry,
         ),
       };
-      writeCachedLandingData(nextPayload);
+      setLandingFreshnessAt(writeCachedLandingData(nextPayload));
       return nextPayload;
     });
 
     void loadLandingData(user)
       .then(({ payload, cacheable }) => {
         setLanding(payload);
+        const loadedAt = new Date().toISOString();
         if (cacheable) {
-          writeCachedLandingData(payload);
+          setLandingFreshnessAt(writeCachedLandingData(payload, loadedAt));
+        } else {
+          setLandingFreshnessAt(loadedAt);
         }
       })
       .catch(() => {
@@ -1980,8 +2163,46 @@ export default function AdminSocialMediaPage() {
     const nextPayload = coerceLandingPayload(data);
     const cacheable = response.headers.get("x-trr-cacheable") !== "0";
     setLanding(nextPayload);
+    const loadedAt = new Date().toISOString();
     if (cacheable) {
-      writeCachedLandingData(nextPayload);
+      setLandingFreshnessAt(writeCachedLandingData(nextPayload, loadedAt));
+    } else {
+      setLandingFreshnessAt(loadedAt);
+    }
+  };
+
+  const reloadSharedSourcesFromSupabase = async () => {
+    if (!user) return;
+    setReloadingSharedSources(true);
+    setSharedSourceReloadMessage(null);
+    setLoadError(null);
+    clearCachedLandingData();
+    try {
+      const { payload, cacheable } = await loadLandingData(user, { refresh: true });
+      setLanding(payload);
+      const loadedAt = new Date().toISOString();
+      if (cacheable) {
+        setLandingFreshnessAt(writeCachedLandingData(payload, loadedAt));
+      } else {
+        setLandingFreshnessAt(loadedAt);
+      }
+      const fallbackCount =
+        payload.shared_source_status?.filter(
+          (status) => status.load_source === "local_db_fallback",
+        ).length ?? 0;
+      setSharedSourceReloadMessage(
+        fallbackCount > 0
+          ? "Reloaded saved Supabase rows; backend source is still unavailable."
+          : "Reloaded from backend shared-source API.",
+      );
+    } catch (error) {
+      setLoadError(
+        error instanceof Error
+          ? error.message
+          : "Failed to reload shared social sources",
+      );
+    } finally {
+      setReloadingSharedSources(false);
     }
   };
 
@@ -1990,6 +2211,7 @@ export default function AdminSocialMediaPage() {
   const personTargets = landing?.person_targets ?? [];
   const castSocialBladeShows = landing?.cast_socialblade_shows ?? [];
   const sharedSourceSets = landing?.shared_source_sets ?? buildEmptySharedSourceSets();
+  const sharedSourceStatus = landing?.shared_source_status ?? [];
   const scrapeJobHealth = landing?.scrape_job_health ?? DEFAULT_SCRAPE_JOB_HEALTH;
   const networkSourceSet =
     sharedSourceSets.find((sourceSet) => sourceSet.source_scope === "network") ?? {
@@ -2089,8 +2311,11 @@ export default function AdminSocialMediaPage() {
       const nextPayload = coerceLandingPayload(data);
       const cacheable = response.headers.get("x-trr-cacheable") !== "0";
       setLanding(nextPayload);
+      const loadedAt = new Date().toISOString();
       if (cacheable) {
-        writeCachedLandingData(nextPayload);
+        setLandingFreshnessAt(writeCachedLandingData(nextPayload, loadedAt));
+      } else {
+        setLandingFreshnessAt(loadedAt);
       }
       setAddHandleValue("");
       setAddHandleMessage(
@@ -2224,6 +2449,15 @@ export default function AdminSocialMediaPage() {
             </div>
           ) : (
             <div className="space-y-6">
+              <SharedSourceFallbackWarning
+                statuses={sharedSourceStatus}
+                reloading={reloadingSharedSources}
+                reloadMessage={sharedSourceReloadMessage}
+                onReload={() => {
+                  void reloadSharedSourcesFromSupabase();
+                }}
+              />
+
               <section className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
                 <div className="mb-4 flex items-center justify-between gap-3">
                   <div>
@@ -2251,48 +2485,77 @@ export default function AdminSocialMediaPage() {
                 </div>
 
                 <div className="space-y-4">
-                  {networkSets.map((network) => (
-                    <div
-                      key={network.key}
-                      className="rounded-2xl border border-zinc-200 bg-zinc-50 p-5"
-                    >
-                      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                        <div>
-                          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">
-                            Profile Set
-                          </p>
-                          <h3 className="text-lg font-semibold text-zinc-900">
-                            {network.title}
-                          </h3>
+                  {networkSets.map((network) => {
+                    const isBravoTvSet = network.key === "bravo-tv";
+                    const linkedProfileCount =
+                      networkSourceSet.key === network.key
+                        ? networkSourceSet.sources.length
+                        : network.handles.length;
+                    const freshnessLabel = isBravoTvSet
+                      ? formatCompactTimestamp(landingFreshnessAt)
+                      : null;
+                    return (
+                      <div
+                        key={network.key}
+                        className="rounded-2xl border border-zinc-200 bg-zinc-50 p-5"
+                      >
+                        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                          <div>
+                            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">
+                              Profile Set
+                            </p>
+                            <h3 className="text-lg font-semibold text-zinc-900">
+                              {network.title}
+                            </h3>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+                            <span className="w-fit rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs font-semibold text-zinc-600">
+                              {linkedProfileCount.toLocaleString()} linked profile
+                              {linkedProfileCount === 1 ? "" : "s"}
+                            </span>
+                            {freshnessLabel ? (
+                              <span className="w-fit rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs font-semibold text-zinc-500">
+                                Loaded {freshnessLabel}
+                              </span>
+                            ) : null}
+                            {isBravoTvSet ? (
+                              <IconActionAnchor
+                                href={BRAVO_SHARED_SOURCES_RAW_URL}
+                                label="Open raw Bravo TV shared-source rows"
+                              >
+                                <ExternalLink aria-hidden="true" />
+                              </IconActionAnchor>
+                            ) : null}
+                          </div>
                         </div>
-                      </div>
 
-                      {networkSourceGroups.length > 0 ? (
-                        <div className="mt-4 grid gap-3 xl:grid-cols-2">
-                          {networkSourceGroups.map((group) => (
-                            <NetworkSourceGroupCard
-                              key={`${network.key}:${group.key}`}
-                              group={group}
-                              networkKey={network.key}
-                            />
-                          ))}
-                        </div>
-                      ) : network.handles.length > 0 ? (
-                        <div className="mt-4 grid gap-3 xl:grid-cols-2">
-                          {network.handles.map((handle) => (
-                            <HandleInventoryCard
-                              key={`${network.key}:${handle.platform}:${handle.handle}`}
-                              handle={handle}
-                            />
-                          ))}
-                        </div>
-                      ) : (
-                        <p className="mt-4 text-sm text-zinc-500">
-                          No linked profiles are configured for this set.
-                        </p>
-                      )}
-                    </div>
-                  ))}
+                        {networkSourceGroups.length > 0 ? (
+                          <div className="mt-4 grid gap-3 xl:grid-cols-2">
+                            {networkSourceGroups.map((group) => (
+                              <NetworkSourceGroupCard
+                                key={`${network.key}:${group.key}`}
+                                group={group}
+                                networkKey={network.key}
+                              />
+                            ))}
+                          </div>
+                        ) : network.handles.length > 0 ? (
+                          <div className="mt-4 grid gap-3 xl:grid-cols-2">
+                            {network.handles.map((handle) => (
+                              <HandleInventoryCard
+                                key={`${network.key}:${handle.platform}:${handle.handle}`}
+                                handle={handle}
+                              />
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="mt-4 text-sm text-zinc-500">
+                            No linked profiles are configured for this set.
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               </section>
 

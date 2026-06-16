@@ -74,6 +74,10 @@ const isLandingPlatform = (value: unknown): value is LandingPlatform =>
 const isSharedSourceTargetScope = (value: unknown): value is SharedSourceTargetScope =>
   value === "news" || value === "creator";
 
+const hasSharedSourceFallbackStatus = (payload: SocialLandingPayloadResult["payload"]): boolean =>
+  Array.isArray(payload.shared_source_status) &&
+  payload.shared_source_status.some((status) => status.load_source === "local_db_fallback");
+
 const normalizeInternalHandle = (platform: LandingPlatform, rawValue: string): string => {
   const normalizedValue = normalizePersonExternalIdValue(platform, rawValue);
   if (!normalizedValue) {
@@ -417,7 +421,12 @@ export async function GET(request: NextRequest) {
       }
       throw error;
     }
-    if (!result.cacheable && staleCached && !shouldRefresh) {
+    if (
+      !result.cacheable &&
+      staleCached &&
+      !shouldRefresh &&
+      !hasSharedSourceFallbackStatus(result.payload)
+    ) {
       return NextResponse.json(staleCached, {
         headers: { "x-trr-cache": "stale", "x-trr-cacheable": "0" },
       });

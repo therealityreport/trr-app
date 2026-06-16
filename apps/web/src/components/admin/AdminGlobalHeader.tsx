@@ -10,6 +10,10 @@ import { HealthIndicator } from "@/components/admin/SystemHealthModal";
 import SystemHealthModal from "@/components/admin/SystemHealthModal";
 import { ADMIN_NAV_ITEMS } from "@/lib/admin/admin-navigation";
 import { ADMIN_ROOT_PATH } from "@/lib/admin/admin-route-paths";
+import {
+  isPortfulPortlessAdminFallback,
+  PORTLESS_ADMIN_ORIGIN,
+} from "@/lib/admin/admin-url-defaults";
 import { buildTypographyDataAttributes } from "@/lib/typography/runtime";
 import {
   readAdminRecentShows,
@@ -34,6 +38,23 @@ export default function AdminGlobalHeader({ children, bodyClassName = "px-6 py-6
   const [menuOpen, setMenuOpen] = useState(false);
   const [healthOpen, setHealthOpen] = useState(false);
   const [recentShows, setRecentShows] = useState<AdminRecentShowEntry[]>([]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (
+      !isPortfulPortlessAdminFallback({
+        hostname: window.location.hostname,
+        port: window.location.port,
+      })
+    ) {
+      return;
+    }
+    const cleanUrl = `${PORTLESS_ADMIN_ORIGIN}${window.location.pathname}${window.location.search}${window.location.hash}`;
+    console.warn("[admin-url] Portful admin fallback detected. Use the Portless admin URL instead.", {
+      current_url: window.location.href,
+      clean_admin_url: cleanUrl,
+    });
+  }, []);
 
   useEffect(() => {
     setRecentShows(readAdminRecentShows());

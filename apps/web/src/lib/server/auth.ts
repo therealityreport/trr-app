@@ -17,6 +17,13 @@ import type { DecodedIdToken } from "firebase-admin/auth";
 import { adminAuth } from "@/lib/firebaseAdmin";
 import { DEFAULT_ADMIN_DISPLAY_NAMES, DEFAULT_ADMIN_UIDS } from "@/lib/admin/constants";
 import { normalizeDisplayNameKey } from "@/lib/admin/display-names";
+import {
+  isLoopbackAdminHost,
+  normalizeAdminHost,
+  normalizeAdminOrigin,
+  parseAdminHostAllowlist,
+  resolveDefaultAdminOrigin,
+} from "@/lib/admin/admin-url-defaults";
 import { getTrrAdminServiceKey, getTrrAdminUrl } from "@/lib/server/supabase-trr-admin";
 import {
   resolveVerifiedAdminContext,
@@ -28,7 +35,9 @@ export type AuthTokenClaims = {
   uid: string;
   sub?: string;
   email?: string;
+  email_verified?: boolean;
   name?: string;
+  admin?: boolean;
   [key: string]: unknown;
 };
 
@@ -471,11 +480,6 @@ function isLocalHostname(value: string | null | undefined): boolean {
   );
 }
 
-function isLoopbackHost(value: string | null | undefined): boolean {
-  if (!value) return false;
-  return LOOPBACK_HOSTS.has(value.trim().toLowerCase());
-}
-
 function parseOptionalBoolean(value: string | undefined): boolean | null {
   if (typeof value !== "string") return null;
   const normalized = value.trim().toLowerCase();
@@ -489,63 +493,22 @@ function parseOptionalBoolean(value: string | undefined): boolean | null {
   return null;
 }
 
-function normalizeHost(value: string | null | undefined): string | null {
-  if (!value) return null;
-  const normalized = value.trim().toLowerCase();
-  if (!normalized) return null;
-
-  // Bracketed IPv6 form from URL.hostname / Host header.
-  if (normalized.startsWith("[")) {
-    const closingBracket = normalized.indexOf("]");
-    if (closingBracket >= 0) {
-      return normalized.slice(0, closingBracket + 1);
-    }
-  }
-
-  // host:port (single-colon non-IPv6 host)
-  const firstColon = normalized.indexOf(":");
-  const lastColon = normalized.lastIndexOf(":");
-  if (firstColon > -1 && firstColon === lastColon) {
-    const maybePort = normalized.slice(lastColon + 1);
-    if (/^\d+$/.test(maybePort)) {
-      return normalized.slice(0, lastColon);
-    }
-  }
-
-  return normalized;
-}
-
 function parseHostAllowlist(raw: string | undefined): Set<string> {
-  return new Set(
-    (raw ?? "")
-      .split(",")
-      .map((entry) => normalizeHost(entry))
-      .filter((entry): entry is string => Boolean(entry)),
-  );
-}
-
-function resolveDefaultAdminOrigin(): string | null {
-  if (process.env.NODE_ENV === "development") return "http://admin.localhost:3000";
-  const configuredBaseDomain = normalizeHost(process.env.ADMIN_APP_BASE_DOMAIN);
-  if (configuredBaseDomain) {
-    const adminHostPrefix = process.env.ADMIN_APP_HOST_PREFIX?.trim() || "admin";
-    return `https://${adminHostPrefix}.${configuredBaseDomain}`;
-  }
-  return null;
+  return parseAdminHostAllowlist(raw);
 }
 
 function resolveAdminAllowedHosts(): Set<string> {
   const hosts = parseHostAllowlist(process.env.ADMIN_APP_HOSTS);
   if (hosts.size === 0 && process.env.NODE_ENV === "development") {
     for (const host of DEFAULT_DEV_ADMIN_ALLOWED_HOSTS) {
-      const normalizedHost = normalizeHost(host);
+      const normalizedHost = normalizeAdminHost(host);
       if (normalizedHost) hosts.add(normalizedHost);
     }
   }
-  const configuredOrigin = process.env.ADMIN_APP_ORIGIN?.trim() || resolveDefaultAdminOrigin();
+  const configuredOrigin = normalizeAdminOrigin(process.env.ADMIN_APP_ORIGIN) || resolveDefaultAdminOrigin();
   if (configuredOrigin) {
     try {
-      const originHost = normalizeHost(new URL(configuredOrigin).hostname);
+      const originHost = normalizeAdminHost(new URL(configuredOrigin).hostname);
       if (originHost) hosts.add(originHost);
     } catch {
       // Ignore invalid origin values; host allowlist can still come from ADMIN_APP_HOSTS.
@@ -564,15 +527,22 @@ const adminAllowedHosts = resolveAdminAllowedHosts();
 
 function isRequestHostAllowedForAdmin(request: NextRequest): boolean {
   if (!isAdminHostEnforced()) return true;
-  const requestHost = normalizeHost(request.headers.get("host")) ?? normalizeHost(request.nextUrl.hostname);
+  const requestHost = normalizeAdminHost(requestAdminHost(request)) ?? normalizeAdminHost(request.nextUrl.hostname);
   if (!requestHost) return false;
   if (adminAllowedHosts.size === 0) return true;
   if (adminAllowedHosts.has(requestHost)) return true;
-  if (!isLoopbackHost(requestHost)) return false;
-  return Array.from(adminAllowedHosts).some((allowedHost) => isLoopbackHost(allowedHost));
+  if (!isLoopbackAdminHost(requestHost)) return false;
+  return Array.from(adminAllowedHosts).some((allowedHost) => isLoopbackAdminHost(allowedHost));
+}
+
+function requestAdminHost(request: NextRequest): string | null {
+  return request.headers.get("x-forwarded-host") ?? request.headers.get("host") ?? request.nextUrl.hostname;
 }
 
 function isDevAdminBypassEnabled(request: NextRequest): boolean {
+  // Production deployments never honor the bypass, regardless of flags or
+  // host: Host headers are attacker-controllable and provide no security.
+  if (process.env.VERCEL_ENV === "production") return false;
   const requestHost = request.nextUrl.hostname;
   const hostHeader = request.headers.get("host");
   const hostWithoutPort = hostHeader?.split(":")[0] ?? hostHeader;
@@ -580,6 +550,17 @@ function isDevAdminBypassEnabled(request: NextRequest): boolean {
   if (!isLocalRequest) return false;
   if (process.env.NODE_ENV !== "production") return true;
   return parseOptionalBoolean(process.env.TRR_DEV_ADMIN_BYPASS) === true;
+}
+
+// Refuse to serve if a production deployment is configured with the dev
+// bypass flag — fail loudly at module load instead of silently ignoring it.
+if (
+  process.env.VERCEL_ENV === "production" &&
+  parseOptionalBoolean(process.env.TRR_DEV_ADMIN_BYPASS) === true
+) {
+  throw new Error(
+    "TRR_DEV_ADMIN_BYPASS must not be set on production deployments (VERCEL_ENV=production).",
+  );
 }
 
 function buildDevBypassUser(provider: AuthProvider = "firebase"): AuthenticatedUser {
@@ -678,6 +659,9 @@ const allowedUids = new Set<string>([
   ...parseAllowlist(process.env.NEXT_PUBLIC_ADMIN_UIDS, false),
 ]);
 
+// Diagnostics/observability only — display names are NOT an authorization
+// input (removed from requireAdmin: attacker-controlled Firebase displayName
+// was a privilege-escalation vector).
 const allowedDisplayNameKeys = new Set<string>(
   [
     ...DEFAULT_ADMIN_DISPLAY_NAMES,
@@ -735,7 +719,7 @@ export async function requireAdmin(request: NextRequest): Promise<AuthenticatedU
     throw new Error("forbidden");
   }
 
-  const propagatedContext = resolveVerifiedAdminContext(request.headers);
+  const propagatedContext = resolveVerifiedAdminContext(request.headers, requestAdminHost(request));
   if (propagatedContext) {
     return buildPropagatedAuthenticatedUser(propagatedContext);
   }
@@ -751,12 +735,11 @@ export async function requireAdmin(request: NextRequest): Promise<AuthenticatedU
 
   const user = await requireUser(request);
   const email = user.email?.toLowerCase();
-  const emailAllowed = Boolean(email && allowedEmails.has(email));
+  const emailVerified = user.token.email_verified === true;
+  const emailAllowed = Boolean(email && emailVerified && allowedEmails.has(email));
   const uidAllowed = Boolean(user.uid && allowedUids.has(user.uid));
-  const displayName = typeof user.token.name === "string" ? user.token.name : undefined;
-  const displayNameKey = normalizeDisplayNameKey(displayName);
-  const displayNameAllowed = Boolean(displayNameKey && allowedDisplayNameKeys.has(displayNameKey));
-  const isAllowed = emailAllowed || uidAllowed || displayNameAllowed;
+  const customClaimAdmin = user.token.admin === true;
+  const isAllowed = emailAllowed || uidAllowed || customClaimAdmin;
   if (!isAllowed) {
     throw new Error("forbidden");
   }
@@ -764,7 +747,13 @@ export async function requireAdmin(request: NextRequest): Promise<AuthenticatedU
 }
 
 export async function requireAdminContext(request: NextRequest): Promise<VerifiedAdminContext> {
-  const propagatedContext = resolveVerifiedAdminContext(request.headers);
+  // Host allowlist applies to every admin entry point, including the
+  // propagated internal-admin JWT — a leaked shared secret must not become a
+  // host-independent admin credential.
+  if (!isRequestHostAllowedForAdmin(request)) {
+    throw new Error("forbidden");
+  }
+  const propagatedContext = resolveVerifiedAdminContext(request.headers, requestAdminHost(request));
   if (propagatedContext) {
     return propagatedContext;
   }
