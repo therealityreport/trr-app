@@ -12413,13 +12413,13 @@ it("uses the newest inspected catalog run from the summary when discovery outran
         expect(body).toMatchObject({
           source_scope: "network",
           backfill_scope: "bounded_window",
+          date_start: "2025-11-01T00:00:00.000Z",
+          date_end: "2026-06-30T23:59:59.999Z",
           selected_tasks: [...INSTAGRAM_BACKFILL_DEFAULT_TASKS],
           detail_worker_count: 8,
           comments_worker_count: 8,
           comments_enable_media_followups: true,
         });
-        expect(typeof body.date_start).toBe("string");
-        expect(typeof body.date_end).toBe("string");
         return jsonResponse({
           run_id: "catalog-run-drift-12345678",
           status: "queued",
@@ -12451,6 +12451,9 @@ it("uses the newest inspected catalog run from the summary when discovery outran
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Start Backfill" })).toBeInTheDocument();
     });
+    fireEvent.change(screen.getByLabelText(/Start month/i), { target: { value: "2025-11" } });
+    fireEvent.change(screen.getByLabelText(/End month/i), { target: { value: "2026-06" } });
+    expect(screen.getByText(/Selected: 11-2025 to 06-2026/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Start Backfill" }));
 
     await waitFor(() => {

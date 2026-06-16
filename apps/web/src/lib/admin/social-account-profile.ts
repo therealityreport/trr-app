@@ -621,7 +621,12 @@ export type SocialAccountCommentsShardProgress = {
   items_found_total?: number | null;
   queue_wait_seconds?: number | null;
   posts_per_minute?: number | null;
+  posts_per_second?: number | null;
   comments_per_minute?: number | null;
+  comments_per_second?: number | null;
+  average_seconds_per_post?: number | null;
+  average_seconds_per_comment?: number | null;
+  estimated_seconds_remaining?: number | null;
   latest_failure_reason?: string | null;
   latest_fetch_reason?: string | null;
   fetch_reason_counts?: Record<string, number | null | undefined> | null;
@@ -658,6 +663,16 @@ export type SocialAccountCommentsNetworkSpend = {
   top_hosts?: SocialAccountCommentsNetworkSpendHost[];
   network_policy_modes?: Record<string, number | null | undefined> | null;
   spend_basis?: string | null;
+};
+
+export type SocialAccountInstagramAccessProof = {
+  auth_state?: string | null;
+  cookie_state?: string | null;
+  proxy_state?: string | null;
+  decodo_state?: string | null;
+  no_cookies?: boolean | null;
+  no_decodo?: boolean | null;
+  proof_label?: string | null;
 };
 
 export type SocialAccountCommentsTargetProgressRow = {
@@ -745,8 +760,26 @@ export type SocialAccountCommentsRunProgress = {
   throughput?: {
     elapsed_seconds?: number;
     posts_per_minute?: number | null;
+    posts_per_second?: number | null;
     comments_per_minute?: number | null;
+    comments_per_second?: number | null;
+    average_seconds_per_post?: number | null;
+    average_seconds_per_comment?: number | null;
+    remaining_posts?: number | null;
+    estimated_seconds_remaining?: number | null;
   };
+  worker_counters?: {
+    total?: number | null;
+    active?: number | null;
+    running?: number | null;
+    queued?: number | null;
+    retrying?: number | null;
+    completed?: number | null;
+    cancelled?: number | null;
+    failed?: number | null;
+    stale?: number | null;
+  } | null;
+  instagram_access_proof?: SocialAccountInstagramAccessProof | null;
   cancellation_summary?: {
     cancelled_jobs?: number;
     failed_jobs?: number;
