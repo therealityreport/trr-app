@@ -50,8 +50,8 @@
     "@firebase/firestore": "4.15.0",
     "@firebase/logger": "0.5.1",
     "@firebase/util": "1.15.1",
-    "@sentry/nextjs": "^10.57.0",
-    "@supabase/supabase-js": "^2.108.1",
+    "@sentry/nextjs": "^10.58.0",
+    "@supabase/supabase-js": "^2.108.2",
     "@vercel/functions": "^3.7.1",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
@@ -72,7 +72,7 @@
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.5",
-    "@playwright/test": "^1.60.0",
+    "@playwright/test": "^1.61.0",
     "@tailwindcss/postcss": "^4.3.1",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
@@ -89,7 +89,7 @@
     "typescript": "^5.9.3",
     "vite": "^7.3.5",
     "vite-tsconfig-paths": "^6.1.1",
-    "vitest": "^4.1.8",
+    "vitest": "^4.1.9",
     "vitest-axe": "^0.1.0",
     "yaml": "^2.9.0"
   },
