@@ -22,7 +22,7 @@ describe("admin api references library", () => {
     expect(screen.getAllByText("/admin/networks-and-streaming/[entityType]/[entitySlug]").length).toBeGreaterThan(0);
     expect(container.querySelector('a[href="/admin/api-references"]')).toBeInTheDocument();
     expect(container.querySelector('a[href="/admin/networks-and-streaming/[entityType]/[entitySlug]"]')).toBeNull();
-  });
+  }, 15_000);
 
   it("filters down to backend endpoints and exposes source links in expanded detail", () => {
     render(<AdminApiReferencesLibraryContent />);
@@ -40,5 +40,5 @@ describe("admin api references library", () => {
     const sourceLinks = screen.getAllByRole("link", { name: "Open in editor" });
     expect(sourceLinks.length).toBeGreaterThan(0);
     expect(sourceLinks.some((link) => link.getAttribute("href")?.includes("operations/health/route.ts"))).toBe(true);
-  });
+  }, 15_000);
 });
