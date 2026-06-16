@@ -562,7 +562,8 @@ describe("admin reddit window posts page", () => {
     render(<AdminRedditWindowPostsPage />);
     await screen.findByText("No posts found for this window yet.");
 
-    fireEvent.click(screen.getByRole("button", { name: "Sync Posts" }));
+    const syncButton = await screen.findByRole("button", { name: "Sync Posts" });
+    fireEvent.click(syncButton);
 
     await waitFor(() => {
       const syncPostsCall = fetchAdminWithAuthMock.mock.calls.find((call) => {
