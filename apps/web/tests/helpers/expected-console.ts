@@ -7,6 +7,18 @@ type ExpectedConsoleCapture = {
 
 type ConsoleMethod = "error" | "info" | "log" | "warn";
 
+type ConsoleCaptureEntry = {
+  matchedCalls: unknown[][];
+  pattern: RegExp;
+};
+
+type ConsoleSpyState = {
+  entries: ConsoleCaptureEntry[];
+  spy: ReturnType<typeof vi.spyOn>;
+};
+
+const consoleSpyStates = new Map<ConsoleMethod, ConsoleSpyState>();
+
 const formatConsoleArg = (arg: unknown): string => {
   if (arg instanceof Error) {
     return `${arg.name}: ${arg.message}`;
@@ -22,24 +34,53 @@ const formatConsoleArg = (arg: unknown): string => {
 };
 
 const captureExpectedConsole = (method: ConsoleMethod, pattern: RegExp): ExpectedConsoleCapture => {
-  const originalConsoleMethod = console[method];
-  const matchedCalls: unknown[][] = [];
-  const spy = vi.spyOn(console, method).mockImplementation((...args: unknown[]) => {
-    const text = args.map(formatConsoleArg).join(" ");
-    if (pattern.test(text)) {
-      matchedCalls.push(args);
+  let state = consoleSpyStates.get(method);
+  if (!state) {
+    const originalConsoleMethod = console[method].bind(console);
+    const entries: ConsoleCaptureEntry[] = [];
+    const spy = vi.spyOn(console, method).mockImplementation((...args: unknown[]) => {
+      const text = args.map(formatConsoleArg).join(" ");
+      let matched = false;
+      for (const entry of entries) {
+        entry.pattern.lastIndex = 0;
+        if (entry.pattern.test(text)) {
+          entry.matchedCalls.push(args);
+          matched = true;
+        }
+      }
+      if (!matched) {
+        originalConsoleMethod(...args);
+      }
+    });
+    state = { entries, spy };
+    consoleSpyStates.set(method, state);
+  }
+
+  const entry: ConsoleCaptureEntry = { matchedCalls: [], pattern };
+  state.entries.push(entry);
+
+  const release = () => {
+    const current = consoleSpyStates.get(method);
+    if (!current) {
       return;
     }
-    originalConsoleMethod(...args);
-  });
+    const index = current.entries.indexOf(entry);
+    if (index >= 0) {
+      current.entries.splice(index, 1);
+    }
+    if (current.entries.length === 0) {
+      current.spy.mockRestore();
+      consoleSpyStates.delete(method);
+    }
+  };
 
   return {
     expectCalled: () => {
-      expect(matchedCalls.length).toBeGreaterThan(0);
-      spy.mockRestore();
+      expect(entry.matchedCalls.length).toBeGreaterThan(0);
+      release();
     },
     restore: () => {
-      spy.mockRestore();
+      release();
     },
   };
 };
