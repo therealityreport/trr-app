@@ -1,0 +1,37 @@
+import { NextRequest, NextResponse } from "next/server";
+import { requireAdmin } from "@/lib/server/auth";
+import {
+  fetchSocialBackendJson,
+  SOCIAL_PROXY_DEFAULT_TIMEOUT_MS,
+  socialProxyErrorResponse,
+} from "@/lib/server/trr-api/social-admin-proxy";
+
+export const dynamic = "force-dynamic";
+
+type RouteContext = {
+  params: Promise<{ platform: string; handle: string; runId: string }>;
+};
+
+export async function POST(request: NextRequest, context: RouteContext) {
+  const { platform, handle, runId } = await context.params;
+
+  try {
+    await requireAdmin(request);
+    const requestBody = await request.text();
+    const body = requestBody.trim() ? requestBody : "{}";
+    const data = await fetchSocialBackendJson(
+      `/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/comments/runs/${encodeURIComponent(runId)}/guarded-restart`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body,
+        fallbackError: "Failed to restart social account comments run",
+        retries: 0,
+        timeoutMs: SOCIAL_PROXY_DEFAULT_TIMEOUT_MS,
+      },
+    );
+    return NextResponse.json(data);
+  } catch (error) {
+    return socialProxyErrorResponse(error, "[api] Failed to restart social account comments run");
+  }
+}

@@ -1935,6 +1935,150 @@ describe("SocialAccountProfilePage", () => {
     expect(await screen.findByRole("heading", { name: "Active Comments Run" })).toBeInTheDocument();
   });
 
+  it("offers a public-only guarded restart for an active comments run and posts the public-relay window", async () => {
+    const runId = "comments-run-active-restart-1234";
+    const restartCalls: { url: string; body: Record<string, unknown> }[] = [];
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const activeSummary = {
+      ...baseSummary,
+      comments_coverage: {
+        ...baseSummary.comments_coverage,
+        active_run_id: runId,
+        effective_status: "running",
+      },
+      top_hashtags: [],
+    };
+
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/snapshot")) {
+        return profileSnapshotResponse(activeSummary);
+      }
+      if (url.includes("/summary")) {
+        return jsonResponse(activeSummary);
+      }
+      if (url.includes("/comments/runs/") && url.includes("/guarded-restart")) {
+        const parsedBody =
+          init?.body && typeof init.body === "string"
+            ? (JSON.parse(init.body) as Record<string, unknown>)
+            : {};
+        restartCalls.push({ url, body: parsedBody });
+        return jsonResponse({ old_run_id: runId, new_run_id: "comments-run-restarted-9999" });
+      }
+      if (url.includes("/posts?page=1&page_size=25&comments_only=true")) {
+        return jsonResponse({ items: [], pagination: { page: 1, page_size: 25, total: 0, total_pages: 1 } });
+      }
+      if (url.includes(`/comments/runs/${runId}/progress`)) {
+        return jsonResponse({
+          run_id: runId,
+          platform: "instagram",
+          account_handle: "bravotv",
+          run_status: "running",
+          job_status: "running",
+          date_start: "2025-01-01T00:00:00Z",
+          date_end: "2027-01-01T00:00:00Z",
+          target_filter: "incomplete",
+          target_source_ids_count: 12,
+          comments_shard_count: 4,
+          active_comment_jobs: 2,
+          post_progress: { completed_posts: 5, total_posts: 12 },
+        });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="comments" />);
+
+    const restartButton = await screen.findByTestId("restart-comments-run-button");
+    expect(restartButton).toBeInTheDocument();
+    expect(restartButton).toHaveTextContent("Restart Comments Run");
+
+    // public-only proof copy must be visible.
+    const proof = await screen.findByTestId("restart-comments-run-public-only-proof");
+    expect(proof.textContent).toMatch(/public relay only/i);
+    expect(proof.textContent).toMatch(/no cookies/i);
+    expect(proof.textContent).toMatch(/no Decodo/i);
+
+    fireEvent.click(restartButton);
+
+    await waitFor(() => {
+      expect(restartCalls.length).toBe(1);
+    });
+    const restartCall = restartCalls[0];
+    expect(restartCall.url).toContain(
+      `/api/admin/trr-api/social/profiles/instagram/bravotv/comments/runs/${runId}/guarded-restart`,
+    );
+    expect(restartCall.body).toMatchObject({
+      date_start: "2025-01-01T00:00:00Z",
+      date_end: "2027-01-01T00:00:00Z",
+      comments_worker_count: 12,
+      comments_target_batch_size: 10,
+      comments_load_strategy: "public_relay",
+      target_filter: "incomplete",
+    });
+
+    confirmSpy.mockRestore();
+  });
+
+  it("offers the guarded restart for a public-blocked-paused comments run and surfaces the pause reason", async () => {
+    const runId = "comments-run-paused-restart-5678";
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const pausedSummary = {
+      ...baseSummary,
+      comments_coverage: {
+        ...baseSummary.comments_coverage,
+        active_run_id: runId,
+        effective_status: "paused",
+      },
+      top_hashtags: [],
+    };
+
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/snapshot")) {
+        return profileSnapshotResponse(pausedSummary);
+      }
+      if (url.includes("/summary")) {
+        return jsonResponse(pausedSummary);
+      }
+      if (url.includes("/posts?page=1&page_size=25&comments_only=true")) {
+        return jsonResponse({ items: [], pagination: { page: 1, page_size: 25, total: 0, total_pages: 1 } });
+      }
+      if (url.includes(`/comments/runs/${runId}/progress`)) {
+        // Public blocks paused the run via dispatch_control; it is not an active status.
+        return jsonResponse({
+          run_id: runId,
+          platform: "instagram",
+          account_handle: "bravotv",
+          run_status: "paused",
+          job_status: "paused",
+          date_start: "2025-01-01T00:00:00Z",
+          date_end: "2027-01-01T00:00:00Z",
+          target_filter: "incomplete",
+          dispatch_control: {
+            pause_after_current: true,
+            pause_reason: "public_blocked_repeated",
+          },
+          post_progress: { completed_posts: 3, total_posts: 12 },
+        });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="comments" />);
+
+    const restartButton = await screen.findByTestId("restart-comments-run-button");
+    expect(restartButton).toBeInTheDocument();
+
+    const proof = await screen.findByTestId("restart-comments-run-public-only-proof");
+    expect(proof.textContent).toMatch(/public blocks paused this run/i);
+    expect(proof.textContent).toMatch(/public relay only/i);
+    expect(proof.textContent).toMatch(/no cookies/i);
+    expect(proof.textContent).toMatch(/no Decodo/i);
+
+    confirmSpy.mockRestore();
+  });
+
   it("shows active comments progress on the profile header and refreshes the comments saved tile", async () => {
     const runId = "comments-run-live-1234";
     const activeSummary = {

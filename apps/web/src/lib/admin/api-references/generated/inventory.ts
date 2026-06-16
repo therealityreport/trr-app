@@ -3,7 +3,7 @@ import type { AdminApiReferenceInventory } from "@/lib/admin/api-references/type
 export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
   "inventorySchemaVersion": "1.0.0",
   "generatorVersion": "1.0.0",
-  "generatedAt": "2026-06-12T18:10:34.569Z",
+  "generatedAt": "2026-06-16T14:31:55.438Z",
   "sourceCommitSha": "b4198ec471d55204af3f5bbeca194ac0a9706ab7",
   "overrideDigest": "1a9e22b4c9b465cc3dab3ee0fcfc469f25b643ecae9e10baf11cdd12f9133e71",
   "nodes": [
@@ -18124,6 +18124,40 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "fanoutRisk": "low"
     },
     {
+      "id": "route:POST:/api/admin/trr-api/social/profiles/[platform]/[handle]/comments/runs/[runId]/guarded-restart",
+      "kind": "api_route",
+      "title": "POST /api/admin/trr-api/social/profiles/[platform]/[handle]/comments/runs/[runId]/guarded-restart",
+      "pathPattern": "/api/admin/trr-api/social/profiles/[platform]/[handle]/comments/runs/[runId]/guarded-restart",
+      "symbol": "POST",
+      "sourceFile": "src/app/api/admin/trr-api/social/profiles/[platform]/[handle]/comments/runs/[runId]/guarded-restart/route.ts",
+      "sourceLocator": {
+        "line": 15,
+        "symbol": "POST"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:app_api_route"
+      ],
+      "usageTier": "manual",
+      "polls": false,
+      "pollCadenceMs": null,
+      "automatic": false,
+      "loadsLargeDatasets": false,
+      "usesPagination": false,
+      "returnsWideRowsOrBlobsOrRawJson": false,
+      "fansOutQueries": false,
+      "postgresAccess": "none",
+      "viewKinds": [
+        "list",
+        "detail"
+      ],
+      "staticOnly": false,
+      "payloadRisk": "low",
+      "fanoutRisk": "low"
+    },
+    {
       "id": "route:POST:/api/admin/trr-api/social/profiles/[platform]/[handle]/comments/runs/[runId]/jobs/[jobId]/cancel",
       "kind": "api_route",
       "title": "POST /api/admin/trr-api/social/profiles/[platform]/[handle]/comments/runs/[runId]/jobs/[jobId]/cancel",
@@ -23314,6 +23348,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
         "route:POST:/api/admin/trr-api/social/profiles/[platform]/[handle]/catalog/sync-recent",
         "route:POST:/api/admin/trr-api/social/profiles/[platform]/[handle]/comments/audit-cursor-retries",
         "route:POST:/api/admin/trr-api/social/profiles/[platform]/[handle]/comments/runs/[runId]/cancel",
+        "route:POST:/api/admin/trr-api/social/profiles/[platform]/[handle]/comments/runs/[runId]/guarded-restart",
         "route:POST:/api/admin/trr-api/social/profiles/[platform]/[handle]/comments/runs/[runId]/jobs/[jobId]/cancel",
         "route:POST:/api/admin/trr-api/social/profiles/[platform]/[handle]/comments/runs/[runId]/resume",
         "route:POST:/api/admin/trr-api/social/profiles/[platform]/[handle]/comments/scrape",
@@ -23693,11 +23728,11 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "renders_view": []
     },
     "summary": {
-      "totalNodes": 570,
+      "totalNodes": 571,
       "totalEdges": 200,
       "nodesByKind": {
         "ui_surface": 59,
-        "api_route": 388,
+        "api_route": 389,
         "backend_endpoint": 118,
         "repository_surface": 2,
         "polling_loop": 3

@@ -1864,6 +1864,79 @@ const readCommentsProgressMetadata = (
   return progress?.job_metadata && typeof progress.job_metadata === "object" ? progress.job_metadata : {};
 };
 
+const readCommentsProgressRecord = (value: unknown): Record<string, unknown> | null =>
+  value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+
+// Guarded restart relaunches the same public-only window. It never enables cookies,
+// login sessions, or Decodo, so the operator gets a one-click public-relay restart.
+const COMMENTS_GUARDED_RESTART_LOAD_STRATEGY = "public_relay";
+const COMMENTS_GUARDED_RESTART_WORKER_COUNT = 12;
+const COMMENTS_GUARDED_RESTART_TARGET_BATCH_SIZE = 10;
+const COMMENTS_GUARDED_RESTART_TARGET_FILTER = "incomplete";
+const COMMENTS_PUBLIC_BLOCKED_REPEATED_PAUSE_REASON = "public_blocked_repeated";
+const COMMENTS_GUARDED_RESTART_PUBLIC_ONLY_PROOF =
+  "Restart is public relay only — no cookies, no Decodo.";
+
+// dispatch_control lives in the run config and may be surfaced on the progress payload at
+// the top level, under summary, or inside job_metadata depending on the backend build, so
+// read defensively from each location.
+const readCommentsRunDispatchControl = (
+  progress?: SocialAccountCommentsRunProgress | null,
+): Record<string, unknown> | null => {
+  if (!progress) return null;
+  const summary = readCommentsProgressRecord(progress.summary);
+  const metadata = readCommentsProgressMetadata(progress);
+  return (
+    readCommentsProgressRecord((progress as Record<string, unknown>).dispatch_control) ??
+    readCommentsProgressRecord(summary?.dispatch_control) ??
+    readCommentsProgressRecord(metadata.dispatch_control)
+  );
+};
+
+const readCommentsRunPauseReason = (
+  progress?: SocialAccountCommentsRunProgress | null,
+): string | null => {
+  if (!progress) return null;
+  const dispatchControl = readCommentsRunDispatchControl(progress);
+  const summary = readCommentsProgressRecord(progress.summary);
+  const metadata = readCommentsProgressMetadata(progress);
+  const publicBlockedPause = readCommentsProgressRecord(summary?.public_blocked_pause);
+  return (
+    readCommentsProgressString(dispatchControl?.pause_reason) ??
+    readCommentsProgressString((progress as Record<string, unknown>).pause_reason) ??
+    readCommentsProgressString(publicBlockedPause?.pause_reason) ??
+    readCommentsProgressString(metadata.pause_reason)
+  );
+};
+
+const isCommentsRunPublicBlockedPaused = (
+  progress?: SocialAccountCommentsRunProgress | null,
+): boolean => readCommentsRunPauseReason(progress) === COMMENTS_PUBLIC_BLOCKED_REPEATED_PAUSE_REASON;
+
+// Date window is stored on run config (and mirrored to job configs). Surface it from the
+// progress payload top level first, then summary/metadata containers.
+const readCommentsRunDateWindow = (
+  progress?: SocialAccountCommentsRunProgress | null,
+): { dateStart: string | null; dateEnd: string | null } => {
+  const summary = readCommentsProgressRecord(progress?.summary);
+  const metadata = readCommentsProgressMetadata(progress);
+  const targetWindow =
+    readCommentsProgressRecord((progress as Record<string, unknown> | null)?.target_window) ??
+    readCommentsProgressRecord(summary?.target_window) ??
+    readCommentsProgressRecord(metadata.target_window);
+  const dateStart =
+    readString((progress as Record<string, unknown> | null)?.date_start) ??
+    readString(summary?.date_start) ??
+    readString(metadata.date_start) ??
+    readString(targetWindow?.date_start);
+  const dateEnd =
+    readString((progress as Record<string, unknown> | null)?.date_end) ??
+    readString(summary?.date_end) ??
+    readString(metadata.date_end) ??
+    readString(targetWindow?.date_end);
+  return { dateStart, dateEnd };
+};
+
 const commentsProgressHasActiveRows = (progress?: SocialAccountCommentsRunProgress | null): boolean => {
   if (!progress) return false;
   const normalizedStatus = String(progress.run_status || "").trim().toLowerCase();
@@ -3172,6 +3245,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   const [cancellingCatalogRun, setCancellingCatalogRun] = useState(false);
   const [cancellingActiveCommentsRun, setCancellingActiveCommentsRun] = useState(false);
   const [resumingActiveCommentsRun, setResumingActiveCommentsRun] = useState(false);
+  const [restartingActiveCommentsRun, setRestartingActiveCommentsRun] = useState(false);
   const [cancellingCommentsJobId, setCancellingCommentsJobId] = useState<string | null>(null);
   const [dismissingCatalogRunId, setDismissingCatalogRunId] = useState<string | null>(null);
   const [pendingDismissedCatalogRunIds, setPendingDismissedCatalogRunIds] = useState<Set<string>>(new Set());
@@ -5301,6 +5375,22 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     Boolean(activeCommentsRunId) &&
     ["cancelled", "failed"].includes(activeCommentsRunEffectiveStatus) &&
     !rawActiveCommentsRunProgressIsStale;
+
+  const activeCommentsRunIsPublicBlockedPaused = useMemo(
+    () => isCommentsRunPublicBlockedPaused(activeCommentsRunProgressData),
+    [activeCommentsRunProgressData],
+  );
+  // Guarded restart is offered for active runs (e.g. a stuck/blocked run the operator
+  // wants to relaunch) and for runs paused with reason public_blocked_repeated.
+  const activeCommentsRunCanRestart =
+    platform === "instagram" &&
+    Boolean(activeCommentsRunId) &&
+    !rawActiveCommentsRunProgressIsStale &&
+    (activeCommentsRunIsActive || activeCommentsRunIsPublicBlockedPaused);
+  const activeCommentsRunDateWindow = useMemo(
+    () => readCommentsRunDateWindow(activeCommentsRunProgressData),
+    [activeCommentsRunProgressData],
+  );
 
   const activeCommentsRunBlocksActions = useMemo(() => {
     if (activeCommentsRunIsTerminal) return false;
@@ -8289,6 +8379,71 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     }
   };
 
+  const restartActiveCommentsRun = async () => {
+    const runId = String(activeCommentsRunId || "").trim();
+    if (!user || !runId || !activeCommentsRunCanRestart) return;
+    const { dateStart, dateEnd } = activeCommentsRunDateWindow;
+    const confirmed =
+      typeof window === "undefined" ||
+      window.confirm(
+        [
+          `Restart comments run ${shortRunId(runId)}?`,
+          "This cancels the current run and relaunches the same public-relay window. It never uses cookies, login sessions, or Decodo.",
+        ].join("\n\n"),
+      );
+    if (!confirmed) return;
+    setRestartingActiveCommentsRun(true);
+    setCatalogActionMessage(`Restarting comments run ${shortRunId(runId)} (public relay only)...`);
+    try {
+      const requestBody: Record<string, unknown> = {
+        date_start: dateStart,
+        date_end: dateEnd,
+        comments_worker_count: COMMENTS_GUARDED_RESTART_WORKER_COUNT,
+        comments_target_batch_size: COMMENTS_GUARDED_RESTART_TARGET_BATCH_SIZE,
+        comments_load_strategy: COMMENTS_GUARDED_RESTART_LOAD_STRATEGY,
+        target_filter: COMMENTS_GUARDED_RESTART_TARGET_FILTER,
+      };
+      const response = await fetchAdminWithAuth(
+        `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/comments/runs/${encodeURIComponent(runId)}/guarded-restart`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(requestBody),
+        },
+        { preferredUser: user },
+      );
+      const data = (await response.json().catch(() => ({}))) as {
+        old_run_id?: string | null;
+        new_run_id?: string | null;
+        run_id?: string | null;
+        error?: string;
+        message?: string;
+        detail?: { message?: string };
+      };
+      if (!response.ok) {
+        throw new Error(data.error || data.message || data.detail?.message || "Failed to restart comments run");
+      }
+      const nextRunId = String(data.new_run_id || data.run_id || "").trim();
+      if (nextRunId) {
+        setCommentsProgressRunId(nextRunId);
+        storeCatalogProgressRunId(commentsProgressStorageKey, nextRunId);
+        setCatalogActionMessage(
+          `Restarted comments run ${shortRunId(runId)} as ${shortRunId(nextRunId)} (public relay only — no cookies, no Decodo).`,
+        );
+      } else {
+        setCatalogActionMessage(
+          `Restarted comments run ${shortRunId(runId)} (public relay only — no cookies, no Decodo).`,
+        );
+      }
+      await refreshProfileSnapshotNow().catch(() => {});
+      refetchActiveCommentsRunProgress({ cause: "manual", forceRefresh: true });
+    } catch (error) {
+      setCatalogActionMessage(error instanceof Error ? error.message : "Failed to restart comments run");
+    } finally {
+      setRestartingActiveCommentsRun(false);
+    }
+  };
+
   const cancelCommentsShardJob = async (jobId: string | null | undefined) => {
     const runId = String(activeCommentsRunId || "").trim();
     const normalizedJobId = String(jobId || "").trim();
@@ -9025,8 +9180,30 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                             {resumingActiveCommentsRun ? "Resuming..." : "Resume Remaining"}
                           </Button>
                         ) : null}
+                        {activeCommentsRunCanRestart ? (
+                          <Button
+                            onClick={() => void restartActiveCommentsRun()}
+                            disabled={restartingActiveCommentsRun || !user}
+                            size="sm"
+                            variant="secondary"
+                            className={NYT_DASHBOARD_PRIMARY_BUTTON_CLASS}
+                            data-testid="restart-comments-run-button"
+                          >
+                            {restartingActiveCommentsRun ? "Restarting..." : "Restart Comments Run"}
+                          </Button>
+                        ) : null}
                       </div>
                     </div>
+                    {activeCommentsRunCanRestart ? (
+                      <p
+                        className="mt-2 text-xs font-medium text-emerald-700"
+                        data-testid="restart-comments-run-public-only-proof"
+                      >
+                        {activeCommentsRunIsPublicBlockedPaused
+                          ? `Public blocks paused this run. ${COMMENTS_GUARDED_RESTART_PUBLIC_ONLY_PROOF}`
+                          : COMMENTS_GUARDED_RESTART_PUBLIC_ONLY_PROOF}
+                      </p>
+                    ) : null}
                     {activeCommentsRunProgressPollError ? (
                       <p className="mt-2 text-xs text-amber-700">
                         Progress poll is retrying: {activeCommentsRunProgressPollError}
