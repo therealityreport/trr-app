@@ -1,0 +1,48 @@
+# Pre-commit hooks for TRR-APP.
+#
+# One-time setup:
+#   uv tool install pre-commit   # or: pipx install pre-commit
+#   pre-commit install                       # commit-stage hooks
+#   pre-commit install --hook-type pre-push  # enables the eslint pre-push gate
+#
+# Commit-stage hooks (gitleaks, ruff) run only on STAGED files and stay fast.
+# The eslint hook runs at PRE-PUSH (not per-commit) because the Next.js lint
+# pass is heavy; it only runs when apps/web TypeScript changed.
+#
+# gitleaks auto-discovers .gitleaks.toml if present; ruff reuses ./ruff.toml
+# (TRR-APP's Python is the repo-map generator scripts only).
+minimum_pre_commit_version: "3.5.0"
+
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.2
+    hooks:
+      - id: gitleaks
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.14.4
+    hooks:
+      - id: ruff
+        args: [--fix]
+        files: \.py$
+      - id: ruff-format
+        files: \.py$
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-merge-conflict
+      - id: end-of-file-fixer
+        exclude: '^apps/web/(\.next|coverage|node_modules)/'
+      - id: trailing-whitespace
+        exclude: '^apps/web/(\.next|coverage|node_modules)/'
+
+  - repo: local
+    hooks:
+      - id: eslint-web
+        name: eslint (apps/web)
+        language: system
+        entry: pnpm -C apps/web run lint
+        pass_filenames: false
+        files: '^apps/web/.*\.(ts|tsx)$'
+        stages: [pre-push]

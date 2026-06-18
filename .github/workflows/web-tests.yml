@@ -56,6 +56,13 @@ jobs:
       - name: Run targeted fandom typecheck (Node 24 full lane)
         if: matrix.lane == 'full'
         run: pnpm run typecheck:fandom
+      # Full project typecheck as a non-blocking signal. The repo gates only the
+      # fandom subset today; this surfaces the remaining errors without blocking
+      # merges. Flip to blocking once the full typecheck is green.
+      - name: Run full typecheck (non-blocking)
+        if: matrix.lane == 'full'
+        continue-on-error: true
+        run: pnpm run typecheck
       - name: Install Playwright Chromium (Node 24 full lane)
         if: matrix.lane == 'full'
         run: pnpm exec playwright install chromium
