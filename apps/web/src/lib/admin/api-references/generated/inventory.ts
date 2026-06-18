@@ -3,8 +3,8 @@ import type { AdminApiReferenceInventory } from "@/lib/admin/api-references/type
 export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
   "inventorySchemaVersion": "1.0.0",
   "generatorVersion": "1.0.0",
-  "generatedAt": "2026-06-16T14:31:55.438Z",
-  "sourceCommitSha": "b4198ec471d55204af3f5bbeca194ac0a9706ab7",
+  "generatedAt": "2026-06-18T22:08:52.953Z",
+  "sourceCommitSha": "e0a97252b93da0ce93bfef851e4901682ad8d113",
   "overrideDigest": "1a9e22b4c9b465cc3dab3ee0fcfc469f25b643ecae9e10baf11cdd12f9133e71",
   "nodes": [
     {
@@ -8985,7 +8985,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/social/landing/route.ts",
       "sourceLocator": {
-        "line": 366,
+        "line": 367,
         "symbol": "GET"
       },
       "provenance": "static_scan",
@@ -12374,7 +12374,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/trr-api/social/ingest/queue-status/route.ts",
       "sourceLocator": {
-        "line": 11,
+        "line": 12,
         "symbol": "GET"
       },
       "provenance": "static_scan",
@@ -12472,7 +12472,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/trr-api/social/profiles/[platform]/[handle]/catalog/posts/route.ts",
       "sourceLocator": {
-        "line": 23,
+        "line": 24,
         "symbol": "GET"
       },
       "provenance": "static_scan",
@@ -12708,7 +12708,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/trr-api/social/profiles/[platform]/[handle]/comments/audit-cursor-retries/route.ts",
       "sourceLocator": {
-        "line": 5,
+        "line": 13,
         "symbol": "GET"
       },
       "provenance": "static_scan",
@@ -12721,16 +12721,17 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "polls": false,
       "pollCadenceMs": null,
       "automatic": false,
-      "loadsLargeDatasets": false,
+      "loadsLargeDatasets": true,
       "usesPagination": true,
       "returnsWideRowsOrBlobsOrRawJson": false,
       "fansOutQueries": false,
       "postgresAccess": "none",
       "viewKinds": [
+        "list",
         "detail"
       ],
       "staticOnly": false,
-      "payloadRisk": "low",
+      "payloadRisk": "high",
       "fanoutRisk": "low"
     },
     {
@@ -12976,7 +12977,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/trr-api/social/profiles/[platform]/[handle]/snapshot/route.ts",
       "sourceLocator": {
-        "line": 135,
+        "line": 136,
         "symbol": "GET"
       },
       "provenance": "static_scan",
@@ -14561,7 +14562,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "POST",
       "sourceFile": "src/app/api/admin/social/landing/route.ts",
       "sourceLocator": {
-        "line": 451,
+        "line": 505,
         "symbol": "POST"
       },
       "provenance": "static_scan",
@@ -18064,7 +18065,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "POST",
       "sourceFile": "src/app/api/admin/trr-api/social/profiles/[platform]/[handle]/comments/audit-cursor-retries/route.ts",
       "sourceLocator": {
-        "line": 15,
+        "line": 32,
         "symbol": "POST"
       },
       "provenance": "static_scan",
@@ -18077,16 +18078,17 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "polls": false,
       "pollCadenceMs": null,
       "automatic": false,
-      "loadsLargeDatasets": false,
+      "loadsLargeDatasets": true,
       "usesPagination": true,
       "returnsWideRowsOrBlobsOrRawJson": false,
       "fansOutQueries": false,
       "postgresAccess": "none",
       "viewKinds": [
+        "list",
         "detail"
       ],
       "staticOnly": false,
-      "payloadRisk": "low",
+      "payloadRisk": "high",
       "fanoutRisk": "low"
     },
     {

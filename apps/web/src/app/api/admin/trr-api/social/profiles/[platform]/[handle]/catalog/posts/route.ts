@@ -5,6 +5,7 @@ import {
   buildAdminSnapshotCacheKey,
   getOrCreateAdminSnapshot,
 } from "@/lib/server/admin/admin-snapshot-cache";
+import { attachAdminRouteTiming } from "@/lib/server/admin/admin-route-timing";
 import { buildAdminReadResponseHeaders } from "@/lib/server/trr-api/admin-read-proxy";
 import {
   fetchSocialBackendJson,
@@ -21,6 +22,7 @@ const CATALOG_POSTS_TTL_MS = 5 * 60_000;
 const CATALOG_POSTS_STALE_MS = 15 * 60_000;
 
 export async function GET(request: NextRequest, context: RouteContext) {
+  const routeStartedAt = performance.now();
   try {
     const user = await requireAdmin(request);
     const { platform, handle } = await context.params;
@@ -49,10 +51,26 @@ export async function GET(request: NextRequest, context: RouteContext) {
           },
         ),
     });
-    return NextResponse.json(snapshot.data, {
-      headers: buildAdminReadResponseHeaders({ cacheStatus: snapshot.meta.cacheStatus }),
-    });
+    return attachAdminRouteTiming(
+      NextResponse.json(snapshot.data, {
+        headers: buildAdminReadResponseHeaders({ cacheStatus: snapshot.meta.cacheStatus }),
+      }),
+      {
+        routeFamily: "admin-social-profile",
+        routeName: "GET catalog/posts",
+        cacheStatus: snapshot.meta.cacheStatus,
+        startedAt: routeStartedAt,
+      },
+    );
   } catch (error) {
-    return socialProxyErrorResponse(error, "[api] Failed to fetch social account catalog posts");
+    return attachAdminRouteTiming(
+      socialProxyErrorResponse(error, "[api] Failed to fetch social account catalog posts"),
+      {
+        routeFamily: "admin-social-profile",
+        routeName: "GET catalog/posts",
+        cacheStatus: "error",
+        startedAt: routeStartedAt,
+      },
+    );
   }
 }

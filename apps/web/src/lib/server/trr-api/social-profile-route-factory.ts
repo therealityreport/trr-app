@@ -7,6 +7,7 @@ import {
   buildAdminSnapshotCacheKey,
   getOrCreateAdminSnapshot,
 } from "@/lib/server/admin/admin-snapshot-cache";
+import { attachAdminRouteTiming } from "@/lib/server/admin/admin-route-timing";
 import {
   buildUserScopedRouteCacheKey,
   getOrCreateRouteResponsePromise,
@@ -190,6 +191,29 @@ const socialProfileJsonResponse = (
   return adminJsonResponse(input.request, data, { headers, title: `TRR API ${config.endpoint}` });
 };
 
+const socialProfileTimedJsonResponse = (
+  input: SocialProfileProxyRouteInput,
+  config: SocialProfileProxyRouteConfig,
+  data: Record<string, unknown>,
+  startedAt: number,
+  cacheStatus: string | null,
+  headers: Record<string, string> = {},
+): NextResponse => {
+  const response = socialProfileJsonResponse(input, config, data, {
+    ...headers,
+    ...routeTimingHeaders(config, startedAt),
+  });
+  if (!config.routeTimingHeaders) {
+    return response;
+  }
+  return attachAdminRouteTiming(response, {
+    routeFamily: "admin-social-profile",
+    routeName: config.endpoint,
+    cacheStatus,
+    startedAt,
+  });
+};
+
 const readBody = async (
   request: NextRequest,
   method: string,
@@ -239,9 +263,8 @@ const respondWithRouteResponseCache = async (
   );
   const cachedPayload = getRouteResponseCache<Record<string, unknown>>(cache.namespace, cacheKey);
   if (cachedPayload) {
-    return socialProfileJsonResponse(input, config, cachedPayload, {
+    return socialProfileTimedJsonResponse(input, config, cachedPayload, startedAt, "hit", {
       "x-trr-cache": "hit",
-      ...routeTimingHeaders(config, startedAt),
     });
   }
   const stalePayload = getStaleRouteResponseCache<Record<string, unknown>>(cache.namespace, cacheKey);
@@ -251,16 +274,14 @@ const respondWithRouteResponseCache = async (
       setRouteResponseCache(cache.namespace, cacheKey, payload, cache.ttlMs, cache.staleTtlMs);
       return payload;
     });
-    return socialProfileJsonResponse(input, config, data, {
+    return socialProfileTimedJsonResponse(input, config, data, startedAt, "miss", {
       "x-trr-cache": "miss",
-      ...routeTimingHeaders(config, startedAt),
     });
   } catch (error) {
     if (stalePayload) {
-      return socialProfileJsonResponse(input, config, stalePayload, {
+      return socialProfileTimedJsonResponse(input, config, stalePayload, startedAt, "stale", {
         "x-trr-cache": "stale",
         "x-trr-cacheable": "0",
-        ...routeTimingHeaders(config, startedAt),
       });
     }
     throw error;
@@ -298,14 +319,14 @@ const respondWithAdminSnapshotCache = async (
     forceRefresh: readForceRefresh(input.request.nextUrl.searchParams, cache.forceRefreshParam),
     fetcher: () => fetchProfilePayload(input, config),
   });
-  return socialProfileJsonResponse(input, config, snapshot.data, {
+  return socialProfileTimedJsonResponse(input, config, snapshot.data, startedAt, snapshot.meta.cacheStatus, {
       ...buildAdminReadResponseHeaders({ cacheStatus: snapshot.meta.cacheStatus }),
-      ...routeTimingHeaders(config, startedAt),
   });
 };
 
 export const createSocialProfileProxyRoute = (config: SocialProfileProxyRouteConfig) => {
   return async (request: NextRequest, context: SocialProfileRouteContext): Promise<NextResponse> => {
+    const routeStartedAt = performance.now();
     try {
       const user = await requireAdmin(request);
       const params = await context.params;
@@ -325,12 +346,25 @@ export const createSocialProfileProxyRoute = (config: SocialProfileProxyRouteCon
         return await respondWithAdminSnapshotCache(input, config, config.cache);
       }
 
-      const startedAt = performance.now();
-      return socialProfileJsonResponse(input, config, await fetchProfilePayload(input, config), {
-        ...routeTimingHeaders(config, startedAt),
-      });
+      const startedAt = routeStartedAt;
+      return socialProfileTimedJsonResponse(
+        input,
+        config,
+        await fetchProfilePayload(input, config),
+        startedAt,
+        "miss",
+      );
     } catch (error) {
-      return socialProxyErrorResponse(error, config.logLabel);
+      const response = socialProxyErrorResponse(error, config.logLabel);
+      if (!config.routeTimingHeaders) {
+        return response;
+      }
+      return attachAdminRouteTiming(response, {
+        routeFamily: "admin-social-profile",
+        routeName: config.endpoint,
+        cacheStatus: "error",
+        startedAt: routeStartedAt,
+      });
     }
   };
 };

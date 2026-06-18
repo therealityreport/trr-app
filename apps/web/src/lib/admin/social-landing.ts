@@ -6,6 +6,14 @@ export type SocialLandingPlatform =
   | "facebook"
   | "threads";
 
+export type SocialLandingProgressStatus = {
+  source: "backend" | "fallback" | "none";
+  cache_status: string | null;
+  generated_at: string | null;
+  stale: boolean;
+  warning?: string | null;
+};
+
 export interface SocialHandleSummary {
   platform: SocialLandingPlatform;
   handle: string;
@@ -202,6 +210,7 @@ export interface SocialLandingPayload {
   shared_source_sets: SharedAccountSourceSet[];
   shared_pipeline: SharedPipelineSummary;
   shared_source_status?: SharedAccountSourceLoadStatus[];
+  social_progress_status?: SocialLandingProgressStatus;
   scrape_job_health: ScrapeJobHealthSummary;
   reddit_dashboard: RedditDashboardSummary;
 }

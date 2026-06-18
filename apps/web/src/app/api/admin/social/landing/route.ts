@@ -25,6 +25,7 @@ import {
   getSocialLandingPayloadResult,
   type SocialLandingPayloadResult,
 } from "@/lib/server/admin/social-landing-repository";
+import { attachAdminRouteTiming } from "@/lib/server/admin/admin-route-timing";
 import { normalizePersonExternalIdValue, type PersonExternalIdInput } from "@/lib/admin/person-external-ids";
 import { normalizeSocialAccountProfileHandle } from "@/lib/admin/show-admin-routes";
 import { fetchSocialBackendJson } from "@/lib/server/trr-api/social-admin-proxy";
@@ -364,6 +365,17 @@ const upsertSharedSource = async ({
 };
 
 export async function GET(request: NextRequest) {
+  const routeStartedAt = performance.now();
+  let backendMs = 0;
+  let databaseMs = 0;
+  const timingCollector = {
+    recordBackendMs(durationMs: number) {
+      backendMs += durationMs;
+    },
+    recordDbMs(durationMs: number) {
+      databaseMs += durationMs;
+    },
+  };
   try {
     const user = await requireAdmin(request);
     const adminContext = toVerifiedAdminContext(user);
@@ -380,7 +392,15 @@ export async function GET(request: NextRequest) {
       cacheKey,
     );
     if (cached && !shouldRefresh) {
-      return NextResponse.json(cached, { headers: { "x-trr-cache": "hit" } });
+      return attachAdminRouteTiming(
+        NextResponse.json(cached, { headers: { "x-trr-cache": "hit" } }),
+        {
+          routeFamily: "admin-social-landing",
+          routeName: "GET /api/admin/social/landing",
+          cacheStatus: "hit",
+          startedAt: routeStartedAt,
+        },
+      );
     }
     const staleCached = shouldRefresh
       ? null
@@ -396,7 +416,7 @@ export async function GET(request: NextRequest) {
         cacheKey,
         async () => {
           const cacheVersion = getSocialLandingRouteCacheVersion(user.uid);
-          const nextResult = await getSocialLandingPayloadResult(adminContext);
+          const nextResult = await getSocialLandingPayloadResult(adminContext, timingCollector);
           if (
             nextResult.cacheable &&
             isSocialLandingRouteCacheVersionCurrent(user.uid, cacheVersion)
@@ -415,9 +435,19 @@ export async function GET(request: NextRequest) {
     } catch (error) {
       if (staleCached && !shouldRefresh) {
         console.warn("[api] Failed to rebuild social landing payload; serving stale cache", error);
-        return NextResponse.json(staleCached, {
-          headers: { "x-trr-cache": "stale", "x-trr-cacheable": "0" },
-        });
+        return attachAdminRouteTiming(
+          NextResponse.json(staleCached, {
+            headers: { "x-trr-cache": "stale", "x-trr-cacheable": "0" },
+          }),
+          {
+            routeFamily: "admin-social-landing",
+            routeName: "GET /api/admin/social/landing",
+            cacheStatus: "stale",
+            startedAt: routeStartedAt,
+            backendMs,
+            databaseMs,
+          },
+        );
       }
       throw error;
     }
@@ -427,9 +457,19 @@ export async function GET(request: NextRequest) {
       !shouldRefresh &&
       !hasSharedSourceFallbackStatus(result.payload)
     ) {
-      return NextResponse.json(staleCached, {
-        headers: { "x-trr-cache": "stale", "x-trr-cacheable": "0" },
-      });
+      return attachAdminRouteTiming(
+        NextResponse.json(staleCached, {
+          headers: { "x-trr-cache": "stale", "x-trr-cacheable": "0" },
+        }),
+        {
+          routeFamily: "admin-social-landing",
+          routeName: "GET /api/admin/social/landing",
+          cacheStatus: "stale",
+          startedAt: routeStartedAt,
+          backendMs,
+          databaseMs,
+        },
+      );
     }
     const headers: Record<string, string> = {};
     if (shouldRefresh) {
@@ -438,17 +478,42 @@ export async function GET(request: NextRequest) {
     if (!result.cacheable) {
       headers["x-trr-cacheable"] = "0";
     }
-    return NextResponse.json(result.payload, { headers });
+    return attachAdminRouteTiming(NextResponse.json(result.payload, { headers }), {
+      routeFamily: "admin-social-landing",
+      routeName: "GET /api/admin/social/landing",
+      cacheStatus: headers["x-trr-cache"] ?? (result.cacheable ? "miss" : "uncacheable"),
+      startedAt: routeStartedAt,
+      backendMs,
+      databaseMs,
+    });
   } catch (error) {
     console.error("[api] Failed to load social landing payload", error);
     const message = error instanceof Error ? error.message : "Failed to load social landing payload";
     const status =
       message === "unauthorized" ? 401 : message === "forbidden" ? 403 : 500;
-    return NextResponse.json({ error: message }, { status });
+    return attachAdminRouteTiming(NextResponse.json({ error: message }, { status }), {
+      routeFamily: "admin-social-landing",
+      routeName: "GET /api/admin/social/landing",
+      cacheStatus: "error",
+      startedAt: routeStartedAt,
+      backendMs,
+      databaseMs,
+    });
   }
 }
 
 export async function POST(request: NextRequest) {
+  const routeStartedAt = performance.now();
+  let backendMs = 0;
+  let databaseMs = 0;
+  const timingCollector = {
+    recordBackendMs(durationMs: number) {
+      backendMs += durationMs;
+    },
+    recordDbMs(durationMs: number) {
+      databaseMs += durationMs;
+    },
+  };
   try {
     const user = await requireAdmin(request);
     const adminContext = toVerifiedAdminContext(user);
@@ -627,7 +692,7 @@ export async function POST(request: NextRequest) {
 
     invalidateSocialLandingRouteCacheForUser(user.uid);
     const cacheVersion = getSocialLandingRouteCacheVersion(user.uid);
-    const result = await getSocialLandingPayloadResult(adminContext);
+    const result = await getSocialLandingPayloadResult(adminContext, timingCollector);
     if (
       result.cacheable &&
       isSocialLandingRouteCacheVersionCurrent(user.uid, cacheVersion)
@@ -640,9 +705,19 @@ export async function POST(request: NextRequest) {
         SOCIAL_LANDING_STALE_CACHE_TTL_MS,
       );
     }
-    return NextResponse.json(result.payload, {
-      headers: result.cacheable ? undefined : { "x-trr-cacheable": "0" },
-    });
+    return attachAdminRouteTiming(
+      NextResponse.json(result.payload, {
+        headers: result.cacheable ? undefined : { "x-trr-cacheable": "0" },
+      }),
+      {
+        routeFamily: "admin-social-landing",
+        routeName: "POST /api/admin/social/landing",
+        cacheStatus: result.cacheable ? "miss" : "uncacheable",
+        startedAt: routeStartedAt,
+        backendMs,
+        databaseMs,
+      },
+    );
   } catch (error) {
     console.error("[api] Failed to update social landing handle", error);
     const message = error instanceof Error ? error.message : "Failed to update social landing handle";
@@ -654,6 +729,13 @@ export async function POST(request: NextRequest) {
           : message === "Person not found"
             ? 404
             : 500;
-    return NextResponse.json({ error: message }, { status });
+    return attachAdminRouteTiming(NextResponse.json({ error: message }, { status }), {
+      routeFamily: "admin-social-landing",
+      routeName: "POST /api/admin/social/landing",
+      cacheStatus: "error",
+      startedAt: routeStartedAt,
+      backendMs,
+      databaseMs,
+    });
   }
 }
