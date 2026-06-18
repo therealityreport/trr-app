@@ -5,6 +5,7 @@ import {
   buildAdminSnapshotCacheKey,
   getOrCreateAdminSnapshot,
 } from "@/lib/server/admin/admin-snapshot-cache";
+import { attachAdminRouteTiming } from "@/lib/server/admin/admin-route-timing";
 import { buildSnapshotResponse } from "@/lib/server/admin/admin-snapshot-route";
 import {
   fetchSocialBackendJson,
@@ -133,6 +134,7 @@ const logSocialProfileDashboardBudget = (input: {
 };
 
 export async function GET(request: NextRequest, context: RouteContext) {
+  const routeStartedAt = performance.now();
   try {
     const user = await requireAdmin(request);
     const adminContext = toVerifiedAdminContext(user);
@@ -185,7 +187,12 @@ export async function GET(request: NextRequest, context: RouteContext) {
       });
       response.headers.set("x-trr-dashboard-freshness", "degraded");
       response.headers.set("x-trr-dashboard-source", source);
-      return response;
+      return attachAdminRouteTiming(response, {
+        routeFamily: "admin-social-profile",
+        routeName: "GET profile snapshot",
+        cacheStatus: "miss",
+        startedAt: routeStartedAt,
+      });
     }
 
     const cacheKey = buildAdminSnapshotCacheKey({
@@ -287,8 +294,21 @@ export async function GET(request: NextRequest, context: RouteContext) {
     });
     response.headers.set("x-trr-dashboard-freshness", freshnessStatus);
     response.headers.set("x-trr-dashboard-source", freshnessSource);
-    return response;
+    return attachAdminRouteTiming(response, {
+      routeFamily: "admin-social-profile",
+      routeName: "GET profile snapshot",
+      cacheStatus: snapshot.meta.cacheStatus,
+      startedAt: routeStartedAt,
+    });
   } catch (error) {
-    return socialProxyErrorResponse(error, "[api] Failed to fetch social account profile snapshot");
+    return attachAdminRouteTiming(
+      socialProxyErrorResponse(error, "[api] Failed to fetch social account profile snapshot"),
+      {
+        routeFamily: "admin-social-profile",
+        routeName: "GET profile snapshot",
+        cacheStatus: "error",
+        startedAt: routeStartedAt,
+      },
+    );
   }
 }

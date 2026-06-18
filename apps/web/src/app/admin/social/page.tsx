@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { Route } from "next";
 import Image from "next/image";
 import type { User } from "firebase/auth";
@@ -75,6 +75,7 @@ import type {
   SocialHandleSummary,
   SocialLandingPlatform,
   SocialLandingPayload,
+  SocialLandingProgressStatus,
 } from "@/lib/admin/social-landing";
 import {
   buildSocialAccountProfileUrl,
@@ -84,6 +85,7 @@ import {
 import { normalizePersonExternalIdValue } from "@/lib/admin/person-external-ids";
 import { resolvePreferredShowRouteSlug } from "@/lib/admin/show-route-slug";
 import { fetchAdminWithAuth } from "@/lib/admin/client-auth";
+import { recordAdminLoadSample } from "@/lib/admin/admin-load-samples";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 
 const sectionEyebrowClass =
@@ -91,6 +93,10 @@ const sectionEyebrowClass =
 const SOCIAL_LANDING_CACHE_KEY = "trr-admin-social-landing:v7";
 const BRAVO_SHARED_SOURCES_RAW_URL =
   "/api/admin/trr-api/social/shared/sources?source_scope=network&include_inactive=true";
+const nowMs = (): number =>
+  typeof performance !== "undefined" && typeof performance.now === "function"
+    ? performance.now()
+    : Date.now();
 const DEFAULT_SCRAPE_JOB_HEALTH: ScrapeJobHealthSummary = {
   window_hours: 8,
   window_started_at: null,
@@ -352,8 +358,28 @@ const coerceSharedSourceStatus = (
   return statuses;
 };
 
+const coerceSocialProgressStatus = (
+  value: Partial<SocialLandingProgressStatus> | null | undefined,
+): SocialLandingProgressStatus => {
+  const source =
+    value?.source === "backend" ||
+    value?.source === "fallback" ||
+    value?.source === "none" ||
+    value?.source === "unavailable"
+      ? value.source
+      : "none";
+  return {
+    source,
+    cache_status: typeof value?.cache_status === "string" ? value.cache_status : null,
+    generated_at: typeof value?.generated_at === "string" ? value.generated_at : null,
+    stale: Boolean(value?.stale),
+    warning: typeof value?.warning === "string" ? value.warning : null,
+  };
+};
+
 const coerceLandingPayload = (
   data: Partial<SocialLandingPayload> | undefined,
+  options: { progressStale?: boolean } = {},
 ): SocialLandingPayload => ({
   network_sets: Array.isArray(data?.network_sets) ? data.network_sets : [],
   show_sets: Array.isArray(data?.show_sets) ? data.show_sets : [],
@@ -385,6 +411,12 @@ const coerceLandingPayload = (
       : [],
   },
   shared_source_status: coerceSharedSourceStatus(data?.shared_source_status),
+  social_progress_status: {
+    ...coerceSocialProgressStatus(data?.social_progress_status),
+    stale:
+      Boolean(options.progressStale) ||
+      Boolean(data?.social_progress_status?.stale),
+  },
   scrape_job_health: {
     ...DEFAULT_SCRAPE_JOB_HEALTH,
     ...(data?.scrape_job_health ?? {}),
@@ -646,6 +678,44 @@ const ScrapeJobHealthBadge = ({
       </TooltipTrigger>
       <TooltipContent>
         Post-deploy watch for recent social scrape job failures and InFailedSqlTransaction hits.
+      </TooltipContent>
+    </Tooltip>
+  );
+};
+
+const SocialProgressStatusBadge = ({
+  status,
+}: {
+  status: SocialLandingProgressStatus | null | undefined;
+}) => {
+  if (!status || status.source === "none") return null;
+  const stale = status.stale || status.cache_status === "stale";
+  const toneClassName = stale
+    ? "border-amber-300 bg-amber-50 text-amber-900"
+    : "border-sky-200 bg-sky-50 text-sky-800";
+  const label = stale ? "Progress stale" : "Progress live";
+  const detail =
+    status.source === "backend"
+      ? status.cache_status
+        ? `backend ${status.cache_status}`
+        : "backend"
+      : status.source === "unavailable"
+        ? "backend unavailable"
+        : "local fallback";
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold ${toneClassName}`}>
+          {stale ? <AlertTriangle aria-hidden="true" className="h-3.5 w-3.5" /> : <CircleCheck aria-hidden="true" className="h-3.5 w-3.5" />}
+          <span>{label}</span>
+          <span className="text-current/70">{detail}</span>
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>
+        {status.warning ||
+          (status.generated_at
+            ? `Progress generated ${formatCompactTimestamp(status.generated_at) || status.generated_at}.`
+            : "Progress freshness for the social landing rollup.")}
       </TooltipContent>
     </Tooltip>
   );
@@ -955,9 +1025,20 @@ const loadLandingData = async (
   const url = options.refresh
     ? "/api/admin/social/landing?refresh=1"
     : "/api/admin/social/landing";
+  const startedAt = nowMs();
   const response = await fetchAdminWithAuth(url, undefined, {
     allowDevAdminBypass: true,
     preferredUser: currentUser,
+  });
+  const durationMs = nowMs() - startedAt;
+  const cacheStatus = response.headers.get("x-trr-cache");
+  recordAdminLoadSample({
+    surface: "admin-social-landing-api",
+    path: "/admin/social",
+    source: "api",
+    duration_ms: durationMs,
+    cache_status: cacheStatus,
+    server_timing: response.headers.get("server-timing"),
   });
   const data = (await response.json().catch(() => ({}))) as
     | ({ error?: string } & Partial<SocialLandingPayload>)
@@ -966,7 +1047,7 @@ const loadLandingData = async (
     throw new Error(data?.error || "Failed to load social landing data");
   }
   return {
-    payload: coerceLandingPayload(data),
+    payload: coerceLandingPayload(data, { progressStale: cacheStatus?.includes("stale") ?? false }),
     cacheable: response.headers.get("x-trr-cacheable") !== "0",
   };
 };
@@ -2015,6 +2096,8 @@ const NetworkSourceGroupCard = ({
 export default function AdminSocialMediaPage() {
   const { user, checking, hasAccess } = useAdminGuard();
   const [landing, setLanding] = useState<SocialLandingPayload | null>(null);
+  const landingLoadStartedAtRef = useRef<number>(nowMs());
+  const landingNavigationSampleRecordedRef = useRef(false);
   const [landingFreshnessAt, setLandingFreshnessAt] = useState<string | null>(null);
   const [loadingLanding, setLoadingLanding] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -2028,6 +2111,18 @@ export default function AdminSocialMediaPage() {
   const [savingHandle, setSavingHandle] = useState(false);
   const [addHandleMessage, setAddHandleMessage] = useState<string | null>(null);
   const [addHandleError, setAddHandleError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!landing || landingNavigationSampleRecordedRef.current) return;
+    landingNavigationSampleRecordedRef.current = true;
+    recordAdminLoadSample({
+      surface: "admin-social-landing",
+      path: "/admin/social",
+      source: "navigation",
+      duration_ms: nowMs() - landingLoadStartedAtRef.current,
+      cache_status: landing.social_progress_status?.cache_status ?? null,
+    });
+  }, [landing]);
 
   useEffect(() => {
     if (checking || !user || !hasAccess) return;
@@ -2386,8 +2481,9 @@ export default function AdminSocialMediaPage() {
                 handles already stored in TRR.
               </p>
               {landing ? (
-                <div className="mt-3">
+                <div className="mt-3 flex flex-wrap items-center gap-2">
                   <ScrapeJobHealthBadge health={scrapeJobHealth} />
+                  <SocialProgressStatusBadge status={landing.social_progress_status} />
                 </div>
               ) : null}
             </div>

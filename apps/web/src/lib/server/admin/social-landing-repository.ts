@@ -36,6 +36,7 @@ import type {
   SocialHandleSummary,
   SocialLandingPayload,
   SocialLandingPlatform,
+  SocialLandingProgressStatus,
 } from "@/lib/admin/social-landing";
 import { listRedditCommunities } from "@/lib/server/admin/reddit-sources-repository";
 import { parseCacheTtlMs } from "@/lib/server/admin/route-response-cache";
@@ -113,6 +114,12 @@ type SocialProgressRollupPayload = {
   rows?: SocialProgressRow[];
   cache_status?: string | null;
   generated_at?: string | Date | null;
+  stale?: boolean | null;
+  timing?: {
+    backend_ms?: number | string | null;
+    database_ms?: number | string | null;
+    total_ms?: number | string | null;
+  } | null;
 };
 
 const SCRAPE_JOB_HEALTH_WINDOW_HOURS = 8;
@@ -174,9 +181,18 @@ export type SocialLandingPayloadResult = {
   cacheable: boolean;
 };
 
+export type SocialLandingTimingCollector = {
+  recordBackendMs: (durationMs: number) => void;
+  recordDbMs: (durationMs: number) => void;
+};
+
 type CacheableValue<T> = {
   value: T;
   cacheable: boolean;
+};
+
+type SocialProgressSummaryResult = CacheableValue<ReadonlyMap<string, SocialAccountProgressSummary>> & {
+  status: SocialLandingProgressStatus;
 };
 
 type SharedSourcesResult = CacheableValue<SharedAccountSourceSummary[]> & {
@@ -828,7 +844,8 @@ const buildSocialProgressMap = (
 const safeLoadBackendSocialProgressRollup = async (
   targets: readonly SocialProgressTarget[],
   adminContext: VerifiedAdminContext,
-): Promise<CacheableValue<ReadonlyMap<string, SocialAccountProgressSummary>>> => {
+  timingCollector?: SocialLandingTimingCollector,
+): Promise<SocialProgressSummaryResult> => {
   try {
     const payload = (await fetchSocialBackendJson("/landing-progress-rollup", {
       adminContext,
@@ -842,27 +859,68 @@ const safeLoadBackendSocialProgressRollup = async (
       retries: 0,
       timeoutMs: SOCIAL_PROXY_PROGRESS_TIMEOUT_MS,
     })) as SocialProgressRollupPayload;
+    const backendMs = normalizeNonNegativeInteger(payload.timing?.backend_ms);
+    const databaseMs = normalizeNonNegativeInteger(payload.timing?.database_ms);
+    if (backendMs > 0) timingCollector?.recordBackendMs(backendMs);
+    if (databaseMs > 0) timingCollector?.recordDbMs(databaseMs);
+    const cacheStatus = typeof payload.cache_status === "string" ? payload.cache_status : null;
+    const generatedAt =
+      typeof payload.generated_at === "string"
+        ? payload.generated_at
+        : payload.generated_at instanceof Date
+          ? payload.generated_at.toISOString()
+          : null;
 
     console.info("[social-landing] backend progress rollup", {
-      cache_status: payload.cache_status ?? null,
+      cache_status: cacheStatus,
       row_count: Array.isArray(payload.rows) ? payload.rows.length : 0,
+      backend_ms: backendMs || null,
+      database_ms: databaseMs || null,
     });
 
-    return cacheableValue(buildSocialProgressMap(Array.isArray(payload.rows) ? payload.rows : []));
+    return {
+      ...cacheableValue(buildSocialProgressMap(Array.isArray(payload.rows) ? payload.rows : [])),
+      status: {
+        source: "backend",
+        cache_status: cacheStatus,
+        generated_at: generatedAt,
+        stale: Boolean(payload.stale) || cacheStatus === "stale",
+      },
+    };
   } catch (error) {
     console.warn("[social-landing] Failed to load backend social progress rollup", error);
-    return uncacheableValue(new Map());
+    return {
+      ...uncacheableValue(new Map()),
+      status: {
+        source: "unavailable",
+        cache_status: null,
+        generated_at: null,
+        stale: true,
+        warning: error instanceof Error ? error.message : "Failed to load backend social progress rollup",
+      },
+    };
   }
 };
 
 const safeLoadSocialProgressSummaries = async (
   targets: readonly SocialProgressTarget[],
   adminContext?: VerifiedAdminContext,
-): Promise<CacheableValue<ReadonlyMap<string, SocialAccountProgressSummary>>> => {
-  if (targets.length === 0) return cacheableValue(new Map());
+  timingCollector?: SocialLandingTimingCollector,
+): Promise<SocialProgressSummaryResult> => {
+  if (targets.length === 0) {
+    return {
+      ...cacheableValue(new Map()),
+      status: {
+        source: "none",
+        cache_status: null,
+        generated_at: null,
+        stale: false,
+      },
+    };
+  }
 
   if (adminContext) {
-    return safeLoadBackendSocialProgressRollup(targets, adminContext);
+    return safeLoadBackendSocialProgressRollup(targets, adminContext, timingCollector);
   }
 
   const platforms = targets.map((target) => target.platform);
@@ -1102,10 +1160,25 @@ const safeLoadSocialProgressSummaries = async (
     return {
       value: buildSocialProgressMap(result.rows, socialBladeCountsByKey),
       cacheable: socialBladeCountsResult.cacheable,
+      status: {
+        source: "fallback",
+        cache_status: null,
+        generated_at: null,
+        stale: !socialBladeCountsResult.cacheable,
+      },
     };
   } catch (error) {
     console.warn("[social-landing] Failed to load social progress summaries", error);
-    return uncacheableValue(new Map());
+    return {
+      ...uncacheableValue(new Map()),
+      status: {
+        source: "fallback",
+        cache_status: null,
+        generated_at: null,
+        stale: true,
+        warning: error instanceof Error ? error.message : "Failed to load social progress summaries",
+      },
+    };
   }
 };
 
@@ -2578,6 +2651,7 @@ const buildCastSocialBladeShows = async (
 
 export async function getSocialLandingPayloadResult(
   adminContext?: VerifiedAdminContext,
+  timingCollector?: SocialLandingTimingCollector,
 ): Promise<SocialLandingPayloadResult> {
   const { coveredShows, redditDashboard, cacheable: landingSummaryCacheable } =
     await withSocialLandingTiming(
@@ -2684,9 +2758,10 @@ export async function getSocialLandingPayloadResult(
         sharedSourceSets,
       }),
       adminContext,
+      timingCollector,
     ),
     new Map(),
-  );
+  ) as SocialProgressSummaryResult;
   const progressByKey = progressResult.value;
   const hydratedNetworkSets = networkSets.map((set) =>
     hydrateNetworkSetProgress(set, progressByKey),
@@ -2716,6 +2791,12 @@ export async function getSocialLandingPayloadResult(
         review_items: sharedReviewItems,
       } satisfies SharedPipelineSummary,
       shared_source_status: sharedSourceStatus,
+      social_progress_status: progressResult.status ?? {
+        source: progressResult.cacheable ? "none" : "unavailable",
+        cache_status: null,
+        generated_at: null,
+        stale: !progressResult.cacheable,
+      },
       scrape_job_health: scrapeJobHealth,
       reddit_dashboard: redditDashboard,
     },
