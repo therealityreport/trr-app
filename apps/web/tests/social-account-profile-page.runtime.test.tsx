@@ -6904,9 +6904,11 @@ describe("SocialAccountProfilePage", () => {
     expect(screen.getByRole("heading", { name: "Collaborators", level: 2 })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Tagged Accounts", level: 2 })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Mentions", level: 2 })).toBeInTheDocument();
-    expect(screen.getByText("@bravochatroom")).toBeInTheDocument();
-    expect(screen.getByText("@staciarusch")).toBeInTheDocument();
-    expect(screen.getByText("@peacock")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText("@bravochatroom")).toBeInTheDocument();
+      expect(screen.getByText("@staciarusch")).toBeInTheDocument();
+      expect(screen.getByText("@peacock")).toBeInTheDocument();
+    });
   });
 
   it("renders YouTube catalog actions and skips the Instagram-only hashtag timeline fetch", async () => {
@@ -12877,11 +12879,13 @@ it("uses the newest inspected catalog run from the summary when discovery outran
       expect(screen.getByText("Unknown Hashtags")).toBeInTheDocument();
     });
 
-    expect(
-      screen.getByText(
-        `3 uses · First seen ${formatLocalDateTime("2026-03-10T12:00:00.000Z")} · Last seen ${formatLocalDateTime("2026-03-17T12:00:00.000Z")}`,
-      ),
-    ).toBeInTheDocument();
+    await waitFor(() => {
+      expect(
+        screen.getByText(
+          `3 uses · First seen ${formatLocalDateTime("2026-03-10T12:00:00.000Z")} · Last seen ${formatLocalDateTime("2026-03-17T12:00:00.000Z")}`,
+        ),
+      ).toBeInTheDocument();
+    });
     expect(screen.getByLabelText("Show for #RHOP")).toBeEnabled();
     fireEvent.click(screen.getByRole("button", { name: "Resolve" }));
 
