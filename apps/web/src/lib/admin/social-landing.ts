@@ -7,7 +7,7 @@ export type SocialLandingPlatform =
   | "threads";
 
 export type SocialLandingProgressStatus = {
-  source: "backend" | "fallback" | "none";
+  source: "backend" | "fallback" | "none" | "unavailable";
   cache_status: string | null;
   generated_at: string | null;
   stale: boolean;

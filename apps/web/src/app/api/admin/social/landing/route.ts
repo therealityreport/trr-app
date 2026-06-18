@@ -514,6 +514,19 @@ export async function POST(request: NextRequest) {
       databaseMs += durationMs;
     },
   };
+  const timedJson = (
+    body: Record<string, unknown>,
+    init: ResponseInit,
+    cacheStatus: string | null = "error",
+  ): NextResponse =>
+    attachAdminRouteTiming(NextResponse.json(body, init), {
+      routeFamily: "admin-social-landing",
+      routeName: "POST /api/admin/social/landing",
+      cacheStatus,
+      startedAt: routeStartedAt,
+      backendMs,
+      databaseMs,
+    });
   try {
     const user = await requireAdmin(request);
     const adminContext = toVerifiedAdminContext(user);
@@ -526,21 +539,21 @@ export async function POST(request: NextRequest) {
     const displayName = typeof body?.display_name === "string" ? body.display_name.trim() : "";
 
     if (!isLandingTargetType(targetType)) {
-      return NextResponse.json({ error: "target_type is required" }, { status: 400 });
+      return timedJson({ error: "target_type is required" }, { status: 400 });
     }
     if (!targetId) {
-      return NextResponse.json({ error: "target_id is required" }, { status: 400 });
+      return timedJson({ error: "target_id is required" }, { status: 400 });
     }
     if (!isLandingPlatform(platform)) {
-      return NextResponse.json({ error: "platform is required" }, { status: 400 });
+      return timedJson({ error: "platform is required" }, { status: 400 });
     }
     if (!rawValue) {
-      return NextResponse.json({ error: "value is required" }, { status: 400 });
+      return timedJson({ error: "value is required" }, { status: 400 });
     }
 
     if (targetType === "shared_source") {
       if (!isSharedSourceTargetScope(sourceScope)) {
-        return NextResponse.json({ error: "source_scope must be news or creator" }, { status: 400 });
+        return timedJson({ error: "source_scope must be news or creator" }, { status: 400 });
       }
       const sourceInput = normalizeSocialSourceInput(platform, rawValue);
       await upsertSharedSource({
@@ -565,7 +578,7 @@ export async function POST(request: NextRequest) {
     if (targetType === "network") {
       const sourceScope = NETWORK_SOURCE_SCOPE_BY_KEY[targetId as keyof typeof NETWORK_SOURCE_SCOPE_BY_KEY];
       if (!sourceScope) {
-        return NextResponse.json({ error: "Network target not found" }, { status: 404 });
+        return timedJson({ error: "Network target not found" }, { status: 404 });
       }
       const sourceInput = normalizeSocialSourceInput(platform, rawValue);
       const current = (await fetchSocialBackendJson("/shared/sources", {
@@ -631,7 +644,7 @@ export async function POST(request: NextRequest) {
     if (targetType === "show") {
       const currentShow = await getShowById(targetId);
       if (!currentShow) {
-        return NextResponse.json({ error: "Show not found" }, { status: 404 });
+        return timedJson({ error: "Show not found" }, { status: 404 });
       }
       const sourceInput = normalizeSocialSourceInput(platform, rawValue);
       const existingExternalIds =

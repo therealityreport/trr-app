@@ -254,8 +254,8 @@ const respondWithRouteResponseCache = async (
   input: SocialProfileProxyRouteInput,
   config: SocialProfileProxyRouteConfig,
   cache: RouteResponseCacheConfig,
+  startedAt: number,
 ): Promise<NextResponse> => {
-  const startedAt = performance.now();
   const cacheKey = buildUserScopedRouteCacheKey(
     input.user.uid,
     resolveRouteScope(cache.scope, input.params),
@@ -305,8 +305,8 @@ const respondWithAdminSnapshotCache = async (
   input: SocialProfileProxyRouteInput,
   config: SocialProfileProxyRouteConfig,
   cache: AdminSnapshotCacheConfig,
+  startedAt: number,
 ): Promise<NextResponse> => {
-  const startedAt = performance.now();
   const snapshot = await getOrCreateAdminSnapshot({
     cacheKey: buildAdminSnapshotCacheKey({
       authPartition: buildAdminAuthPartition(input.user),
@@ -340,10 +340,10 @@ export const createSocialProfileProxyRoute = (config: SocialProfileProxyRouteCon
       };
 
       if (config.cache?.kind === "route-response") {
-        return await respondWithRouteResponseCache(input, config, config.cache);
+        return await respondWithRouteResponseCache(input, config, config.cache, routeStartedAt);
       }
       if (config.cache?.kind === "admin-snapshot") {
-        return await respondWithAdminSnapshotCache(input, config, config.cache);
+        return await respondWithAdminSnapshotCache(input, config, config.cache, routeStartedAt);
       }
 
       const startedAt = routeStartedAt;

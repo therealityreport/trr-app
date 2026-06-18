@@ -88,7 +88,7 @@ export const getAdminLoadSampleSurfaceForPath = (path: string): AdminLoadSampleS
   if (path === "/admin/social" || path.startsWith("/admin/social?")) {
     return "admin-social-landing";
   }
-  if (/^\/social\/[^/]+\/[^/]+/.test(path)) {
+  if (/^(?:\/admin)?\/social\/[^/]+\/[^/]+/.test(path)) {
     return "admin-social-profile";
   }
   return null;

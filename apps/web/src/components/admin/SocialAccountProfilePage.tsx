@@ -3325,6 +3325,16 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   useEffect(() => {
     if (profileNavigationSampleRecordedRef.current) return;
     if (!hasSummary && !summaryUninitialized) return;
+    if (
+      hasSummary &&
+      (summary?.platform !== platform ||
+        String(summary?.account_handle || "")
+          .trim()
+          .replace(/^@+/, "")
+          .toLowerCase() !== handle.trim().replace(/^@+/, "").toLowerCase())
+    ) {
+      return;
+    }
     profileNavigationSampleRecordedRef.current = true;
     recordAdminLoadSample({
       surface: "admin-social-profile",
@@ -3333,7 +3343,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       duration_ms: nowMs() - profileLoadStartedAtRef.current,
       cache_status: dashboardFreshness?.status ?? null,
     });
-  }, [dashboardFreshness?.status, handle, hasSummary, platform, summaryUninitialized]);
+  }, [dashboardFreshness?.status, handle, hasSummary, platform, summary?.account_handle, summary?.platform, summaryUninitialized]);
   const postsSortMetadata = posts?.sort_metadata ?? null;
   const summaryInitialStatePending = !hasSummary && !summaryError && !summaryUninitialized;
   const summarySourceMetadata = useMemo(
@@ -4162,8 +4172,9 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       !hasAccess ||
       platform !== "instagram" ||
       summaryLoading ||
-      !summary ||
+      !hasSummary ||
       !secondaryReadsGateOpen ||
+      Boolean(secondaryReadsPressurePause) ||
       secondaryReadBudgetSlot < 2
     ) {
       return;
@@ -4227,6 +4238,16 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
         if (liveProfileTotalProbeKeyRef.current === pendingProbeKey) {
           liveProfileTotalProbeKeyRef.current = null;
         }
+        const requestError = toSocialAccountRequestError(error, "Failed to load social account live profile total");
+        const requestErrorCode = requestError.code;
+        const requestErrorMessage = requestError.message || "";
+        if (
+          isBackendSaturationError(requestError) ||
+          isBackendPressureCode(requestErrorCode) ||
+          hasBackendSaturationText(requestErrorMessage)
+        ) {
+          pauseSecondaryReadsForPressure(requestError, "Failed to load social account live profile total");
+        }
         // Best-effort only; leave the cached summary values intact.
       }
     };
@@ -4240,18 +4261,18 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     };
   }, [
     checking,
-    catalogActionMessage,
     fetchAdminWithAuth,
     handle,
+    hasSummary,
     hasAccess,
+    liveProfileTotalRequestNonce,
+    pauseSecondaryReadsForPressure,
     platform,
     secondaryReadBudgetSlot,
     secondaryReadsGateOpen,
-    summary,
+    secondaryReadsPressurePause,
     summaryLoading,
-    summaryUninitialized,
     user,
-    liveProfileTotalRequestNonce,
   ]);
 
   useEffect(() => {
@@ -4326,6 +4347,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       !user ||
       !hasAccess ||
       selectedTab !== "posts" ||
+      !hasSummary ||
       summaryUninitialized
     ) {
       return;
@@ -4364,6 +4386,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     fetchAdminWithAuth,
     handle,
     hasAccess,
+    hasSummary,
     page,
     platform,
     selectedTab,
@@ -4378,7 +4401,8 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       !hasAccess ||
       selectedTab !== "catalog" ||
       !supportsCatalog ||
-      (summaryUninitialized && !hasSummary)
+      !hasSummary ||
+      summaryUninitialized
     ) {
       return;
     }
@@ -4450,6 +4474,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       !user ||
       !hasAccess ||
       !shouldLoadHashtags ||
+      !hasSummary ||
       summaryUninitialized ||
       (selectedTab !== "hashtags" && shouldDeferSecondaryCatalogReads)
     ) {
@@ -4497,6 +4522,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     checking,
     hashtagWindow,
     hasAccess,
+    hasSummary,
     hashtagsRequestKey,
     platform,
     pauseSecondaryReadsForPressure,
@@ -4515,6 +4541,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       !hasAccess ||
       selectedTab !== "hashtags" ||
       platform !== "instagram" ||
+      !hasSummary ||
       summaryUninitialized ||
       !secondaryReadsGateOpen ||
       Boolean(secondaryReadsPressurePause)
@@ -4548,6 +4575,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   }, [
     checking,
     hasAccess,
+    hasSummary,
     platform,
     refreshHashtagTimeline,
     secondaryReadsGateOpen,
@@ -4622,6 +4650,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       !user ||
       !hasAccess ||
       selectedTab !== "collaborators-tags" ||
+      !hasSummary ||
       summaryUninitialized
     ) {
       return;
@@ -4666,6 +4695,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     fetchAdminWithAuth,
     handle,
     hasAccess,
+    hasSummary,
     platform,
     selectedTab,
     summaryUninitialized,
@@ -8510,7 +8540,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     const runId = String(activeCommentsRunId || "").trim();
     if (!user || !runId || !activeCommentsRunCanRestart) return;
     let { dateStart, dateEnd } = activeCommentsRunDateWindow;
-    if (!dateStart && !dateEnd) {
+    if (!dateStart || !dateEnd) {
       try {
         const progress = await fetchActiveCommentsRunProgressNow(runId);
         ({ dateStart, dateEnd } = readCommentsRunDateWindow(progress));

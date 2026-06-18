@@ -892,7 +892,7 @@ const safeLoadBackendSocialProgressRollup = async (
     return {
       ...uncacheableValue(new Map()),
       status: {
-        source: "fallback",
+        source: "unavailable",
         cache_status: null,
         generated_at: null,
         stale: true,
@@ -2792,7 +2792,7 @@ export async function getSocialLandingPayloadResult(
       } satisfies SharedPipelineSummary,
       shared_source_status: sharedSourceStatus,
       social_progress_status: progressResult.status ?? {
-        source: "fallback",
+        source: progressResult.cacheable ? "none" : "unavailable",
         cache_status: null,
         generated_at: null,
         stale: !progressResult.cacheable,

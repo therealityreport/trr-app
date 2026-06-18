@@ -362,7 +362,10 @@ const coerceSocialProgressStatus = (
   value: Partial<SocialLandingProgressStatus> | null | undefined,
 ): SocialLandingProgressStatus => {
   const source =
-    value?.source === "backend" || value?.source === "fallback" || value?.source === "none"
+    value?.source === "backend" ||
+    value?.source === "fallback" ||
+    value?.source === "none" ||
+    value?.source === "unavailable"
       ? value.source
       : "none";
   return {
@@ -696,7 +699,9 @@ const SocialProgressStatusBadge = ({
       ? status.cache_status
         ? `backend ${status.cache_status}`
         : "backend"
-      : "local fallback";
+      : status.source === "unavailable"
+        ? "backend unavailable"
+        : "local fallback";
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -1042,7 +1047,7 @@ const loadLandingData = async (
     throw new Error(data?.error || "Failed to load social landing data");
   }
   return {
-    payload: coerceLandingPayload(data, { progressStale: cacheStatus === "stale" }),
+    payload: coerceLandingPayload(data, { progressStale: cacheStatus?.includes("stale") ?? false }),
     cacheable: response.headers.get("x-trr-cacheable") !== "0",
   };
 };
