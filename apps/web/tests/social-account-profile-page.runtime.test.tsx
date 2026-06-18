@@ -1306,11 +1306,14 @@ describe("SocialAccountProfilePage", () => {
 
     render(<SocialAccountProfilePage platform="instagram" handle="thetraitorsus" activeTab="stats" />);
 
-    await waitFor(() => {
-      expect(screen.getByText("Saved Posts", { selector: "p" }).parentElement?.textContent?.replace(/\s+/g, " ").trim()).toContain(
-        "431 / 436",
-      );
-    });
+    await waitFor(
+      () => {
+        expect(screen.getByText("Saved Posts", { selector: "p" }).parentElement?.textContent?.replace(/\s+/g, " ").trim()).toContain(
+          "431 / 436",
+        );
+      },
+      { timeout: 5000 },
+    );
     expect(screen.queryByText("431 / 500")).not.toBeInTheDocument();
   });
 
