@@ -1,39 +1,9 @@
 import "server-only";
 
-import {
-  PORTLESS_ADMIN_DASHBOARD_URL,
-  PORTLESS_API_ORIGIN,
-  PORTLESS_APP_ORIGIN,
-} from "@/lib/admin/admin-url-defaults";
+import { PORTLESS_STATUS_ROUTES } from "@/lib/admin/admin-url-defaults";
 import { getWorkspaceRoot, safeExec } from "@/lib/server/admin/shell-exec";
 
 const TRR_ROUTE_NAMES = new Set(["trr", "admin.trr", "api.trr", "wordle.trr"]);
-const EXPECTED_ROUTES = [
-  {
-    id: "trr",
-    label: "App",
-    url: PORTLESS_APP_ORIGIN,
-    expectedPath: "/",
-  },
-  {
-    id: "admin.trr",
-    label: "Admin",
-    url: PORTLESS_ADMIN_DASHBOARD_URL,
-    expectedPath: "/admin",
-  },
-  {
-    id: "api.trr",
-    label: "API",
-    url: `${PORTLESS_API_ORIGIN}/health/live`,
-    expectedPath: "/health/live",
-  },
-  {
-    id: "wordle.trr",
-    label: "Wordle",
-    url: "https://wordle.trr.localhost",
-    expectedPath: "/",
-  },
-] as const;
 
 export interface PortlessRouteStatus {
   url: string;
@@ -97,7 +67,7 @@ export function buildPortlessStatusSnapshot(input: {
   checkedAt?: string;
 }): PortlessStatusSnapshot {
   const routeByName = new Map(input.routes.map((route) => [route.name, route]));
-  const expectedRoutes = EXPECTED_ROUTES.map((expected) => {
+  const expectedRoutes = PORTLESS_STATUS_ROUTES.map((expected) => {
     const route = routeByName.get(expected.id);
     const wildcardFallback =
       expected.id === "admin.trr" && !route && routeByName.get("trr")?.kind !== "alias"

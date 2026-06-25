@@ -15,6 +15,9 @@ import Image from "next/image";
 import MultiSelectPills from "@/components/survey/MultiSelectPills";
 
 type FieldErrors = Partial<Record<"username" | "birthday" | "shows" | "gender" | "country" | "state", string>>;
+type ShowListResponse = {
+  shows?: Array<{ name?: unknown }>;
+};
 
 const FINISH_SHOW_REQUESTS_STORAGE_KEY = "finish_show_requests";
 
@@ -35,6 +38,7 @@ function FinishProfileContent() {
   const [state, setState] = useState("");
   const [errors, setErrors] = useState<FieldErrors>({});
   const [showsLoading, setShowsLoading] = useState(true);
+  const [apiShows, setApiShows] = useState<string[]>([]);
   const [showRequestOpen, setShowRequestOpen] = useState(false);
   const [showRequestInput, setShowRequestInput] = useState("");
   const [showRequests, setShowRequests] = useState<string[]>([]);
@@ -45,7 +49,11 @@ function FinishProfileContent() {
       try {
         const response = await fetch("/api/shows/list");
         if (response.ok) {
-          await response.json();
+          const data = (await response.json().catch(() => ({}))) as ShowListResponse;
+          const names = parseShows(
+            (data.shows ?? []).flatMap((show) => (typeof show.name === "string" ? [show.name] : [])),
+          );
+          setApiShows(names);
         }
       } catch (error) {
         console.error("Failed to fetch shows:", error);
@@ -115,6 +123,7 @@ function FinishProfileContent() {
   }, [router]);
 
   const selectedShows = useMemo(() => Object.keys(showSelections).filter((s) => showSelections[s]), [showSelections]);
+  const showOptions = apiShows.length > 0 ? apiShows : ALL_SHOWS;
   
   // Calculate max date for birthday (enforce 13+ age requirement from validation)
   const maxDate = useMemo(() => {
@@ -505,7 +514,7 @@ function FinishProfileContent() {
               ) : (
                 <MultiSelectPills
                   title="Which shows do you watch?"
-                  items={ALL_SHOWS.map((name, index) => ({
+                  items={showOptions.map((name, index) => ({
                     id: name,
                     label: getDisplayName(name),
                     color: showColors[index % showColors.length],

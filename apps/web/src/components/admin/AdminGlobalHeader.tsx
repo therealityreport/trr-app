@@ -12,7 +12,7 @@ import { ADMIN_NAV_ITEMS } from "@/lib/admin/admin-navigation";
 import { ADMIN_ROOT_PATH } from "@/lib/admin/admin-route-paths";
 import {
   isPortfulPortlessAdminFallback,
-  PORTLESS_ADMIN_ORIGIN,
+  PORTLESS_ADMIN_DASHBOARD_URL,
 } from "@/lib/admin/admin-url-defaults";
 import { buildTypographyDataAttributes } from "@/lib/typography/runtime";
 import {
@@ -49,10 +49,10 @@ export default function AdminGlobalHeader({ children, bodyClassName = "px-6 py-6
     ) {
       return;
     }
-    const cleanUrl = `${PORTLESS_ADMIN_ORIGIN}${window.location.pathname}${window.location.search}${window.location.hash}`;
-    console.warn("[admin-url] Portful admin fallback detected. Use the Portless admin URL instead.", {
+    console.warn("[admin-url] Portful admin fallback detected. Use the clean Portless admin root instead.", {
+      clean_admin_url: PORTLESS_ADMIN_DASHBOARD_URL,
+      current_route: window.location.href,
       current_url: window.location.href,
-      clean_admin_url: cleanUrl,
     });
   }, []);
 

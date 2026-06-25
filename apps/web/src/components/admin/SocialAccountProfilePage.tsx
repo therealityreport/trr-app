@@ -93,6 +93,25 @@ type Props = {
   activeTab: SocialAccountProfileTab;
 };
 
+type InstagramCompletionLaneSummary = {
+  finished: number;
+  in_progress: number;
+  not_started: number;
+};
+
+type InstagramCompletionSummary = {
+  year: number;
+  total_posts: number;
+  total_reported_comments: number;
+  saved_comments: number;
+  accounted_comments: number;
+  lanes: {
+    comments: InstagramCompletionLaneSummary;
+    details: InstagramCompletionLaneSummary;
+    media: InstagramCompletionLaneSummary;
+  };
+};
+
 const INSTAGRAM_AUTH_REFRESH_CONFIRMATION = "I UNDERSTAND INSTAGRAM AUTH RISK";
 const INSTAGRAM_AUTH_REFRESH_WARNING =
   "Manual Instagram auth can surface CAPTCHA, verification code, checkpoint, or account-lock prompts. Complete those steps yourself before confirming a validated-cookie sync.";
@@ -133,6 +152,34 @@ type CatalogPostsResponse = {
     page_size: number;
     total: number;
     total_pages: number;
+  };
+};
+
+const normalizeCatalogPostsResponse = (
+  data: Partial<CatalogPostsResponse> | null | undefined,
+  fallbackPage: number,
+  fallbackPageSize: number,
+): CatalogPostsResponse => {
+  const items = Array.isArray(data?.items) ? data.items : [];
+  const pagination = data?.pagination;
+  const rawPage = Number(pagination?.page);
+  const rawPageSize = Number(pagination?.page_size);
+  const rawTotal = Number(pagination?.total);
+  const rawTotalPages = Number(pagination?.total_pages);
+  const pageSize = Number.isFinite(rawPageSize) && rawPageSize > 0 ? Math.floor(rawPageSize) : fallbackPageSize;
+  const total = Number.isFinite(rawTotal) && rawTotal >= 0 ? Math.floor(rawTotal) : items.length;
+  const totalPages =
+    Number.isFinite(rawTotalPages) && rawTotalPages > 0 ? Math.floor(rawTotalPages) : Math.max(1, Math.ceil(total / pageSize));
+  const page = Number.isFinite(rawPage) && rawPage > 0 ? Math.floor(rawPage) : fallbackPage;
+
+  return {
+    items,
+    pagination: {
+      page,
+      page_size: pageSize,
+      total,
+      total_pages: totalPages,
+    },
   };
 };
 
@@ -194,6 +241,12 @@ type ReviewResolutionDraft = {
 type PendingCatalogAction = {
   action: "backfill" | "sync_recent" | "sync_newer";
   requestBody: CatalogBackfillRequest | CatalogSyncRecentRequest | CatalogSyncNewerRequest;
+};
+
+type PendingInstagramApply = {
+  requestBody: CatalogBackfillRequest;
+  applyRunId: string;
+  requiredConfirmation: string;
 };
 
 type BackfillTaskOption = {
@@ -422,6 +475,7 @@ const INSTAGRAM_BACKFILL_TASK_OPTIONS: ReadonlyArray<BackfillTaskOption> = [
 const INSTAGRAM_BACKFILL_DEFAULT_SELECTED_TASKS: CatalogBackfillSelectedTask[] = [
   "post_details",
   "comments",
+  "media",
 ];
 const INSTAGRAM_BACKFILL_DETAIL_WORKER_OPTIONS = [1, 2, 4, 6, 8, 12] as const;
 const INSTAGRAM_BACKFILL_COMMENTS_WORKER_OPTIONS = [1, 2, 4, 6, 8] as const;
@@ -658,6 +712,8 @@ const monthInputToWindowBoundaryIso = (value: string, boundary: "start" | "end")
   return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
 };
 
+const buildInstagramApplyConfirmation = (runId: string): string => `APPLY INSTAGRAM 2025 BACKFILL ${runId}`;
+
 const formatMonthYear = (value: string): string => {
   const match = /^(\d{4})-(\d{2})$/.exec(String(value || "").trim());
   return match ? `${match[2]}-${match[1]}` : value;
@@ -687,6 +743,17 @@ const formatDashboardFreshnessAge = (ageSeconds: number | null | undefined): str
   }
   const minutes = Math.round(normalizedSeconds / 60);
   return `${minutes} minute${minutes === 1 ? "" : "s"} ago`;
+};
+
+const formatRouteDuration = (durationMs: number | null | undefined): string => {
+  if (durationMs == null || !Number.isFinite(Number(durationMs))) {
+    return "unknown";
+  }
+  const normalizedMs = Math.max(0, Math.round(Number(durationMs)));
+  if (normalizedMs < 1000) {
+    return `${normalizedMs} ms`;
+  }
+  return `${(normalizedMs / 1000).toFixed(normalizedMs < 10_000 ? 1 : 0)} s`;
 };
 
 export const defaultLocalCatalogCommandSelectedTasks = (
@@ -844,6 +911,61 @@ const formatDiagnosticToken = (value?: string | null): string => {
   return normalized.replace(/_/g, " ");
 };
 
+const COMMENTS_SKIP_REASON_LABELS: Record<string, string> = {
+  comments_not_selected: "Comments lane not selected",
+  posts_auth_blocked: "Posts auth blocked",
+  no_commentable_targets: "No commentable targets",
+  authenticated_comments_not_requested: "Authenticated comments not requested",
+  comments_running_or_complete: "Comments already running or complete",
+};
+
+const formatCommentsSkipReasonLabel = (value?: string | null): string => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized) return "";
+  return COMMENTS_SKIP_REASON_LABELS[normalized] ?? formatDiagnosticToken(normalized);
+};
+
+const getCommentsShardAttentionRecommendation = (
+  progress: SocialAccountCommentsRunProgress | null | undefined,
+  issueReasons: string[],
+): string => {
+  const action = String(
+    progress?.recommended_next_action || progress?.operator_next_action || progress?.recommended_action || "",
+  )
+    .trim()
+    .toLowerCase();
+  const reasonText = issueReasons.join(" ").toLowerCase();
+  const retryProgress = progress?.retry_progress as JsonRecord | undefined;
+  const publicApprovalCount =
+    readFiniteNumber((progress as JsonRecord | undefined)?.public_comments_approval_required_target_count) ??
+    readFiniteNumber(retryProgress?.public_comments_approval_required_target_count) ??
+    0;
+  if (
+    action === "approve_comments_auth_or_proxy_fallback" ||
+    publicApprovalCount > 0 ||
+    reasonText.includes("public requires approval") ||
+    reasonText.includes("requires approval")
+  ) {
+    return "Public scraping saved what Instagram exposed, but full coverage needs approved auth/proxy fallback for the remaining comments.";
+  }
+  if (action === "retry_cursor_deadline_targets" || reasonText.includes("pagination deadline")) {
+    return "Cursor deadline gaps are retryable; start Incomplete Fill to auto-queue cursor continuation jobs, or use Retry Cursor Targets for only those posts.";
+  }
+  if (action === "retry_network_stopped_targets") {
+    return "Network-stopped targets are retryable; queue cursor recovery for those posts instead of cancelling the whole run.";
+  }
+  if (action === "wait_for_retry_jobs") {
+    return "Retry jobs are already active; let them continue while saved-count movement is still happening.";
+  }
+  if (action === "mark_stale_jobs_terminal_or_retry") {
+    return "Only cancel or recover shards with stale heartbeats; do not cancel the whole comments run.";
+  }
+  if (action === "retry_largest_gaps" || action === "retry_incomplete_targets") {
+    return "Continue with Incomplete Fill so unfinished posts are targeted without rerunning completed posts.";
+  }
+  return "Cancel only a shard that is stale or no longer moving; failed or retrying shards do not mean the whole comments run is dead.";
+};
+
 const normalizeCatalogActionScope = (value?: string | null): SocialAccountCatalogActionScope | null => {
   const normalized = String(value || "").trim().toLowerCase();
   if (!normalized) return null;
@@ -939,7 +1061,7 @@ const formatPhaseProgress = (progress?: SocialAccountCatalogRunProgressSnapshot[
   return parts.filter(Boolean).join(" · ") || null;
 };
 
-const buildCatalogProgressDiagnosticRows = (
+export const buildCatalogProgressDiagnosticRows = (
   progress?: SocialAccountCatalogRunProgressSnapshot | null,
   summary?: SocialAccountProfileSummary | null,
 ): CatalogProgressDiagnosticRow[] => {
@@ -960,6 +1082,63 @@ const buildCatalogProgressDiagnosticRows = (
   ]);
   const listingStatus = String(progress?.listing_progress?.status || "").trim();
   const selectedTasks = new Set([...(progress?.selected_tasks ?? []), ...(progress?.effective_selected_tasks ?? [])]);
+  const budgetDecision = progress?.budget_decision as JsonRecord | null | undefined;
+  const budgetLimits = budgetDecision?.limits as JsonRecord | null | undefined;
+  const budgetRunbook =
+    (progress?.runbook_state as JsonRecord | null | undefined) ??
+    (budgetDecision?.runbook_state as JsonRecord | null | undefined);
+  const budgetState = String(budgetDecision?.state || "").trim().toLowerCase();
+  const effectiveBudgetCap = getNumberFromRecord(budgetLimits, [
+    "effective_max_concurrent_jobs",
+    "normal_max_concurrent_jobs",
+  ]);
+  const requestedBudgetCap = getNumberFromRecord(budgetLimits, [
+    "requested_max_concurrent_jobs",
+    "healthy_max_concurrent_jobs",
+  ]);
+  const bindingBudgetCap =
+    getNumberFromRecord(budgetLimits, ["live_apply_binding_cap", "comments_job_concurrency_limit", "binding_cap"]) ??
+    getNumberFromRecord(budgetRunbook, ["binding_cap", "current_comments_cap"]);
+  const canaryMetadata = budgetRunbook?.cap4_canary as JsonRecord | null | undefined;
+  const canaryCap =
+    getNumberFromRecord(budgetLimits, ["cap4_canary_max_concurrent_jobs"]) ??
+    getNumberFromRecord(budgetRunbook, ["speed_canary_cap"]) ??
+    getNumberFromRecord(canaryMetadata, ["cap"]);
+  const canaryMinimumJobs =
+    getNumberFromRecord(budgetRunbook, ["minimum_completed_comments_jobs"]) ??
+    getNumberFromRecord(canaryMetadata, ["minimum_completed_comments_jobs"]);
+  const canaryActive = Boolean(
+    progress?.enable_cap4_canary ||
+      budgetLimits?.cap4_canary_active ||
+      canaryMetadata?.active,
+  );
+  if (budgetState || effectiveBudgetCap != null || bindingBudgetCap != null) {
+    const budgetParts = [
+      budgetState ? formatDiagnosticToken(budgetState) : null,
+      effectiveBudgetCap != null ? `effective cap ${formatInteger(effectiveBudgetCap)}` : null,
+      bindingBudgetCap != null ? `binding cap ${formatInteger(bindingBudgetCap)}` : null,
+      requestedBudgetCap != null && requestedBudgetCap !== effectiveBudgetCap
+        ? `requested ${formatInteger(requestedBudgetCap)}`
+        : null,
+    ].filter(Boolean);
+    rows.push({
+      key: "budget-decision",
+      label: "Budget",
+      value: budgetParts.join(" · "),
+      detail: "Budget is checked before catalog jobs launch; paused or identity-blocked lanes do not dispatch new catalog work.",
+    });
+  }
+  if (canaryCap != null) {
+    rows.push({
+      key: "cap4-canary",
+      label: "Cap 4 Canary",
+      value: canaryActive ? `enabled at cap ${formatInteger(canaryCap)}` : `available at cap ${formatInteger(canaryCap)}`,
+      detail:
+        canaryMinimumJobs != null
+          ? `Trust the verdict after at least ${formatInteger(canaryMinimumJobs)} completed comments jobs.`
+          : "Roll back to cap 2 on auth, proxy, 429, or zero-write failures.",
+    });
+  }
   const hasDetailRefreshSignal =
     Boolean(detailsLabel) ||
     getNumberFromRecord(progress?.post_progress, ["completed_posts", "matched_posts"]) != null ||
@@ -990,16 +1169,31 @@ const buildCatalogProgressDiagnosticRows = (
   }
 
   if (selectedTasks.has("post_details")) {
+    const appliedDetailWorkerCount = getNumberFromRecord(progress, ["details_refresh_worker_count"]);
+    const requestedDetailWorkerCount = getNumberFromRecord(progress, ["requested_details_worker_count"]);
+    const liveApplyBindingCap = getNumberFromRecord(progress, ["live_apply_binding_cap"]);
+    const workerCapNote = readString(progress?.worker_cap_note);
     const detailWorkerCount =
+      appliedDetailWorkerCount ??
       getNumberFromRecord(progress?.worker_runtime, ["runner_count"]) ??
-      getNumberFromRecord(progress, ["details_refresh_shard_count", "details_refresh_worker_count"]);
+      getNumberFromRecord(progress, ["detail_worker_count", "details_refresh_shard_count"]);
     const detailRunnerStrategy = String(progress?.worker_runtime?.runner_strategy || "").trim().toLowerCase();
     if (detailWorkerCount != null) {
+      const showRequestedVsApplied =
+        requestedDetailWorkerCount != null && requestedDetailWorkerCount !== detailWorkerCount;
+      const workerValue = showRequestedVsApplied
+        ? `${formatInteger(detailWorkerCount)} applied · ${formatInteger(requestedDetailWorkerCount)} requested`
+        : `${formatInteger(detailWorkerCount)} ${detailWorkerCount === 1 ? "worker" : "workers"}`;
+      const detailParts = [
+        detailRunnerStrategy ? `Strategy: ${formatDiagnosticToken(detailRunnerStrategy)}.` : null,
+        liveApplyBindingCap != null ? `Binding cap ${formatInteger(liveApplyBindingCap)}.` : null,
+        workerCapNote,
+      ].filter(Boolean);
       rows.push({
         key: "detail-worker-count",
         label: "Detail Worker Count",
-        value: `${formatInteger(detailWorkerCount)} ${detailWorkerCount === 1 ? "worker" : "workers"}`,
-        detail: detailRunnerStrategy ? `Strategy: ${formatDiagnosticToken(detailRunnerStrategy)}.` : null,
+        value: workerValue,
+        detail: detailParts.length > 0 ? detailParts.join(" ") : null,
       });
     }
     if (detailWorkerCount === 1 && detailRunnerStrategy === "single_runner") {
@@ -1016,6 +1210,7 @@ const buildCatalogProgressDiagnosticRows = (
     const targetReadiness = progress?.target_readiness as JsonRecord | null | undefined;
     const commentsPreview = targetReadiness?.comments_preview;
     const commentsWorkerCount =
+      getNumberFromRecord(progress, ["comments_worker_count"]) ??
       getNumberFromRecord(commentsPreview, ["comments_shard_count", "recommended_comments_shard_count"]) ??
       getNumberFromRecord(targetReadiness, ["comments_shard_count", "recommended_comments_shard_count"]);
     if (commentsWorkerCount != null) {
@@ -1026,6 +1221,22 @@ const buildCatalogProgressDiagnosticRows = (
         detail: "Comments workers are separate from post-detail workers.",
       });
     }
+  }
+
+  const commentsSkipReason = readString(progress?.comments_skip_reason);
+  if (commentsSkipReason) {
+    const commentsSkipDetail = readString(progress?.comments_skip_detail);
+    const commentsOperatorAction = readString(progress?.comments_operator_action);
+    const skipDetailParts = [
+      commentsSkipDetail,
+      commentsOperatorAction ? `Operator action: ${commentsOperatorAction}` : null,
+    ].filter(Boolean);
+    rows.push({
+      key: "comments-skip-reason",
+      label: "Comments Skipped",
+      value: formatCommentsSkipReasonLabel(commentsSkipReason),
+      detail: skipDetailParts.length > 0 ? skipDetailParts.join(" ") : null,
+    });
   }
 
   const coverage = progress?.rich_field_coverage ?? progress?.field_coverage ?? null;
@@ -2242,6 +2453,40 @@ const shouldPreferAttachedFollowupLaneStatus = (value?: string | null): boolean 
   return TERMINAL_CATALOG_RUN_STATUSES.has(normalized) || ACTIVE_CATALOG_RUN_STATUSES.has(normalized) || normalized === "blocked_auth";
 };
 
+const selectedTaskForStageGraphLane = (key: string): CatalogBackfillSelectedTask | null => {
+  const normalized = String(key || "").trim().toLowerCase();
+  if (normalized === "detail_refresh") return "post_details";
+  if (normalized === "comments") return "comments";
+  if (normalized === "media") return "media";
+  return null;
+};
+
+const isCatalogLaneSelected = (
+  progress: SocialAccountCatalogRunProgressSnapshot | null | undefined,
+  key: string,
+): boolean => {
+  const task = selectedTaskForStageGraphLane(key);
+  if (!task) return false;
+  return new Set<CatalogBackfillSelectedTask>([
+    ...(progress?.selected_tasks ?? []),
+    ...(progress?.effective_selected_tasks ?? []),
+  ]).has(task);
+};
+
+const fallbackSelectedStageGraphLaneStatus = (
+  progress: SocialAccountCatalogRunProgressSnapshot | null | undefined,
+  key: string,
+): string => {
+  const normalized = String(key || "").trim().toLowerCase();
+  if (normalized === "detail_refresh") {
+    const detailStatus = normalizeCatalogLaneStatus(progress?.details_progress?.status);
+    if (detailStatus && detailStatus !== "skipped") return detailStatus;
+    const runStatus = normalizeCatalogLaneStatus(progress?.run_status);
+    if (runStatus === "completed") return "completed";
+  }
+  return "pending";
+};
+
 const getStageGraphBlockedReason = (node?: SocialAccountCatalogStageGraphNode | null): string | null => {
   const reasons = [
     node?.blocked_reason,
@@ -2333,10 +2578,17 @@ const buildStageGraphLaneCards = (
     const followupErrorDetail = followupErrorMessage
       ? `${followup && "retryable" in followup && followup.retryable ? "Retryable: " : ""}${followupErrorMessage}`
       : null;
+    const selectedLane = isCatalogLaneSelected(progress, key);
+    const normalizedNodeStatus = normalizeCatalogLaneStatus(nodeStatus);
+    const attachedStatus = shouldPreferAttachedFollowupLaneStatus(followupStatus) ? followupStatus : null;
+    const safeNodeStatus =
+      selectedLane && (!normalizedNodeStatus || normalizedNodeStatus === "skipped")
+        ? attachedStatus ?? fallbackStatus ?? fallbackSelectedStageGraphLaneStatus(progress, key)
+        : nodeStatus;
     lanes.push({
       key,
       label: formatStageGraphLaneLabel(key),
-      status: shouldPreferAttachedFollowupLaneStatus(followupStatus) ? followupStatus : nodeStatus ?? fallbackStatus,
+      status: attachedStatus ?? safeNodeStatus ?? fallbackStatus,
       sourceLabel: formatAttachedLaneSourceLabel(followup?.source),
       detail: followupDetail || followupErrorDetail || String(node?.detail || "").trim() || fallbackDetail || null,
       blockedReason: getStageGraphBlockedReason(node),
@@ -2491,6 +2743,11 @@ const getCatalogAggregateRunStatus = (runStatus?: string | null, laneCards: Cata
     if (statuses.includes(status)) return status;
   }
   return normalizedRunStatus || statuses[0] || "";
+};
+
+const getCatalogAllLanesComplete = (runStatus?: string | null, laneCards: CatalogLaneCard[] = []): boolean => {
+  if (normalizeCatalogLaneStatus(runStatus) !== "completed") return false;
+  return laneCards.every((lane) => normalizeCatalogLaneStatus(lane.status) === "completed");
 };
 
 const formatCatalogAggregateRunStatusLabel = (runStatus?: string | null, laneCards: CatalogLaneCard[] = []): string => {
@@ -2963,8 +3220,32 @@ const getInstagramCommentsAuthStatusCopy = (
   const probeStatus = String(probe?.status || probe?.result || "").trim().toLowerCase();
   const healthStatus = String(health?.status || "").trim().toLowerCase();
   const status = probeStatus || healthStatus;
-  if (health?.ready === true || probe?.ready === true || status === "valid") {
+  const publicReady =
+    health?.public_ready === true ||
+    health?.category === "public" ||
+    probe?.public_ready === true ||
+    status === "public";
+  const reason = String(health?.reason || probe?.reason || "").trim().toLowerCase();
+  const rateLimited =
+    health?.rate_limited === true ||
+    health?.category === "rate_limited" ||
+    probe?.rate_limited === true ||
+    reason === "http_429" ||
+    reason === "rate_limited" ||
+    reason.includes("429");
+  const authenticatedReady =
+    health?.authenticated_ready === true ||
+    (health?.ready === true && health?.auth_probe_skipped !== true && status !== "public") ||
+    (probe?.authenticated_ready === true || (probe?.ready === true && probe?.auth_probe_skipped !== true && status !== "public")) ||
+    (status === "valid" && health?.auth_probe_skipped !== true && probe?.auth_probe_skipped !== true);
+  if (authenticatedReady) {
     return { tone: "text-emerald-700", text: "Modal comments auth verified" };
+  }
+  if (rateLimited) {
+    return { tone: "text-amber-700", text: "Instagram comments auth rate-limited; wait before retrying" };
+  }
+  if (publicReady) {
+    return { tone: "text-amber-700", text: "Public comments scraping available; authenticated comments not verified" };
   }
   if (status === "transport_blocked") {
     return { tone: "text-amber-700", text: "Instagram comments transport blocked" };
@@ -3148,6 +3429,12 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   const [summaryError, setSummaryError] = useState<string | null>(null);
   const [summarySaturationActive, setSummarySaturationActive] = useState(false);
   const [dashboardFreshness, setDashboardFreshness] = useState<SocialAccountDashboardFreshness | null>(null);
+  const [profileSnapshotPerformance, setProfileSnapshotPerformance] = useState<{
+    durationMs: number;
+    cacheStatus: string;
+    dashboardStatus: string | null;
+    dashboardSource: string | null;
+  } | null>(null);
   const [accountSwitcherOpen, setAccountSwitcherOpen] = useState(false);
   const [sharedAccountSources, setSharedAccountSources] = useState<SharedAccountSource[]>([]);
   const [sharedAccountSourcesLoading, setSharedAccountSourcesLoading] = useState(false);
@@ -3174,6 +3461,9 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     total: number;
     latestPostedAt: string | null;
   } | null>(null);
+  const [instagramCompletionSummary, setInstagramCompletionSummary] = useState<InstagramCompletionSummary | null>(null);
+  const [instagramCompletionSummaryLoading, setInstagramCompletionSummaryLoading] = useState(false);
+  const [instagramCompletionSummaryError, setInstagramCompletionSummaryError] = useState<string | null>(null);
   const [catalogPage, setCatalogPage] = useState(1);
   const [catalogFilter, setCatalogFilter] = useState<"all" | "assigned" | "unassigned" | "ambiguous" | "needs_review">("all");
   const [instagramBackfillDialogOpen, setInstagramBackfillDialogOpen] = useState(false);
@@ -3194,6 +3484,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     () => buildInstagramBackfillMonthDefaults().monthEnd,
   );
   const [catalogActionMessage, setCatalogActionMessage] = useState<string | null>(null);
+  const [pendingInstagramApply, setPendingInstagramApply] = useState<PendingInstagramApply | null>(null);
   const [runningCatalogAction, setRunningCatalogAction] = useState<
     | "backfill"
     | "clear_stuck_jobs"
@@ -3253,6 +3544,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   const [cancellingActiveCommentsRun, setCancellingActiveCommentsRun] = useState(false);
   const [resumingActiveCommentsRun, setResumingActiveCommentsRun] = useState(false);
   const [restartingActiveCommentsRun, setRestartingActiveCommentsRun] = useState(false);
+  const [repairingActiveCommentsAuth, setRepairingActiveCommentsAuth] = useState(false);
   const [cancellingCommentsJobId, setCancellingCommentsJobId] = useState<string | null>(null);
   const [dismissingCatalogRunId, setDismissingCatalogRunId] = useState<string | null>(null);
   const [pendingDismissedCatalogRunIds, setPendingDismissedCatalogRunIds] = useState<Set<string>>(new Set());
@@ -3288,6 +3580,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   const [cookieRefreshMessage, setCookieRefreshMessage] = useState<string | null>(null);
   const [cookieRefreshConfirmationPending, setCookieRefreshConfirmationPending] = useState(false);
   const [catalogRepairAuthConfirmationRunId, setCatalogRepairAuthConfirmationRunId] = useState<string | null>(null);
+  const [commentsRepairAuthConfirmationRunId, setCommentsRepairAuthConfirmationRunId] = useState<string | null>(null);
   const [secondaryReadsGateOpen, setSecondaryReadsGateOpen] = useState(false);
   const [secondaryReadBudgetSlot, setSecondaryReadBudgetSlot] = useState(0);
   const [secondaryReadsPressurePause, setSecondaryReadsPressurePause] = useState<{
@@ -3824,13 +4117,20 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
         },
         { preferredUser: user },
       );
+      const durationMs = nowMs() - requestStartedAt;
       recordAdminLoadSample({
         surface: "admin-social-profile-snapshot",
         path: `/social/${platform}/${handle}`,
         source: "api",
-        duration_ms: nowMs() - requestStartedAt,
+        duration_ms: durationMs,
         cache_status: response.headers.get("x-trr-cache"),
         server_timing: response.headers.get("server-timing"),
+      });
+      setProfileSnapshotPerformance({
+        durationMs,
+        cacheStatus: response.headers.get("x-trr-cache") ?? "miss",
+        dashboardStatus: response.headers.get("x-trr-dashboard-freshness"),
+        dashboardSource: response.headers.get("x-trr-dashboard-source"),
       });
       const envelope = (await response.json().catch(() => ({}))) as
         | SocialAccountProfileSnapshot
@@ -4292,14 +4592,15 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
           undefined,
           { preferredUser: user },
         );
-        const data = (await response.json().catch(() => ({}))) as CatalogPostsResponse & { error?: string };
+        const data = (await response.json().catch(() => ({}))) as Partial<CatalogPostsResponse> & { error?: string };
         if (!response.ok) {
           throw new Error(data.error || "Failed to load catalog preview");
         }
         if (cancelled) return;
+        const normalizedData = normalizeCatalogPostsResponse(data, 1, 1);
         setCatalogCardPreview({
-          total: Number(data.pagination?.total ?? 0),
-          latestPostedAt: data.items?.[0]?.posted_at ?? null,
+          total: normalizedData.pagination.total,
+          latestPostedAt: normalizedData.items[0]?.posted_at ?? null,
         });
       } catch (error) {
         pauseSecondaryReadsForPressure(error, "Failed to load catalog preview");
@@ -4413,12 +4714,12 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
           undefined,
           { preferredUser: user },
         );
-        const data = (await response.json().catch(() => ({}))) as CatalogPostsResponse & { error?: string };
+        const data = (await response.json().catch(() => ({}))) as Partial<CatalogPostsResponse> & { error?: string };
         if (!response.ok) {
           throw new Error(data.error || "Failed to load social account catalog posts");
         }
         if (cancelled) return;
-        setCatalogPosts(data);
+        setCatalogPosts(normalizeCatalogPostsResponse(data, catalogPage, 25));
       } catch (error) {
         if (cancelled) return;
         setCatalogPostsError(error instanceof Error ? error.message : "Failed to load social account catalog posts");
@@ -4706,6 +5007,53 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     summary?.catalog_total_posts,
     summary?.live_catalog_total_posts,
     supportsCatalog,
+  ]);
+
+  useEffect(() => {
+    if (checking || !user || !hasAccess || platform !== "instagram" || selectedTab !== "catalog") {
+      setInstagramCompletionSummary(null);
+      setInstagramCompletionSummaryLoading(false);
+      setInstagramCompletionSummaryError(null);
+      return;
+    }
+    let cancelled = false;
+    setInstagramCompletionSummaryLoading(true);
+    setInstagramCompletionSummaryError(null);
+    const loadCompletionSummary = async () => {
+      try {
+        const response = await fetchAdminWithAuth(
+          `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/completion-summary?year=2025`,
+          undefined,
+          { preferredUser: user },
+        );
+        const data = (await response.json().catch(() => ({}))) as Partial<InstagramCompletionSummary> & { error?: string };
+        if (!response.ok) {
+          throw new Error(data.error || "Failed to load 2025 completion summary");
+        }
+        if (!cancelled) setInstagramCompletionSummary(data as InstagramCompletionSummary);
+      } catch (error) {
+        pauseSecondaryReadsForPressure(error, "Failed to load 2025 completion summary");
+        if (!cancelled) {
+          setInstagramCompletionSummary(null);
+          setInstagramCompletionSummaryError("Unavailable");
+        }
+      } finally {
+        if (!cancelled) setInstagramCompletionSummaryLoading(false);
+      }
+    };
+    void loadCompletionSummary();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    checking,
+    fetchAdminWithAuth,
+    handle,
+    hasAccess,
+    pauseSecondaryReadsForPressure,
+    platform,
+    selectedTab,
+    user,
   ]);
 
   const displayTotalPosts = useMemo(() => {
@@ -5533,6 +5881,14 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     Boolean(activeCommentsRunId) &&
     !rawActiveCommentsRunProgressIsStale &&
     (activeCommentsRunIsActive || activeCommentsRunIsPublicBlockedPaused);
+  const activeCommentsRunCanRepairAuth =
+    platform === "instagram" &&
+    Boolean(activeCommentsRunId) &&
+    !rawActiveCommentsRunProgressIsStale &&
+    (activeCommentsRunProgressData?.manual_auth_required === true ||
+      String(activeCommentsRunProgressData?.operational_state || "").trim().toLowerCase() === "blocked_auth" ||
+      String(activeCommentsRunProgressData?.recommended_next_action || "").trim().toLowerCase() ===
+        "repair_auth_then_retry");
   const activeCommentsRunDateWindow = useMemo(
     () => readCommentsRunDateWindow(activeCommentsRunProgressData),
     [activeCommentsRunProgressData],
@@ -5611,8 +5967,19 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     const autoRebalance = progress?.auto_rebalance;
     const autoRebalancedJobCount = getNumberFromRecord(autoRebalance, ["created_job_count"]);
     const accessProofLabel = formatInstagramAccessProofLabel(progress);
+    const terminalNotice = (() => {
+      const status = String(progress?.run_status || activeCommentsRunEffectiveStatus || "").trim().toLowerCase();
+      if (!TERMINAL_CATALOG_RUN_STATUSES.has(status)) return null;
+      const baseMessage = progress?.error_message || `Comments run ${formatRunStatusLabel(status)}.`;
+      if (status !== "cancelled") return baseMessage;
+      const remainingTargets = readFiniteNumber(progress?.cancellation_summary?.remaining_target_source_ids_count);
+      return remainingTargets !== null && remainingTargets > 0
+        ? `${baseMessage} ${formatInteger(remainingTargets)} targets remain; use Incomplete Fill to continue only unfinished posts.`
+        : baseMessage;
+    })();
     return {
       status: formatRunStatusLabel(activeCommentsRunEffectiveStatus || "running"),
+      terminalNotice,
       jobSummary: formatCommentsShardJobSummary(progress),
       completedPosts,
       totalPosts,
@@ -5887,6 +6254,83 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   const activeCatalogSourceScope = useMemo(() => {
     return resolveActiveCatalogSourceScope(summary, catalogRunProgress);
   }, [catalogRunProgress, summary]);
+
+  useEffect(() => {
+    if (platform !== "instagram") {
+      setPendingInstagramApply(null);
+      return;
+    }
+    const currentRunId = String(catalogRunProgress?.run_id || "").trim();
+    const launchState = String(catalogRunProgress?.launch_state || "").trim().toLowerCase();
+    const applyRunId =
+      String(catalogRunProgress?.apply_run_id || "").trim() ||
+      (launchState === "pending_apply_confirmation" ? currentRunId : "");
+    const applyRequired = Boolean(
+      catalogRunProgress?.requires_apply_confirmation ||
+        catalogRunProgress?.apply_required ||
+        launchState === "pending_apply_confirmation",
+    );
+    if (!applyRequired || !applyRunId) {
+      setPendingInstagramApply((current) => (current?.applyRunId === currentRunId ? null : current));
+      return;
+    }
+    const selectedTasks =
+      catalogRunProgress?.effective_selected_tasks?.length ? catalogRunProgress.effective_selected_tasks
+      : catalogRunProgress?.selected_tasks?.length ? catalogRunProgress.selected_tasks
+      : [...INSTAGRAM_BACKFILL_DEFAULT_SELECTED_TASKS];
+    const requestBody: CatalogBackfillRequest = {
+      source_scope: (String(catalogRunProgress?.source_scope || activeCatalogSourceScope || "network").trim() ||
+        "network") as NonNullable<CatalogBackfillRequest["source_scope"]>,
+      backfill_scope:
+        catalogRunProgress?.date_start || catalogRunProgress?.date_end ? "bounded_window" : "full_history",
+      date_start: catalogRunProgress?.date_start ?? null,
+      date_end: catalogRunProgress?.date_end ?? null,
+      selected_tasks: selectedTasks,
+      ...(catalogRunProgress?.detail_worker_count ? { detail_worker_count: catalogRunProgress.detail_worker_count } : {}),
+      ...(catalogRunProgress?.comments_worker_count
+        ? { comments_worker_count: catalogRunProgress.comments_worker_count }
+        : {}),
+      ...(catalogRunProgress?.comments_enable_media_followups != null
+        ? { comments_enable_media_followups: catalogRunProgress.comments_enable_media_followups }
+        : {}),
+      ...(catalogRunProgress?.enable_cap4_canary ? { enable_cap4_canary: true } : {}),
+    };
+    const requiredConfirmation =
+      String(catalogRunProgress?.required_confirmation || "").trim() || buildInstagramApplyConfirmation(applyRunId);
+    setPendingInstagramApply((current) => {
+      if (
+        current?.applyRunId === applyRunId &&
+        current.requiredConfirmation === requiredConfirmation &&
+        JSON.stringify(current.requestBody) === JSON.stringify(requestBody)
+      ) {
+        return current;
+      }
+      return {
+        requestBody,
+        applyRunId,
+        requiredConfirmation,
+      };
+    });
+  }, [
+    activeCatalogSourceScope,
+    catalogRunProgress?.apply_required,
+    catalogRunProgress?.apply_run_id,
+    catalogRunProgress?.comments_enable_media_followups,
+    catalogRunProgress?.comments_worker_count,
+    catalogRunProgress?.date_end,
+    catalogRunProgress?.date_start,
+    catalogRunProgress?.detail_worker_count,
+    catalogRunProgress?.effective_selected_tasks,
+    catalogRunProgress?.enable_cap4_canary,
+    catalogRunProgress?.launch_state,
+    catalogRunProgress?.required_confirmation,
+    catalogRunProgress?.requires_apply_confirmation,
+    catalogRunProgress?.run_id,
+    catalogRunProgress?.selected_tasks,
+    catalogRunProgress?.source_scope,
+    platform,
+  ]);
+
   const displayedCatalogRunStatusLabel = useMemo(() => {
     return getCatalogRunDisplayStatusLabel(displayedCatalogRunStatus, catalogRunProgress);
   }, [catalogRunProgress, displayedCatalogRunStatus]);
@@ -6552,6 +6996,10 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       issueReasons: Array.from(issueReasons).slice(0, 3),
     };
   }, [activeCommentsProgressRankedRows, activeCommentsRunProgressData?.worker_counters]);
+  const commentsShardAttentionRecommendation = useMemo(
+    () => getCommentsShardAttentionRecommendation(activeCommentsRunProgressData, commentsShardHealthSummary.issueReasons),
+    [activeCommentsRunProgressData, commentsShardHealthSummary.issueReasons],
+  );
 
   const catalogLaneCards = useMemo(
     () =>
@@ -6568,6 +7016,10 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
 	      displayedCatalogRunStatus,
 	    ],
 	  );
+  const catalogAllLanesComplete = getCatalogAllLanesComplete(
+    catalogRunProgress?.run_status ?? displayedCatalogRunStatus,
+    catalogLaneCards,
+  );
 
   const catalogTerminalCoverageMessage = useMemo(() => {
     if (catalogProgressMode !== "coverage") return null;
@@ -6722,6 +7174,16 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
 
   const mediaCoverageUnavailable = !summaryInitialStatePending && summary?.media_coverage == null;
 
+  const instagramCompletionLanes = useMemo(() => {
+    const lanes = instagramCompletionSummary?.lanes;
+    if (!lanes) return [];
+    return [
+      { key: "comments", label: "Comments", summary: lanes.comments },
+      { key: "details", label: "Details", summary: lanes.details },
+      { key: "media", label: "Media", summary: lanes.media },
+    ];
+  }, [instagramCompletionSummary?.lanes]);
+
   const catalogProgressDiagnosticRows = useMemo(
     () => buildCatalogProgressDiagnosticRows(catalogRunProgress, summary),
     [catalogRunProgress, summary],
@@ -6830,7 +7292,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
           .join(" · "),
         recommendation:
           commentsShardHealthSummary.failed > 0 || commentsShardHealthSummary.retrying > 0
-            ? "Leave the run active unless a shard stops moving; cancel only the stuck shard."
+            ? commentsShardAttentionRecommendation
             : "Let comments continue separately from post/details work.",
         progressValue: activeCommentsProgressSummary.postsPercent ?? null,
       });
@@ -6896,6 +7358,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     catalogAlertCodes,
     catalogStuckQueueRecoveryRecommended,
     commentsSavedCount,
+    commentsShardAttentionRecommendation,
     commentsShardHealthSummary.failed,
     commentsShardHealthSummary.queued,
     commentsShardHealthSummary.retrying,
@@ -7032,7 +7495,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
         ]
           .filter(Boolean)
           .join(". "),
-        recommendation: "Cancel only a shard that is stuck; failed or retrying shards do not mean the whole comments run is dead.",
+        recommendation: commentsShardAttentionRecommendation,
         tone: commentsShardHealthSummary.failed > 0 ? "red" : "amber",
       });
     }
@@ -7067,6 +7530,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     catalogRunProgressError,
     catalogStopMessage,
     commentsShardHealthSummary.failed,
+    commentsShardAttentionRecommendation,
     commentsShardHealthSummary.issueReasons,
     commentsShardHealthSummary.retrying,
     cookieHealth?.auth_surface_blocked,
@@ -7715,14 +8179,25 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       requestBody: CatalogBackfillRequest | CatalogSyncRecentRequest | CatalogSyncNewerRequest,
     ) => {
       setRunningCatalogAction(action);
+      const liveApplyRequest =
+        action === "backfill" &&
+        "apply_run_id" in requestBody &&
+        Boolean(String(requestBody.apply_run_id || "").trim());
+      if (liveApplyRequest) {
+        setCatalogActionMessage("Confirming Live APPLY and finalizing Instagram backfill lanes...");
+      } else {
+        setPendingInstagramApply(null);
+      }
       const requestSelectedTasks = "selected_tasks" in requestBody ? requestBody.selected_tasks : undefined;
       const instagramCommentsSelected =
         action === "backfill" &&
         platform === "instagram" &&
         (requestSelectedTasks ?? INSTAGRAM_BACKFILL_DEFAULT_SELECTED_TASKS).includes("comments");
-      setCatalogActionMessage(
-        instagramCommentsSelected ? "Checking Instagram auth before preparing backfill..." : null,
-      );
+      if (!liveApplyRequest) {
+        setCatalogActionMessage(
+          instagramCommentsSelected ? "Checking Instagram auth before preparing backfill..." : null,
+        );
+      }
       setCatalogFreshness(null);
       setCatalogFreshnessError(null);
       setSecondaryReadsPressurePause(null);
@@ -7812,6 +8287,14 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
         if (action === "backfill" && platform === "instagram") {
           const launchTaskResolutionPending =
             data.launch_state === "pending" || Boolean(data.launch_task_resolution_pending);
+          const liveApplyRunId = String(data.apply_run_id || data.run_id || "").trim();
+          const requiredLiveApplyConfirmation =
+            String(data.required_confirmation || "").trim() ||
+            (liveApplyRunId ? buildInstagramApplyConfirmation(liveApplyRunId) : "");
+          const requiresLiveApplyConfirmation =
+            Boolean(data.requires_apply_confirmation) &&
+            Boolean(liveApplyRunId) &&
+            Boolean(requiredLiveApplyConfirmation);
           const attachedFollowups = data.attached_followups ?? null;
           const attachedComments = attachedFollowups?.comments ?? null;
           const attachedMedia = attachedFollowups?.media ?? null;
@@ -7838,11 +8321,25 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
             data.auth_repair_attempted && data.auth_repair_status === "succeeded"
               ? "Manual Instagram auth validated. "
               : "";
-          if (launchTaskResolutionPending) {
+          if (requiresLiveApplyConfirmation && "backfill_scope" in requestBody) {
+            setPendingInstagramApply({
+              requestBody: { ...requestBody },
+              applyRunId: liveApplyRunId,
+              requiredConfirmation: requiredLiveApplyConfirmation,
+            });
+            const message =
+              launchParts.length > 0
+                ? `Instagram 2025 backfill reserved. Confirm Live APPLY to enqueue catalog jobs at the configured comments cap. ${launchParts.join(" · ")}.`
+                : "Instagram 2025 backfill reserved. Confirm Live APPLY to enqueue catalog jobs at the configured comments cap.";
+            setCatalogActionMessage(`${authRepairPrefix}${message}`);
+          } else if (launchTaskResolutionPending) {
+            const currentPhase = liveApplyRequest
+              ? "Current phase: finalizing task lanes in the background. "
+              : "Current phase: reserving the run and finalizing task lanes in the background. ";
             const phaseMessage =
               `Requested tasks: ${selectedTaskLabels || "Post Details"}. ` +
               `Source scope: ${formatDiagnosticToken(requestedSourceScope)}. ` +
-              "Current phase: reserving the run and finalizing task lanes in the background. " +
+              currentPhase +
               "Next: verify Instagram posts auth, check target readiness, attach selected follow-up lanes, then workers claim queued jobs.";
             const message =
               launchParts.length > 0
@@ -7943,7 +8440,15 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
         return;
       }
     }
-    if (platformRequiresCookies && effectiveCookieHealth?.healthy === false) {
+    const localCookieHealthBlocksCatalogLaunch =
+      platformRequiresCookies && platform !== "tiktok" && effectiveCookieHealth?.healthy === false;
+    if (localCookieHealthBlocksCatalogLaunch) {
+      // effectiveCookieHealth is guaranteed non-null here (the platformRequiresCookies
+      // branch above returns early when it cannot be resolved), but narrow explicitly
+      // so the type-checker can follow it through the rest of this block.
+      if (!effectiveCookieHealth) {
+        return;
+      }
       const canAutoRepairBeforeLaunch =
         effectiveCookieHealth.refresh_available &&
         effectiveCookieHealth.refresh_action === "cookie_refresh";
@@ -8025,6 +8530,69 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     startCatalogActionRequest,
     user,
   ]);
+
+  const instagramCap4CanaryState = useMemo(() => {
+    if (platform !== "instagram") {
+      return { allowed: false, reason: null as string | null };
+    }
+    const budgetDecision = catalogRunProgress?.budget_decision as JsonRecord | null | undefined;
+    const budgetState = String(budgetDecision?.state || "").trim().toLowerCase();
+    const runbookState =
+      (catalogRunProgress?.runbook_state as JsonRecord | null | undefined) ??
+      (budgetDecision?.runbook_state as JsonRecord | null | undefined);
+    const canaryOptional =
+      runbookState?.speed_canary_optional !== false &&
+      getNumberFromRecord(runbookState, ["speed_canary_cap"]) === 4;
+    if (catalogLaunchActionsBlocked) {
+      return { allowed: false, reason: catalogLaunchGuardMessage || "Another catalog or comments run is active." };
+    }
+    if (budgetState !== "normal" || !canaryOptional) {
+      return { allowed: false, reason: "Cap 4 canary is available only when the Instagram budget state is normal." };
+    }
+    return { allowed: true, reason: null };
+  }, [
+    catalogLaunchActionsBlocked,
+    catalogLaunchGuardMessage,
+    catalogRunProgress?.budget_decision,
+    catalogRunProgress?.runbook_state,
+    platform,
+  ]);
+
+  const runInstagramCap4Canary = useCallback(async () => {
+    if (platform !== "instagram") return;
+    if (!instagramCap4CanaryState.allowed) {
+      setCatalogActionMessage(instagramCap4CanaryState.reason);
+      return;
+    }
+    const dateStartIso = monthInputToWindowBoundaryIso("2025-01", "start");
+    const dateEndIso = monthInputToWindowBoundaryIso("2025-12", "end");
+    if (!dateStartIso || !dateEndIso) {
+      setCatalogActionMessage("Cannot build the 2025 cap 4 canary window.");
+      return;
+    }
+    const selectedTasks: CatalogBackfillSelectedTask[] = ["post_details", "comments", "media"];
+    await runCatalogAction("backfill", {
+      ...buildBoundedWindowBackfillRequest(dateStartIso, dateEndIso, selectedTasks, 4, 4, true),
+      enable_cap4_canary: true,
+    });
+  }, [
+    buildBoundedWindowBackfillRequest,
+    instagramCap4CanaryState.allowed,
+    instagramCap4CanaryState.reason,
+    platform,
+    runCatalogAction,
+  ]);
+
+  const confirmPendingInstagramApply = useCallback(async () => {
+    if (!pendingInstagramApply) {
+      return;
+    }
+    await runCatalogAction("backfill", {
+      ...pendingInstagramApply.requestBody,
+      apply_run_id: pendingInstagramApply.applyRunId,
+      operator_confirmation: pendingInstagramApply.requiredConfirmation,
+    });
+  }, [pendingInstagramApply, runCatalogAction]);
 
   const toggleInstagramBackfillTask = useCallback((task: CatalogBackfillSelectedTask) => {
     setInstagramBackfillSelectedTasks((current) =>
@@ -8392,8 +8960,8 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     }
   };
 
-  const cancelCatalogRun = async () => {
-    const runId = String(cancellableCatalogRunId || "").trim();
+  const cancelCatalogRun = async (overrideRunId?: string | null) => {
+    const runId = String(overrideRunId || cancellableCatalogRunId || "").trim();
     if (!user || !runId) return;
     setCancellingCatalogRun(true);
     setCatalogActionMessage(null);
@@ -8433,9 +9001,11 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       } else {
         setCatalogActionMessage(cancelMessage);
       }
+      setPendingInstagramApply((current) => (current?.applyRunId === runId ? null : current));
     } catch (error) {
       const reconciled = await reconcileCatalogRunAfterCancelAttempt(runId);
       if (reconciled) {
+        setPendingInstagramApply((current) => (current?.applyRunId === runId ? null : current));
         return;
       }
       setCatalogActionMessage(error instanceof Error ? error.message : "Failed to cancel catalog run");
@@ -8526,6 +9096,48 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       setCatalogActionMessage(error instanceof Error ? error.message : "Failed to resume comments run");
     } finally {
       setResumingActiveCommentsRun(false);
+    }
+  };
+
+  const repairActiveCommentsAuth = async (requestBody: CatalogRepairAuthRequest = {}) => {
+    const runId = String(activeCommentsRunId || "").trim();
+    if (!user || !runId || !activeCommentsRunCanRepairAuth) return;
+    if (!requestBody.operator_confirmation) {
+      setCommentsRepairAuthConfirmationRunId(runId);
+      setCatalogActionMessage(INSTAGRAM_AUTH_REFRESH_WARNING);
+      return;
+    }
+    setRepairingActiveCommentsAuth(true);
+    setCommentsRepairAuthConfirmationRunId(null);
+    setCatalogActionMessage(`Repairing Instagram comments auth for run ${shortRunId(runId)}...`);
+    try {
+      const response = await fetchAdminWithAuth(
+        `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/comments/runs/${encodeURIComponent(runId)}/repair-auth`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(requestBody),
+        },
+        { preferredUser: user },
+      );
+      const data = (await response.json().catch(() => ({}))) as {
+        status?: string | null;
+        repair_status?: string | null;
+        error?: string;
+        message?: string;
+        detail?: { message?: string };
+      };
+      if (!response.ok) {
+        throw new Error(data.error || data.message || data.detail?.message || "Failed to repair comments auth");
+      }
+      setCatalogActionMessage("Checking manual Instagram auth and resuming unfinished comments targets.");
+      await refreshProfileSnapshotNow().catch(() => {});
+      refetchActiveCommentsRunProgress({ cause: "manual", forceRefresh: true });
+      void fetchCookieHealth(true, { includeCommentsAuth: true }).catch(() => {});
+    } catch (error) {
+      setCatalogActionMessage(error instanceof Error ? error.message : "Failed to repair comments auth");
+    } finally {
+      setRepairingActiveCommentsAuth(false);
     }
   };
 
@@ -8941,6 +9553,17 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                       >
                         {runningCatalogAction === "backfill" ? "Preparing Backfill…" : "Backfill Posts"}
                       </Button>
+                      {platform === "instagram" ? (
+                        <Button
+                          onClick={() => void runInstagramCap4Canary()}
+                          disabled={!instagramCap4CanaryState.allowed}
+                          title={instagramCap4CanaryState.reason ?? "Run 2025 backfill canary at comments cap 4"}
+                          variant="outline"
+                          className={NYT_DASHBOARD_BUTTON_CLASS}
+                        >
+                          {runningCatalogAction === "backfill" ? "Preparing Canary..." : "Cap 4 Canary"}
+                        </Button>
+                      ) : null}
                       <Button
                         aria-label="Copy terminal command"
                         title="Copy Backfill Posts terminal command"
@@ -9035,6 +9658,36 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                 ) : null}
                 {catalogLaunchGuardMessage ? <p className="mt-2 text-sm text-red-700">{catalogLaunchGuardMessage}</p> : null}
                 {catalogActionMessage ? <p className="mt-2 text-sm text-zinc-600">{catalogActionMessage}</p> : null}
+                {pendingInstagramApply ? (
+                  <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border border-amber-200 bg-amber-50 px-3 py-2.5">
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-800">Live APPLY Required</p>
+                      <p className="mt-1 break-words font-mono text-xs text-amber-950">
+                        {pendingInstagramApply.requiredConfirmation}
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button
+                        onClick={() => void confirmPendingInstagramApply()}
+                        disabled={runningCatalogAction === "backfill" || Boolean(catalogLaunchGuardMessage)}
+                        size="sm"
+                        variant="primary"
+                        className={NYT_DASHBOARD_PRIMARY_BUTTON_CLASS}
+                      >
+                        Confirm Live APPLY
+                      </Button>
+                      <Button
+                        onClick={() => void cancelCatalogRun(pendingInstagramApply.applyRunId)}
+                        disabled={cancellingCatalogRun || runningCatalogAction === "backfill"}
+                        size="sm"
+                        variant="outline"
+                        className={NYT_DASHBOARD_BUTTON_CLASS}
+                      >
+                        {cancellingCatalogRun ? "Discarding..." : "Discard Pending APPLY"}
+                      </Button>
+                    </div>
+                  </div>
+                ) : null}
                 {/* Cookie preflight card for cookie-dependent platforms */}
                 {supportsCatalog && platformRequiresCookies ? (
                   <div className="mt-3 flex items-center gap-3 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2.5">
@@ -9232,6 +9885,43 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                     </Button>
                   ) : null}
                 </div>
+                {platform === "instagram" && selectedTab === "catalog" ? (
+                  <div className="mt-3 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
+                    <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+                      <div>
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">2025 Completion</p>
+                        <h3 className="mt-1 text-base font-semibold text-zinc-900">
+                          {instagramCompletionSummaryLoading
+                            ? "Loading..."
+                            : instagramCompletionSummary
+                              ? `${formatInteger(instagramCompletionSummary.total_posts)} posts`
+                              : instagramCompletionSummaryError || "Unavailable"}
+                        </h3>
+                      </div>
+                      {instagramCompletionSummary ? (
+                        <p className="text-xs text-zinc-500">
+                          {formatInteger(instagramCompletionSummary.total_reported_comments)} reported comments ·{" "}
+                          {formatInteger(instagramCompletionSummary.accounted_comments)} accounted
+                        </p>
+                      ) : null}
+                    </div>
+                    {instagramCompletionSummary ? (
+                      <div className="mt-3 grid gap-3 md:grid-cols-3">
+                        {instagramCompletionLanes.map((lane) => (
+                          <div key={lane.key} className="rounded-xl border border-zinc-100 bg-zinc-50 px-3 py-3">
+                            <p className="text-xs font-semibold text-zinc-800">{lane.label}</p>
+                            <p className="mt-1 text-sm font-semibold text-zinc-900">
+                              {formatInteger(lane.summary.finished)} finished
+                            </p>
+                            <p className="mt-1 text-xs text-zinc-500">
+                              {formatInteger(lane.summary.in_progress)} in progress · {formatInteger(lane.summary.not_started)} not started
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
                 {pendingReviewOpen ? (
                   <div
                     className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/35 px-4 py-6"
@@ -9338,6 +10028,30 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                             {resumingActiveCommentsRun ? "Resuming..." : "Resume Remaining"}
                           </Button>
                         ) : null}
+                        {activeCommentsRunCanRepairAuth ? (
+                          <Button
+                            onClick={() =>
+                              void repairActiveCommentsAuth(
+                                commentsRepairAuthConfirmationRunId === activeCommentsRunId
+                                  ? {
+                                      operator_confirmation: INSTAGRAM_AUTH_REFRESH_CONFIRMATION,
+                                      allow_cookie_refresh: false,
+                                    }
+                                  : {},
+                              )
+                            }
+                            disabled={repairingActiveCommentsAuth || !user}
+                            size="sm"
+                            variant="outline"
+                            className={NYT_DASHBOARD_DANGER_BUTTON_CLASS}
+                          >
+                            {repairingActiveCommentsAuth
+                              ? "Repairing..."
+                              : commentsRepairAuthConfirmationRunId === activeCommentsRunId
+                                ? "Confirm Auth Repair"
+                                : "Repair Comments Auth"}
+                          </Button>
+                        ) : null}
                         {activeCommentsRunCanRestart ? (
                           <Button
                             onClick={() => void restartActiveCommentsRun()}
@@ -9378,6 +10092,9 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                     ) : null}
                     {activeCommentsProgressWarning ? (
                       <p className="mt-2 text-xs font-medium text-amber-700">{activeCommentsProgressWarning}</p>
+                    ) : null}
+                    {activeCommentsProgressSummary.terminalNotice ? (
+                      <p className="mt-2 text-xs font-medium text-amber-700">{activeCommentsProgressSummary.terminalNotice}</p>
                     ) : null}
                     {activeCommentsProgressSummary.autoRebalancedJobCount ? (
                       <p className="mt-2 text-xs font-medium text-sky-700">
@@ -9763,21 +10480,54 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
           {summaryError && !shouldRenderCatalogRunProgressCard ? (
             <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{summaryError}</div>
           ) : null}
-          {dashboardFreshness?.status === "stale" ? (
-            <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-              Showing cached dashboard data from {formatDashboardFreshnessAge(dashboardFreshness.age_seconds)}.
-            </div>
-          ) : null}
-          {dashboardFreshness?.status === "error" && hasSummary ? (
-            <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-              Backend dashboard refresh failed. Showing the last successful profile data.
-            </div>
-          ) : null}
-          {dashboardFreshness?.status === "missing" && !summaryUninitialized ? (
-            <div className="mb-6 rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm text-zinc-700">
-              No profile dashboard snapshot has been generated yet.
-            </div>
-          ) : null}
+          {(() => {
+            // Unified, always-visible data freshness/performance status row.
+            // Replaces the previous separate stale/error/missing banners so the page
+            // always signals whether data is fresh (live), cached (with age), degraded,
+            // or not yet generated.
+            const status = dashboardFreshness?.status ?? null;
+            const source = dashboardFreshness?.source ?? null;
+            if (!status && !hasSummary) return null;
+            if (status === "missing" && summaryUninitialized) return null;
+
+            let tone = "border-emerald-200 bg-emerald-50 text-emerald-800";
+            let dotClass = "bg-emerald-500";
+            let label = "Fresh";
+            let detail: string | null =
+              source === "live"
+                ? "live data"
+                : dashboardFreshness?.age_seconds != null
+                  ? `updated ${formatDashboardFreshnessAge(dashboardFreshness.age_seconds)}`
+                  : null;
+            if (status === "error") {
+              tone = "border-red-200 bg-red-50 text-red-800";
+              dotClass = "bg-red-500";
+              label = "Degraded";
+              detail = "showing the last successful profile data";
+            } else if (status === "missing") {
+              tone = "border-zinc-200 bg-zinc-50 text-zinc-600";
+              dotClass = "bg-zinc-400";
+              label = "No snapshot yet";
+              detail = null;
+            } else if (status === "stale" || source === "cache") {
+              tone = "border-amber-200 bg-amber-50 text-amber-900";
+              dotClass = "bg-amber-500";
+              label = "Cached";
+              detail = `updated ${formatDashboardFreshnessAge(dashboardFreshness?.age_seconds)}`;
+            }
+
+            return (
+              <div
+                className={`mb-6 flex items-center gap-2 rounded-xl border px-4 py-2.5 text-sm ${tone}`}
+                role="status"
+                aria-live="polite"
+              >
+                <span className={`inline-block h-2 w-2 rounded-full ${dotClass}`} aria-hidden="true" />
+                <span className="font-medium">Data status: {label}</span>
+                {detail ? <span className="opacity-80">· {detail}</span> : null}
+              </div>
+            );
+          })()}
           {showInstagramPipelineTruthPanel ? (
             <section className="mb-6 rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
               <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
@@ -9822,6 +10572,21 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                       ) : null}
                     </div>
                   ))}
+                </div>
+              ) : null}
+              {profileSnapshotPerformance ? (
+                <div className="mt-4 flex flex-wrap items-center gap-2 rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-xs text-zinc-600">
+                  <span className="font-semibold uppercase tracking-[0.16em] text-zinc-500">Performance</span>
+                  <span className="font-medium text-zinc-900">
+                    Snapshot {formatRouteDuration(profileSnapshotPerformance.durationMs)}
+                  </span>
+                  <span>Cache {profileSnapshotPerformance.cacheStatus}</span>
+                  {profileSnapshotPerformance.dashboardStatus ? (
+                    <span>Freshness {profileSnapshotPerformance.dashboardStatus}</span>
+                  ) : null}
+                  {profileSnapshotPerformance.dashboardSource ? (
+                    <span>Source {profileSnapshotPerformance.dashboardSource}</span>
+                  ) : null}
                 </div>
               ) : null}
               <div className="mt-4 rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3">
@@ -9908,6 +10673,15 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                       )}`}
                     >
                       {displayedCatalogRunStatusLabel}
+                    </span>
+                    <span
+                      className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] ${
+                        catalogAllLanesComplete
+                          ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                          : "border-amber-200 bg-amber-50 text-amber-700"
+                      }`}
+                    >
+                      {catalogAllLanesComplete ? "All Lanes Complete" : "Lanes Still Running"}
                     </span>
                     {(displayedCatalogRunStatus === "failed" || displayedCatalogRunStatus === "cancelled") &&
                       displayedCatalogRunId && (
@@ -10673,11 +11447,11 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                           Previous
                         </Button>
                         <div className="text-sm text-zinc-500">
-                          Page {catalogPosts?.pagination.page ?? catalogPage} of {catalogPosts?.pagination.total_pages ?? 1}
+                          Page {catalogPosts?.pagination?.page ?? catalogPage} of {catalogPosts?.pagination?.total_pages ?? 1}
                         </div>
                         <Button
                           onClick={() => setCatalogPage((current) => current + 1)}
-                          disabled={Boolean(catalogPosts && catalogPage >= catalogPosts.pagination.total_pages) || catalogPostsLoading}
+                          disabled={Boolean(catalogPosts && catalogPage >= (catalogPosts.pagination?.total_pages ?? 1)) || catalogPostsLoading}
                           size="sm"
                           variant="outline"
                           className={NYT_DASHBOARD_BUTTON_CLASS}
@@ -10705,6 +11479,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                         });
                         const aggregateStatus = getCatalogAggregateRunStatus(run.status, laneCards);
                         const aggregateStatusLabel = formatCatalogAggregateRunStatusLabel(run.status, laneCards);
+                        const allLanesComplete = getCatalogAllLanesComplete(run.status, laneCards);
                         return (
                         <div key={run.job_id || run.run_id} className="rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3">
                           <div className="flex items-start justify-between gap-3">
@@ -10716,6 +11491,15 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                                   )}`}
                                 >
                                   {aggregateStatusLabel}
+                                </span>
+                                <span
+                                  className={`rounded-full border px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] ${
+                                    allLanesComplete
+                                      ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                      : "border-amber-200 bg-amber-50 text-amber-700"
+                                  }`}
+                                >
+                                  {allLanesComplete ? "All Lanes Complete" : "Lanes Still Running"}
                                 </span>
                                 <span className="text-xs font-semibold text-zinc-500">Run {shortRunId(run.run_id)}</span>
                                 {run.launch_group_id ? (
@@ -11277,8 +12061,8 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                     <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">Instagram Backfill</p>
                     <h2 className="mt-2 text-2xl font-semibold text-zinc-900">Choose what this backfill should run</h2>
                     <p className="mt-2 text-sm text-zinc-500">
-                      Post Details and Comments run by default inside the selected date window. Add Media when you want the
-                      full hosted-media lane.
+                      Post Details, Comments, and Media all run by default inside the selected date window, so a backfill
+                      scrapes every lane to completion. Uncheck a lane only to deliberately scope it out.
                     </p>
                   </div>
                   <Button

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fetchAdminWithAuth } from "@/lib/admin/client-auth";
 import { useSharedPollingResource } from "@/lib/admin/shared-live-resource";
 import {
@@ -33,6 +33,9 @@ interface SocialGrowthData {
   username: string;
   platform: string;
   scraped_at: string;
+  last_attempt_at?: string | null;
+  last_attempt_error?: string | null;
+  last_attempt_history_source?: string | null;
   freshness_status?: "fresh" | "stale" | "missing" | "unknown";
   profile_stats: ProfileStats;
   rankings: Rankings;
@@ -61,7 +64,17 @@ interface CastEntry {
   data: SocialGrowthData | null;
   error: string | null;
   loading: boolean;
-  status: "loading" | "missing" | "fresh" | "stale" | "refreshing" | "failed";
+  pendingCallId: string | null;
+  status:
+    | "loading"
+    | "missing"
+    | "fresh"
+    | "stale"
+    | "refreshing"
+    | "queued"
+    | "running"
+    | "still_running"
+    | "failed";
 }
 
 interface CastSocialBladeComparisonProps {
@@ -76,6 +89,49 @@ type MemberLoadResult = {
   error: string | null;
   notFound: boolean;
 };
+
+type PendingRefreshStatus = "queued" | "running" | "still_running";
+
+type PendingRefreshState = Record<
+  string,
+  {
+    callId: string | null;
+    status: PendingRefreshStatus;
+    attempt: number;
+    callStatus: string | null;
+    checkedAt: string | null;
+    reason: string | null;
+    error: string | null;
+  }
+>;
+
+interface ModalCallStatus {
+  callId: string;
+  status: string;
+  rawStatus: string | null;
+  taskId: string | null;
+  finished: boolean;
+  terminal: boolean;
+  reason: string | null;
+  error: string | null;
+  checkedAt: string | null;
+}
+
+interface SocialBladeHistoryItem {
+  snapshotId: string | null;
+  personId: string | null;
+  handle: string | null;
+  platform: string;
+  scrapedAt: string | null;
+  status: string;
+  statsRefreshed: boolean;
+  source: string | null;
+  snapshotSource: string | null;
+  refreshSource: string | null;
+  forced: boolean;
+  reason: string | null;
+  error: string | null;
+}
 
 // ============================================================================
 // Constants
@@ -94,8 +150,9 @@ const CAST_COLORS = [
   "#4338ca", // indigo-700
 ];
 
-const POLL_INTERVAL_MS = 3000;
-const MAX_POLL_ATTEMPTS = 10;
+const POLL_INTERVAL_MS = 5000;
+const MAX_POLL_ATTEMPTS = 24;
+const STILL_RUNNING_AFTER_ATTEMPTS = 12;
 
 // ============================================================================
 // Chart Helpers
@@ -907,7 +964,7 @@ function gradeColor(grade: string): { bg: string; text: string } {
 }
 
 function entryKey(personId: string, handle: string): string {
-  return `${personId}:${handle.toLowerCase()}`;
+  return `${personId}:${handle.replace(/^@+/, "").toLowerCase()}`;
 }
 
 function deriveEntryStatus(data: SocialGrowthData | null, error: string | null): CastEntry["status"] {
@@ -916,14 +973,28 @@ function deriveEntryStatus(data: SocialGrowthData | null, error: string | null):
   return data.freshness_status === "stale" ? "stale" : "fresh";
 }
 
+function formatStatusLabel(status: CastEntry["status"]): string {
+  switch (status) {
+    case "still_running":
+      return "still running";
+    default:
+      return status;
+  }
+}
+
 function statusChipClass(status: CastEntry["status"]): string {
   switch (status) {
     case "fresh":
       return "border-emerald-200 bg-emerald-50 text-emerald-700";
     case "stale":
       return "border-amber-200 bg-amber-50 text-amber-700";
+    case "queued":
+      return "border-indigo-200 bg-indigo-50 text-indigo-700";
+    case "running":
     case "refreshing":
       return "border-sky-200 bg-sky-50 text-sky-700";
+    case "still_running":
+      return "border-violet-200 bg-violet-50 text-violet-700";
     case "failed":
       return "border-red-200 bg-red-50 text-red-700";
     case "missing":
@@ -945,6 +1016,101 @@ function formatScrapedAtLabel(data: SocialGrowthData | null): string {
       })}`;
 }
 
+function formatDateTimeLabel(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function formatPendingCallId(callId: string | null): string | null {
+  const normalized = String(callId || "").trim();
+  return normalized ? normalized.slice(0, 10) : null;
+}
+
+function resolvePendingRefreshStatus(
+  currentStatus: PendingRefreshStatus,
+  attemptNumber: number,
+  modalStatus?: string | null,
+): PendingRefreshStatus {
+  if (attemptNumber >= STILL_RUNNING_AFTER_ATTEMPTS) return "still_running";
+  if (modalStatus === "pending") return "queued";
+  if (modalStatus === "running" || modalStatus === "completed") return "running";
+  if (currentStatus === "queued") return "running";
+  return currentStatus === "still_running" ? "still_running" : "running";
+}
+
+function formatEntryDetail(entry: CastEntry, pending?: PendingRefreshState[string]): string {
+  if (entry.error) return entry.error;
+  const shortCallId = formatPendingCallId(entry.pendingCallId);
+  const suffixParts = [shortCallId, pending?.reason, pending?.error].filter(Boolean);
+  const suffix = suffixParts.length > 0 ? ` · ${suffixParts.join(" · ")}` : "";
+  if (entry.status === "queued") return shortCallId ? `Queued in Modal · ${shortCallId}` : "Queued in Modal";
+  if (entry.status === "running") {
+    if (pending?.callStatus === "completed") return `Modal completed, waiting for data${suffix}`;
+    return `Running in Modal${suffix}`;
+  }
+  if (entry.status === "still_running") {
+    return `Still running in Modal${suffix}`;
+  }
+  if (entry.status === "refreshing") return "Refreshing snapshot";
+  return formatScrapedAtLabel(entry.data);
+}
+
+function formatTimingDetail(
+  entry: CastEntry,
+  pending: PendingRefreshState[string] | undefined,
+  historyItems: SocialBladeHistoryItem[],
+): string {
+  if (pending) {
+    const checked = formatDateTimeLabel(pending.checkedAt);
+    const parts = [
+      `next check ~${Math.round(POLL_INTERVAL_MS / 1000)}s`,
+      `attempt ${pending.attempt}/${MAX_POLL_ATTEMPTS}`,
+      checked ? `checked ${checked}` : null,
+    ].filter(Boolean);
+    return parts.join(" · ");
+  }
+
+  const lastCompleted = historyItems.find((item) => item.statsRefreshed || item.status === "completed");
+  const lastAttempt = historyItems[0] ?? null;
+  const lastSuccessAt = formatDateTimeLabel(entry.data?.scraped_at) ?? formatDateTimeLabel(lastCompleted?.scrapedAt);
+  const lastAttemptAt =
+    formatDateTimeLabel(entry.data?.last_attempt_at) ?? formatDateTimeLabel(lastAttempt?.scrapedAt);
+  const parts = [
+    lastSuccessAt ? `success ${lastSuccessAt}` : null,
+    lastAttemptAt ? `attempt ${lastAttemptAt}` : null,
+    entry.status === "failed" ? "retry now" : null,
+  ].filter(Boolean);
+  return parts.length > 0 ? parts.join(" · ") : "No refresh history yet";
+}
+
+function buildStatusCountItems(entries: CastEntry[]): Array<{ status: CastEntry["status"]; count: number }> {
+  const counts = new Map<CastEntry["status"], number>();
+  for (const entry of entries) {
+    counts.set(entry.status, (counts.get(entry.status) ?? 0) + 1);
+  }
+  const statusOrder: CastEntry["status"][] = [
+    "fresh",
+    "stale",
+    "missing",
+    "queued",
+    "running",
+    "still_running",
+    "failed",
+    "loading",
+  ];
+  return statusOrder.flatMap((status) => {
+    const count = counts.get(status);
+    return count ? [{ status, count }] : [];
+  });
+}
+
 // ============================================================================
 // Main Component
 // ============================================================================
@@ -962,8 +1128,13 @@ export default function CastSocialBladeComparison({
   const [entries, setEntries] = useState<CastEntry[]>([]);
   const [batchRefreshing, setBatchRefreshing] = useState(false);
   const [batchError, setBatchError] = useState<string | null>(null);
-  const [pendingRefreshKeys, setPendingRefreshKeys] = useState<string[]>([]);
+  const [batchNotice, setBatchNotice] = useState<string | null>(null);
+  const [historyItems, setHistoryItems] = useState<SocialBladeHistoryItem[]>([]);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [pendingRefreshState, setPendingRefreshState] = useState<PendingRefreshState>({});
   const [pollAttempt, setPollAttempt] = useState(0);
+  const lastRefreshSnapshotEventMsRef = useRef<number | null>(null);
+  const pendingRefreshKeys = useMemo(() => Object.keys(pendingRefreshState), [pendingRefreshState]);
 
   const buildEntries = useCallback(
     () =>
@@ -975,6 +1146,7 @@ export default function CastSocialBladeComparison({
         data: null,
         error: null,
         loading: true,
+        pendingCallId: null,
         status: "loading" as const,
       })),
     [membersWithIG]
@@ -986,7 +1158,9 @@ export default function CastSocialBladeComparison({
         const key = entryKey(member.person_id, member.instagram_handle!);
         try {
           const res = await fetchAdminWithAuth(
-            `/api/admin/trr-api/people/${member.person_id}/social-growth?handle=${encodeURIComponent(member.instagram_handle!)}`
+            `/api/admin/trr-api/people/${member.person_id}/social-growth?handle=${encodeURIComponent(member.instagram_handle!)}`,
+            undefined,
+            { allowDevAdminBypass: true },
           );
           const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
           if (!res.ok) {
@@ -1033,6 +1207,7 @@ export default function CastSocialBladeComparison({
       const response = await fetchAdminWithAuth(
         `/api/admin/trr-api/social-growth/cast-comparison/snapshot?${params.toString()}`,
         { cache: "no-store" },
+        { allowDevAdminBypass: true },
       );
       const payload = (await response.json().catch(() => ({}))) as {
         data?: {
@@ -1061,6 +1236,85 @@ export default function CastSocialBladeComparison({
     [membersWithIG],
   );
 
+  const fetchJobHistory = useCallback(async () => {
+    if (membersWithIG.length === 0) {
+      setHistoryItems([]);
+      return;
+    }
+
+    const params = new URLSearchParams({ platform: "instagram", limit: "50" });
+    for (const member of membersWithIG) {
+      params.append("personId", member.person_id);
+      params.append("handle", member.instagram_handle!);
+    }
+
+    try {
+      const response = await fetchAdminWithAuth(`/api/admin/trr-api/social-growth/history?${params.toString()}`, {
+        cache: "no-store",
+      }, { allowDevAdminBypass: true });
+      const payload = (await response.json().catch(() => ({}))) as {
+        items?: SocialBladeHistoryItem[];
+        error?: string;
+      };
+      if (!response.ok) {
+        throw new Error(payload.error ?? `HTTP ${response.status}`);
+      }
+      setHistoryItems(Array.isArray(payload.items) ? payload.items : []);
+      setHistoryError(null);
+    } catch (error) {
+      setHistoryError(error instanceof Error ? error.message : "Failed to load SocialBlade history");
+    }
+  }, [membersWithIG]);
+
+  const fetchModalCallStatuses = useCallback(async (currentPendingState: PendingRefreshState) => {
+    const pairs = Object.entries(currentPendingState).filter(([, pending]) => pending.callId);
+    const results = await Promise.all(
+      pairs.map(async ([key, pending]): Promise<[string, ModalCallStatus | null]> => {
+        try {
+          const response = await fetchAdminWithAuth(
+            `/api/admin/trr-api/social-growth/calls/${encodeURIComponent(pending.callId!)}`,
+            { cache: "no-store" },
+            { allowDevAdminBypass: true },
+          );
+          const payload = (await response.json().catch(() => ({}))) as ModalCallStatus & { error?: string };
+          if (!response.ok) {
+            return [
+              key,
+              {
+                callId: pending.callId!,
+                status: "unknown",
+                rawStatus: null,
+                taskId: null,
+                finished: false,
+                terminal: false,
+                reason: payload.error ?? `HTTP ${response.status}`,
+                error: payload.error ?? `HTTP ${response.status}`,
+                checkedAt: null,
+              },
+            ];
+          }
+          return [key, payload];
+        } catch (error) {
+          return [
+            key,
+            {
+              callId: pending.callId!,
+              status: "unknown",
+              rawStatus: null,
+              taskId: null,
+              finished: false,
+              terminal: false,
+              reason: "call_status_unavailable",
+              error: error instanceof Error ? error.message : "Failed to inspect Modal call",
+              checkedAt: null,
+            },
+          ];
+        }
+      }),
+    );
+    return new Map(results);
+  }, []);
+
   const fetchAll = useCallback(async () => {
     const targetMembers = membersWithIG;
     const targetKeys = new Set(
@@ -1085,35 +1339,65 @@ export default function CastSocialBladeComparison({
           data: result.data,
           error: result.notFound ? null : result.error,
           loading: false,
+          pendingCallId: null,
           status: deriveEntryStatus(result.data, result.notFound ? null : result.error),
         };
       })
     );
   }, [loadMembers, membersWithIG]);
 
-  const pollPendingRefreshes = useCallback(async (currentPendingKeys: string[], options?: { forceRefresh?: boolean }) => {
+  const pollPendingRefreshes = useCallback(async (
+    currentPendingState: PendingRefreshState,
+    attemptNumber: number,
+    options?: { forceRefresh?: boolean },
+  ) => {
+    const currentPendingKeys = Object.keys(currentPendingState);
     const pendingSet = new Set(currentPendingKeys);
-    if (pendingSet.size === 0) return [];
+    if (pendingSet.size === 0) return {} satisfies PendingRefreshState;
 
-    const results = await fetchPendingRefreshSnapshot(currentPendingKeys, options);
+    const [results, callStatuses] = await Promise.all([
+      fetchPendingRefreshSnapshot(currentPendingKeys, options),
+      fetchModalCallStatuses(currentPendingState),
+    ]);
     const resultMap = new Map(results.map((result) => [result.key, result]));
-    const nextPending = new Set<string>();
+    const nextPending: PendingRefreshState = {};
 
     setEntries((prev) =>
       prev.map((entry) => {
         const key = entryKey(entry.personId, entry.handle);
         const result = resultMap.get(key);
+        const pending = currentPendingState[key];
+        const callStatus = callStatuses.get(key) ?? null;
         if (!result) return entry;
+        if (pending && callStatus?.status === "failed") {
+          return {
+            ...entry,
+            error: callStatus.error || callStatus.reason || "Modal SocialBlade job failed",
+            loading: false,
+            pendingCallId: pending.callId,
+            status: "failed",
+          };
+        }
         if (result.data) {
           const nextStatus = deriveEntryStatus(result.data, null);
-          if (pendingSet.has(key) && nextStatus !== "fresh") {
-            nextPending.add(key);
+          if (pending && nextStatus !== "fresh") {
+            const pendingStatus = resolvePendingRefreshStatus(pending.status, attemptNumber, callStatus?.status);
+            nextPending[key] = {
+              callId: pending.callId,
+              status: pendingStatus,
+              attempt: attemptNumber,
+              callStatus: callStatus?.status ?? pending.callStatus,
+              checkedAt: callStatus?.checkedAt ?? pending.checkedAt,
+              reason: callStatus?.reason ?? pending.reason,
+              error: callStatus?.error ?? pending.error,
+            };
             return {
               ...entry,
               data: result.data,
               error: null,
               loading: false,
-              status: "refreshing",
+              pendingCallId: pending.callId,
+              status: pendingStatus,
             };
           }
           return {
@@ -1121,35 +1405,48 @@ export default function CastSocialBladeComparison({
             data: result.data,
             error: null,
             loading: false,
+            pendingCallId: null,
             status: nextStatus,
           };
         }
-        if (pendingSet.has(key)) {
-          nextPending.add(key);
+        if (pending) {
+          const pendingStatus = resolvePendingRefreshStatus(pending.status, attemptNumber, callStatus?.status);
+          nextPending[key] = {
+            callId: pending.callId,
+            status: pendingStatus,
+            attempt: attemptNumber,
+            callStatus: callStatus?.status ?? pending.callStatus,
+            checkedAt: callStatus?.checkedAt ?? pending.checkedAt,
+            reason: callStatus?.reason ?? pending.reason,
+            error: callStatus?.error ?? pending.error,
+          };
           return {
             ...entry,
             error: null,
             loading: false,
-            status: "refreshing",
+            pendingCallId: pending.callId,
+            status: pendingStatus,
           };
         }
         return entry;
       })
     );
 
-    return [...nextPending];
-  }, [fetchPendingRefreshSnapshot]);
+    return nextPending;
+  }, [fetchModalCallStatuses, fetchPendingRefreshSnapshot]);
 
   const triggerBatchRefresh = useCallback(async (targetEntries: CastEntry[], force = false) => {
     if (targetEntries.length === 0 || batchRefreshing) return;
     const targetKeySet = new Set(targetEntries.map((entry) => entryKey(entry.personId, entry.handle)));
     setBatchRefreshing(true);
     setBatchError(null);
+    setBatchNotice(null);
     setPollAttempt(0);
+    lastRefreshSnapshotEventMsRef.current = null;
     setEntries((prev) =>
       prev.map((entry) =>
         targetKeySet.has(entryKey(entry.personId, entry.handle))
-          ? { ...entry, status: "refreshing", error: null, loading: false }
+          ? { ...entry, status: "refreshing", error: null, loading: false, pendingCallId: null }
           : entry
       )
     );
@@ -1166,17 +1463,30 @@ export default function CastSocialBladeComparison({
             handle: entry.handle,
           })),
         }),
-      });
+      }, { allowDevAdminBypass: true });
       const payload = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
       if (!response.ok) {
         throw new Error(typeof payload.error === "string" ? payload.error : `HTTP ${response.status}`);
       }
 
-      const acceptedKeys = new Set<string>(
-        Array.isArray(payload.accepted)
-          ? payload.accepted.map((item: { personId: string; handle: string }) => entryKey(item.personId, item.handle))
-          : []
-      );
+      const acceptedPendingState: PendingRefreshState = {};
+      const acceptedKeys = new Set<string>();
+      if (Array.isArray(payload.accepted)) {
+        for (const item of payload.accepted as Array<{ personId: string; handle: string; callId?: string | null }>) {
+          const key = entryKey(item.personId, item.handle);
+          acceptedKeys.add(key);
+          const callId = String(item.callId || "").trim() || null;
+          acceptedPendingState[key] = {
+            callId,
+            status: callId ? "queued" : "running",
+            attempt: 0,
+            callStatus: callId ? null : "unknown",
+            checkedAt: null,
+            reason: null,
+            error: null,
+          };
+        }
+      }
       const skippedMap = new Map<string, { reason?: string }>(
         Array.isArray(payload.skipped)
           ? payload.skipped.map((item: { personId: string; handle: string; reason?: string }) => [
@@ -1198,13 +1508,20 @@ export default function CastSocialBladeComparison({
         prev.map((entry) => {
           const key = entryKey(entry.personId, entry.handle);
           if (acceptedKeys.has(key)) {
-            return { ...entry, status: "refreshing", error: null };
+            const pending = acceptedPendingState[key];
+            return {
+              ...entry,
+              status: pending?.status ?? "refreshing",
+              error: null,
+              pendingCallId: pending?.callId ?? null,
+            };
           }
           if (skippedMap.has(key)) {
             return {
               ...entry,
               status: entry.data ? deriveEntryStatus(entry.data, null) : "missing",
               error: null,
+              pendingCallId: null,
             };
           }
           if (errorMap.has(key)) {
@@ -1212,46 +1529,60 @@ export default function CastSocialBladeComparison({
               ...entry,
               status: "failed",
               error: errorMap.get(key)?.reason ?? "Refresh failed",
+              pendingCallId: null,
             };
           }
           return entry;
         })
       );
-      setPendingRefreshKeys([...acceptedKeys]);
+      setPendingRefreshState((current) => ({ ...current, ...acceptedPendingState }));
+      void fetchJobHistory();
     } catch (err) {
       const message = err instanceof Error ? err.message : "Refresh failed";
       setBatchError(message);
       setEntries((prev) =>
         prev.map((entry) =>
           targetKeySet.has(entryKey(entry.personId, entry.handle))
-            ? { ...entry, status: "failed", error: message }
+            ? { ...entry, status: "failed", error: message, pendingCallId: null }
             : entry
         )
       );
     } finally {
       setBatchRefreshing(false);
     }
-  }, [batchRefreshing]);
+  }, [batchRefreshing, fetchJobHistory]);
 
   useEffect(() => {
     setEntries(buildEntries());
-    setPendingRefreshKeys([]);
+    setPendingRefreshState({});
     setPollAttempt(0);
+    lastRefreshSnapshotEventMsRef.current = null;
     setBatchError(null);
+    setBatchNotice(null);
+    setHistoryItems([]);
+    setHistoryError(null);
   }, [buildEntries]);
 
   useEffect(() => {
     if (membersWithIG.length > 0) fetchAll();
   }, [fetchAll, membersWithIG.length]);
 
-  const liveRefreshSnapshot = useSharedPollingResource<{ nextPending: string[] }>({
+  useEffect(() => {
+    if (membersWithIG.length > 0) void fetchJobHistory();
+  }, [fetchJobHistory, membersWithIG.length]);
+
+  const liveRefreshSnapshot = useSharedPollingResource<{ nextPending: PendingRefreshState }>({
     key: `cast-socialblade-refresh:${[...pendingRefreshKeys].sort().join(",") || "idle"}`,
     shouldRun: pendingRefreshKeys.length > 0 && pollAttempt < MAX_POLL_ATTEMPTS,
     intervalMs: POLL_INTERVAL_MS,
     fetchData: async (_signal, request) => ({
-      nextPending: await pollPendingRefreshes(pendingRefreshKeys, { forceRefresh: request?.forceRefresh }),
+      nextPending: await pollPendingRefreshes(pendingRefreshState, pollAttempt + 1, {
+        forceRefresh: request?.forceRefresh,
+      }),
     }),
   });
+  const liveRefreshSnapshotEventMs =
+    liveRefreshSnapshot.lastSuccessAt?.getTime() ?? liveRefreshSnapshot.lastEventAt?.getTime() ?? null;
 
   useEffect(() => {
     if (pendingRefreshKeys.length === 0) return;
@@ -1262,22 +1593,34 @@ export default function CastSocialBladeComparison({
           pendingSet.has(entryKey(entry.personId, entry.handle))
             ? {
                 ...entry,
-                status: "failed",
-                error: "Timed out waiting for refreshed SocialBlade data",
+                status: "still_running",
+                error: null,
               }
             : entry
         )
       );
-      setPendingRefreshKeys([]);
+      setBatchNotice(
+        `${pendingRefreshKeys.length} refresh${pendingRefreshKeys.length === 1 ? "" : "es"} still running in Modal.`,
+      );
+      setPendingRefreshState({});
+      void fetchJobHistory();
       return;
     }
-    if (!liveRefreshSnapshot.data) return;
-    setPendingRefreshKeys(liveRefreshSnapshot.data.nextPending);
+    if (!liveRefreshSnapshot.data || liveRefreshSnapshotEventMs === null) return;
+    if (lastRefreshSnapshotEventMsRef.current === liveRefreshSnapshotEventMs) return;
+    lastRefreshSnapshotEventMsRef.current = liveRefreshSnapshotEventMs;
+    setBatchNotice(null);
+    const nextPending = liveRefreshSnapshot.data.nextPending;
+    if (Object.keys(nextPending).length < pendingRefreshKeys.length) {
+      void fetchJobHistory();
+    }
+    setPendingRefreshState(nextPending);
     setPollAttempt((current) => current + 1);
-  }, [liveRefreshSnapshot.data, pendingRefreshKeys, pollAttempt]);
+  }, [fetchJobHistory, liveRefreshSnapshot.data, liveRefreshSnapshotEventMs, pendingRefreshKeys, pollAttempt]);
 
   useEffect(() => {
     if (!liveRefreshSnapshot.error) return;
+    setBatchNotice(null);
     setBatchError(liveRefreshSnapshot.error);
   }, [liveRefreshSnapshot.error]);
 
@@ -1287,6 +1630,132 @@ export default function CastSocialBladeComparison({
   const failedEntries = entries.filter((entry) => entry.status === "failed");
   const refreshableEntries = entries.filter(
     (entry) => entry.status === "missing" || entry.status === "stale" || entry.status === "failed"
+  );
+  const statusCountItems = useMemo(() => buildStatusCountItems(entries), [entries]);
+  const historyByEntryKey = useMemo(() => {
+    const map = new Map<string, SocialBladeHistoryItem[]>();
+    for (const entry of entries) {
+      map.set(entryKey(entry.personId, entry.handle), []);
+    }
+    for (const item of historyItems) {
+      const itemHandle = String(item.handle || "").replace(/^@+/, "").toLowerCase();
+      for (const entry of entries) {
+        if (
+          (item.personId && item.personId === entry.personId) ||
+          (itemHandle && itemHandle === entry.handle.replace(/^@+/, "").toLowerCase())
+        ) {
+          const key = entryKey(entry.personId, entry.handle);
+          map.set(key, [...(map.get(key) ?? []), item]);
+        }
+      }
+    }
+    for (const [key, items] of map) {
+      map.set(
+        key,
+        [...items].sort((left, right) => {
+          const leftTime = new Date(left.scrapedAt || "").getTime();
+          const rightTime = new Date(right.scrapedAt || "").getTime();
+          return (Number.isNaN(rightTime) ? 0 : rightTime) - (Number.isNaN(leftTime) ? 0 : leftTime);
+        }),
+      );
+    }
+    return map;
+  }, [entries, historyItems]);
+  const recentHistoryItems = useMemo(() => historyItems.slice(0, 8), [historyItems]);
+  const statusRows = (
+    <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-sm">
+      {entries.map((entry, index) => {
+        const key = entryKey(entry.personId, entry.handle);
+        const pending = pendingRefreshState[key];
+        const memberHistory = historyByEntryKey.get(key) ?? [];
+        return (
+          <div
+            key={entry.personId}
+            className={`grid gap-2 px-3 py-2 text-xs sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center ${
+              index > 0 ? "border-t border-zinc-100" : ""
+            }`}
+          >
+            <div className="min-w-0 space-y-1">
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
+                <span
+                  className="inline-block h-2 w-2 rounded-full"
+                  style={{ backgroundColor: entry.color }}
+                />
+                <span className="font-semibold text-zinc-700">@{entry.handle}</span>
+                <span className={`rounded-full border px-2 py-0.5 font-semibold ${statusChipClass(entry.status)}`}>
+                  {formatStatusLabel(entry.status)}
+                </span>
+                <span className="min-w-0 truncate text-zinc-500">{formatEntryDetail(entry, pending)}</span>
+              </div>
+              <div className="truncate pl-4 text-[11px] font-medium text-zinc-400">
+                {formatTimingDetail(entry, pending, memberHistory)}
+              </div>
+            </div>
+            <div className="flex items-center justify-start sm:justify-end">
+              {entry.status === "failed" ? (
+                <button
+                  type="button"
+                  onClick={() => void triggerBatchRefresh([entry], true)}
+                  disabled={batchRefreshing}
+                  className="inline-flex items-center gap-1 rounded-md border border-red-200 bg-white px-2 py-1 text-[11px] font-semibold text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Retry
+                </button>
+              ) : null}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+  const historyPanel = (
+    <div className="rounded-xl border border-zinc-200 bg-white shadow-sm">
+      <div className="flex items-center justify-between gap-3 border-b border-zinc-100 px-4 py-3">
+        <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-400">
+          Job History
+        </p>
+        <button
+          type="button"
+          onClick={() => void fetchJobHistory()}
+          className="rounded-md border border-zinc-200 px-2 py-1 text-[11px] font-semibold text-zinc-600 transition hover:bg-zinc-50"
+        >
+          Update
+        </button>
+      </div>
+      <div className="divide-y divide-zinc-50">
+        {historyError ? (
+          <p className="px-4 py-3 text-xs text-red-600">{historyError}</p>
+        ) : recentHistoryItems.length === 0 ? (
+          <p className="px-4 py-3 text-xs text-zinc-500">No refresh history yet</p>
+        ) : (
+          recentHistoryItems.map((item) => (
+            <div key={item.snapshotId ?? `${item.handle}-${item.scrapedAt}`} className="grid gap-2 px-4 py-3 text-xs sm:grid-cols-[minmax(0,1fr)_auto]">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-semibold text-zinc-700">@{item.handle ?? "unknown"}</span>
+                  <span className={`rounded-full border px-2 py-0.5 font-semibold ${
+                    item.status === "completed"
+                      ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                      : item.status === "failed"
+                        ? "border-red-200 bg-red-50 text-red-700"
+                        : "border-zinc-200 bg-zinc-100 text-zinc-600"
+                  }`}>
+                    {item.status}
+                  </span>
+                  {item.source ? <span className="text-zinc-400">{item.source}</span> : null}
+                </div>
+                {item.error || item.reason ? (
+                  <p className="mt-1 truncate text-[11px] text-zinc-500">{item.error ?? item.reason}</p>
+                ) : null}
+              </div>
+              <span className="text-[11px] font-medium text-zinc-400 sm:text-right">
+                {formatDateTimeLabel(item.scrapedAt) ?? "unknown time"}
+              </span>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
   );
 
   if (membersWithIG.length === 0) {
@@ -1312,12 +1781,12 @@ export default function CastSocialBladeComparison({
 
   if (loadedEntries.length === 0) {
     return (
-      <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-8 text-center">
-        <p className="text-sm font-semibold text-zinc-600">No SocialBlade data available</p>
-        <p className="mt-1 text-xs text-zinc-500">
-          Refresh SocialBlade here to backfill missing cast rows without visiting each person page.
-        </p>
-        <div className="mt-4 flex items-center justify-center gap-2">
+      <div className="space-y-4 rounded-xl border border-zinc-200 bg-zinc-50 p-6">
+        <div className="text-center">
+          <p className="text-sm font-semibold text-zinc-600">No SocialBlade data available</p>
+          <p className="mt-1 text-xs text-zinc-500">Queue a refresh to load cast rows.</p>
+        </div>
+        <div className="flex items-center justify-center gap-2">
           <button type="button"
             onClick={() => void triggerBatchRefresh(refreshableEntries.length > 0 ? refreshableEntries : entries)}
             disabled={batchRefreshing}
@@ -1335,24 +1804,29 @@ export default function CastSocialBladeComparison({
             </button>
           )}
         </div>
-        {batchError && (
-          <p className="mt-3 text-xs text-red-600">{batchError}</p>
-        )}
-        <div className="mt-4 space-y-1">
-          {entries.map((e) => (
-            <div key={e.personId} className="flex items-center justify-center gap-2 text-xs text-zinc-400">
+        {statusCountItems.length > 0 && (
+          <div className="flex flex-wrap justify-center gap-2">
+            {statusCountItems.map(({ status, count }) => (
               <span
-                className="inline-block h-2 w-2 rounded-full"
-                style={{ backgroundColor: e.color }}
-              />
-              <span>@{e.handle}</span>
-              <span className={`rounded-full border px-2 py-0.5 font-semibold ${statusChipClass(e.status)}`}>
-                {e.status}
+                key={status}
+                className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-semibold ${statusChipClass(status)}`}
+              >
+                <span>{formatStatusLabel(status)}</span>
+                <span className="tabular-nums">{count}</span>
               </span>
-              <span>{e.error || formatScrapedAtLabel(e.data)}</span>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
+        {statusRows}
+        {batchError && (
+          <p className="text-center text-xs text-red-600">{batchError}</p>
+        )}
+        {batchNotice && (
+          <div className="rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-center text-xs text-violet-700">
+            {batchNotice}
+          </div>
+        )}
+        {historyPanel}
       </div>
     );
   }
@@ -1388,31 +1862,31 @@ export default function CastSocialBladeComparison({
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
-          {entries.map((entry) => (
-            <div
-              key={entry.personId}
-              className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-white px-3 py-1 text-[11px] text-zinc-600"
+          {statusCountItems.map(({ status, count }) => (
+            <span
+              key={status}
+              className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-semibold ${statusChipClass(status)}`}
             >
-              <span
-                className="inline-block h-2 w-2 rounded-full"
-                style={{ backgroundColor: entry.color }}
-              />
-              <span className="font-semibold">@{entry.handle}</span>
-              <span className={`rounded-full border px-2 py-0.5 font-semibold ${statusChipClass(entry.status)}`}>
-                {entry.status}
-              </span>
-              <span>{entry.error || formatScrapedAtLabel(entry.data)}</span>
-            </div>
+              <span>{formatStatusLabel(status)}</span>
+              <span className="tabular-nums">{count}</span>
+            </span>
           ))}
         </div>
+        {statusRows}
         {someLoading && (
           <span className="text-[10px] text-zinc-400 animate-pulse">Loading remaining...</span>
+        )}
+        {batchNotice && (
+          <div className="rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-xs text-violet-700">
+            {batchNotice}
+          </div>
         )}
         {batchError && (
           <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
             {batchError}
           </div>
         )}
+        {historyPanel}
       </div>
 
       <FollowersGainedLineChart

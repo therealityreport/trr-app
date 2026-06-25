@@ -56,6 +56,9 @@ const nextConfig: NextConfig = {
   reactStrictMode: true,
   typedRoutes: TYPED_ROUTES_ENABLED,
   distDir: DIST_DIR,
+  allowedDevOrigins: IS_DEV
+    ? ["admin.trr.localhost", "trr.localhost", "api.trr.localhost", "localhost"]
+    : undefined,
   experimental: BUILD_WORKER_COUNT
     ? {
         cpus: BUILD_WORKER_COUNT,

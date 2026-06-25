@@ -81,6 +81,67 @@ const jsonResponse = (
     headers: { "Content-Type": "application/json", ...init.headers },
   });
 
+const buildMediaQueuePayload = () => ({
+  queue: {
+    by_stage: {
+      media_mirror: { queued: 12, retrying: 1, running: 2 },
+      comment_media_mirror: { queued: 3, retrying: 0, running: 1 },
+    },
+    by_stage_platform: {
+      media_mirror: {
+        instagram: { queued: 12, retrying: 1, running: 2 },
+      },
+      comment_media_mirror: {
+        instagram: { queued: 3, retrying: 0, running: 1 },
+      },
+    },
+    media_stale_claims: {
+      total: 2,
+      by_stage: { media_mirror: 1, comment_media_mirror: 1 },
+      by_platform: { instagram: 2 },
+      stale_after_seconds: 900,
+    },
+    media_queued_jobs_stale_after_seconds: 900,
+    media_queued_jobs: [
+      {
+        id: "job-oldest",
+        run_id: "77f85ad9-0b32-4607-8ff4-999261bab84c",
+        status: "queued",
+        stage: "media_mirror",
+        account_handle: "bravotv",
+        source_id: "DGk_hLXhy56",
+        queued_age_seconds: 3600,
+        stale: true,
+        created_at: "2026-06-22T13:30:00.000Z",
+      },
+      {
+        id: "job-newer",
+        run_id: "77f85ad9-0b32-4607-8ff4-999261bab84c",
+        status: "queued",
+        stage: "comment_media_mirror",
+        account_handle: "bravotv",
+        source_id: "comment-1",
+        queued_age_seconds: 120,
+        stale: false,
+        created_at: "2026-06-22T14:28:00.000Z",
+      },
+    ],
+    media_runs: [
+      {
+        run_id: "77f85ad9-0b32-4607-8ff4-999261bab84c",
+        status: "running",
+        latest_job_at: "2026-06-22T14:30:00.000Z",
+        active: 16,
+        stale: true,
+        stages: {
+          media_mirror: { queued: 12, retrying: 1, running: 2 },
+          comment_media_mirror: { queued: 3, running: 1 },
+        },
+      },
+    ],
+  },
+});
+
 const buildInitialLandingPayload = () => ({
   network_sets: [
     {
@@ -427,6 +488,59 @@ describe("admin social page auth bypass", () => {
         }
 
         const url = String(input);
+        if (url.includes("/api/admin/trr-api/social/ingest/queue-status")) {
+          return jsonResponse(buildMediaQueuePayload());
+        }
+
+        if (url === "/api/admin/social/media-queue/snapshots") {
+          return jsonResponse({
+            snapshots: [
+              {
+                name: "20260622T143000Z-77f85ad9-0b32-4607-8ff4-999261bab84c-media_mirror.json",
+                href: "/api/admin/social/media-queue/snapshots?file=20260622T143000Z-77f85ad9-0b32-4607-8ff4-999261bab84c-media_mirror.json",
+                createdAt: "2026-06-22T14:30:00.000Z",
+                runId: "77f85ad9-0b32-4607-8ff4-999261bab84c",
+                stage: "media_mirror",
+              },
+            ],
+          });
+        }
+
+        if (url === "/api/admin/trr-api/social/ingest/media-mirror/recover-stale") {
+          expect(init?.method).toBe("POST");
+          expect(JSON.parse(String(init?.body))).toMatchObject({
+            run_id: "77f85ad9-0b32-4607-8ff4-999261bab84c",
+            confirm_recovery: "RECOVER MEDIA MIRROR JOBS",
+          });
+          return jsonResponse({
+            ok: true,
+            recovered_count: 1,
+            recovered_by_stage: { media_mirror: ["job-oldest"], comment_media_mirror: [] },
+            dispatch: { dispatched_job_ids: ["job-2"] },
+          });
+        }
+
+        if (url === "/api/admin/trr-api/social/ingest/media-mirror/drain-account") {
+          expect(init?.method).toBe("POST");
+          expect(JSON.parse(String(init?.body))).toMatchObject({
+            run_id: "77f85ad9-0b32-4607-8ff4-999261bab84c",
+            account_handle: "bravotv",
+            stage: "media_mirror",
+            recover_limit: 25,
+            dispatch_limit: 8,
+            confirm_drain: "DRAIN BRAVO MEDIA",
+          });
+          return jsonResponse({
+            ok: true,
+            before_remaining: 25,
+            recovered: 25,
+            dispatched: 8,
+            after_remaining: 17,
+            stop_reason: "dispatch_limit_reached",
+            next_recommended_action: "Run drain again",
+          });
+        }
+
         if (url === "/api/admin/social/landing" && init?.method === "POST") {
           expect(JSON.parse(String(init.body))).toMatchObject({
             target_type: "person",
@@ -657,6 +771,73 @@ describe("admin social page auth bypass", () => {
         String(input) === "/api/admin/social/landing" && init?.method === "POST",
     );
     expect(saveCall?.[2]).toMatchObject({
+      allowDevAdminBypass: true,
+      preferredUser: mocks.guardState.user,
+    });
+  });
+
+  it("renders media queue drilldown and recovers a run-scoped stale queue", async () => {
+    render(<AdminSocialPage />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Mirror recovery" })).toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(screen.getByLabelText("Media recovery run ID")).toHaveValue(
+        "77f85ad9-0b32-4607-8ff4-999261bab84c",
+      );
+    });
+    expect(screen.getByLabelText("Drain media account")).toHaveValue("bravotv");
+    expect(screen.getAllByText("Post media").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Comment media").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("1 stale").length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText("Oldest queued media jobs")).toBeInTheDocument();
+    expect(screen.getByText("DGk_hLXhy56")).toBeInTheDocument();
+    expect(screen.getByText("1h")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /77f85ad9/ })).toHaveAttribute(
+      "href",
+      "/api/admin/social/media-queue/snapshots?file=20260622T143000Z-77f85ad9-0b32-4607-8ff4-999261bab84c-media_mirror.json",
+    );
+
+    fireEvent.change(screen.getByLabelText("Media recovery run"), {
+      target: { value: "77f85ad9-0b32-4607-8ff4-999261bab84c" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Recover stale/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Recovered 1 stale media job; dispatched 1\./)).toBeInTheDocument();
+    });
+    expect(screen.getByText(/1 recovered · 1 dispatched/)).toBeInTheDocument();
+    expect(screen.getByText(/Post media 1; 1 dispatch follow-up/)).toBeInTheDocument();
+
+    const recoveryCall = mocks.fetchAdminWithAuth.mock.calls.find(
+      ([input, init]) =>
+        String(input) === "/api/admin/trr-api/social/ingest/media-mirror/recover-stale" &&
+        init?.method === "POST",
+    );
+    expect(recoveryCall?.[2]).toMatchObject({
+      allowDevAdminBypass: true,
+      preferredUser: mocks.guardState.user,
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /Drain Bravo media/i }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(
+          /Drained @bravotv: 25 before, 25 recovered, 8 dispatched, 17 after\./,
+        ),
+      ).toBeInTheDocument();
+    });
+    expect(screen.getByText(/@bravotv · 77f85ad9-0b32-4607-8ff4-999261bab84c/)).toBeInTheDocument();
+    expect(screen.getByText(/Stop: dispatch_limit_reached · Next: Run drain again/)).toBeInTheDocument();
+
+    const drainCall = mocks.fetchAdminWithAuth.mock.calls.find(
+      ([input, init]) =>
+        String(input) === "/api/admin/trr-api/social/ingest/media-mirror/drain-account" &&
+        init?.method === "POST",
+    );
+    expect(drainCall?.[2]).toMatchObject({
       allowDevAdminBypass: true,
       preferredUser: mocks.guardState.user,
     });

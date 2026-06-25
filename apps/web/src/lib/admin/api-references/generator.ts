@@ -174,15 +174,49 @@ function normalizeDynamicSegmentToken(raw: string): string {
   return candidate.replace(/^[A-Z]/, (letter) => letter.toLowerCase());
 }
 
+function stripPathQueryTemplate(raw: string): string {
+  let templateDepth = 0;
+  for (let index = 0; index < raw.length; index += 1) {
+    const current = raw[index];
+    const next = raw[index + 1];
+    if (current === "$" && next === "{") {
+      if (templateDepth === 0) {
+        const expression = raw.slice(index + 2);
+        if (
+          /^\s*(?:query|search|searchParams|queryParams|urlSearchParams)\b/i.test(expression) ||
+          /^\s*[^}]*\?\s*`?\?/.test(expression) ||
+          /^\s*[^}]*:\s*`?\s*`/.test(expression)
+        ) {
+          return raw.slice(0, index);
+        }
+      }
+      templateDepth += 1;
+      index += 1;
+      continue;
+    }
+    if (current === "}" && templateDepth > 0) {
+      templateDepth -= 1;
+      continue;
+    }
+    if (templateDepth === 0 && (current === "?" || current === "#")) {
+      return raw.slice(0, index);
+    }
+  }
+  return raw;
+}
+
 function normalizeStringPathPattern(rawLiteral: string): string | null {
   const unwrapped = rawLiteral.trim().replace(/^["'`]/, "").replace(/["'`]$/, "");
-  const normalizedSegments = unwrapped.replace(/\$\{([^}]+)\}/g, (_match, expression: string) => {
+  const pathOnlyLiteral = stripPathQueryTemplate(unwrapped);
+  const normalizedSegments = pathOnlyLiteral.replace(/\$\{([^}]+)\}/g, (_match, expression: string) => {
     return `[${normalizeDynamicSegmentToken(expression)}]`;
   });
   if (!normalizedSegments.startsWith("/")) {
     return null;
   }
-  const withoutTemplateQueries = normalizedSegments.replace(/\[[^\]]*(?:query|search|params?)[^\]]*\]$/i, "");
+  const withoutTemplateQueries = normalizedSegments
+    .replace(/[?#].*$/, "")
+    .replace(/\[[^\]]*(?:query|search|searchParams|queryParams|urlSearchParams)[^\]]*\]$/i, "");
   return normalizePathPattern(withoutTemplateQueries);
 }
 

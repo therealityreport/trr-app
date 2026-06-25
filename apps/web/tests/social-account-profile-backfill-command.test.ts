@@ -25,6 +25,7 @@ describe("buildLocalCatalogCommand", () => {
     expect(defaultLocalCatalogCommandSelectedTasks("instagram", "backfill")).toEqual([
       "post_details",
       "comments",
+      "media",
     ]);
     expect(defaultLocalCatalogCommandSelectedTasks("tiktok", "backfill")).toEqual([
       "post_details",

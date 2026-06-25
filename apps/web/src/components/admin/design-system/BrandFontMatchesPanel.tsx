@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
 import { getGeneratedBrandFontMatchesApiResponse } from "@/lib/fonts/brand-fonts";
+import { getScoreBreakdownMaxima } from "@/lib/fonts/brand-fonts/scoring-profiles";
 import type {
   BrandFontMatchesApiResponse,
   BrandFontMatchResult,
@@ -11,7 +12,6 @@ import type {
   Provenance,
   ResolvedFontAsset,
   ScoreBreakdown,
-  ScoreBreakdownProfile,
   ScoringMode,
 } from "@/lib/fonts/brand-fonts/types";
 
@@ -161,64 +161,6 @@ function scoringModeLabel(value: ScoringMode | undefined): string {
   return value === "visual+metadata" ? "visual+metadata" : "metadata-only";
 }
 
-function profileLabel(value: ScoreBreakdownProfile): string {
-  if (value === "explicit-mapping-visual") return "explicit-mapping-visual";
-  if (value === "balanced-visual") return "balanced-visual";
-  return "metadata-only";
-}
-
-function profileMaxima(profile: ScoreBreakdownProfile): Record<string, number> {
-  if (profile === "explicit-mapping-visual") {
-    return {
-      classification: 6,
-      role: 10,
-      width: 10,
-      weightCoverage: 7,
-      styleSupport: 4,
-      traitCompatibility: 3,
-      familyName: 5,
-      visualAffinity: 55,
-      riskPenalty: 20,
-      structuralTotal: 40,
-      identityTotal: 5,
-      visualTotal: 55,
-      penaltyTotal: 20,
-    };
-  }
-  if (profile === "balanced-visual") {
-    return {
-      classification: 12,
-      role: 18,
-      width: 14,
-      weightCoverage: 10,
-      styleSupport: 6,
-      traitCompatibility: 5,
-      familyName: 10,
-      visualAffinity: 25,
-      riskPenalty: 20,
-      structuralTotal: 65,
-      identityTotal: 10,
-      visualTotal: 25,
-      penaltyTotal: 20,
-    };
-  }
-  return {
-    classification: 17,
-    role: 25,
-    width: 19,
-    weightCoverage: 14,
-    styleSupport: 8,
-    traitCompatibility: 7,
-    familyName: 10,
-    visualAffinity: 0,
-    riskPenalty: 20,
-    structuralTotal: 90,
-    identityTotal: 10,
-    visualTotal: 0,
-    penaltyTotal: 20,
-  };
-}
-
 function visualEvidenceTone(status: BrandFontMatchesApiResponse["visualEvidence"]["status"]): string {
   if (status === "fresh") return "bg-emerald-50 text-emerald-700 ring-emerald-200";
   if (status === "stale") return "bg-amber-50 text-amber-800 ring-amber-200";
@@ -239,7 +181,7 @@ function sectionToneClass(tone: "zinc" | "emerald" | "sky" | "rose", negative = 
 }
 
 function ScoreBreakdownBars({ breakdown }: { breakdown: ScoreBreakdown }) {
-  const maxima = profileMaxima(breakdown.profile);
+  const maxima = getScoreBreakdownMaxima(breakdown.profile);
 
   return (
     <div className="mt-3 rounded-xl border border-zinc-200 bg-white/80 px-3 py-3">
@@ -248,7 +190,7 @@ function ScoreBreakdownBars({ breakdown }: { breakdown: ScoreBreakdown }) {
           Weighted score breakdown
         </div>
         <span className="rounded-md bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-zinc-600 ring-1 ring-inset ring-zinc-200">
-          {profileLabel(breakdown.profile)}
+          {breakdown.profile}
         </span>
       </div>
       <div className="space-y-3">

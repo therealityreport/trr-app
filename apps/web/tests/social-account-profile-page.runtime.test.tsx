@@ -269,7 +269,7 @@ const healthyCookieHealth = (platform: string) => ({
   source_kind: "default_file",
 });
 
-const INSTAGRAM_BACKFILL_DEFAULT_TASKS = ["post_details", "comments"] as const;
+const INSTAGRAM_BACKFILL_DEFAULT_TASKS = ["post_details", "comments", "media"] as const;
 const TIKTOK_BACKFILL_DEFAULT_TASKS = ["post_details", "comments", "media"] as const;
 
 const createStorageMock = (): Storage => {
@@ -886,7 +886,9 @@ describe("SocialAccountProfilePage", () => {
 
     render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="stats" />);
 
-    expect(await screen.findByText("Showing cached dashboard data from 2 minutes ago.")).toBeInTheDocument();
+    const statusRow = await screen.findByRole("status");
+    expect(statusRow).toHaveTextContent("Data status: Cached");
+    expect(statusRow).toHaveTextContent("updated 2 minutes ago");
     expect(screen.getByText("All-time Saved Comments")).toBeInTheDocument();
   });
 
@@ -915,9 +917,9 @@ describe("SocialAccountProfilePage", () => {
 
     render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="stats" />);
 
-    expect(
-      await screen.findByText("Backend dashboard refresh failed. Showing the last successful profile data."),
-    ).toBeInTheDocument();
+    const statusRow = await screen.findByRole("status");
+    expect(statusRow).toHaveTextContent("Data status: Degraded");
+    expect(statusRow).toHaveTextContent("showing the last successful profile data");
     expect(screen.getByText("All-time Saved Comments")).toBeInTheDocument();
     expect(screen.queryByText("Failed to load social account profile summary")).not.toBeInTheDocument();
   });
@@ -2545,7 +2547,7 @@ describe("SocialAccountProfilePage", () => {
     render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="comments" />);
 
     expect(
-      await screen.findByText("Stopped by operator. 7 targets remain; run Sync Comments to resume."),
+      await screen.findByText("Stopped by operator. 7 targets remain; use Incomplete Fill to continue only unfinished posts."),
     ).toBeInTheDocument();
   });
 
@@ -2595,7 +2597,7 @@ describe("SocialAccountProfilePage", () => {
     const { unmount } = render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="comments" />);
 
     expect(
-      await screen.findByText("Stopped by operator. 7 targets remain; run Sync Comments to resume."),
+      await screen.findByText("Stopped by operator. 7 targets remain; use Incomplete Fill to continue only unfinished posts."),
     ).toBeInTheDocument();
     await waitFor(() => {
       expect(summaryRequests).toBeGreaterThanOrEqual(2);
@@ -4042,7 +4044,8 @@ describe("SocialAccountProfilePage", () => {
     expect(checkboxes).toHaveLength(4);
     expect(checkboxes[0]).toBeChecked();
     expect(checkboxes[1]).toBeChecked();
-    expect(checkboxes[2]).not.toBeChecked();
+    // Media is now checked by default (all three lanes run by default).
+    expect(checkboxes[2]).toBeChecked();
 
     fireEvent.click(screen.getByRole("button", { name: "Start Backfill" }));
 
@@ -4134,6 +4137,109 @@ describe("SocialAccountProfilePage", () => {
           String(input).includes("/catalog/backfill"),
         ),
       ).toBe(true);
+    });
+  });
+
+  it("requires explicit Live APPLY before a 2025 Instagram backfill is finalized", async () => {
+    const runId = "11111111-1111-4111-8111-111111111111";
+    const requiredConfirmation = `APPLY INSTAGRAM 2025 BACKFILL ${runId}`;
+    const backfillRequests: Array<Record<string, unknown>> = [];
+
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse(baseSummary);
+      }
+      if (url.includes("/cookies/health")) {
+        return jsonResponse(healthyCookieHealth("instagram"));
+      }
+      if (url.includes("/snapshot")) {
+        return jsonResponse({
+          summary: baseSummary,
+          catalog_run_progress: null,
+          generated_at: "2026-05-03T15:31:47.000Z",
+        });
+      }
+      if (url.includes(`/catalog/runs/${runId}/progress`)) {
+        return jsonResponse({
+          run_id: runId,
+          run_status: "queued",
+          launch_state: "pending_apply_confirmation",
+          source_scope: "network",
+          selected_tasks: [...INSTAGRAM_BACKFILL_DEFAULT_TASKS],
+          effective_selected_tasks: [...INSTAGRAM_BACKFILL_DEFAULT_TASKS],
+          stages: {},
+          per_handle: [],
+          recent_log: [],
+          summary: { total_jobs: 0, completed_jobs: 0, failed_jobs: 0, active_jobs: 0 },
+        });
+      }
+      if (url.includes("/catalog/backfill")) {
+        expect(init?.method).toBe("POST");
+        const body = typeof init?.body === "string" ? JSON.parse(init.body) : {};
+        backfillRequests.push(body);
+        if (!body.apply_run_id) {
+          expect(body).toMatchObject({
+            source_scope: "network",
+            backfill_scope: "bounded_window",
+            date_start: "2025-01-01T00:00:00.000Z",
+            date_end: "2025-12-31T23:59:59.999Z",
+            selected_tasks: [...INSTAGRAM_BACKFILL_DEFAULT_TASKS],
+          });
+          return jsonResponse({
+            run_id: runId,
+            status: "queued",
+            catalog_run_id: runId,
+            launch_state: "pending_apply_confirmation",
+            launch_task_resolution_pending: true,
+            requires_apply_confirmation: true,
+            apply_required: true,
+            apply_run_id: runId,
+            required_confirmation: requiredConfirmation,
+          });
+        }
+        expect(body).toMatchObject({
+          apply_run_id: runId,
+          operator_confirmation: requiredConfirmation,
+        });
+        return jsonResponse({
+          run_id: runId,
+          status: "queued",
+          catalog_run_id: runId,
+          launch_state: "finalizing",
+          launch_task_resolution_pending: true,
+          requires_apply_confirmation: false,
+          apply_required: false,
+        });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Backfill Posts" })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Backfill Posts" }));
+    expect(await screen.findByText("Choose what this backfill should run")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Start month (MM-YYYY)"), { target: { value: "2025-01" } });
+    fireEvent.change(screen.getByLabelText("End month (MM-YYYY)"), { target: { value: "2025-12" } });
+    fireEvent.click(screen.getByRole("button", { name: "Start Backfill" }));
+
+    expect(await screen.findByText("Live APPLY Required")).toBeInTheDocument();
+    expect(screen.getByText(requiredConfirmation)).toBeInTheDocument();
+    expect(backfillRequests).toHaveLength(1);
+    expect(backfillRequests[0].apply_run_id).toBeUndefined();
+
+    fireEvent.click(screen.getByRole("button", { name: "Confirm Live APPLY" }));
+
+    await waitFor(() => {
+      expect(backfillRequests).toHaveLength(2);
+    });
+    expect(backfillRequests[1]).toMatchObject({
+      apply_run_id: runId,
+      operator_confirmation: requiredConfirmation,
     });
   });
 
@@ -4276,21 +4382,18 @@ describe("SocialAccountProfilePage", () => {
     });
   });
 
-  it("auto-refreshes unhealthy TikTok cookies before starting backfill", async () => {
-    const cookieHealthResponses = [
-      {
-        platform: "tiktok",
-        required: true,
-        healthy: false,
-        reason: "expired",
-        refresh_supported: true,
-        refresh_available: true,
-        refresh_action: "cookie_refresh",
-        refresh_label: "Refresh Cookies",
-        source_kind: "default_file",
-      },
-      healthyCookieHealth("tiktok"),
-    ];
+  it("starts TikTok backfill through Modal even when local cookies are unhealthy", async () => {
+    const unhealthyCookieHealth = {
+      platform: "tiktok",
+      required: true,
+      healthy: false,
+      reason: "expired",
+      refresh_supported: true,
+      refresh_available: true,
+      refresh_action: "cookie_refresh",
+      refresh_label: "Refresh Cookies",
+      source_kind: "default_file",
+    };
 
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
@@ -4303,16 +4406,10 @@ describe("SocialAccountProfilePage", () => {
         });
       }
       if (url.includes("/cookies/health")) {
-        return jsonResponse(cookieHealthResponses.shift() ?? healthyCookieHealth("tiktok"));
+        return jsonResponse(unhealthyCookieHealth);
       }
       if (url.includes("/cookies/refresh")) {
-        expect(init?.method).toBe("POST");
-        return jsonResponse({
-          success: true,
-          healthy: true,
-          reason: null,
-          refresh_action: "cookie_refresh",
-        });
+        throw new Error("TikTok backfill should not refresh local cookies before Modal launch");
       }
       if (url.includes("/catalog/backfill")) {
         expect(init?.method).toBe("POST");
@@ -4441,9 +4538,8 @@ describe("SocialAccountProfilePage", () => {
     expect(checkboxes).toHaveLength(4);
     expect(checkboxes[0]).toBeChecked();
     expect(checkboxes[1]).toBeChecked();
-    expect(checkboxes[2]).not.toBeChecked();
-
-    fireEvent.click(checkboxes[2]);
+    // Media is now checked by default (all three lanes run by default), so no click needed.
+    expect(checkboxes[2]).toBeChecked();
 
     const selectedSummary = Array.from(document.querySelectorAll("p"))
       .map((element) => element.textContent?.replace(/\s+/g, " ").trim() ?? "")
@@ -4868,6 +4964,56 @@ describe("SocialAccountProfilePage", () => {
     });
   });
 
+  it("shows a compact 2025 completion split for bounded backfills", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse({
+          ...baseSummary,
+          catalog_recent_runs: [],
+        });
+      }
+      if (url.includes("/snapshot")) {
+        return jsonResponse({
+          summary: {
+            ...baseSummary,
+            catalog_recent_runs: [],
+          },
+        });
+      }
+      if (url.includes("/completion-summary?year=2025")) {
+        return jsonResponse({
+          total_posts: 437,
+          total_reported_comments: 1820,
+          accounted_comments: 1764,
+          lanes: {
+            comments: { finished: 320, in_progress: 18, not_started: 99 },
+            details: { finished: 401, in_progress: 11, not_started: 25 },
+            media: { finished: 288, in_progress: 44, not_started: 105 },
+          },
+        });
+      }
+      if (url.includes("/cookies/health")) {
+        return jsonResponse(healthyCookieHealth("instagram"));
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
+
+    const completionHeading = await screen.findByText("2025 Completion");
+    const completionCard = completionHeading.closest("div.rounded-2xl.border.border-zinc-200.bg-white");
+    expect(completionCard).not.toBeNull();
+    const completion = within(completionCard as HTMLElement);
+    expect(completion.getByText("437 posts")).toBeInTheDocument();
+    expect(completion.getByText("Details")).toBeInTheDocument();
+    expect(completion.getByText("Comments")).toBeInTheDocument();
+    expect(completion.getByText("Media")).toBeInTheDocument();
+    expect(completion.getByText("401 finished")).toBeInTheDocument();
+    expect(completion.getByText("320 finished")).toBeInTheDocument();
+    expect(completion.getByText("288 finished")).toBeInTheDocument();
+  });
+
   it("uses resolved attached follow-up status over stale stage graph lanes", async () => {
     const attachedFollowups = {
       comments: {
@@ -4979,6 +5125,7 @@ describe("SocialAccountProfilePage", () => {
       expect(progress.getByText("Cancelled")).toBeInTheDocument();
       expect(progress.getByText("New")).toBeInTheDocument();
       expect(progress.getByText("Run comments")).toBeInTheDocument();
+      expect(progress.getByText("Lanes Still Running")).toBeInTheDocument();
     });
     expect(progress.queryByText("Queued")).not.toBeInTheDocument();
 

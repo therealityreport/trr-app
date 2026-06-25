@@ -394,9 +394,10 @@ function parseSocialAccountProfilePath(pathname: string): {
   const first = segments[0]?.toLowerCase() ?? "";
   const second = segments[1]?.toLowerCase() ?? "";
   if (first === "social") {
-    offset = 1;
+    offset = second === "profiles" ? 2 : 1;
   } else if (first === "admin" && second === "social") {
-    offset = 2;
+    const third = segments[2]?.toLowerCase() ?? "";
+    offset = third === "profiles" ? 3 : 2;
   } else {
     return null;
   }
@@ -1047,6 +1048,10 @@ export function proxy(request: NextRequest): NextResponse {
     return NextResponse.json({ error: "Admin API is not available on this host." }, { status: 403 });
   }
 
+  if (isApiPath(pathname)) {
+    return NextResponse.next();
+  }
+
   if (onAdminUiPath && !onCanonicalAdminHost && !onPublicUiPath) {
     if (isInternalAdminRewrite) {
       return NextResponse.next();
@@ -1069,10 +1074,6 @@ export function proxy(request: NextRequest): NextResponse {
   }
 
   if (onCanonicalAdminHost) {
-    if (pathname === "/") {
-      return NextResponse.redirect(new URL(`/admin${request.nextUrl.search}`, adminOrigin ?? request.nextUrl.origin), 307);
-    }
-
     if (!isInternalAdminRewrite) {
       const canonicalPath = mapCanonicalAdminUiRedirect(pathname, request.nextUrl.searchParams);
       const currentPath = appendSearch(pathname, request.nextUrl.searchParams);

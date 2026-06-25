@@ -1,4 +1,6 @@
 import type { Metadata } from "next";
+import { Analytics } from "@vercel/analytics/next";
+import { SpeedInsights } from "@vercel/speed-insights/next";
 import { Geist, Inter, Playfair_Display } from "next/font/google";
 import "./globals.css";
 import "./side-menu.css";
@@ -63,6 +65,8 @@ export default async function RootLayout({
               <ToastHost />
               {children}
               <DebugPanel />
+              <Analytics />
+              <SpeedInsights />
             </ErrorBoundary>
           </SideMenuProvider>
         </TypographyRuntimeClient>

@@ -543,7 +543,7 @@ export type SocialAccountCommentsAuditCursorRetryRequest = {
   batch_size?: number;
   comments_worker_count?: number;
   max_comments_per_post?: number;
-  comments_load_strategy?: "cursor_api" | "single_session_load_all";
+  comments_load_strategy?: "instagram_comments_endpoint_cursor" | "cursor_api" | "single_session_load_all";
   skip_launch_auth_probe?: boolean;
   attach_to_active_run?: boolean;
   dispatch_immediately?: boolean;
@@ -709,6 +709,7 @@ export type SocialAccountCommentsRunProgress = {
   platform: SocialPlatformSlug;
   account_handle: string;
   run_status: string;
+  operational_state?: string | null;
   created_at?: string | null;
   started_at?: string | null;
   completed_at?: string | null;
@@ -934,7 +935,7 @@ export type SocialAccountCatalogRun = {
   completed_at?: string | null;
   error_message?: string | null;
   launch_group_id?: string | null;
-  launch_state?: "pending" | "finalizing" | "ready" | "failed" | "blocked_auth" | null;
+  launch_state?: "pending" | "pending_apply_confirmation" | "finalizing" | "ready" | "failed" | "blocked_auth" | null;
   selected_tasks?: CatalogBackfillSelectedTask[];
   effective_selected_tasks?: CatalogBackfillSelectedTask[];
   comments_run_id?: string | null;
@@ -1246,7 +1247,7 @@ export type SocialAccountCatalogRunProgressSnapshot = {
   run_id: string;
   run_status: string;
   launch_group_id?: string | null;
-  launch_state?: "pending" | "finalizing" | "ready" | "failed" | "blocked_auth" | null;
+  launch_state?: "pending" | "pending_apply_confirmation" | "finalizing" | "ready" | "failed" | "blocked_auth" | null;
   catalog_action?: SocialAccountCatalogAction | null;
   catalog_action_scope?: SocialAccountCatalogActionScope | null;
   date_start?: string | null;
@@ -1255,6 +1256,18 @@ export type SocialAccountCatalogRunProgressSnapshot = {
   instagram_posts_auth_mode?: "anonymous" | "authenticated" | string | null;
   selected_tasks?: CatalogBackfillSelectedTask[];
   effective_selected_tasks?: CatalogBackfillSelectedTask[];
+  budget_decision?: Record<string, unknown> | null;
+  adaptive_worker_plan?: Record<string, unknown> | null;
+  runbook_state?: Record<string, unknown> | null;
+  requires_apply_confirmation?: boolean | null;
+  apply_required?: boolean | null;
+  apply_run_id?: string | null;
+  required_confirmation?: string | null;
+  enable_cap4_canary?: boolean | null;
+  detail_worker_count?: number | null;
+  comments_worker_count?: number | null;
+  comments_enable_media_followups?: boolean | null;
+  per_stage_timing_ms?: Record<string, unknown> | null;
   pipeline_strategy?: "stage_graph" | string | null;
   stage_graph?: SocialAccountCatalogStageGraph | null;
   target_readiness?: SocialAccountCatalogStageGraphNode | null;
@@ -1265,6 +1278,22 @@ export type SocialAccountCatalogRunProgressSnapshot = {
   } | null;
   comments_started_before_detail_complete?: boolean;
   comments_blocked_reason?: string | null;
+  // Comments-skip diagnostics mirror the upstream helper on the run-progress GET and catalog launch responses.
+  comments_skip_reason?:
+    | "comments_not_selected"
+    | "posts_auth_blocked"
+    | "no_commentable_targets"
+    | "authenticated_comments_not_requested"
+    | "comments_running_or_complete"
+    | string
+    | null;
+  comments_skip_detail?: string | null;
+  comments_operator_action?: string | null;
+  // Detail-refresh worker reconciliation surfaced by _finalize_social_account_catalog_route_response.
+  requested_details_worker_count?: number | null;
+  details_refresh_worker_count?: number | null;
+  live_apply_binding_cap?: number | null;
+  worker_cap_note?: string | null;
   posts_auth_probe?: Record<string, unknown> | null;
   auth_repair_attempted?: boolean;
   auth_repair_status?: InstagramCommentsAuthRepairStatus;
@@ -1506,14 +1535,25 @@ export type CatalogBackfillRequest = {
   detail_worker_count?: number | null;
   comments_worker_count?: number | null;
   comments_enable_media_followups?: boolean | null;
+  enable_cap4_canary?: boolean | null;
+  apply_run_id?: string | null;
+  operator_confirmation?: string | null;
 };
 
 export type CatalogBackfillLaunchResponse = {
   run_id?: string | null;
   status?: string | null;
   launch_group_id?: string | null;
-  launch_state?: "pending" | "ready" | "failed" | null;
+  launch_state?: "pending" | "pending_apply_confirmation" | "finalizing" | "ready" | "failed" | null;
   launch_task_resolution_pending?: boolean | null;
+  requires_apply_confirmation?: boolean | null;
+  apply_required?: boolean | null;
+  apply_run_id?: string | null;
+  required_confirmation?: string | null;
+  runbook_state?: Record<string, unknown> | null;
+  budget_decision?: Record<string, unknown> | null;
+  adaptive_worker_plan?: Record<string, unknown> | null;
+  enable_cap4_canary?: boolean | null;
   selected_tasks?: CatalogBackfillSelectedTask[];
   effective_selected_tasks?: CatalogBackfillSelectedTask[];
   post_details_skipped_reason?: "already_materialized" | null;
@@ -1522,6 +1562,22 @@ export type CatalogBackfillLaunchResponse = {
   attached_followups?: SocialAccountCatalogAttachedFollowups | null;
   catalog_bootstrap_required?: boolean;
   comments_deferred_until_catalog_complete?: boolean;
+  // Worker reconciliation + comments-skip diagnostics from _finalize_social_account_catalog_route_response.
+  requested_details_worker_count?: number | null;
+  details_refresh_worker_count?: number | null;
+  live_apply_binding_cap?: number | null;
+  worker_cap_note?: string | null;
+  deduped?: boolean;
+  comments_skip_reason?:
+    | "comments_not_selected"
+    | "posts_auth_blocked"
+    | "no_commentable_targets"
+    | "authenticated_comments_not_requested"
+    | "comments_running_or_complete"
+    | string
+    | null;
+  comments_skip_detail?: string | null;
+  comments_operator_action?: string | null;
 } & InstagramCommentsLaunchAuthMetadata;
 
 export type CatalogSyncRecentRequest = {
@@ -1695,6 +1751,16 @@ export type SocialProfileCookieHealth = {
     account_handle?: string;
     shortcode?: string | null;
     ready: boolean;
+    public_ready?: boolean | null;
+    authenticated_ready?: boolean | null;
+    auth_probe_skipped?: boolean | null;
+    auth_required_for_hidden_comments?: boolean | null;
+    comments_auth_blocker?: string | null;
+    operator_action?: string | null;
+    rate_limited?: boolean | null;
+    cooldown_recommended_seconds?: number | null;
+    cache_hit?: boolean | null;
+    cache_ttl_seconds?: number | null;
     status?: string | null;
     category?: string | null;
     reason: string | null;

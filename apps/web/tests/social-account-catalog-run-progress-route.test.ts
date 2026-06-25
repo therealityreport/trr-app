@@ -69,7 +69,7 @@ describe("social account catalog run progress proxy route", () => {
     );
   });
 
-  it("uses a shorter timeout and degraded fallback for fast polling", async () => {
+  it("uses the progress timeout and degraded fallback for fast polling", async () => {
     fetchSocialBackendJsonMock.mockRejectedValueOnce(new Error("timeout"));
 
     const response = await GET(
@@ -100,7 +100,7 @@ describe("social account catalog run progress proxy route", () => {
       "/profiles/instagram/bravotv/catalog/runs/run-fast-1/progress?recent_log_limit=25&fast=1",
       expect.objectContaining({
         retries: 0,
-        timeoutMs: 12_000,
+        timeoutMs: 30_000,
       }),
     );
     expect(socialProxyErrorResponseMock).not.toHaveBeenCalled();

@@ -58,6 +58,7 @@ vi.mock("@/lib/server/trr-api/social-admin-proxy", () => ({
   fetchSocialBackendJson: fetchSocialBackendJsonMock,
   SOCIAL_PROXY_DEFAULT_TIMEOUT_MS: 25_000,
   SOCIAL_PROXY_LONG_TIMEOUT_MS: 30_000,
+  SOCIAL_PROXY_PROGRESS_TIMEOUT_MS: 30_000,
   socialProxyErrorResponse: socialProxyErrorResponseMock,
 }));
 
@@ -170,7 +171,7 @@ describe("social account profile snapshot route", () => {
       expect.objectContaining({
         queryString: "fast=1&recent_log_limit=25",
         retries: 0,
-        timeoutMs: 12_000,
+        timeoutMs: 30_000,
       }),
     );
   });
@@ -208,7 +209,7 @@ describe("social account profile snapshot route", () => {
         fallbackError: "Failed to fetch social account catalog run progress",
         queryString: "fast=1&recent_log_limit=12",
         retries: 0,
-        timeoutMs: 12_000,
+        timeoutMs: 30_000,
       }),
     );
     expect(getOrCreateAdminSnapshotMock).not.toHaveBeenCalled();
@@ -298,73 +299,40 @@ describe("social account profile snapshot route", () => {
     );
   });
 
-  it("bypasses cached social profile snapshots while comments coverage has an active run", async () => {
+  it("serves cached social profile snapshots while comments coverage has an active run", async () => {
     const expectedInfo = captureExpectedConsoleInfo(/^social_profile_dashboard_budget/);
-    getOrCreateAdminSnapshotMock
-      .mockResolvedValueOnce({
-        data: {
-          summary: makeSocialAccountSummary({
-            comments_saved_summary: {
-              saved_comments: 96564,
-              retrieved_comments: 106592,
-            },
-            comments_coverage: {
-              eligible_posts: 437,
-              missing_posts: 12,
-              stale_posts: 203,
-              active_run_id: "comments-run-active",
-              effective_status: "running",
-              last_comments_run_status: "running",
-            },
-          }),
-          catalog_run_progress: null,
-          dashboard_freshness: {
-            status: "fresh",
-            source: "live",
-            generated_at: "2026-04-26T12:00:00.000Z",
-            age_seconds: 0,
+    getOrCreateAdminSnapshotMock.mockResolvedValueOnce({
+      data: {
+        summary: makeSocialAccountSummary({
+          comments_saved_summary: {
+            saved_comments: 96564,
+            retrieved_comments: 106592,
           },
-          operational_alerts: [],
-        },
-        meta: {
-          cacheStatus: "hit",
-          generatedAt: "2026-04-26T12:00:00.000Z",
-          cacheAgeMs: 120_000,
-          stale: false,
-        },
-      })
-      .mockResolvedValueOnce({
-        data: {
-          summary: makeSocialAccountSummary({
-            comments_saved_summary: {
-              saved_comments: 98409,
-              retrieved_comments: 106212,
-            },
-            comments_coverage: {
-              eligible_posts: 437,
-              missing_posts: 12,
-              stale_posts: 203,
-              active_run_id: "comments-run-active",
-              effective_status: "running",
-              last_comments_run_status: "running",
-            },
-          }),
-          catalog_run_progress: null,
-          dashboard_freshness: {
-            status: "fresh",
-            source: "live",
-            generated_at: "2026-04-26T12:02:00.000Z",
-            age_seconds: 0,
+          comments_coverage: {
+            eligible_posts: 437,
+            missing_posts: 12,
+            stale_posts: 203,
+            active_run_id: "comments-run-active",
+            effective_status: "running",
+            last_comments_run_status: "running",
           },
-          operational_alerts: [],
+        }),
+        catalog_run_progress: null,
+        dashboard_freshness: {
+          status: "fresh",
+          source: "live",
+          generated_at: "2026-04-26T12:00:00.000Z",
+          age_seconds: 0,
         },
-        meta: {
-          cacheStatus: "refresh",
-          generatedAt: "2026-04-26T12:02:00.000Z",
-          cacheAgeMs: 0,
-          stale: false,
-        },
-      });
+        operational_alerts: [],
+      },
+      meta: {
+        cacheStatus: "hit",
+        generatedAt: "2026-04-26T12:00:00.000Z",
+        cacheAgeMs: 120_000,
+        stale: false,
+      },
+    });
 
     const response = await GET(
       new NextRequest("http://localhost/api/admin/trr-api/social/profiles/instagram/thetraitorsus/snapshot?detail=lite"),
@@ -375,15 +343,9 @@ describe("social account profile snapshot route", () => {
     };
 
     expect(response.status).toBe(200);
-    expect(body.data.summary?.comments_saved_summary?.saved_comments).toBe(98409);
-    expect(response.headers.get("x-trr-cache")).toBe("refresh");
-    expect(getOrCreateAdminSnapshotMock).toHaveBeenCalledTimes(2);
-    expect(getOrCreateAdminSnapshotMock).toHaveBeenNthCalledWith(
-      2,
-      expect.objectContaining({
-        forceRefresh: true,
-      }),
-    );
+    expect(body.data.summary?.comments_saved_summary?.saved_comments).toBe(96564);
+    expect(response.headers.get("x-trr-cache")).toBe("hit");
+    expect(getOrCreateAdminSnapshotMock).toHaveBeenCalledTimes(1);
     expectedInfo.expectCalled();
   });
 });

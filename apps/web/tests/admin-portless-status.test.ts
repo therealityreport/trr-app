@@ -51,6 +51,8 @@ Active routes:
       expect.arrayContaining([
         expect.objectContaining({
           id: "admin.trr",
+          url: "https://admin.trr.localhost",
+          expectedPath: "/",
           target: "localhost:4192",
           kind: "wildcard",
           present: true,

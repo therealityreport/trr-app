@@ -2,7 +2,7 @@ import { defineConfig, devices } from "@playwright/test";
 
 const PORT = Number.parseInt(process.env.PLAYWRIGHT_PORT ?? "3200", 10);
 const LIVE_MODE = process.env.E2E_CAST_LIVE === "1";
-const BASE_URL = process.env.PLAYWRIGHT_BASE_URL ?? `http://127.0.0.1:${PORT}`;
+const BASE_URL = process.env.PLAYWRIGHT_BASE_URL ?? `http://localhost:${PORT}`;
 const STORAGE_STATE = process.env.PLAYWRIGHT_STORAGE_STATE;
 
 export default defineConfig({
@@ -30,7 +30,7 @@ export default defineConfig({
   webServer: LIVE_MODE
     ? undefined
     : {
-        command: `ADMIN_APP_ORIGIN=http://127.0.0.1:${PORT} ADMIN_APP_HOSTS=127.0.0.1,localhost,admin.localhost NEXT_PUBLIC_DEV_ADMIN_BYPASS=true NEXT_DIST_DIR=.next-e2e pnpm exec next dev --webpack -p ${PORT}`,
+        command: `ADMIN_APP_ORIGIN=http://localhost:${PORT} ADMIN_APP_HOSTS=localhost,127.0.0.1,admin.localhost NEXT_PUBLIC_DEV_ADMIN_BYPASS=true NEXT_DIST_DIR=.next-e2e pnpm exec next dev --webpack -p ${PORT}`,
         url: BASE_URL,
         timeout: 240_000,
         reuseExistingServer: false,

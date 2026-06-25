@@ -412,14 +412,30 @@ const formatCommentsProgressMessage = (progress: SocialAccountCommentsRunProgres
 
 const formatCommentsTerminalError = (progress: SocialAccountCommentsRunProgress, status: string): string => {
   const baseMessage = progress.error_message || `Comments sync ${status}.`;
+  if (status === "cancelled") {
+    const cleanBaseMessage = baseMessage.toLowerCase().includes("cancelled by user request")
+      ? "Comments sync cancelled."
+      : baseMessage;
+    const remainingTargets = readFiniteNumber(progress.cancellation_summary?.remaining_target_source_ids_count) ?? 0;
+    if (progress.cancellation_summary?.resume_recommendation === "stale_or_missing") {
+      const resumeHint =
+        remainingTargets > 0
+          ? `${formatInteger(remainingTargets)} targets remain; use Incomplete Fill to continue only unfinished posts.`
+          : "Use Incomplete Fill to resume unfinished posts.";
+      return `${cleanBaseMessage} ${resumeHint}`;
+    }
+    return remainingTargets > 0
+      ? `${cleanBaseMessage} ${formatInteger(remainingTargets)} targets were left unfinished; use Incomplete Fill to continue only unfinished posts.`
+      : cleanBaseMessage;
+  }
   if (progress.cancellation_summary?.resume_recommendation !== "stale_or_missing") {
     return baseMessage;
   }
   const remainingTargets = readFiniteNumber(progress.cancellation_summary.remaining_target_source_ids_count) ?? 0;
   const resumeHint =
     remainingTargets > 0
-      ? `${formatInteger(remainingTargets)} targets remain; run Sync Comments to resume.`
-      : "Run Sync Comments to resume.";
+      ? `${formatInteger(remainingTargets)} targets remain; use Incomplete Fill to continue only unfinished posts.`
+      : "Use Incomplete Fill to resume unfinished posts.";
   return `${baseMessage} ${resumeHint}`;
 };
 
@@ -979,7 +995,7 @@ export default function InstagramCommentsPanel({
       limit: 50,
       batch_size: 1,
       max_comments_per_post: 0,
-      comments_load_strategy: "cursor_api",
+      comments_load_strategy: "instagram_comments_endpoint_cursor",
       attach_to_active_run: true,
       dispatch_immediately: true,
     };
@@ -1051,7 +1067,7 @@ export default function InstagramCommentsPanel({
         shortcodes: [row.shortcode],
         batch_size: 1,
         max_comments_per_post: 0,
-        comments_load_strategy: "cursor_api",
+        comments_load_strategy: "instagram_comments_endpoint_cursor",
         attach_to_active_run: true,
         dispatch_immediately: true,
         force_rerun_existing: true,
@@ -1553,6 +1569,10 @@ export default function InstagramCommentsPanel({
                     ? "Loading audit cursor targets..."
                     : `${formatInteger(auditCursorRecoveryTargetCount)} cursor targets / ${formatInteger(auditCursorRecoveryGap)} comments still open`}
                   {auditCursorRecoveryActiveRunId ? ` / active run ${auditCursorRecoveryActiveRunId.slice(0, 8)}` : ""}
+                </p>
+                <p className="mt-2 max-w-2xl text-xs text-zinc-500">
+                  Public relay uses logged-out Instagram pages. Endpoint cursor uses our authenticated Instagram comments endpoint pagination.
+                  Single-session keeps one browser session open for a focused repair.
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">

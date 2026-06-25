@@ -9,6 +9,7 @@ export const CAST_PERSON_PRIMARY_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 export const CAST_PERSON_SECONDARY_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 
 const ADMIN_LOADING_MARKERS = ["Loading admin access", "Preparing admin dashboard", "Checking admin access"];
+const SEASON_SOCIAL_ROUTE_RE = /\/s\d+\/social\/cast-comparison(?:\?|$)/;
 
 const json = async (route: Route, body: unknown, status = 200) => {
   await route.fulfill({
@@ -43,6 +44,9 @@ export type MockAdminApiOptions = {
   seasonCastMembers?: unknown[];
   castRoleMembers?: unknown[];
   showRoles?: unknown[];
+  socialGrowthByKey?: Record<string, unknown | null>;
+  socialGrowthRefreshCallIdsByKey?: Record<string, string>;
+  socialGrowthRefreshPollsBeforeData?: number;
   castRoleMembersDelayMs?: number;
   castRoleMembersStatus?: number;
   showRolesStatus?: number;
@@ -97,9 +101,96 @@ export const buildCastRoleMember = (
   seasons_appeared: 1,
   latest_season: SEASON_NUMBER,
   roles,
+  display_name: name,
+  instagram_handle: name.toLowerCase().replace(/[^a-z0-9]+/g, ""),
+  instagram_handle_source: "mock",
   photo_url: "https://example.com/photo.jpg",
   ...overrides,
 });
+
+const buildSocialGrowthData = (
+  handle: string,
+  overrides: Partial<Record<string, unknown>> = {}
+) => ({
+  username: handle,
+  account_handle: handle,
+  platform: "instagram",
+  scraped_at: "2026-06-19T12:00:00.000Z",
+  freshness_status: "fresh",
+  is_stale: false,
+  age_hours: 0.25,
+  socialblade_url: `https://socialblade.com/instagram/user/${handle}`,
+  chart_metric_label: "Followers",
+  profile_stats: {
+    followers: 210_000,
+    following: 1_800,
+    media_count: 950,
+    engagement_rate: "3.20%",
+    average_likes: 12_400,
+    average_comments: 280,
+  },
+  rankings: {
+    sb_rank: "#12,345",
+    followers_rank: "#8,901",
+    engagement_rate_rank: "#2,468",
+    grade: "A-",
+  },
+  daily_channel_metrics_60day: {
+    period: "60d",
+    row_count: 2,
+    headers: ["date", "followers"],
+    data: [
+      { date: "2026-06-17", followers: "209400" },
+      { date: "2026-06-18", followers: "210000" },
+    ],
+  },
+  daily_total_followers_chart: {
+    frequency: "daily",
+    metric: "followers",
+    total_data_points: 2,
+    date_range: { from: "2026-06-17", to: "2026-06-18" },
+    data: [
+      { date: "2026-06-17", followers: 209_400 },
+      { date: "2026-06-18", followers: 210_000 },
+    ],
+  },
+  ...overrides,
+});
+
+const buildSeasonSocialSnapshot = () => ({
+  data: {
+    analytics: null,
+    targets: [],
+    runs: [],
+    run_summaries: [],
+    jobs: [],
+    worker_health: {
+      queue_enabled: true,
+      healthy: true,
+      healthy_workers: 1,
+      reason: null,
+      checked_at: "2026-06-19T12:00:00.000Z",
+    },
+    shared_status: {
+      live_status: "idle",
+      sync_status: "idle",
+      ingest_status: "idle",
+    },
+    generated_at: "2026-06-19T12:00:00.000Z",
+    cache_age_ms: 0,
+    stale: false,
+  },
+  generated_at: "2026-06-19T12:00:00.000Z",
+  cache_age_ms: 0,
+  stale: false,
+});
+
+type PendingSocialGrowthRefresh = {
+  callId: string;
+  pollsRemaining: number;
+  history: Array<Record<string, unknown>>;
+  data: Record<string, unknown>;
+};
 
 export async function mockAdminApi(page: Page, options: MockAdminApiOptions = {}) {
   const showSeasonsPathRe = /^\/api\/admin\/trr-api\/shows\/[^/]+\/seasons$/;
@@ -113,6 +204,17 @@ export async function mockAdminApi(page: Page, options: MockAdminApiOptions = {}
   const seasonAssetsPathRe = /^\/api\/admin\/trr-api\/shows\/[^/]+\/seasons\/[^/]+\/assets$/;
   const showNewsPathRe = /^\/api\/admin\/trr-api\/shows\/[^/]+\/news$/;
   const showBravoVideosPathRe = /^\/api\/admin\/trr-api\/shows\/[^/]+\/bravo\/videos$/;
+  const seasonSocialSnapshotPathRe =
+    /^\/api\/admin\/trr-api\/shows\/[^/]+\/seasons\/[^/]+\/social\/analytics\/snapshot$/;
+
+  const socialGrowthByKey = new Map<string, Record<string, unknown>>(
+    Object.entries(options.socialGrowthByKey ?? {}).flatMap(([key, value]) =>
+      value && typeof value === "object" ? [[key, value as Record<string, unknown>]] : []
+    )
+  );
+  const pendingSocialGrowthByKey = new Map<string, PendingSocialGrowthRefresh>();
+  const socialGrowthHistoryByKey = new Map<string, Array<Record<string, unknown>>>();
+  const socialGrowthRefreshPollsBeforeData = Math.max(1, options.socialGrowthRefreshPollsBeforeData ?? 1);
 
   await page.route("**/api/admin/**", async (route) => {
     const requestUrl = new URL(route.request().url());
@@ -209,6 +311,10 @@ export async function mockAdminApi(page: Page, options: MockAdminApiOptions = {}
         return json(route, { error: "Failed to load cast role members" }, options.castRoleMembersStatus);
       }
       return json(route, options.castRoleMembers ?? []);
+    }
+
+    if (seasonSocialSnapshotPathRe.test(path)) {
+      return json(route, buildSeasonSocialSnapshot());
     }
 
     if (showRefreshStreamPathRe.test(path)) {
@@ -316,6 +422,128 @@ export async function mockAdminApi(page: Page, options: MockAdminApiOptions = {}
       });
     }
 
+    if (/^\/api\/admin\/trr-api\/people\/[^/]+\/social-growth$/.test(path)) {
+      const personId = path.split("/")[5] ?? "";
+      const handle = String(requestUrl.searchParams.get("handle") ?? "").trim();
+      const key = `${personId}:${handle}`;
+      const pending = pendingSocialGrowthByKey.get(key);
+      const data = socialGrowthByKey.get(key) ?? (pending?.pollsRemaining === 0 ? pending.data : null);
+      if (!data) {
+        return json(route, { error: "No SocialBlade data found" }, 404);
+      }
+      return json(route, data);
+    }
+
+    if (path === "/api/admin/trr-api/social-growth/cast-comparison/snapshot") {
+      const snapshot = buildSeasonSocialSnapshot();
+      const items = requestUrl.searchParams.getAll("item").map((rawItem) => {
+        const [personId, ...handleParts] = rawItem.split(":");
+        const handle = handleParts.join(":").trim();
+        const key = `${personId.trim()}:${handle}`;
+        const pending = pendingSocialGrowthByKey.get(key);
+        if (pending) {
+          const nextPollsRemaining = Math.max(0, pending.pollsRemaining - 1);
+          pendingSocialGrowthByKey.set(key, { ...pending, pollsRemaining: nextPollsRemaining });
+          if (nextPollsRemaining === 0) {
+            socialGrowthByKey.set(key, pending.data);
+            socialGrowthHistoryByKey.set(key, pending.history);
+          }
+        }
+
+        const currentPending = pendingSocialGrowthByKey.get(key);
+        const data =
+          socialGrowthByKey.get(key) ?? (currentPending && currentPending.pollsRemaining === 0 ? currentPending.data : null);
+        return {
+          personId: personId.trim(),
+          handle,
+          data,
+          error: data ? null : "No SocialBlade data found",
+          not_found: !data,
+        };
+      });
+      return json(route, {
+        ...snapshot,
+        data: {
+          ...snapshot.data,
+          items,
+        },
+      });
+    }
+
+    if (path === "/api/admin/trr-api/social-growth/refresh-batch" && route.request().method() === "POST") {
+      const body = JSON.parse(route.request().postData() ?? "{}") as {
+        items?: Array<{ personId?: string; handle?: string }>;
+      };
+      const accepted = Array.isArray(body.items)
+        ? body.items.flatMap((item, index) => {
+            const personId = String(item.personId ?? "").trim();
+            const handle = String(item.handle ?? "").trim();
+            if (!personId || !handle) return [];
+            const key = `${personId}:${handle}`;
+            const callId =
+              options.socialGrowthRefreshCallIdsByKey?.[key] ??
+              `modal-${handle.slice(0, 4).padEnd(4, "x")}-${index + 1}`;
+            const data =
+              socialGrowthByKey.get(key) ??
+              buildSocialGrowthData(handle, {
+                refresh_status: "refreshed",
+                stats_refreshed: true,
+              });
+            const history = [
+              {
+                call_id: callId,
+                status: "completed",
+                source: "cast_comparison",
+                handle,
+                person_id: personId,
+                scraped_at: "2026-06-19T12:00:00.000Z",
+              },
+            ];
+            pendingSocialGrowthByKey.set(key, {
+              callId,
+              pollsRemaining: socialGrowthRefreshPollsBeforeData,
+              history,
+              data,
+            });
+            return [{ personId, handle, callId }];
+          })
+        : [];
+      return json(route, { accepted, skipped: [], errors: [] }, 202);
+    }
+
+    if (
+      /^\/api\/admin\/trr-api\/social-growth\/(?:calls|call-status)\/[^/]+(?:\/status)?$/.test(path)
+    ) {
+      const callId = path.match(/\/(?:calls|call-status)\/([^/]+)(?:\/status)?$/)?.[1] ?? "";
+      const pendingEntry = [...pendingSocialGrowthByKey.values()].find((entry) => entry.callId === callId);
+      const completedEntry = [...socialGrowthHistoryByKey.entries()].find(([, history]) =>
+        history.some((item) => item.call_id === callId)
+      );
+      if (pendingEntry) {
+        const status = pendingEntry.pollsRemaining >= socialGrowthRefreshPollsBeforeData ? "queued" : "running";
+        return json(route, { call_id: callId, status });
+      }
+      if (completedEntry) {
+        return json(route, { call_id: callId, status: "completed" });
+      }
+      return json(route, { call_id: callId, status: "not_found" }, 404);
+    }
+
+    if (
+      path === "/api/admin/trr-api/social-growth/history" ||
+      /^\/api\/admin\/trr-api\/people\/[^/]+\/social-growth\/history$/.test(path)
+    ) {
+      const personId =
+        /^\/api\/admin\/trr-api\/people\/[^/]+\/social-growth\/history$/.test(path)
+          ? path.split("/")[5] ?? ""
+          : String(requestUrl.searchParams.get("personId") ?? "").trim();
+      const handle = String(requestUrl.searchParams.get("handle") ?? "").trim();
+      const key = `${personId}:${handle}`;
+      return json(route, {
+        items: socialGrowthHistoryByKey.get(key) ?? [],
+      });
+    }
+
     if (path === `/api/admin/covered-shows/${SHOW_ID}`) {
       return json(route, { show_id: SHOW_ID }, 404);
     }
@@ -345,4 +573,22 @@ export async function waitForAdminReady(page: Page, timeoutMs = 90_000) {
       },
     )
     .toBe(false);
+}
+
+export async function gotoSeasonSocialCastContent(page: Page) {
+  const legacyRoute =
+    `/admin/trr-shows/${SHOW_ID}/seasons/${SEASON_NUMBER}?tab=social&social_view=cast-content`;
+  const canonicalRoute = `/${SHOW_SLUG}/s${SEASON_NUMBER}/social/cast-comparison`;
+
+  await page.goto(legacyRoute);
+  await waitForAdminReady(page);
+
+  if (!SEASON_SOCIAL_ROUTE_RE.test(page.url())) {
+    await page.goto(canonicalRoute);
+    await waitForAdminReady(page);
+  }
+
+  await expect(page.getByRole("tab", { name: "Social" })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByText("Cast Comparison").first()).toBeVisible({ timeout: 20_000 });
+  await expect(page).toHaveURL(SEASON_SOCIAL_ROUTE_RE, { timeout: 20_000 });
 }
