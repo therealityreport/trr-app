@@ -133,6 +133,26 @@ interface SocialBladeHistoryItem {
   error: string | null;
 }
 
+interface SocialBladeCookieHealth {
+  healthy: boolean;
+  status: string;
+  reason: string | null;
+  retryable: boolean;
+  cookieNames: string[];
+  cookieFile: {
+    path: string;
+    exists: boolean;
+    modifiedAt: string | null;
+  };
+  validation: {
+    checked: boolean;
+    healthy: boolean | null;
+    reason: string | null;
+    url: string | null;
+  };
+  checkedAt: string;
+}
+
 // ============================================================================
 // Constants
 // ============================================================================
@@ -1131,6 +1151,9 @@ export default function CastSocialBladeComparison({
   const [batchNotice, setBatchNotice] = useState<string | null>(null);
   const [historyItems, setHistoryItems] = useState<SocialBladeHistoryItem[]>([]);
   const [historyError, setHistoryError] = useState<string | null>(null);
+  const [cookieHealth, setCookieHealth] = useState<SocialBladeCookieHealth | null>(null);
+  const [cookieHealthError, setCookieHealthError] = useState<string | null>(null);
+  const [cookieHealthLoading, setCookieHealthLoading] = useState(false);
   const [pendingRefreshState, setPendingRefreshState] = useState<PendingRefreshState>({});
   const [pollAttempt, setPollAttempt] = useState(0);
   const lastRefreshSnapshotEventMsRef = useRef<number | null>(null);
@@ -1263,6 +1286,31 @@ export default function CastSocialBladeComparison({
       setHistoryError(null);
     } catch (error) {
       setHistoryError(error instanceof Error ? error.message : "Failed to load SocialBlade history");
+    }
+  }, [membersWithIG]);
+
+  const fetchCookieHealth = useCallback(async (options?: { validate?: boolean }) => {
+    setCookieHealthLoading(true);
+    const validate = options?.validate ?? true;
+    const validationHandle = membersWithIG[0]?.instagram_handle ?? "";
+    const params = new URLSearchParams({ validate: validate ? "true" : "false" });
+    if (validationHandle) params.set("handle", validationHandle);
+    try {
+      const response = await fetchAdminWithAuth(
+        `/api/admin/trr-api/social-growth/cookies/health?${params.toString()}`,
+        { cache: "no-store" },
+        { allowDevAdminBypass: true },
+      );
+      const payload = (await response.json().catch(() => ({}))) as SocialBladeCookieHealth & { error?: string };
+      if (!response.ok) {
+        throw new Error(payload.error ?? `HTTP ${response.status}`);
+      }
+      setCookieHealth(payload);
+      setCookieHealthError(null);
+    } catch (error) {
+      setCookieHealthError(error instanceof Error ? error.message : "Failed to load SocialBlade cookie health");
+    } finally {
+      setCookieHealthLoading(false);
     }
   }, [membersWithIG]);
 
@@ -1537,9 +1585,11 @@ export default function CastSocialBladeComparison({
       );
       setPendingRefreshState((current) => ({ ...current, ...acceptedPendingState }));
       void fetchJobHistory();
+      void fetchCookieHealth({ validate: false });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Refresh failed";
       setBatchError(message);
+      void fetchCookieHealth({ validate: false });
       setEntries((prev) =>
         prev.map((entry) =>
           targetKeySet.has(entryKey(entry.personId, entry.handle))
@@ -1550,7 +1600,7 @@ export default function CastSocialBladeComparison({
     } finally {
       setBatchRefreshing(false);
     }
-  }, [batchRefreshing, fetchJobHistory]);
+  }, [batchRefreshing, fetchCookieHealth, fetchJobHistory]);
 
   useEffect(() => {
     setEntries(buildEntries());
@@ -1561,6 +1611,8 @@ export default function CastSocialBladeComparison({
     setBatchNotice(null);
     setHistoryItems([]);
     setHistoryError(null);
+    setCookieHealth(null);
+    setCookieHealthError(null);
   }, [buildEntries]);
 
   useEffect(() => {
@@ -1570,6 +1622,10 @@ export default function CastSocialBladeComparison({
   useEffect(() => {
     if (membersWithIG.length > 0) void fetchJobHistory();
   }, [fetchJobHistory, membersWithIG.length]);
+
+  useEffect(() => {
+    if (membersWithIG.length > 0) void fetchCookieHealth();
+  }, [fetchCookieHealth, membersWithIG.length]);
 
   const liveRefreshSnapshot = useSharedPollingResource<{ nextPending: PendingRefreshState }>({
     key: `cast-socialblade-refresh:${[...pendingRefreshKeys].sort().join(",") || "idle"}`,
@@ -1662,6 +1718,47 @@ export default function CastSocialBladeComparison({
     return map;
   }, [entries, historyItems]);
   const recentHistoryItems = useMemo(() => historyItems.slice(0, 8), [historyItems]);
+  const cookieHealthPanel = (
+    <div
+      className={`rounded-xl border px-4 py-3 text-xs shadow-sm ${
+        cookieHealth?.healthy
+          ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+          : "border-amber-200 bg-amber-50 text-amber-800"
+      }`}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-[10px] font-bold uppercase tracking-[0.2em] opacity-70">Cookie Health</p>
+          <div className="mt-1 flex flex-wrap items-center gap-2">
+            <span className="rounded-full border border-current/20 bg-white/60 px-2 py-0.5 font-semibold">
+              {cookieHealthLoading ? "Checking" : cookieHealth?.healthy ? "Ready" : "Needs login"}
+            </span>
+            <span className="min-w-0 truncate">
+              {cookieHealthError ??
+                cookieHealth?.reason ??
+                (cookieHealth?.healthy ? "Authenticated SocialBlade session is usable" : "Not checked yet")}
+            </span>
+          </div>
+          <p className="mt-1 text-[11px] opacity-70">
+            {cookieHealth?.cookieFile.modifiedAt
+              ? `Cookie file: ${formatDateTimeLabel(cookieHealth.cookieFile.modifiedAt)}`
+              : "Cookie file not written"}
+            {cookieHealth?.validation.checked && cookieHealth.validation.reason
+              ? ` · Validation: ${cookieHealth.validation.reason}`
+              : ""}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => void fetchCookieHealth()}
+          disabled={cookieHealthLoading}
+          className="rounded-md border border-current/20 bg-white/70 px-2 py-1 text-[11px] font-semibold transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          Update
+        </button>
+      </div>
+    </div>
+  );
   const statusRows = (
     <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-sm">
       {entries.map((entry, index) => {
@@ -1818,6 +1915,7 @@ export default function CastSocialBladeComparison({
           </div>
         )}
         {statusRows}
+        {cookieHealthPanel}
         {batchError && (
           <p className="text-center text-xs text-red-600">{batchError}</p>
         )}
@@ -1873,6 +1971,7 @@ export default function CastSocialBladeComparison({
           ))}
         </div>
         {statusRows}
+        {cookieHealthPanel}
         {someLoading && (
           <span className="text-[10px] text-zinc-400 animate-pulse">Loading remaining...</span>
         )}
