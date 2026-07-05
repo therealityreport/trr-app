@@ -22,6 +22,7 @@ describe("shouldUseSummaryTopHashtagsPreview", () => {
     expect(
       shouldUseSummaryTopHashtagsPreview({
         activeTab: "stats",
+        hashtagAssignmentStatus: "all",
         hashtagWindow: "all",
         summaryTopHashtags,
         hasLoadedExactWindow: false,
@@ -33,6 +34,7 @@ describe("shouldUseSummaryTopHashtagsPreview", () => {
     expect(
       shouldUseSummaryTopHashtagsPreview({
         activeTab: "stats",
+        hashtagAssignmentStatus: "all",
         hashtagWindow: "all",
         summaryTopHashtags,
         hasLoadedExactWindow: true,
@@ -44,6 +46,7 @@ describe("shouldUseSummaryTopHashtagsPreview", () => {
     expect(
       shouldUseSummaryTopHashtagsPreview({
         activeTab: "hashtags",
+        hashtagAssignmentStatus: "all",
         hashtagWindow: "all",
         summaryTopHashtags,
         hasLoadedExactWindow: false,
@@ -53,7 +56,18 @@ describe("shouldUseSummaryTopHashtagsPreview", () => {
     expect(
       shouldUseSummaryTopHashtagsPreview({
         activeTab: "stats",
+        hashtagAssignmentStatus: "all",
         hashtagWindow: "30d",
+        summaryTopHashtags,
+        hasLoadedExactWindow: false,
+      }),
+    ).toBe(false);
+
+    expect(
+      shouldUseSummaryTopHashtagsPreview({
+        activeTab: "stats",
+        hashtagAssignmentStatus: "unassigned",
+        hashtagWindow: "all",
         summaryTopHashtags,
         hasLoadedExactWindow: false,
       }),

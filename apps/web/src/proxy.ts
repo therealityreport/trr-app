@@ -385,6 +385,7 @@ function parseSocialAccountProfilePath(pathname: string): {
   platform: string;
   handle: string;
   tab: string;
+  variant: string | null;
   canonicalPath: string;
 } | null {
   const segments = toPathSegments(pathname);
@@ -402,21 +403,25 @@ function parseSocialAccountProfilePath(pathname: string): {
     return null;
   }
 
-  if (segments.length < offset + 2 || segments.length > offset + 3) return null;
+  if (segments.length < offset + 2 || segments.length > offset + 4) return null;
 
   const platform = segments[offset]?.trim().toLowerCase() ?? "";
   const handle = normalizeSocialAccountHandle(segments[offset + 1]);
   const tab = resolveSocialAccountProfileTab(segments[offset + 2]);
+  const variant = segments[offset + 3]?.trim().toLowerCase() ?? "";
+  if (variant && (tab !== "catalog" || !/^alt-[1-9][0-9]*$/.test(variant))) return null;
   if (!SOCIAL_ACCOUNT_PROFILE_PLATFORM_SEGMENTS.has(platform) || !handle || !tab) return null;
+  const basePath =
+    tab === "stats"
+      ? `/social/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}`
+      : `/social/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/${tab}`;
 
   return {
     platform,
     handle,
     tab,
-    canonicalPath:
-      tab === "stats"
-        ? `/social/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}`
-        : `/social/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/${tab}`,
+    variant: variant || null,
+    canonicalPath: variant ? `${basePath}/${encodeURIComponent(variant)}` : basePath,
   };
 }
 
@@ -1006,6 +1011,17 @@ function isApiPath(pathname: string): boolean {
   return pathname === "/api" || pathname.startsWith("/api/");
 }
 
+function buildInternalRewriteUrl(request: NextRequest, rewritePath: string): URL {
+  const targetUrl = new URL(rewritePath, request.nextUrl.origin);
+  const requestHostname = normalizeAdminHost(request.nextUrl.hostname);
+
+  if (targetUrl.protocol === "https:" && request.nextUrl.port && isLoopbackAdminHost(requestHostname)) {
+    targetUrl.protocol = "http:";
+  }
+
+  return targetUrl;
+}
+
 export function proxy(request: NextRequest): NextResponse {
   const enforceHost = parseOptionalBoolean(process.env.ADMIN_ENFORCE_HOST) ?? true;
   if (!enforceHost) return NextResponse.next();
@@ -1074,6 +1090,10 @@ export function proxy(request: NextRequest): NextResponse {
   }
 
   if (onCanonicalAdminHost) {
+    if (pathname === "/" && canonicalAdminHost === "admin.trr.localhost") {
+      return NextResponse.redirect(new URL("/admin", adminOrigin || request.nextUrl.origin), 307);
+    }
+
     if (!isInternalAdminRewrite) {
       const canonicalPath = mapCanonicalAdminUiRedirect(pathname, request.nextUrl.searchParams);
       const currentPath = appendSearch(pathname, request.nextUrl.searchParams);
@@ -1084,7 +1104,7 @@ export function proxy(request: NextRequest): NextResponse {
 
     const rewritePath = mapCanonicalAdminUiRewrite(pathname);
     if (rewritePath) {
-      const targetUrl = new URL(rewritePath, request.nextUrl.origin);
+      const targetUrl = buildInternalRewriteUrl(request, rewritePath);
       request.nextUrl.searchParams.forEach((value, key) => {
         if (!targetUrl.searchParams.has(key)) {
           targetUrl.searchParams.append(key, value);

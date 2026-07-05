@@ -6269,12 +6269,15 @@ export default function WeekDetailPage() {
     } satisfies WorkerHealthPayload;
   }, [getSyncRunRequestHeaders]);
 
+  const shouldPollLiveWeekSnapshot =
+    hasValidNumericPathParams && isAdmin && (syncingComments ? !syncSessionStreamConnected : Boolean(data));
+
   const liveWeekSnapshot = useSharedPollingResource<{
     payload: WeekSocialSnapshot;
     cacheStatus: string;
   }>({
     key: `week-social-snapshot:${showIdForApi}:${seasonNumber}:${weekIndex}:${sourceScope}:${resolvedSeasonId ?? "none"}:${platformFilter}:${syncRunId ?? "none"}:${syncSessionId ?? "none"}`,
-    shouldRun: hasValidNumericPathParams && isAdmin && (syncingComments || Boolean(data)),
+    shouldRun: shouldPollLiveWeekSnapshot,
     intervalMs: syncingComments ? SYNC_ACTIVE_POLL_INTERVAL_MS : 30_000,
     fetchData: async (signal, request) =>
       await fetchWeekSnapshot({

@@ -446,6 +446,11 @@ export type SocialAccountCommentsScrapeRequest =
       max_comments_per_post?: number;
       refresh_policy?: "stale_or_missing" | "all_saved_posts";
       target_filter?: "incomplete";
+      comments_load_strategy?: "public_relay" | "instagram_comments_endpoint_cursor" | "cursor_api" | "single_session_load_all";
+      comments_worker_count?: number;
+      comments_target_batch_size?: number;
+      date_start?: string | null;
+      date_end?: string | null;
       allow_inline_dev_fallback?: boolean;
       dry_run?: boolean;
     }
@@ -453,6 +458,7 @@ export type SocialAccountCommentsScrapeRequest =
       mode: "single_post";
       source_id: string;
       max_comments_per_post?: number;
+      comments_load_strategy?: "public_relay" | "instagram_comments_endpoint_cursor" | "cursor_api" | "single_session_load_all";
       allow_inline_dev_fallback?: boolean;
       dry_run?: boolean;
     };
@@ -481,7 +487,7 @@ export type SocialAccountCommentsScrapeResponse = {
   timing?: Record<string, unknown> | null;
 } & InstagramCommentsLaunchAuthMetadata;
 
-export type SocialAccountCommentsAuditCursorRetryRow = {
+export type SocialAccountCommentsRelayCheckpointRetryRow = {
   shortcode: string;
   post_id?: string | null;
   show_id?: string | null;
@@ -506,7 +512,7 @@ export type SocialAccountCommentsAuditCursorRetryRow = {
   active_job_target_counts?: number[];
 };
 
-export type SocialAccountCommentsAuditCursorRetriesResponse = {
+export type SocialAccountCommentsRelayCheckpointRetriesResponse = {
   ok?: boolean;
   account?: string;
   selected_target_source_ids?: string[];
@@ -519,8 +525,8 @@ export type SocialAccountCommentsAuditCursorRetriesResponse = {
     terms?: string[];
   } | null;
   active_run?: Record<string, unknown> | null;
-  progress_rows?: SocialAccountCommentsAuditCursorRetryRow[];
-  rows?: SocialAccountCommentsAuditCursorRetryRow[];
+  progress_rows?: SocialAccountCommentsRelayCheckpointRetryRow[];
+  rows?: SocialAccountCommentsRelayCheckpointRetryRow[];
   mode?: "dry_run" | "enqueue" | string;
   batch_size?: number;
   enqueue?: {
@@ -532,7 +538,7 @@ export type SocialAccountCommentsAuditCursorRetriesResponse = {
   failure_reason?: string | null;
 };
 
-export type SocialAccountCommentsAuditCursorRetryRequest = {
+export type SocialAccountCommentsRelayCheckpointRetryRequest = {
   limit?: number;
   shortcodes?: string[];
   stop_reasons?: string[];
@@ -543,7 +549,9 @@ export type SocialAccountCommentsAuditCursorRetryRequest = {
   batch_size?: number;
   comments_worker_count?: number;
   max_comments_per_post?: number;
-  comments_load_strategy?: "instagram_comments_endpoint_cursor" | "cursor_api" | "single_session_load_all";
+  comments_load_strategy?: "public_relay" | "instagram_comments_endpoint_cursor" | "cursor_api" | "single_session_load_all";
+  date_start?: string | null;
+  date_end?: string | null;
   skip_launch_auth_probe?: boolean;
   attach_to_active_run?: boolean;
   dispatch_immediately?: boolean;
@@ -579,11 +587,21 @@ export type SocialAccountCommentsDryRunPreviewResponse = {
   incomplete_fill?: boolean | null;
   target_priority?: string | null;
   target_source_ids_count?: number;
+  comments_load_strategy?: "public_relay" | "instagram_comments_endpoint_cursor" | "cursor_api" | "single_session_load_all" | string;
+  comments_session_scope?: string | null;
+  date_start?: string | null;
+  date_end?: string | null;
+  target_window?: {
+    date_start?: string | null;
+    date_end?: string | null;
+    end_exclusive?: boolean;
+  } | null;
   comments_shard_count?: number;
   comments_sharding_enabled?: boolean;
   comments_proxy_shard_sessions?: boolean;
   recommended_comments_shard_count?: number;
   sample_target_source_ids?: string[];
+  strategy_warnings?: Array<Record<string, unknown>> | string[];
   timing?: Record<string, unknown> | null;
   preview_cache?: Record<string, unknown> | string | null;
   cache?: Record<string, unknown> | string | null;
@@ -665,6 +683,45 @@ export type SocialAccountCommentsNetworkSpend = {
   spend_basis?: string | null;
 };
 
+export type SocialAccountCatalogCommentsStreaming = {
+  enabled?: boolean | null;
+  state?: string | null;
+  source?: string | null;
+  comments_run_id?: string | null;
+  account_handle?: string | null;
+  source_scope?: string | null;
+  launch_group_id?: string | null;
+  worker_count?: number | null;
+  enable_media_followups?: boolean | null;
+  next_action?: {
+    code?: string | null;
+    label?: string | null;
+    detail?: string | null;
+  } | null;
+  targets_seen?: number | null;
+  targets_enqueued?: number | null;
+  targets_skipped_duplicate?: number | null;
+  append_failures?: number | null;
+  reconciled_source_ids?: number | null;
+  last_updated_at?: string | null;
+  started_at?: string | null;
+  completed_at?: string | null;
+  last_enqueue_targets_seen?: number | null;
+  last_enqueue_targets_enqueued?: number | null;
+  last_enqueue_requested_at?: string | null;
+  last_enqueue_completed_at?: string | null;
+  last_enqueue_lag_ms?: number | null;
+  max_enqueue_lag_ms?: number | null;
+  average_enqueue_lag_ms?: number | null;
+  enqueue_attempt_count?: number | null;
+  last_batch_source_ids_count?: number | null;
+  last_append_result?: Record<string, unknown> | null;
+  last_reconcile_result?: Record<string, unknown> | null;
+  last_error?: string | null;
+  last_conflict?: string | null;
+  history?: Array<Record<string, unknown>>;
+};
+
 export type SocialAccountInstagramAccessProof = {
   auth_state?: string | null;
   cookie_state?: string | null;
@@ -673,6 +730,30 @@ export type SocialAccountInstagramAccessProof = {
   no_cookies?: boolean | null;
   no_decodo?: boolean | null;
   proof_label?: string | null;
+};
+
+export type SocialAccountCommentsGapPost = {
+  source_id?: string | null;
+  shortcode?: string | null;
+  post_id?: string | null;
+  post_url?: string | null;
+  posted_at?: string | null;
+  status?: string | null;
+  current_phase?: string | null;
+  latest_reason?: string | null;
+  fetch_reason?: string | null;
+  latest_stop_reason?: string | null;
+  cursor_stop_reason?: string | null;
+  reported_comment_count?: number | null;
+  saved_comment_count?: number | null;
+  observed_comment_count?: number | null;
+  missing_comment_gap?: number | null;
+  has_top_level_cursor?: boolean | null;
+  reply_resume_count?: number | null;
+  remaining?: boolean | null;
+  retryable?: boolean | null;
+  auth_failed?: boolean | null;
+  network_stopped?: boolean | null;
 };
 
 export type SocialAccountCommentsTargetProgressRow = {
@@ -744,9 +825,9 @@ export type SocialAccountCommentsRunProgress = {
   top_incomplete_reasons?: Record<string, number | null | undefined> | Array<Record<string, unknown>>;
   incomplete_reason_counts?: Record<string, number | null | undefined>;
   retry_reason_counts?: Record<string, number | null | undefined>;
-  largest_remaining_gaps?: Array<Record<string, unknown>>;
-  largest_gaps?: Array<Record<string, unknown>>;
-  incomplete_targets?: Array<Record<string, unknown>>;
+  largest_remaining_gaps?: SocialAccountCommentsGapPost[];
+  largest_gaps?: SocialAccountCommentsGapPost[];
+  incomplete_targets?: SocialAccountCommentsGapPost[];
   recommended_next_action?: string | null;
   operator_next_action?: string | null;
   recommended_action?: string | null;
@@ -793,7 +874,13 @@ export type SocialAccountCommentsRunProgress = {
     targeted_retry_target_count?: number | null;
     network_stopped_target_count?: number | null;
     network_stopped_target_source_ids?: string[];
-    largest_remaining_gaps?: Array<Record<string, unknown>>;
+    public_comments_recovery_pending_target_count?: number | null;
+    public_comments_recovery_pending_target_source_ids?: string[];
+    public_recovery_bucket?: Record<string, unknown> | null;
+    public_comments_approval_required_target_count?: number | null;
+    public_comments_approval_required_target_source_ids?: string[];
+    authenticated_followup_bucket?: Record<string, unknown> | null;
+    largest_remaining_gaps?: SocialAccountCommentsGapPost[];
     target_progress_rows?: SocialAccountCommentsTargetProgressRow[];
     top_incomplete_reasons?: Record<string, number | null | undefined> | null;
   } | null;
@@ -814,6 +901,13 @@ export type SocialAccountCommentsRunProgress = {
   comments_endpoint_probe?: Record<string, unknown> | null;
   comments_endpoint_probe_advisory_active?: boolean | null;
   manual_auth_required?: boolean | null;
+  public_comments_recovery_pending_target_count?: number | null;
+  public_comments_recovery_pending_target_source_ids?: string[];
+  public_recovery_bucket?: Record<string, unknown> | null;
+  public_comments_approval_required_target_count?: number | null;
+  public_comments_approval_required_target_source_ids?: string[];
+  authenticated_followup_bucket?: Record<string, unknown> | null;
+  catalog_streaming?: SocialAccountCatalogCommentsStreaming | null;
   started_at_epoch_seconds?: number | null;
   updated_at?: string | null;
 };
@@ -1329,6 +1423,7 @@ export type SocialAccountCatalogRunProgressSnapshot = {
   force_network_detail_fetch?: boolean;
   details_refresh_shard_count?: number | null;
   comments_run_id?: string | null;
+  comments_streaming?: SocialAccountCatalogCommentsStreaming | null;
   attached_followups?: SocialAccountCatalogAttachedFollowups | null;
   operational_state?:
     | "blocked_auth"
@@ -1628,8 +1723,26 @@ export type SocialAccountProfileHashtagAssignment = {
   show_id?: string | null;
   show_name?: string | null;
   show_slug?: string | null;
+  assignment_scope?: "global" | "platform" | null;
+  platform?: SocialPlatformSlug | null;
   updated_by?: string | null;
   updated_at?: string | null;
+};
+
+export type SocialHashtagAssignmentBackfillConflict = {
+  id?: string | null;
+  hashtag: string;
+  display_hashtag?: string | null;
+  distinct_show_count: number;
+  legacy_assignments: Array<{
+    platform?: SocialPlatformSlug | string | null;
+    account_handle?: string | null;
+    show_id?: string | null;
+    season_id?: string | null;
+    display_hashtag?: string | null;
+  }>;
+  resolution_action: string;
+  resolved_at?: string | null;
 };
 
 export type SocialAccountProfileHashtag = {

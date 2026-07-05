@@ -204,9 +204,9 @@ describe("admin host proxy", () => {
     const request = new NextRequest("https://admin.trr.localhost/");
     const response = proxy(request);
 
-    expect(response.status).toBe(200);
-    expect(response.headers.get("x-middleware-rewrite")).toBe("https://admin.trr.localhost/admin");
-    expect(response.headers.get("location")).toBeNull();
+    expect(response.status).toBe(307);
+    expect(response.headers.get("x-middleware-rewrite")).toBeNull();
+    expect(response.headers.get("location")).toBe("https://admin.trr.localhost/admin");
   });
 
   it("recognizes the clean Portless admin host from forwarded host headers", () => {
@@ -223,9 +223,9 @@ describe("admin host proxy", () => {
     });
     const response = proxy(request);
 
-    expect(response.status).toBe(200);
-    expect(response.headers.get("x-middleware-rewrite")).toBe("http://localhost:3001/admin");
-    expect(response.headers.get("location")).toBeNull();
+    expect(response.status).toBe(307);
+    expect(response.headers.get("x-middleware-rewrite")).toBeNull();
+    expect(response.headers.get("location")).toBe("https://admin.trr.localhost/admin");
   });
 
   it("derives Portless admin origin without carrying the underlying Next port", () => {
@@ -244,6 +244,24 @@ describe("admin host proxy", () => {
     expect(response.headers.get("location")).toBe(
       "https://admin.trr.localhost/admin/social/instagram/bravotv/posts",
     );
+  });
+
+  it("rewrites Portless short admin paths through the local HTTP Next origin", () => {
+    process.env.NODE_ENV = "development";
+    process.env.ADMIN_APP_ORIGIN = "https://admin.trr.localhost";
+    process.env.ADMIN_APP_HOSTS = "admin.trr.localhost,trr.localhost,admin.localhost,localhost,127.0.0.1,[::1]";
+    process.env.ADMIN_ENFORCE_HOST = "true";
+    process.env.ADMIN_STRICT_HOST_ROUTING = "false";
+
+    const request = new NextRequest("https://localhost:3002/social", {
+      headers: {
+        "x-forwarded-host": "admin.trr.localhost",
+      },
+    });
+    const response = proxy(request);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-middleware-rewrite")).toBe("http://localhost:3002/admin/social");
   });
 
   it("redirects /design-system requests on public host to admin origin", () => {
@@ -317,6 +335,7 @@ describe("admin host proxy", () => {
 
   it.each([
     "/dev-dashboard",
+    "/dev-dashboard/instagram-catalog-backfill-mockup",
     "/docs",
     "/groups",
     "/shows/settings",
@@ -441,6 +460,10 @@ describe("admin host proxy", () => {
     ["/admin/design-docs/overview", "http://admin.localhost:3000/design-docs/overview"],
     ["/admin/api-references", "http://admin.localhost:3000/api-references"],
     ["/admin/dev-dashboard/skills-and-agents", "http://admin.localhost:3000/dev-dashboard/skills-and-agents"],
+    [
+      "/admin/dev-dashboard/instagram-catalog-backfill-mockup",
+      "http://admin.localhost:3000/dev-dashboard/instagram-catalog-backfill-mockup",
+    ],
   ])("redirects %s to the canonical admin-host URL", (pathname, expectedLocation) => {
     process.env.ADMIN_APP_ORIGIN = "http://admin.localhost:3000";
     process.env.ADMIN_ENFORCE_HOST = "true";
@@ -461,6 +484,10 @@ describe("admin host proxy", () => {
     ["/design-docs/overview", "http://admin.localhost:3000/admin/design-docs/overview"],
     ["/api-references", "http://admin.localhost:3000/admin/api-references"],
     ["/dev-dashboard/skills-and-agents", "http://admin.localhost:3000/admin/dev-dashboard/skills-and-agents"],
+    [
+      "/dev-dashboard/instagram-catalog-backfill-mockup",
+      "http://admin.localhost:3000/admin/dev-dashboard/instagram-catalog-backfill-mockup",
+    ],
     ["/rhoslc", "http://admin.localhost:3000/admin/trr-shows/rhoslc"],
     ["/rhoslc/credits", "http://admin.localhost:3000/admin/trr-shows/rhoslc/credits"],
     ["/rhoslc/social", "http://admin.localhost:3000/admin/trr-shows/rhoslc/social"],
@@ -509,6 +536,7 @@ describe("admin host proxy", () => {
     "/social/instagram/bravotv",
     "/social/instagram/bravotv/socialblade",
     "/social/instagram/bravotv/catalog",
+    "/social/instagram/bravotv/catalog/alt-1",
     "/social/instagram/bravotv/posts",
     "/social/instagram/bravotv/hashtags",
     "/social/instagram/bravotv/collaborators-tags",

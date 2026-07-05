@@ -32,14 +32,29 @@ const runPendingTimers = async (): Promise<void> => {
   });
 };
 
+const createDeferred = <T,>(): { promise: Promise<T>; resolve: (value: T) => void } => {
+  let resolve: (value: T) => void = () => {};
+  const promise = new Promise<T>((nextResolve) => {
+    resolve = nextResolve;
+  });
+  return { promise, resolve };
+};
+
+type PollRefresh = (request?: {
+  forceRefresh?: boolean;
+  cause?: "interval" | "manual" | "mutation" | "visibility";
+}) => void;
+
 function PollingHarness({
   fetcher,
   shouldRun,
+  onRefetch,
 }: {
   fetcher: (signal: AbortSignal) => Promise<{ ok: boolean }>;
   shouldRun: boolean;
+  onRefetch?: (refetch: PollRefresh) => void;
 }) {
-  useSharedPollingResource({
+  const resource = useSharedPollingResource({
     key: "shared-live-resource-hidden-tab-test",
     fetchData: fetcher,
     intervalMs: 1_000,
@@ -48,6 +63,9 @@ function PollingHarness({
     followerCheckIntervalMs: 1_000,
     startupJitterMs: [0, 0],
   });
+  React.useEffect(() => {
+    onRefetch?.(resource.refetch);
+  }, [onRefetch, resource.refetch]);
   return null;
 }
 
@@ -91,5 +109,56 @@ describe("useSharedPollingResource visibility budget", () => {
     await flushReact();
     await flushTimers(1_000);
     expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not start a duplicate poll when shared subscribers refresh during an in-flight request", async () => {
+    const firstRequest = createDeferred<{ ok: boolean }>();
+    const queuedRequest = createDeferred<{ ok: boolean }>();
+    const fetcher = vi
+      .fn<(signal: AbortSignal) => Promise<{ ok: boolean }>>()
+      .mockImplementationOnce(() => firstRequest.promise)
+      .mockImplementationOnce(() => queuedRequest.promise);
+    let firstRefetch: PollRefresh | null = null;
+    let secondRefetch: PollRefresh | null = null;
+
+    render(
+      <>
+        <PollingHarness
+          fetcher={fetcher}
+          shouldRun
+          onRefetch={(refetch) => {
+            firstRefetch = refetch;
+          }}
+        />
+        <PollingHarness
+          fetcher={fetcher}
+          shouldRun
+          onRefetch={(refetch) => {
+            secondRefetch = refetch;
+          }}
+        />
+      </>,
+    );
+
+    await flushReact();
+    await runPendingTimers();
+    expect(fetcher).toHaveBeenCalledTimes(1);
+
+    firstRefetch?.({ forceRefresh: true, cause: "manual" });
+    secondRefetch?.({ forceRefresh: true, cause: "manual" });
+    await runPendingTimers();
+    expect(fetcher).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      firstRequest.resolve({ ok: true });
+      await firstRequest.promise;
+    });
+    await runPendingTimers();
+    expect(fetcher).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      queuedRequest.resolve({ ok: true });
+      await queuedRequest.promise;
+    });
   });
 });

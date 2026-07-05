@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import ClientOnly from "@/components/ClientOnly";
 import { buildAdminSectionBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
 import { fetchAdminWithAuth } from "@/lib/admin/client-auth";
@@ -150,9 +151,47 @@ interface VercelCleanupDoctor {
   errors: string[];
 }
 
+interface PortlessServiceStatus {
+  manager_state: string | null;
+  installed: boolean | null;
+  proxy_on_443: boolean | null;
+  https: boolean | null;
+  tld: string | null;
+  lan_mode: boolean | null;
+  wildcard: boolean | null;
+  state_directory: string | null;
+  service_entry: string | null;
+  raw_output: string;
+  raw_error?: string;
+}
+
+interface PortlessRouteStatus {
+  id: string;
+  label: string;
+  url: string;
+  expectedPath: string;
+  target: string | null;
+  kind: string | null;
+  present: boolean;
+  staticAlias: boolean;
+}
+
+interface PortlessStatusSnapshot {
+  status: "ok" | "unavailable";
+  checked_at: string;
+  service: PortlessServiceStatus | null;
+  routes: PortlessRouteStatus[];
+  static_alias_count: number;
+  uses_static_aliases: boolean;
+  repair_command: string;
+  open_admin_command: string;
+  raw_error?: string;
+}
+
 interface DevDashboardData {
   repos: RepoStatus[];
   tasks: OutstandingTasks;
+  portlessStatus: PortlessStatusSnapshot;
   vercelPreviewReadiness: VercelPreviewReadiness | null;
   vercelCleanupDoctor: VercelCleanupDoctor;
   generatedAt: string;
@@ -532,6 +571,33 @@ export default function DevDashboardPage() {
                 />
               ) : null}
 
+              <PortlessWorkspaceSection snapshot={data.portlessStatus} />
+
+              <section className="mb-6 rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                  <div>
+                    <h2 className="text-lg font-semibold text-zinc-900">Instagram Catalog Backfill</h2>
+                    <p className="mt-1 max-w-2xl text-sm text-zinc-500">
+                      Test the cleaner live-run layout from the dev copy or from the @bravotv catalog route.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Link
+                      href="/dev-dashboard/instagram-catalog-backfill-mockup"
+                      className="rounded-lg border border-zinc-200 bg-zinc-50 px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100"
+                    >
+                      Open Mockup
+                    </Link>
+                    <Link
+                      href="/social/instagram/bravotv/catalog/alt-1"
+                      className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-700"
+                    >
+                      Open Alt 1
+                    </Link>
+                  </div>
+                </div>
+              </section>
+
               <div className="mb-6 flex flex-wrap gap-2">
                 {REPO_TABS.map((tab) => {
                   const isActive = tab === activeRepo;
@@ -780,6 +846,100 @@ function VercelWorkspaceSection({
         </div>
       ) : null}
     </div>
+  );
+}
+
+function PortlessWorkspaceSection({ snapshot }: { snapshot: PortlessStatusSnapshot | null }) {
+  const service = snapshot?.service ?? null;
+  const routes = snapshot?.routes ?? [];
+  const routeById = new Map(routes.map((route) => [route.id, route]));
+  const appRouteReady = routeById.get("trr")?.present === true;
+  const adminRouteReady = routeById.get("admin.trr")?.present === true;
+  const apiRouteReady = routeById.get("api.trr")?.present === true;
+  const serviceReady =
+    service?.installed === true && service.proxy_on_443 === true && service.wildcard === true;
+  const ready =
+    snapshot?.status === "ok" &&
+    serviceReady &&
+    appRouteReady &&
+    adminRouteReady &&
+    apiRouteReady &&
+    snapshot.uses_static_aliases !== true;
+  const blockers = [
+    service?.installed === false ? "Portless service is not installed" : null,
+    service?.proxy_on_443 === false ? "Portless secure proxy is not responding" : null,
+    service?.wildcard === false ? "Wildcard routing is off" : null,
+    !appRouteReady ? "TRR app route is missing" : null,
+    !apiRouteReady ? "TRR API route is missing" : null,
+    snapshot?.uses_static_aliases ? "Static aliases are still active" : null,
+    snapshot?.status === "unavailable" ? snapshot.raw_error || "Portless route list is unavailable" : null,
+  ].filter((item): item is string => Boolean(item));
+
+  return (
+    <section className="mb-6 rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-semibold text-zinc-900">Portless Browser Readiness</h2>
+          <p className="text-xs text-zinc-500">
+            Clean admin URL: <span className="font-mono">https://admin.trr.localhost</span>
+          </p>
+          {snapshot?.checked_at ? (
+            <p className="text-xs text-zinc-500">
+              Checked: <span className="font-mono">{new Date(snapshot.checked_at).toLocaleString()}</span>
+            </p>
+          ) : null}
+        </div>
+        <span
+          className={`rounded-md px-2 py-1 text-xs font-semibold ${
+            ready
+              ? "border border-green-200 bg-green-50 text-green-800"
+              : "border border-amber-200 bg-amber-50 text-amber-800"
+          }`}
+        >
+          {ready ? "Ready" : "Blocked"}
+        </span>
+      </div>
+
+      <div className="grid gap-3 text-sm md:grid-cols-3">
+        <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Service</p>
+          <p className="mt-1 text-zinc-900">
+            {serviceReady ? "Installed and running" : "Needs repair"}
+          </p>
+          <p className="mt-1 text-xs text-zinc-500">
+            State: <span className="font-mono">{service?.manager_state ?? "unknown"}</span>
+          </p>
+        </div>
+        <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Proxy</p>
+          <p className="mt-1 text-zinc-900">
+            {service?.proxy_on_443 ? "Secure local routing is open" : "Secure local routing is closed"}
+          </p>
+          <p className="mt-1 text-xs text-zinc-500">
+            Wildcard: <span className="font-mono">{service?.wildcard ? "on" : "off"}</span>
+          </p>
+        </div>
+        <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Routes</p>
+          <p className="mt-1 text-zinc-900">
+            {appRouteReady && apiRouteReady ? "App and API are connected" : "App route is not complete"}
+          </p>
+          <p className="mt-1 text-xs text-zinc-500">
+            Admin: <span className="font-mono">{adminRouteReady ? "wildcard/ready" : "missing"}</span>
+          </p>
+        </div>
+      </div>
+
+      {blockers.length > 0 ? (
+        <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-amber-800">What is blocking Browser</p>
+          <p className="mt-1 text-sm text-amber-900">{blockers.join(" | ")}</p>
+          <p className="mt-2 text-xs text-amber-800">
+            Repair: <span className="font-mono">{snapshot?.repair_command ?? "make portless-repair"}</span>
+          </p>
+        </div>
+      ) : null}
+    </section>
   );
 }
 

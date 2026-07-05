@@ -4,6 +4,7 @@ import { readdir, readFile, stat, open } from "node:fs/promises";
 import type { Dirent } from "node:fs";
 import { join } from "node:path";
 import os from "node:os";
+import { getPortlessStatus, type PortlessStatusSnapshot } from "@/lib/server/admin/portless-status";
 import { safeExec } from "@/lib/server/admin/shell-exec";
 
 export interface BranchInfo {
@@ -146,6 +147,7 @@ export interface VercelCleanupDoctor {
 export interface DevDashboardData {
   repos: RepoStatus[];
   tasks: OutstandingTasks;
+  portlessStatus: PortlessStatusSnapshot;
   vercelPreviewReadiness: VercelPreviewReadiness | null;
   vercelCleanupDoctor: VercelCleanupDoctor;
   generatedAt: string;
@@ -1079,14 +1081,16 @@ export async function getDevDashboardData(): Promise<DevDashboardData> {
   const repoStatusesPromise = Promise.allSettled(REPOS.map((repo) => collectRepoStatus(repo)));
   const taskPlansPromise = Promise.allSettled(REPOS.map((repo) => collectTaskPlans(repo)));
   const claudePlansPromise = collectClaudePlans();
+  const portlessStatusPromise = getPortlessStatus();
   const vercelPreviewReadinessPromise = readVercelPreviewReadinessArtifact();
   const vercelCleanupDoctorPromise = readVercelCleanupDoctor();
 
-  const [repoStatusesSettled, taskPlansSettled, claudePlans, vercelPreviewReadiness, vercelCleanupDoctor] =
+  const [repoStatusesSettled, taskPlansSettled, claudePlans, portlessStatus, vercelPreviewReadiness, vercelCleanupDoctor] =
     await Promise.all([
       repoStatusesPromise,
       taskPlansPromise,
       claudePlansPromise,
+      portlessStatusPromise,
       vercelPreviewReadinessPromise,
       vercelCleanupDoctorPromise,
     ]);
@@ -1135,6 +1139,7 @@ export async function getDevDashboardData(): Promise<DevDashboardData> {
       taskPlans: filteredTaskPlans,
       claudePlans,
     },
+    portlessStatus,
     vercelPreviewReadiness,
     vercelCleanupDoctor,
     generatedAt,

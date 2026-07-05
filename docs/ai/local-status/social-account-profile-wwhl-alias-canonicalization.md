@@ -13,7 +13,7 @@ Last updated: 2026-03-30
 ## Validation
 - Passed: targeted `eslint` on the touched social profile route files, route helper, and `tests/show-admin-routes.test.ts`
 - Passed: `pnpm -C apps/web exec vitest run tests/show-admin-routes.test.ts`
-- Passed: `curl -I -s http://admin.localhost:3000/admin/social/instagram/wwhlbravo` returning `307` with `location: /admin/social/instagram/bravowwhl`
+- Passed: `curl -I -s https://admin.trr.localhost/admin/social/instagram/wwhlbravo` returning `307` with `location: /admin/social/instagram/bravowwhl`
 
 ## Handoff Snapshot
 ```yaml

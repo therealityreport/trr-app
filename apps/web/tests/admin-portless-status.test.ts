@@ -1,7 +1,40 @@
 import { describe, expect, it } from "vitest";
-import { buildPortlessStatusSnapshot, parsePortlessList } from "@/lib/server/admin/portless-status";
+import {
+  buildPortlessStatusSnapshot,
+  parsePortlessList,
+  parsePortlessServiceStatus,
+} from "@/lib/server/admin/portless-status";
 
 describe("parsePortlessList", () => {
+  it("parses the Portless service status", () => {
+    const service = parsePortlessServiceStatus(`
+portless service
+  Manager state: running
+  Installed: yes
+  Proxy on 443: responding
+  HTTPS: yes
+  TLD: localhost
+  LAN mode: no
+  Wildcard: yes
+  State directory: /Users/thomashulihan/.portless
+  Service entry: /Library/LaunchDaemons/sh.portless.proxy.plist
+`);
+
+    expect(service).toEqual(
+      expect.objectContaining({
+        manager_state: "running",
+        installed: true,
+        proxy_on_443: true,
+        https: true,
+        tld: "localhost",
+        lan_mode: false,
+        wildcard: true,
+        state_directory: "/Users/thomashulihan/.portless",
+        service_entry: "/Library/LaunchDaemons/sh.portless.proxy.plist",
+      }),
+    );
+  });
+
   it("parses managed and alias routes from portless list output", () => {
     const routes = parsePortlessList(`
 Active routes:

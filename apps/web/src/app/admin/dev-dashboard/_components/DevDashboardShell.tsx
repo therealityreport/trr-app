@@ -10,6 +10,7 @@ import { ADMIN_ROOT_PATH } from "@/lib/admin/admin-route-paths";
 const DEV_DASHBOARD_ROUTES = [
   { href: "/dev-dashboard", label: "Overview" },
   { href: "/dev-dashboard/skills-and-agents", label: "Skills & Agents" },
+  { href: "/dev-dashboard/instagram-catalog-backfill-mockup", label: "Catalog Backfill" },
 ] as const;
 
 interface DevDashboardShellProps {
