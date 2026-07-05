@@ -30,6 +30,13 @@ const PUBLIC_ROUTE_FILES = [
   "src/app/[showId]/s[seasonNumber]/social/reddit/[communitySlug]/[windowKey]/post/[postId]/page.tsx",
 ];
 
+const LEGACY_ADMIN_REDDIT_SEASON_ROUTE_FILES = [
+  "src/app/admin/social/reddit/[communitySlug]/[showSlug]/s[seasonNumber]/page.tsx",
+  "src/app/admin/social/reddit/[communitySlug]/[showSlug]/s[seasonNumber]/[windowKey]/page.tsx",
+  "src/app/admin/social/reddit/[communitySlug]/[showSlug]/s[seasonNumber]/[windowKey]/post/[postId]/page.tsx",
+  "src/app/admin/social/reddit/[communitySlug]/[showSlug]/s[seasonNumber]/[windowKey]/[detailSlug]/page.tsx",
+];
+
 describe("public route boundary", () => {
   it.each(PUBLIC_ROUTE_FILES)(
     "keeps %s free of admin-only imports and guards",
@@ -41,6 +48,19 @@ describe("public route boundary", () => {
       expect(source).not.toMatch(/useAdminGuard/);
       expect(source).not.toMatch(/WeekDetailPageViewLoader/);
       expect(source).not.toMatch(/redirect\((["'`])\/admin\//);
+    },
+  );
+
+  it.each(LEGACY_ADMIN_REDDIT_SEASON_ROUTE_FILES)(
+    "keeps %s as a redirect shim instead of an admin page re-export",
+    (relativePath) => {
+      const filePath = path.resolve(process.cwd(), relativePath);
+      const source = fs.readFileSync(filePath, "utf8");
+
+      expect(source).toMatch(/from "next\/navigation"/);
+      expect(source).toMatch(/redirect\(/);
+      expect(source).not.toMatch(/export \{ default \} from "@\/app\/admin\//);
+      expect(source).not.toMatch(/export \{ default \} from "@\/components\/admin\//);
     },
   );
 });

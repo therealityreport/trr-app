@@ -219,7 +219,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
       } satisfies SocialProfileSnapshotPayload;
     };
 
-    let snapshot = await getOrCreateAdminSnapshot({
+    const snapshot = await getOrCreateAdminSnapshot({
       cacheKey,
       ttlMs,
       staleIfErrorTtlMs,

@@ -648,7 +648,7 @@ describe("show-admin-routes", () => {
         showSlug: "rhoslc",
         seasonNumber: 6,
       }),
-    ).toBe("/admin/social/reddit/BravoRealHousewives/rhoslc/s6");
+    ).toBe("/rhoslc/social/reddit/BravoRealHousewives/s6");
 
     expect(
       buildAdminRedditCommunityWindowUrl({
@@ -657,7 +657,7 @@ describe("show-admin-routes", () => {
         seasonNumber: 6,
         windowKey: "episode-1",
       }),
-    ).toBe("/admin/social/reddit/BravoRealHousewives/rhoslc/s6/e1");
+    ).toBe("/rhoslc/social/reddit/BravoRealHousewives/s6/e1");
 
     expect(
       buildAdminRedditCommunityWindowPostUrl({
@@ -670,7 +670,7 @@ describe("show-admin-routes", () => {
         author: "AutoModerator",
       }),
     ).toBe(
-      "/admin/social/reddit/BravoRealHousewives/rhoslc/s6/e1/the-real-housewives-of-salt-lake-city-season-6-episode-1-pre-episode-discussion--u-automoderator",
+      "/rhoslc/social/reddit/BravoRealHousewives/s6/e1/the-real-housewives-of-salt-lake-city-season-6-episode-1-pre-episode-discussion--u-automoderator",
     );
   });
 
