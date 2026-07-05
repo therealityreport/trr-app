@@ -23,13 +23,14 @@ import {
 import type {
   CatalogBackfillLaunchResponse,
   CatalogBackfillRequest,
-  SocialAccountCommentsAuditCursorRetriesResponse,
-  SocialAccountCommentsAuditCursorRetryRequest,
-  SocialAccountCommentsAuditCursorRetryRow,
+  SocialAccountCommentsRelayCheckpointRetriesResponse,
+  SocialAccountCommentsRelayCheckpointRetryRequest,
+  SocialAccountCommentsRelayCheckpointRetryRow,
   SocialAccountCommentsCancelResponse,
   SocialAccountCommentsNetworkSpend,
   SocialAccountCommentsRunProgress,
   SocialAccountCommentsShardProgress,
+  SocialAccountCommentsDryRunPreviewResponse,
   SocialAccountCommentsScrapeRequest,
   SocialAccountCommentsScrapeResponse,
   SocialAccountCommentsTargetProgressRow,
@@ -95,6 +96,14 @@ type CommentsRunHealth = {
   incompleteReasons: string | null;
   largestGaps: CommentsHealthGap[];
   recommendedAction: string | null;
+};
+type IncompleteFillPreviewSummary = {
+  targetCount: number;
+  shardCount: number;
+  strategy: string;
+  windowLabel: string;
+  sampleShortcodes: string[];
+  warningCount: number;
 };
 
 const ACTIVE_RUN_STATUSES = new Set(["queued", "pending", "retrying", "running", "cancelling"]);
@@ -618,6 +627,45 @@ const formatCommentsLaunchQueuedMessage = (
   return fallback;
 };
 
+const getIncompleteFillPreviewSummary = (
+  data: SocialAccountCommentsDryRunPreviewResponse,
+): IncompleteFillPreviewSummary => {
+  const targetCount = readFiniteNumber(data.target_source_ids_count) ?? 0;
+  const shardCount = readFiniteNumber(data.comments_shard_count) ?? 0;
+  const strategy = formatCompactReason(
+    String(data.comments_load_strategy || data.comments_session_scope || "public_relay"),
+  );
+  const windowStart = data.date_start ?? data.target_window?.date_start ?? null;
+  const windowEnd = data.date_end ?? data.target_window?.date_end ?? null;
+  const windowLabel =
+    windowStart || windowEnd
+      ? `window ${windowStart ?? "start"} to ${windowEnd ?? "open end"}`
+      : "all saved dates";
+  const sampleShortcodes = (data.sample_target_source_ids ?? []).filter(Boolean).slice(0, 5);
+  const warningCount = Array.isArray(data.strategy_warnings) ? data.strategy_warnings.length : 0;
+  return {
+    targetCount,
+    shardCount,
+    strategy,
+    windowLabel,
+    sampleShortcodes,
+    warningCount,
+  };
+};
+
+const formatIncompleteFillPreviewMessage = (data: SocialAccountCommentsDryRunPreviewResponse): string => {
+  const summary = getIncompleteFillPreviewSummary(data);
+  return [
+    `Incomplete Fill preview: ${formatInteger(summary.targetCount)} targets`,
+    summary.shardCount > 0 ? `${formatInteger(summary.shardCount)} shard${summary.shardCount === 1 ? "" : "s"}` : null,
+    summary.strategy,
+    summary.windowLabel,
+    summary.sampleShortcodes.length ? `sample ${summary.sampleShortcodes.join(", ")}` : null,
+  ]
+    .filter(Boolean)
+    .join(" / ");
+};
+
 const readProgressBoolean = (value: unknown): boolean | null => {
   return typeof value === "boolean" ? value : null;
 };
@@ -724,17 +772,20 @@ export default function InstagramCommentsPanel({
   const [scrapeMessage, setScrapeMessage] = useState<string | null>(null);
   const [scrapeError, setScrapeError] = useState<string | null>(null);
   const [scrapeRunId, setScrapeRunId] = useState<string | null>(null);
+  const [incompleteFillPreview, setIncompleteFillPreview] =
+    useState<SocialAccountCommentsDryRunPreviewResponse | null>(null);
   const [commentsLaunchPending, setCommentsLaunchPending] = useState(false);
+  const [commentsPreviewPending, setCommentsPreviewPending] = useState(false);
   const [cancelPending, setCancelPending] = useState(false);
   const [cancelRequestedRunId, setCancelRequestedRunId] = useState<string | null>(null);
   const [catalogRefreshPending, setCatalogRefreshPending] = useState(false);
-  const [auditCursorRecovery, setAuditCursorRecovery] =
-    useState<SocialAccountCommentsAuditCursorRetriesResponse | null>(null);
-  const [auditCursorRecoveryLoading, setAuditCursorRecoveryLoading] = useState(false);
-  const [auditCursorRecoveryPending, setAuditCursorRecoveryPending] = useState(false);
-  const [auditCursorRerunShortcode, setAuditCursorRerunShortcode] = useState<string | null>(null);
-  const [auditCursorRecoveryError, setAuditCursorRecoveryError] = useState<string | null>(null);
-  const [auditCursorShowFilter, setAuditCursorShowFilter] = useState("");
+  const [relayCheckpointRecovery, setRelayCheckpointRecovery] =
+    useState<SocialAccountCommentsRelayCheckpointRetriesResponse | null>(null);
+  const [relayCheckpointRecoveryLoading, setRelayCheckpointRecoveryLoading] = useState(false);
+  const [relayCheckpointRecoveryPending, setRelayCheckpointRecoveryPending] = useState(false);
+  const [relayCheckpointRerunShortcode, setRelayCheckpointRerunShortcode] = useState<string | null>(null);
+  const [relayCheckpointRecoveryError, setRelayCheckpointRecoveryError] = useState<string | null>(null);
+  const [relayCheckpointShowFilter, setRelayCheckpointShowFilter] = useState("");
   const [selectedPost, setSelectedPost] = useState<SocialAccountProfilePost | null>(null);
   const [modalRefreshKey, setModalRefreshKey] = useState(0);
   const handledTerminalRunRef = useRef<string | null>(null);
@@ -814,13 +865,13 @@ export default function InstagramCommentsPanel({
     void refreshPosts();
   }, [refreshPosts, supportsComments]);
 
-  const refreshAuditCursorRecovery = useCallback(async () => {
+  const refreshRelayCheckpointRecovery = useCallback(async () => {
     if (checking || !user || !hasAccess || !supportsInlineCommentsSync) return;
-    setAuditCursorRecoveryLoading(true);
-    setAuditCursorRecoveryError(null);
+    setRelayCheckpointRecoveryLoading(true);
+    setRelayCheckpointRecoveryError(null);
     try {
       const params = new URLSearchParams({ limit: "50" });
-      const trimmedShowFilter = auditCursorShowFilter.trim();
+      const trimmedShowFilter = relayCheckpointShowFilter.trim();
       if (trimmedShowFilter) {
         params.set("show_filter", trimmedShowFilter);
       }
@@ -829,23 +880,23 @@ export default function InstagramCommentsPanel({
         undefined,
         { preferredUser: user },
       );
-      const data = (await response.json().catch(() => ({}))) as SocialAccountCommentsAuditCursorRetriesResponse &
+      const data = (await response.json().catch(() => ({}))) as SocialAccountCommentsRelayCheckpointRetriesResponse &
         ProxyErrorPayload;
       if (!response.ok) {
-        throw new Error(readInstagramCommentsErrorMessage(data, "Failed to load audit cursor recovery"));
+        throw new Error(readInstagramCommentsErrorMessage(data, "Failed to load relay checkpoint recovery"));
       }
-      setAuditCursorRecovery(data);
+      setRelayCheckpointRecovery(data);
     } catch (error) {
-      setAuditCursorRecoveryError(error instanceof Error ? error.message : "Failed to load audit cursor recovery");
+      setRelayCheckpointRecoveryError(error instanceof Error ? error.message : "Failed to load relay checkpoint recovery");
     } finally {
-      setAuditCursorRecoveryLoading(false);
+      setRelayCheckpointRecoveryLoading(false);
     }
-  }, [auditCursorShowFilter, checking, fetchAdminWithAuth, handle, hasAccess, platform, supportsInlineCommentsSync, user]);
+  }, [relayCheckpointShowFilter, checking, fetchAdminWithAuth, handle, hasAccess, platform, supportsInlineCommentsSync, user]);
 
   useEffect(() => {
     if (!supportsInlineCommentsSync) return;
-    void refreshAuditCursorRecovery();
-  }, [refreshAuditCursorRecovery, supportsInlineCommentsSync]);
+    void refreshRelayCheckpointRecovery();
+  }, [refreshRelayCheckpointRecovery, supportsInlineCommentsSync]);
 
   useEffect(() => {
     if (!selectedPost || !posts) return;
@@ -886,18 +937,69 @@ export default function InstagramCommentsPanel({
   });
   const refetchRunProgress = runProgress.refetch;
 
+  const buildPublicRelayCommentsScrapeBody = useCallback(
+    (options: { target_filter?: "incomplete"; dry_run?: boolean } = {}): SocialAccountCommentsScrapeRequest => {
+      const body: SocialAccountCommentsScrapeRequest = {
+        mode: "profile",
+        source_scope: "network",
+        refresh_policy: "stale_or_missing",
+        max_comments_per_post: 0,
+        comments_load_strategy: "public_relay",
+        date_start: searchParams.get("date_start"),
+        date_end: searchParams.get("date_end"),
+      };
+      if (options.target_filter) {
+        body.target_filter = options.target_filter;
+      }
+      if (options.dry_run) {
+        body.dry_run = true;
+      }
+      return body;
+    },
+    [searchParams],
+  );
+
+  const previewIncompleteFillScrape = useCallback(async () => {
+    if (!user) return;
+    setScrapeError(null);
+    setScrapeMessage("Previewing public relay incomplete fill...");
+    setIncompleteFillPreview(null);
+    setCommentsPreviewPending(true);
+    const body = buildPublicRelayCommentsScrapeBody({ target_filter: "incomplete", dry_run: true });
+    try {
+      const response = await fetchAdminWithAuth(
+        `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/comments/scrape`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        },
+        { preferredUser: user },
+      );
+      const data = (await response.json().catch(() => ({}))) as SocialAccountCommentsDryRunPreviewResponse &
+        ProxyErrorPayload;
+      if (!response.ok) {
+        throw new Error(readInstagramCommentsErrorMessage(data, "Failed to preview incomplete fill"));
+      }
+      setIncompleteFillPreview(data);
+      setScrapeMessage(formatIncompleteFillPreviewMessage(data));
+    } catch (error) {
+      setIncompleteFillPreview(null);
+      setScrapeError(error instanceof Error ? error.message : "Failed to preview incomplete fill");
+    } finally {
+      setCommentsPreviewPending(false);
+    }
+  }, [buildPublicRelayCommentsScrapeBody, fetchAdminWithAuth, handle, platform, user]);
+
   const startProfileScrape = useCallback(async () => {
     if (!user) return;
     setScrapeError(null);
-    setScrapeMessage("Repairing Instagram auth if needed...");
+    setIncompleteFillPreview(null);
+    setScrapeMessage("Preparing public comments relay sync...");
     setCommentsLaunchPending(true);
     handledTerminalRunRef.current = null;
     setCancelRequestedRunId(null);
-    const body: SocialAccountCommentsScrapeRequest = {
-      mode: "profile",
-      source_scope: "network",
-      refresh_policy: "stale_or_missing",
-    };
+    const body = buildPublicRelayCommentsScrapeBody();
     try {
       const response = await fetchAdminWithAuth(
         `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/comments/scrape`,
@@ -933,21 +1035,17 @@ export default function InstagramCommentsPanel({
     } finally {
       setCommentsLaunchPending(false);
     }
-  }, [fetchAdminWithAuth, handle, platform, user]);
+  }, [buildPublicRelayCommentsScrapeBody, fetchAdminWithAuth, handle, platform, user]);
 
   const startIncompleteFillScrape = useCallback(async () => {
     if (!user) return;
     setScrapeError(null);
-    setScrapeMessage("Repairing Instagram auth if needed...");
+    setIncompleteFillPreview(null);
+    setScrapeMessage("Preparing public comments relay incomplete fill...");
     setCommentsLaunchPending(true);
     handledTerminalRunRef.current = null;
     setCancelRequestedRunId(null);
-    const body: SocialAccountCommentsScrapeRequest = {
-      mode: "profile",
-      source_scope: "network",
-      refresh_policy: "stale_or_missing",
-      target_filter: "incomplete",
-    };
+    const body = buildPublicRelayCommentsScrapeBody({ target_filter: "incomplete" });
     try {
       const response = await fetchAdminWithAuth(
         `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/comments/scrape`,
@@ -983,23 +1081,26 @@ export default function InstagramCommentsPanel({
     } finally {
       setCommentsLaunchPending(false);
     }
-  }, [fetchAdminWithAuth, handle, platform, user]);
+  }, [buildPublicRelayCommentsScrapeBody, fetchAdminWithAuth, handle, platform, user]);
 
-  const startAuditCursorRecovery = useCallback(async () => {
+  const startRelayCheckpointRecovery = useCallback(async () => {
     if (!user) return;
     setScrapeError(null);
-    setAuditCursorRecoveryError(null);
-    setScrapeMessage("Queueing cap-free audit cursor recovery...");
-    setAuditCursorRecoveryPending(true);
-    const body: SocialAccountCommentsAuditCursorRetryRequest = {
+    setIncompleteFillPreview(null);
+    setRelayCheckpointRecoveryError(null);
+    setScrapeMessage("Queueing public relay checkpoint recovery...");
+    setRelayCheckpointRecoveryPending(true);
+    const body: SocialAccountCommentsRelayCheckpointRetryRequest = {
       limit: 50,
       batch_size: 1,
       max_comments_per_post: 0,
-      comments_load_strategy: "instagram_comments_endpoint_cursor",
+      comments_load_strategy: "public_relay",
+      date_start: searchParams.get("date_start"),
+      date_end: searchParams.get("date_end"),
       attach_to_active_run: true,
       dispatch_immediately: true,
     };
-    const trimmedShowFilter = auditCursorShowFilter.trim();
+    const trimmedShowFilter = relayCheckpointShowFilter.trim();
     if (trimmedShowFilter) {
       body.show_filter = trimmedShowFilter;
     }
@@ -1013,12 +1114,12 @@ export default function InstagramCommentsPanel({
         },
         { preferredUser: user },
       );
-      const data = (await response.json().catch(() => ({}))) as SocialAccountCommentsAuditCursorRetriesResponse &
+      const data = (await response.json().catch(() => ({}))) as SocialAccountCommentsRelayCheckpointRetriesResponse &
         ProxyErrorPayload;
       if (!response.ok || data.ok === false) {
-        throw new Error(readInstagramCommentsErrorMessage(data, "Failed to queue audit cursor recovery"));
+        throw new Error(readInstagramCommentsErrorMessage(data, "Failed to queue relay checkpoint recovery"));
       }
-      setAuditCursorRecovery(data);
+      setRelayCheckpointRecovery(data);
       const runId =
         readCommentsRunId(data.enqueue?.result) ??
         readCommentsRunId(data.active_run) ??
@@ -1031,48 +1132,52 @@ export default function InstagramCommentsPanel({
       const modeLabel = data.enqueue?.mode === "active_run_split" ? "split into the active run" : "queued";
       setScrapeMessage(
         createdCount > 0
-          ? `Audit cursor recovery ${modeLabel}. ${formatInteger(createdCount)} batch jobs for ${formatInteger(selectedCount)} targets.`
-          : `Audit cursor recovery ${modeLabel}. ${formatInteger(selectedCount)} targets selected.`,
+          ? `Relay checkpoint recovery ${modeLabel}. ${formatInteger(createdCount)} batch jobs for ${formatInteger(selectedCount)} targets.`
+          : `Relay checkpoint recovery ${modeLabel}. ${formatInteger(selectedCount)} targets selected.`,
       );
       void refreshPosts();
-      void refreshAuditCursorRecovery();
+      void refreshRelayCheckpointRecovery();
       void onSummaryRefresh?.();
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to queue audit cursor recovery";
-      setAuditCursorRecoveryError(message);
+      const message = error instanceof Error ? error.message : "Failed to queue relay checkpoint recovery";
+      setRelayCheckpointRecoveryError(message);
       setScrapeError(message);
     } finally {
-      setAuditCursorRecoveryPending(false);
+      setRelayCheckpointRecoveryPending(false);
     }
   }, [
-    auditCursorShowFilter,
+    relayCheckpointShowFilter,
     fetchAdminWithAuth,
     handle,
     onSummaryRefresh,
     platform,
-    refreshAuditCursorRecovery,
+    refreshRelayCheckpointRecovery,
     refreshPosts,
+    searchParams,
     user,
   ]);
 
-  const rerunAuditCursorTarget = useCallback(
-    async (row: SocialAccountCommentsAuditCursorRetryRow) => {
+  const rerunRelayCheckpointTarget = useCallback(
+    async (row: SocialAccountCommentsRelayCheckpointRetryRow) => {
       if (!user || !row.shortcode) return;
       setScrapeError(null);
-      setAuditCursorRecoveryError(null);
+      setIncompleteFillPreview(null);
+      setRelayCheckpointRecoveryError(null);
       setScrapeMessage(`Queueing ${row.shortcode} now...`);
-      setAuditCursorRerunShortcode(row.shortcode);
-      const body: SocialAccountCommentsAuditCursorRetryRequest = {
+      setRelayCheckpointRerunShortcode(row.shortcode);
+      const body: SocialAccountCommentsRelayCheckpointRetryRequest = {
         limit: 1,
         shortcodes: [row.shortcode],
         batch_size: 1,
         max_comments_per_post: 0,
-        comments_load_strategy: "instagram_comments_endpoint_cursor",
+        comments_load_strategy: "public_relay",
+        date_start: searchParams.get("date_start"),
+        date_end: searchParams.get("date_end"),
         attach_to_active_run: true,
         dispatch_immediately: true,
         force_rerun_existing: true,
       };
-      const trimmedShowFilter = auditCursorShowFilter.trim();
+      const trimmedShowFilter = relayCheckpointShowFilter.trim();
       if (trimmedShowFilter) {
         body.show_filter = trimmedShowFilter;
       }
@@ -1086,12 +1191,12 @@ export default function InstagramCommentsPanel({
           },
           { preferredUser: user },
         );
-        const data = (await response.json().catch(() => ({}))) as SocialAccountCommentsAuditCursorRetriesResponse &
+        const data = (await response.json().catch(() => ({}))) as SocialAccountCommentsRelayCheckpointRetriesResponse &
           ProxyErrorPayload;
         if (!response.ok || data.ok === false) {
           throw new Error(readInstagramCommentsErrorMessage(data, "Failed to queue target now"));
         }
-        setAuditCursorRecovery(data);
+        setRelayCheckpointRecovery(data);
         const runId =
           readCommentsRunId(data.enqueue?.result) ??
           readCommentsRunId(data.active_run) ??
@@ -1102,28 +1207,29 @@ export default function InstagramCommentsPanel({
         const createdCount = readNonNegativeInteger(data.enqueue?.result?.created_target_job_count) ?? 0;
         setScrapeMessage(
           createdCount > 0
-            ? `${row.shortcode} queued now. ${formatInteger(createdCount)} fresh recovery job${createdCount === 1 ? "" : "s"}.`
-            : `${row.shortcode} recovery requested.`,
+            ? `${row.shortcode} queued now. ${formatInteger(createdCount)} relay checkpoint job${createdCount === 1 ? "" : "s"}.`
+            : `${row.shortcode} relay checkpoint requested.`,
         );
         void refreshPosts();
-        void refreshAuditCursorRecovery();
+        void refreshRelayCheckpointRecovery();
         void onSummaryRefresh?.();
       } catch (error) {
         const message = error instanceof Error ? error.message : "Failed to queue target now";
-        setAuditCursorRecoveryError(message);
+        setRelayCheckpointRecoveryError(message);
         setScrapeError(message);
       } finally {
-        setAuditCursorRerunShortcode(null);
+        setRelayCheckpointRerunShortcode(null);
       }
     },
     [
-      auditCursorShowFilter,
+      relayCheckpointShowFilter,
       fetchAdminWithAuth,
       handle,
       onSummaryRefresh,
       platform,
-      refreshAuditCursorRecovery,
+      refreshRelayCheckpointRecovery,
       refreshPosts,
+      searchParams,
       user,
     ],
   );
@@ -1131,6 +1237,7 @@ export default function InstagramCommentsPanel({
   const startCatalogRefresh = useCallback(async () => {
     if (!user) return;
     setScrapeError(null);
+    setIncompleteFillPreview(null);
     setScrapeMessage("Repairing Instagram auth if needed before queueing refresh...");
     setCatalogRefreshPending(true);
     const body: CatalogBackfillRequest = {
@@ -1341,23 +1448,28 @@ export default function InstagramCommentsPanel({
     !hasAccess ||
     commentsProgressControlsLocked ||
     cancelRequestedRunId === scrapeRunId;
-  const commentsActionDisabled = commentsLaunchPending || isScraping || checking || !user || !hasAccess;
-  const auditCursorRecoveryRows = useMemo<SocialAccountCommentsAuditCursorRetryRow[]>(
-    () => auditCursorRecovery?.progress_rows ?? auditCursorRecovery?.rows ?? [],
-    [auditCursorRecovery],
+  const commentsActionDisabled = commentsLaunchPending || commentsPreviewPending || isScraping || checking || !user || !hasAccess;
+  const commentsPreviewDisabled = commentsPreviewPending || commentsLaunchPending || isScraping || checking || !user || !hasAccess;
+  const incompleteFillPreviewSummary = useMemo(
+    () => (incompleteFillPreview ? getIncompleteFillPreviewSummary(incompleteFillPreview) : null),
+    [incompleteFillPreview],
   );
-  const auditCursorRecoveryTargetCount =
-    readNonNegativeInteger(auditCursorRecovery?.selected_target_source_ids_count) ?? auditCursorRecoveryRows.length;
-  const auditCursorRecoveryGap = auditCursorRecoveryRows.reduce(
+  const relayCheckpointRecoveryRows = useMemo<SocialAccountCommentsRelayCheckpointRetryRow[]>(
+    () => relayCheckpointRecovery?.progress_rows ?? relayCheckpointRecovery?.rows ?? [],
+    [relayCheckpointRecovery],
+  );
+  const relayCheckpointRecoveryTargetCount =
+    readNonNegativeInteger(relayCheckpointRecovery?.selected_target_source_ids_count) ?? relayCheckpointRecoveryRows.length;
+  const relayCheckpointRecoveryGap = relayCheckpointRecoveryRows.reduce(
     (total, row) => total + (readNonNegativeInteger(row.missing_comment_gap) ?? 0),
     0,
   );
-  const auditCursorRecoveryActiveRunId = readCommentsRunId(auditCursorRecovery?.active_run);
-  const auditCursorActionDisabled =
-    auditCursorRecoveryPending ||
-    Boolean(auditCursorRerunShortcode) ||
-    auditCursorRecoveryLoading ||
-    auditCursorRecoveryTargetCount <= 0 ||
+  const relayCheckpointRecoveryActiveRunId = readCommentsRunId(relayCheckpointRecovery?.active_run);
+  const relayCheckpointActionDisabled =
+    relayCheckpointRecoveryPending ||
+    Boolean(relayCheckpointRerunShortcode) ||
+    relayCheckpointRecoveryLoading ||
+    relayCheckpointRecoveryTargetCount <= 0 ||
     checking ||
     !user ||
     !hasAccess;
@@ -1501,6 +1613,14 @@ export default function InstagramCommentsPanel({
                 </button>
                 <button
                   type="button"
+                  onClick={() => void previewIncompleteFillScrape()}
+                  disabled={commentsPreviewDisabled}
+                  className={SECONDARY_BUTTON_CLASS}
+                >
+                  {commentsPreviewPending ? "Previewing..." : "Preview Incomplete Fill"}
+                </button>
+                <button
+                  type="button"
                   onClick={() => void startProfileScrape()}
                   disabled={commentsActionDisabled}
                   className={PRIMARY_BUTTON_CLASS}
@@ -1560,57 +1680,68 @@ export default function InstagramCommentsPanel({
         </div>
 
         {supportsInlineCommentsSync ? (
+          <div className="mt-4 rounded-2xl border border-sky-100 bg-sky-50 px-4 py-3">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-sky-800">Streaming Order</p>
+            <div className="mt-2 grid gap-2 text-xs text-sky-900 md:grid-cols-3">
+              <p>Posts save first, then comments can start streaming as soon as those saved posts exist.</p>
+              <p>Public-first recovery stays default for open gaps, retries, and checkpoint resumptions.</p>
+              <p>Auth-backed comments work is last resort and should only cover leftover blocked posts.</p>
+            </div>
+          </div>
+        ) : null}
+
+        {supportsInlineCommentsSync ? (
           <div className="mt-5 rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
               <div>
-                <h3 className="text-sm font-semibold text-zinc-900">Cap-free Comments Recovery</h3>
+                <h3 className="text-sm font-semibold text-zinc-900">Public Relay Recovery</h3>
                 <p className="mt-1 text-xs text-zinc-500">
-                  {auditCursorRecoveryLoading
-                    ? "Loading audit cursor targets..."
-                    : `${formatInteger(auditCursorRecoveryTargetCount)} cursor targets / ${formatInteger(auditCursorRecoveryGap)} comments still open`}
-                  {auditCursorRecoveryActiveRunId ? ` / active run ${auditCursorRecoveryActiveRunId.slice(0, 8)}` : ""}
+                  {relayCheckpointRecoveryLoading
+                    ? "Loading relay checkpoint targets..."
+                    : `${formatInteger(relayCheckpointRecoveryTargetCount)} checkpoint targets / ${formatInteger(relayCheckpointRecoveryGap)} comments still open`}
+                  {relayCheckpointRecoveryActiveRunId ? ` / active run ${relayCheckpointRecoveryActiveRunId.slice(0, 8)}` : ""}
                 </p>
                 <p className="mt-2 max-w-2xl text-xs text-zinc-500">
-                  Public relay uses logged-out Instagram pages. Endpoint cursor uses our authenticated Instagram comments endpoint pagination.
-                  Single-session keeps one browser session open for a focused repair.
+                  Public relay uses logged-out Instagram pages. Checkpoint recovery resumes saved relay checkpoints for focused repairs.
+                  Rate limits still apply, so a live run can slow down or split work after preview identifies the targets.
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
                 <input
                   type="search"
-                  value={auditCursorShowFilter}
-                  onChange={(event) => setAuditCursorShowFilter(event.target.value)}
+                  value={relayCheckpointShowFilter}
+                  onChange={(event) => setRelayCheckpointShowFilter(event.target.value)}
                   placeholder="Show filter"
                   className="h-9 min-w-[160px] rounded-lg border border-zinc-200 bg-white px-3 text-sm text-zinc-900 placeholder:text-zinc-400 disabled:cursor-not-allowed disabled:opacity-50"
-                  disabled={auditCursorRecoveryPending || Boolean(auditCursorRerunShortcode)}
+                  disabled={relayCheckpointRecoveryPending || Boolean(relayCheckpointRerunShortcode)}
                 />
                 <button
                   type="button"
-                  onClick={() => void refreshAuditCursorRecovery()}
+                  onClick={() => void refreshRelayCheckpointRecovery()}
                   disabled={
-                    auditCursorRecoveryLoading ||
-                    auditCursorRecoveryPending ||
-                    Boolean(auditCursorRerunShortcode) ||
+                    relayCheckpointRecoveryLoading ||
+                    relayCheckpointRecoveryPending ||
+                    Boolean(relayCheckpointRerunShortcode) ||
                     checking ||
                     !user ||
                     !hasAccess
                   }
                   className={SECONDARY_BUTTON_CLASS}
                 >
-                  {auditCursorRecoveryLoading ? "Refreshing..." : "Refresh"}
+                  {relayCheckpointRecoveryLoading ? "Refreshing..." : "Refresh"}
                 </button>
                 <button
                   type="button"
-                  onClick={() => void startAuditCursorRecovery()}
-                  disabled={auditCursorActionDisabled}
+                  onClick={() => void startRelayCheckpointRecovery()}
+                  disabled={relayCheckpointActionDisabled}
                   className={PRIMARY_BUTTON_CLASS}
                 >
-                  {auditCursorRecoveryPending ? "Queueing..." : "Retry Cursor Targets"}
+                  {relayCheckpointRecoveryPending ? "Queueing..." : "Queue Checkpoint Targets"}
                 </button>
               </div>
             </div>
-            {auditCursorRecoveryError ? <p className="mt-3 text-sm text-red-700">{auditCursorRecoveryError}</p> : null}
-            {auditCursorRecoveryRows.length > 0 ? (
+            {relayCheckpointRecoveryError ? <p className="mt-3 text-sm text-red-700">{relayCheckpointRecoveryError}</p> : null}
+            {relayCheckpointRecoveryRows.length > 0 ? (
               <div className="mt-4 overflow-x-auto">
                 <table className="min-w-full divide-y divide-zinc-200 text-sm">
                   <thead>
@@ -1618,17 +1749,17 @@ export default function InstagramCommentsPanel({
                       <th className="pb-2 pr-4">Post</th>
                       <th className="pb-2 pr-4">Gap</th>
                       <th className="pb-2 pr-4">Saved</th>
-                      <th className="pb-2 pr-4">Cursor</th>
+                      <th className="pb-2 pr-4">Checkpoint</th>
                       <th className="pb-2 pr-4">Queue</th>
                       <th className="pb-2">Action</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-zinc-200">
-                    {auditCursorRecoveryRows.slice(0, 8).map((row) => {
+                    {relayCheckpointRecoveryRows.slice(0, 8).map((row) => {
                       const activeJobCount = readNonNegativeInteger(row.active_run_job_count) ?? 0;
                       const activeJobTargetCounts = row.active_job_target_counts ?? [];
                       const smallestBatch = activeJobTargetCounts.length > 0 ? Math.min(...activeJobTargetCounts) : null;
-                      const rowRerunPending = auditCursorRerunShortcode === row.shortcode;
+                      const rowRerunPending = relayCheckpointRerunShortcode === row.shortcode;
                       return (
                         <tr key={row.shortcode}>
                           <td className="py-2 pr-4 align-top text-xs font-semibold text-blue-700">{row.shortcode}</td>
@@ -1652,8 +1783,8 @@ export default function InstagramCommentsPanel({
                           <td className="py-2 align-top">
                             <button
                               type="button"
-                              onClick={() => void rerunAuditCursorTarget(row)}
-                              disabled={auditCursorActionDisabled || rowRerunPending}
+                              onClick={() => void rerunRelayCheckpointTarget(row)}
+                              disabled={relayCheckpointActionDisabled || rowRerunPending}
                               className="inline-flex rounded-md border border-zinc-200 px-2 py-1 text-xs font-semibold text-zinc-700 disabled:cursor-not-allowed disabled:opacity-50"
                             >
                               {rowRerunPending ? "Queueing..." : "Run Now"}
@@ -1664,15 +1795,63 @@ export default function InstagramCommentsPanel({
                     })}
                   </tbody>
                 </table>
-                {auditCursorRecoveryRows.length > 8 ? (
+                {relayCheckpointRecoveryRows.length > 8 ? (
                   <p className="mt-2 text-xs text-zinc-500">
-                    Showing 8 of {formatInteger(auditCursorRecoveryRows.length)} targets.
+                    Showing 8 of {formatInteger(relayCheckpointRecoveryRows.length)} targets.
                   </p>
                 ) : null}
               </div>
-            ) : !auditCursorRecoveryLoading ? (
-              <p className="mt-3 text-sm text-zinc-500">No cursor recovery targets found.</p>
+            ) : !relayCheckpointRecoveryLoading ? (
+              <p className="mt-3 text-sm text-zinc-500">No relay checkpoint recovery targets found.</p>
             ) : null}
+          </div>
+        ) : null}
+
+        {incompleteFillPreviewSummary ? (
+          <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-emerald-800">
+                  Incomplete Fill Preview
+                </p>
+                <p className="mt-1 text-sm text-emerald-900">
+                  Dry-run only. No run was queued and no workers were dispatched.
+                </p>
+              </div>
+              <div className="grid gap-2 text-sm sm:grid-cols-2 lg:min-w-[460px] lg:grid-cols-4">
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-emerald-700">Targets</p>
+                  <p className="mt-1 font-semibold text-emerald-950">
+                    {formatInteger(incompleteFillPreviewSummary.targetCount)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-emerald-700">Shards</p>
+                  <p className="mt-1 font-semibold text-emerald-950">
+                    {formatInteger(incompleteFillPreviewSummary.shardCount)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-emerald-700">Strategy</p>
+                  <p className="mt-1 font-semibold text-emerald-950">{incompleteFillPreviewSummary.strategy}</p>
+                </div>
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-emerald-700">Warnings</p>
+                  <p className="mt-1 font-semibold text-emerald-950">
+                    {formatInteger(incompleteFillPreviewSummary.warningCount)}
+                  </p>
+                </div>
+              </div>
+            </div>
+            <p className="mt-3 text-xs text-emerald-800">{incompleteFillPreviewSummary.windowLabel}</p>
+            {incompleteFillPreviewSummary.sampleShortcodes.length > 0 ? (
+              <p className="mt-2 break-words text-xs text-emerald-900">
+                Sample: {incompleteFillPreviewSummary.sampleShortcodes.join(", ")}
+              </p>
+            ) : null}
+            <p className="mt-2 text-xs text-emerald-800">
+              Public relay does not require auth cookies for comment retrieval, but Instagram can still throttle by IP or session.
+            </p>
           </div>
         ) : null}
 

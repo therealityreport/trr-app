@@ -1,5 +1,5 @@
 import React from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 const mocks = vi.hoisted(() => ({
@@ -475,6 +475,8 @@ describe("admin social page auth bypass", () => {
   const landingCacheKey = "trr-admin-social-landing:v7";
 
   beforeEach(() => {
+    delete process.env.NEXT_PUBLIC_TRR_FLAG_ADMIN_SOCIAL_INGESTION_UI;
+    delete process.env.NEXT_PUBLIC_TRR_FLAG_ADMIN_SOCIAL_SCRAPER_TRIGGERS;
     window.localStorage.clear();
     mocks.fetchAdminWithAuth.mockReset();
     mocks.fetchAdminWithAuth.mockImplementation(
@@ -569,6 +571,11 @@ describe("admin social page auth bypass", () => {
         throw new Error(`Unhandled request: ${url}`);
       },
     );
+  });
+
+  afterEach(() => {
+    delete process.env.NEXT_PUBLIC_TRR_FLAG_ADMIN_SOCIAL_INGESTION_UI;
+    delete process.env.NEXT_PUBLIC_TRR_FLAG_ADMIN_SOCIAL_SCRAPER_TRIGGERS;
   });
 
   it("updates the cached landing payload after saving a social handle", async () => {
@@ -777,6 +784,9 @@ describe("admin social page auth bypass", () => {
   });
 
   it("renders media queue drilldown and recovers a run-scoped stale queue", async () => {
+    process.env.NEXT_PUBLIC_TRR_FLAG_ADMIN_SOCIAL_INGESTION_UI = "1";
+    process.env.NEXT_PUBLIC_TRR_FLAG_ADMIN_SOCIAL_SCRAPER_TRIGGERS = "1";
+
     render(<AdminSocialPage />);
 
     await waitFor(() => {

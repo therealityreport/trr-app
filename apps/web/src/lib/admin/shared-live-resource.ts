@@ -71,6 +71,14 @@ type SharedResourceConfig<T> =
   | ({ mode: "sse" } & SharedSseConfig<T>)
   | ({ mode: "manualRefetch" } & SharedManualConfig);
 
+const mergeSharedPollRequests = (
+  current: SharedPollRequest | null,
+  next: SharedPollRequest,
+): SharedPollRequest => ({
+  cause: next.cause ?? current?.cause ?? "manual",
+  forceRefresh: Boolean(current?.forceRefresh || next.forceRefresh),
+});
+
 const areSharedLiveSnapshotsEqual = <T,>(
   left: SharedLiveSnapshot<T>,
   right: SharedLiveSnapshot<T>,
@@ -216,10 +224,18 @@ class SharedLiveResourceCoordinator<T> {
 
   requestImmediateRefresh(request?: SharedPollRequest): void {
     if (!this.shouldRunInThisTab()) return;
-    this.pendingPollRequest = request ?? { cause: "manual" };
+    this.pendingPollRequest = mergeSharedPollRequests(
+      this.pendingPollRequest,
+      request ?? { cause: "manual" },
+    );
     this.clearTimer();
     if (this.config.mode === "sse") {
       this.stopExecutor();
+      this.scheduleTick(0);
+      return;
+    }
+    if (this.inFlight) {
+      return;
     }
     this.scheduleTick(0);
   }
@@ -336,7 +352,7 @@ class SharedLiveResourceCoordinator<T> {
       if (this.config.mode === "poll") {
         const nextDelayMs = await this.runPoll();
         if (this.shouldRunInThisTab()) {
-          this.scheduleTick(nextDelayMs ?? this.config.intervalMs);
+          this.scheduleTick(this.pendingPollRequest ? 0 : nextDelayMs ?? this.config.intervalMs);
         }
         return;
       }

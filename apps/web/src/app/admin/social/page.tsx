@@ -87,6 +87,7 @@ import { resolvePreferredShowRouteSlug } from "@/lib/admin/show-route-slug";
 import { fetchAdminWithAuth } from "@/lib/admin/client-auth";
 import { recordAdminLoadSample } from "@/lib/admin/admin-load-samples";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
+import { getTrrAppFlags } from "@/lib/trr-app-flags";
 
 const sectionEyebrowClass =
   "text-xs font-semibold uppercase tracking-[0.25em] text-zinc-500";
@@ -2867,6 +2868,9 @@ const NetworkSourceGroupCard = ({
 
 export default function AdminSocialMediaPage() {
   const { user, checking, hasAccess } = useAdminGuard();
+  const appFlags = getTrrAppFlags();
+  const adminSocialIngestionUiEnabled = appFlags.adminSocialIngestionUi;
+  const adminSocialScraperTriggersEnabled = appFlags.adminSocialScraperTriggers;
   const [landing, setLanding] = useState<SocialLandingPayload | null>(null);
   const landingLoadStartedAtRef = useRef<number>(nowMs());
   const landingNavigationSampleRecordedRef = useRef(false);
@@ -2967,7 +2971,7 @@ export default function AdminSocialMediaPage() {
   }, [checking, hasAccess, user]);
 
   const recoverStaleMediaQueueJobs = async () => {
-    if (!user) return;
+    if (!user || !adminSocialScraperTriggersEnabled) return;
     const runId = mediaRecoveryRunId.trim();
     if (!UUID_PATTERN.test(runId)) {
       setMediaRecoveryError("Enter a valid run ID.");
@@ -3050,7 +3054,7 @@ export default function AdminSocialMediaPage() {
   };
 
   const drainBravoMediaQueueJobs = async () => {
-    if (!user) return;
+    if (!user || !adminSocialScraperTriggersEnabled) return;
     const runId = mediaRecoveryRunId.trim();
     const accountHandle = mediaDrainAccountHandle.trim().replace(/^@/, "") || "bravotv";
     if (!UUID_PATTERN.test(runId)) {
@@ -3151,14 +3155,22 @@ export default function AdminSocialMediaPage() {
   };
 
   useEffect(() => {
+    if (!adminSocialIngestionUiEnabled) {
+      setMediaRecoveryRunId("");
+      return;
+    }
     const firstRunId = mediaQueueSummary?.runs[0]?.runId;
     if (!mediaRecoveryRunId && firstRunId) {
       setMediaRecoveryRunId(firstRunId);
     }
-  }, [mediaQueueSummary, mediaRecoveryRunId]);
+  }, [adminSocialIngestionUiEnabled, mediaQueueSummary, mediaRecoveryRunId]);
 
   useEffect(() => {
-    if (checking || !user || !hasAccess) return;
+    if (checking || !user || !hasAccess || !adminSocialIngestionUiEnabled) {
+      setMediaQueueSummary(null);
+      setMediaQueueSnapshotLinks([]);
+      return;
+    }
 
     let cancelled = false;
     const load = async () => {
@@ -3210,7 +3222,7 @@ export default function AdminSocialMediaPage() {
     return () => {
       cancelled = true;
     };
-  }, [checking, hasAccess, user]);
+  }, [adminSocialIngestionUiEnabled, checking, hasAccess, user]);
 
   const saveShowHandleOverrides = async (
     show: ShowProfileSet,
@@ -3522,7 +3534,9 @@ export default function AdminSocialMediaPage() {
               {landing ? (
                 <div className="mt-3 flex flex-wrap items-center gap-2">
                   <ScrapeJobHealthBadge health={scrapeJobHealth} />
-                  <SocialMediaQueueBadge summary={mediaQueueSummary} />
+                  {adminSocialIngestionUiEnabled ? (
+                    <SocialMediaQueueBadge summary={mediaQueueSummary} />
+                  ) : null}
                   <SocialProgressStatusBadge status={landing.social_progress_status} />
                 </div>
               ) : null}
@@ -3594,46 +3608,48 @@ export default function AdminSocialMediaPage() {
                 }}
               />
 
-              <MediaQueueDrilldownPanel
-                summary={mediaQueueSummary}
-                runId={mediaRecoveryRunId}
-                stage={mediaRecoveryStage}
-                drainAccountHandle={mediaDrainAccountHandle}
-                recovering={recoveringMediaQueue}
-                draining={drainingMediaQueue}
-                recoveryMessage={mediaRecoveryMessage}
-                recoveryError={mediaRecoveryError}
-                recoveryHistory={mediaRecoveryHistory}
-                drainMessage={mediaDrainMessage}
-                drainError={mediaDrainError}
-                drainHistory={mediaDrainHistory}
-                snapshotLinks={mediaQueueSnapshotLinks}
-                onRunIdChange={(nextValue) => {
-                  setMediaRecoveryRunId(nextValue);
-                  setMediaRecoveryError(null);
-                  setMediaRecoveryMessage(null);
-                  setMediaDrainError(null);
-                  setMediaDrainMessage(null);
-                }}
-                onStageChange={(nextValue) => {
-                  setMediaRecoveryStage(nextValue);
-                  setMediaRecoveryError(null);
-                  setMediaRecoveryMessage(null);
-                  setMediaDrainError(null);
-                  setMediaDrainMessage(null);
-                }}
-                onDrainAccountHandleChange={(nextValue) => {
-                  setMediaDrainAccountHandle(nextValue);
-                  setMediaDrainError(null);
-                  setMediaDrainMessage(null);
-                }}
-                onRecover={() => {
-                  void recoverStaleMediaQueueJobs();
-                }}
-                onDrain={() => {
-                  void drainBravoMediaQueueJobs();
-                }}
-              />
+              {adminSocialIngestionUiEnabled ? (
+                <MediaQueueDrilldownPanel
+                  summary={mediaQueueSummary}
+                  runId={mediaRecoveryRunId}
+                  stage={mediaRecoveryStage}
+                  drainAccountHandle={mediaDrainAccountHandle}
+                  recovering={recoveringMediaQueue}
+                  draining={drainingMediaQueue}
+                  recoveryMessage={mediaRecoveryMessage}
+                  recoveryError={mediaRecoveryError}
+                  recoveryHistory={mediaRecoveryHistory}
+                  drainMessage={mediaDrainMessage}
+                  drainError={mediaDrainError}
+                  drainHistory={mediaDrainHistory}
+                  snapshotLinks={mediaQueueSnapshotLinks}
+                  onRunIdChange={(nextValue) => {
+                    setMediaRecoveryRunId(nextValue);
+                    setMediaRecoveryError(null);
+                    setMediaRecoveryMessage(null);
+                    setMediaDrainError(null);
+                    setMediaDrainMessage(null);
+                  }}
+                  onStageChange={(nextValue) => {
+                    setMediaRecoveryStage(nextValue);
+                    setMediaRecoveryError(null);
+                    setMediaRecoveryMessage(null);
+                    setMediaDrainError(null);
+                    setMediaDrainMessage(null);
+                  }}
+                  onDrainAccountHandleChange={(nextValue) => {
+                    setMediaDrainAccountHandle(nextValue);
+                    setMediaDrainError(null);
+                    setMediaDrainMessage(null);
+                  }}
+                  onRecover={() => {
+                    void recoverStaleMediaQueueJobs();
+                  }}
+                  onDrain={() => {
+                    void drainBravoMediaQueueJobs();
+                  }}
+                />
+              ) : null}
 
               <section className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
                 <div className="mb-4 flex items-center justify-between gap-3">

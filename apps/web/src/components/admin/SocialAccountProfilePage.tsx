@@ -47,6 +47,7 @@ import {
   type SocialAccountCatalogRunProgressSnapshot,
   type SocialAccountCatalogRunProgressStage,
   type SocialAccountCatalogStageGraphNode,
+  type SocialAccountCatalogCommentsStreaming,
   type SocialAccountDashboardFreshness,
   type SocialAccountOperationalAlert,
   type SocialAccountProfileHashtag,
@@ -58,10 +59,12 @@ import {
   type SocialAccountProfileSummaryDetail,
   type SocialAccountProfileSummary,
   type SocialAccountProfileTab,
+  type SocialHashtagAssignmentBackfillConflict,
   type SocialPlatformSlug,
   type SocialAccountProfileCollaboratorTagAggregate,
   type SocialProfileCookieHealth,
   type SocialProfileCookieRefreshResult,
+  type SocialAccountCommentsGapPost,
   type SocialAccountCommentsRunProgress,
   type SocialAccountCommentsShardProgress,
   SOCIAL_ACCOUNT_CATALOG_DETAIL_ENABLED_PLATFORMS,
@@ -104,12 +107,37 @@ type InstagramCompletionSummary = {
   total_posts: number;
   total_reported_comments: number;
   saved_comments: number;
+  missing_comments: number;
   accounted_comments: number;
+  comment_gap_posts?: SocialAccountCommentsGapPost[] | null;
   lanes: {
     comments: InstagramCompletionLaneSummary;
     details: InstagramCompletionLaneSummary;
     media: InstagramCompletionLaneSummary;
   };
+};
+
+type InstagramCommentsGapDisplayRow = {
+  key: string;
+  label: string;
+  missingCommentGap: number;
+  savedCommentCount: number | null;
+  reportedCommentCount: number | null;
+  status: string | null;
+  reason: string | null;
+  phase: string | null;
+  hasTopLevelCursor: boolean;
+  replyResumeCount: number | null;
+};
+
+type InstagramCommentsStreamingBanner = {
+  stateLabel: string;
+  detail: string;
+  runLabel: string | null;
+  nextActionLabel: string;
+  nextActionDetail: string;
+  metricItems: string[];
+  historyItems: string[];
 };
 
 const INSTAGRAM_AUTH_REFRESH_CONFIRMATION = "I UNDERSTAND INSTAGRAM AUTH RISK";
@@ -129,6 +157,19 @@ const nowMs = (): number =>
   typeof performance !== "undefined" && typeof performance.now === "function"
     ? performance.now()
     : Date.now();
+
+const getCurrentUtcYear = (): number => new Date().getUTCFullYear();
+
+const readBackfillMonthYear = (value: string | null | undefined): number | null => {
+  const match = /^(\d{4})-(\d{2})$/.exec(String(value ?? "").trim());
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  if (!Number.isInteger(year) || year < 2000 || year > 2100) return null;
+  if (!Number.isInteger(month) || month < 1 || month > 12) return null;
+  return year;
+};
+
 export const getCatalogRepairAuthEndpointSegment = (repairAction: string | null | undefined): "manual-auth" | "repair-auth" =>
   repairAction === "repair_instagram_auth" ? "manual-auth" : "repair-auth";
 
@@ -196,8 +237,15 @@ const formatPostsSortMode = (mode: string | null | undefined): string => {
   }
 };
 
+type HashtagAssignmentStatus = "all" | "assigned" | "unassigned";
+
 type HashtagsResponse = {
   items: SocialAccountProfileHashtag[];
+  assignment_status?: HashtagAssignmentStatus;
+};
+
+type HashtagConflictsResponse = {
+  items: SocialHashtagAssignmentBackfillConflict[];
 };
 
 type HashtagTimelineResponse = SocialAccountProfileHashtagTimeline & {
@@ -437,6 +485,7 @@ const INTEGER_FORMATTER = new Intl.NumberFormat("en-US");
 const ACTIVE_CATALOG_RUN_STATUSES = new Set(["queued", "pending", "retrying", "running", "cancelling"]);
 const ACTIVE_CATALOG_RECOVERY_STATUSES = new Set(["queued", "running", "fallback_enqueued", "blocked"]);
 const TERMINAL_CATALOG_RUN_STATUSES = new Set(["completed", "failed", "cancelled"]);
+const HISTORICAL_ATTACHED_LANE_PARENT_STATUSES = new Set(["failed", "cancelled"]);
 const COMMENTS_PROGRESS_POLL_INTERVAL_MS = 5_000;
 const TWITTER_BACKFILL_LOOKBACK_DAYS = 365;
 const TIKTOK_EMPTY_FIRST_PAGE_ERROR_CODE = "tiktok_discovery_empty_first_page";
@@ -522,6 +571,11 @@ const HASHTAG_WINDOW_OPTIONS = [
   { value: "30d", label: "This Month" },
   { value: "365d", label: "This Year" },
 ] as const;
+const HASHTAG_ASSIGNMENT_STATUS_OPTIONS: ReadonlyArray<{ value: HashtagAssignmentStatus; label: string }> = [
+  { value: "all", label: "All Hashtags" },
+  { value: "assigned", label: "Assigned" },
+  { value: "unassigned", label: "Unassigned" },
+];
 const CATALOG_STAGE_SORT_ORDER: Record<string, number> = {
   posts: 0,
   comments: 1,
@@ -601,6 +655,11 @@ const formatInteger = (value: number | null | undefined): string => {
 const readFiniteNumber = (value: unknown): number | null => {
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : null;
+};
+
+const readNonNegativeInteger = (value: unknown): number | null => {
+  const numeric = readFiniteNumber(value);
+  return numeric === null ? null : Math.max(0, Math.trunc(numeric));
 };
 
 const asRecord = (value: unknown): Record<string, unknown> | null => {
@@ -925,6 +984,140 @@ const formatCommentsSkipReasonLabel = (value?: string | null): string => {
   return COMMENTS_SKIP_REASON_LABELS[normalized] ?? formatDiagnosticToken(normalized);
 };
 
+const normalizeInstagramCommentsGapDisplayRow = (value: unknown): InstagramCommentsGapDisplayRow | null => {
+  const record = asRecord(value);
+  if (!record) return null;
+  const key =
+    readString(record.source_id) ||
+    readString(record.shortcode) ||
+    readString(record.post_id) ||
+    readString(record.post_url);
+  const label =
+    readString(record.shortcode) ||
+    readString(record.source_id) ||
+    readString(record.post_id) ||
+    readString(record.post_url);
+  const savedCommentCount = readNonNegativeInteger(record.saved_comment_count);
+  const reportedCommentCount =
+    readNonNegativeInteger(record.reported_comment_count) ??
+    readNonNegativeInteger(record.observed_comment_count);
+  const missingCommentGap =
+    readNonNegativeInteger(record.missing_comment_gap) ??
+    (reportedCommentCount !== null ? Math.max(reportedCommentCount - (savedCommentCount ?? 0), 0) : null);
+  if (!key || !label || missingCommentGap === null || missingCommentGap <= 0) {
+    return null;
+  }
+  return {
+    key,
+    label,
+    missingCommentGap,
+    savedCommentCount,
+    reportedCommentCount,
+    status: readString(record.status),
+    reason:
+      readString(record.latest_reason) ||
+      readString(record.fetch_reason) ||
+      readString(record.latest_stop_reason) ||
+      readString(record.cursor_stop_reason),
+    phase: readString(record.current_phase),
+    hasTopLevelCursor: record.has_top_level_cursor === true,
+    replyResumeCount: readNonNegativeInteger(record.reply_resume_count),
+  };
+};
+
+const buildInstagramCommentsGapDisplayRows = (
+  ...sources: Array<readonly unknown[] | null | undefined>
+): InstagramCommentsGapDisplayRow[] => {
+  const rows = new Map<string, InstagramCommentsGapDisplayRow>();
+  for (const source of sources) {
+    if (!Array.isArray(source)) continue;
+    for (const item of source) {
+      const row = normalizeInstagramCommentsGapDisplayRow(item);
+      if (!row || rows.has(row.key)) continue;
+      rows.set(row.key, row);
+    }
+  }
+  return Array.from(rows.values())
+    .sort((left, right) => {
+      if (right.missingCommentGap !== left.missingCommentGap) {
+        return right.missingCommentGap - left.missingCommentGap;
+      }
+      return left.label.localeCompare(right.label);
+    })
+    .slice(0, 8);
+};
+
+const buildInstagramCommentsStreamingBanner = (
+  streaming: SocialAccountCatalogCommentsStreaming | null | undefined,
+  fallbackRunId?: string | null,
+): InstagramCommentsStreamingBanner | null => {
+  if (!streaming?.enabled) return null;
+  const state = readString(streaming.state) || "started";
+  const commentsRunId = readString(streaming.comments_run_id) || readString(fallbackRunId);
+  const enqueued = readNonNegativeInteger(streaming.targets_enqueued);
+  const seen = readNonNegativeInteger(streaming.targets_seen);
+  const skippedDuplicate = readNonNegativeInteger(streaming.targets_skipped_duplicate);
+  const appendFailures = readNonNegativeInteger(streaming.append_failures);
+  const workerCount = readNonNegativeInteger(streaming.worker_count);
+  const lastLag = readNonNegativeInteger(streaming.last_enqueue_lag_ms);
+  const maxLag = readNonNegativeInteger(streaming.max_enqueue_lag_ms);
+  const averageLag = readFiniteNumber(streaming.average_enqueue_lag_ms);
+  const attemptCount = readNonNegativeInteger(streaming.enqueue_attempt_count);
+  const lastBatchCount = readNonNegativeInteger(streaming.last_batch_source_ids_count);
+  const source = readString(streaming.source);
+  const sourceLabel = source ? formatDiagnosticToken(source) : "catalog batch persist";
+  const nextAction = asRecord(streaming.next_action);
+  const nextActionLabel = readString(nextAction?.label) || "Waiting for saved catalog batch";
+  const nextActionDetail =
+    readString(nextAction?.detail) ||
+    "The comments lane will start or append work as soon as the next catalog batch is durably saved.";
+  const historyItems = Array.isArray(streaming.history)
+    ? streaming.history
+        .slice(-4)
+        .reverse()
+        .map((item) => {
+          const entry = asRecord(item);
+          if (!entry) return null;
+          const entryState = readString(entry.state);
+          const entryAt = readString(entry.recorded_at);
+          const entrySeen = readNonNegativeInteger(entry.enqueue_targets_seen);
+          const entryEnqueued = readNonNegativeInteger(entry.enqueue_targets_enqueued);
+          const entryLag = readNonNegativeInteger(entry.last_enqueue_lag_ms);
+          return [
+            entryState ? formatRunStatusLabel(entryState) : null,
+            entrySeen !== null ? `${formatInteger(entrySeen)} seen` : null,
+            entryEnqueued !== null ? `${formatInteger(entryEnqueued)} enqueued` : null,
+            entryLag !== null ? `${formatInteger(entryLag)} ms` : null,
+            entryAt ? formatDateTime(entryAt) : null,
+          ]
+            .filter(Boolean)
+            .join(" · ");
+        })
+        .filter((item): item is string => Boolean(item))
+    : [];
+  const metricItems = [
+    enqueued !== null ? `${formatInteger(enqueued)} posts enqueued` : null,
+    seen !== null ? `${formatInteger(seen)} posts seen` : null,
+    skippedDuplicate !== null && skippedDuplicate > 0 ? `${formatInteger(skippedDuplicate)} skipped as duplicates` : null,
+    appendFailures !== null && appendFailures > 0 ? `${formatInteger(appendFailures)} append failures` : null,
+    workerCount !== null && workerCount > 0 ? `${formatInteger(workerCount)} comment workers` : null,
+    lastBatchCount !== null && lastBatchCount > 0 ? `${formatInteger(lastBatchCount)} posts in latest batch` : null,
+    lastLag !== null ? `${formatInteger(lastLag)} ms enqueue lag` : null,
+    maxLag !== null ? `${formatInteger(maxLag)} ms max lag` : null,
+    averageLag !== null ? `${averageLag.toFixed(1)} ms average lag` : null,
+    attemptCount !== null && attemptCount > 0 ? `${formatInteger(attemptCount)} enqueue attempts` : null,
+  ].filter((item): item is string => Boolean(item));
+  return {
+    stateLabel: formatRunStatusLabel(state),
+    runLabel: commentsRunId ? `run ${shortRunId(commentsRunId)}` : null,
+    detail: `Saved catalog batches are feeding comments immediately through ${sourceLabel}. Public-first recovery remains the default; account-backed follow-up stays last resort.`,
+    nextActionLabel,
+    nextActionDetail,
+    metricItems,
+    historyItems,
+  };
+};
+
 const getCommentsShardAttentionRecommendation = (
   progress: SocialAccountCommentsRunProgress | null | undefined,
   issueReasons: string[],
@@ -936,17 +1129,28 @@ const getCommentsShardAttentionRecommendation = (
     .toLowerCase();
   const reasonText = issueReasons.join(" ").toLowerCase();
   const retryProgress = progress?.retry_progress as JsonRecord | undefined;
+  const publicRecoveryCount =
+    readFiniteNumber((progress as JsonRecord | undefined)?.public_comments_recovery_pending_target_count) ??
+    readFiniteNumber(retryProgress?.public_comments_recovery_pending_target_count) ??
+    0;
   const publicApprovalCount =
     readFiniteNumber((progress as JsonRecord | undefined)?.public_comments_approval_required_target_count) ??
     readFiniteNumber(retryProgress?.public_comments_approval_required_target_count) ??
     0;
+  if (
+    action === "start_comments_public_recovery" ||
+    publicRecoveryCount > 0 ||
+    reasonText.includes("public recovery pending")
+  ) {
+    return "Public scraping still has recoverable gaps; queue public recovery before considering any account-backed fallback.";
+  }
   if (
     action === "approve_comments_auth_or_proxy_fallback" ||
     publicApprovalCount > 0 ||
     reasonText.includes("public requires approval") ||
     reasonText.includes("requires approval")
   ) {
-    return "Public scraping saved what Instagram exposed, but full coverage needs approved auth/proxy fallback for the remaining comments.";
+    return "Some remaining comments need an approved account-backed follow-up; public recovery is no longer the next step for those posts.";
   }
   if (action === "retry_cursor_deadline_targets" || reasonText.includes("pagination deadline")) {
     return "Cursor deadline gaps are retryable; start Incomplete Fill to auto-queue cursor continuation jobs, or use Retry Cursor Targets for only those posts.";
@@ -1406,12 +1610,14 @@ const formatHashtagWindowLabel = (value: (typeof HASHTAG_WINDOW_OPTIONS)[number]
 export const shouldUseSummaryTopHashtagsPreview = (options: {
   activeTab: SocialAccountProfileTab;
   hashtagWindow: (typeof HASHTAG_WINDOW_OPTIONS)[number]["value"];
+  hashtagAssignmentStatus: HashtagAssignmentStatus;
   summaryTopHashtags: ReadonlyArray<SocialAccountProfileHashtag> | null | undefined;
   hasLoadedExactWindow: boolean;
 }): boolean => {
   return (
     options.activeTab === "stats" &&
     options.hashtagWindow === "all" &&
+    options.hashtagAssignmentStatus === "all" &&
     !options.hasLoadedExactWindow &&
     (options.summaryTopHashtags?.length ?? 0) > 0
   );
@@ -1657,6 +1863,15 @@ const isBackendPressureError = (error: unknown): error is SocialAccountRequestEr
   );
 };
 
+const formatCatalogGalleryErrorMessage = (error: unknown): string => {
+  const requestError = toSocialAccountRequestError(error, "Failed to load social account catalog posts");
+  const fallbackMessage = requestError.message || "Failed to load social account catalog posts";
+  if (isBackendPressureError(requestError) || isTimeoutRequestError(requestError)) {
+    return "Catalog gallery temporarily unavailable. Saved post cards will reload when the gallery request succeeds.";
+  }
+  return fallbackMessage;
+};
+
 const formatCatalogDiagnosticErrorMessage = (
   label: "Freshness check" | "Gap analysis",
   error: SocialAccountRequestError | null,
@@ -1710,7 +1925,7 @@ const formatSummaryRequestErrorMessage = (error: SocialAccountRequestError | nul
     return "Failed to load social account profile summary";
   }
   if (isTimeoutRequestError(error)) {
-    return "Summary read timed out before completion. Retry in a moment.";
+    return "Account summary temporarily unavailable. Saved profile totals may be stale until the summary reloads.";
   }
   return (error as Error).message || "Failed to load social account profile summary";
 };
@@ -1766,15 +1981,25 @@ const buildHashtagDraftAssignments = (
   return Object.fromEntries(
     items.map((item) => [
       item.hashtag,
-      item.assignments?.map((assignment) => ({ ...assignment })) ?? [],
+      item.assignments?.map((assignment) => normalizeHashtagAssignmentDraft(assignment)) ?? [],
     ]),
   );
+};
+
+const normalizeHashtagAssignmentDraft = (
+  assignment: SocialAccountProfileHashtagAssignment,
+): SocialAccountProfileHashtagAssignment => {
+  return {
+    ...assignment,
+    assignment_scope: "global",
+    platform: null,
+  };
 };
 
 const cloneHashtagItems = (items: SocialAccountProfileHashtag[]): SocialAccountProfileHashtag[] => {
   return items.map((item) => ({
     ...item,
-    assignments: item.assignments?.map((assignment) => ({ ...assignment })) ?? [],
+    assignments: item.assignments?.map((assignment) => normalizeHashtagAssignmentDraft(assignment)) ?? [],
     assigned_shows: item.assigned_shows?.map((show) => ({ ...show })) ?? [],
     observed_shows: item.observed_shows?.map((show) => ({ ...show })) ?? [],
     observed_seasons: item.observed_seasons?.map((season) => ({ ...season })) ?? [],
@@ -1790,6 +2015,29 @@ const formatHashtagRequestErrorMessage = (error: SocialAccountRequestError | nul
     return "Hashtag load timed out before completion. Retry when needed.";
   }
   return (error as Error).message || "Failed to load social account profile hashtags";
+};
+
+const formatHashtagConflictAction = (value: string | null | undefined): string => {
+  const normalized = String(value || "merged_global_show_set").trim().replaceAll("_", " ");
+  return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+};
+
+const formatHashtagConflictLegacyAssignments = (
+  assignments: SocialHashtagAssignmentBackfillConflict["legacy_assignments"] | null | undefined,
+): string => {
+  const items = assignments ?? [];
+  if (items.length === 0) return "No legacy rows";
+  return items
+    .slice(0, 3)
+    .map((assignment) => {
+      const platformLabel = assignment.platform
+        ? SOCIAL_ACCOUNT_PLATFORM_LABELS[assignment.platform as SocialPlatformSlug] ?? assignment.platform
+        : "Unknown";
+      const handleLabel = assignment.account_handle ? `@${assignment.account_handle}` : "no handle";
+      const showLabel = assignment.show_id ? `show ${assignment.show_id}` : "no show";
+      return `${platformLabel} ${handleLabel} -> ${showLabel}`;
+    })
+    .join("; ");
 };
 
 const resolveCatalogGapAnalysisBackoffMs = (
@@ -2406,6 +2654,25 @@ const shortRunId = (value?: string | null): string => {
   return normalized ? normalized.slice(0, 8) : "pending";
 };
 
+const getCatalogRunIdentity = (run?: Pick<SocialAccountCatalogRun, "run_id" | "job_id"> | null): string => {
+  return String(run?.run_id || run?.job_id || "").trim();
+};
+
+const dedupeCatalogRecentRuns = (runs: SocialAccountCatalogRun[]): SocialAccountCatalogRun[] => {
+  const seen = new Set<string>();
+  const deduped: SocialAccountCatalogRun[] = [];
+  for (const run of runs) {
+    const identity = getCatalogRunIdentity(run);
+    if (identity) {
+      const normalizedIdentity = identity.toLowerCase();
+      if (seen.has(normalizedIdentity)) continue;
+      seen.add(normalizedIdentity);
+    }
+    deduped.push(run);
+  }
+  return deduped;
+};
+
 const formatAttachedLaneSourceLabel = (value?: string | null): string | null => {
   const normalized = String(value || "").trim().toLowerCase();
   if (!normalized) return null;
@@ -2451,6 +2718,25 @@ const shouldPreferAttachedFollowupLaneStatus = (value?: string | null): boolean 
   const normalized = normalizeCatalogLaneStatus(value);
   if (!normalized) return false;
   return TERMINAL_CATALOG_RUN_STATUSES.has(normalized) || ACTIVE_CATALOG_RUN_STATUSES.has(normalized) || normalized === "blocked_auth";
+};
+
+const normalizeHistoricalAttachedLaneStatus = (
+  parentStatus?: string | null,
+  laneStatus?: string | null,
+): string | null => {
+  const normalizedParentStatus = normalizeCatalogLaneStatus(parentStatus);
+  const normalizedLaneStatus = normalizeCatalogLaneStatus(laneStatus);
+  if (!normalizedParentStatus || !HISTORICAL_ATTACHED_LANE_PARENT_STATUSES.has(normalizedParentStatus)) {
+    return normalizedLaneStatus;
+  }
+  if (
+    normalizedLaneStatus === "completed" ||
+    normalizedLaneStatus === "failed" ||
+    normalizedLaneStatus === "cancelled"
+  ) {
+    return normalizedLaneStatus;
+  }
+  return normalizedParentStatus === "cancelled" ? "cancelled" : "not_started";
 };
 
 const selectedTaskForStageGraphLane = (key: string): CatalogBackfillSelectedTask | null => {
@@ -2683,12 +2969,14 @@ const buildCatalogLaneCards = (options: {
       ? `${commentsFollowup?.retryable ? "Retryable: " : ""}${followupErrorMessage}`
       : null;
     const normalizedCommentsFollowupStatus = normalizeCatalogLaneStatus(commentsFollowup?.status);
-    const commentsStatus =
+    const commentsStatus = normalizeHistoricalAttachedLaneStatus(
+      terminalRunStatus,
       terminalRunStatus && !commentsRunId && commentsFollowup?.source === "deferred_after_catalog"
         ? normalizedCommentsFollowupStatus === "failed" || normalizedCommentsFollowupStatus === "cancelled"
           ? normalizedCommentsFollowupStatus
           : terminalRunStatus
-        : commentsFollowup?.status ?? (commentsRunId ? "queued" : null);
+        : commentsFollowup?.status ?? commentsFollowup?.state ?? (commentsRunId ? "queued" : null),
+    );
     cards.push({
       key: "comments",
       label: "Comments",
@@ -2707,13 +2995,15 @@ const buildCatalogLaneCards = (options: {
     const attachmentId = String(mediaFollowup?.attachment_id || "").trim() || null;
     const enqueuedCount = typeof mediaFollowup?.enqueued_job_count === "number" ? mediaFollowup.enqueued_job_count : null;
     const mediaJobIds = Array.isArray(mediaFollowup?.enqueued_job_ids) ? mediaFollowup.enqueued_job_ids : [];
-    const mediaStatus =
+    const mediaStatus = normalizeHistoricalAttachedLaneStatus(
+      terminalRunStatus,
       terminalRunStatus &&
       mediaFollowup?.source === "catalog_media_mirror" &&
       mediaJobIds.length === 0 &&
       (enqueuedCount === null || enqueuedCount <= 0)
         ? terminalRunStatus
-        : mediaFollowup?.status ?? null;
+        : mediaFollowup?.status ?? mediaFollowup?.state ?? null,
+    );
     cards.push({
       key: "media",
       label: "Media",
@@ -2750,6 +3040,23 @@ const getCatalogAllLanesComplete = (runStatus?: string | null, laneCards: Catalo
   return laneCards.every((lane) => normalizeCatalogLaneStatus(lane.status) === "completed");
 };
 
+const getCatalogLaneSummaryLabel = (runStatus?: string | null, allLanesComplete = false): string => {
+  const normalizedRunStatus = normalizeCatalogLaneStatus(runStatus);
+  if (allLanesComplete) return "All Lanes Complete";
+  if (normalizedRunStatus === "cancelled") return "Run Cancelled";
+  if (normalizedRunStatus === "failed") return "Run Failed";
+  if (ACTIVE_CATALOG_RUN_STATUSES.has(normalizedRunStatus || "")) return "Lanes Running";
+  return "Lanes Pending";
+};
+
+const getCatalogLaneSummaryTone = (runStatus?: string | null, allLanesComplete = false): string => {
+  const normalizedRunStatus = normalizeCatalogLaneStatus(runStatus);
+  if (allLanesComplete) return "border-emerald-200 bg-emerald-50 text-emerald-700";
+  if (normalizedRunStatus === "failed") return "border-red-200 bg-red-50 text-red-700";
+  if (normalizedRunStatus === "cancelled") return "border-zinc-200 bg-zinc-50 text-zinc-600";
+  return "border-amber-200 bg-amber-50 text-amber-700";
+};
+
 const formatCatalogAggregateRunStatusLabel = (runStatus?: string | null, laneCards: CatalogLaneCard[] = []): string => {
   const hasFollowupLanes = laneCards.some((lane) => lane.key !== "catalog");
   const aggregateStatus = getCatalogAggregateRunStatus(runStatus, laneCards);
@@ -2762,6 +3069,7 @@ const getCatalogRunStatusTone = (value?: string | null): string => {
   if (normalized === "completed") return "border-emerald-200 bg-emerald-50 text-emerald-700";
   if (normalized === "failed") return "border-red-200 bg-red-50 text-red-700";
   if (normalized === "cancelled") return "border-amber-200 bg-amber-50 text-amber-700";
+  if (normalized === "not_started" || normalized === "skipped") return "border-zinc-200 bg-zinc-50 text-zinc-600";
   return "border-sky-200 bg-sky-50 text-sky-700";
 };
 
@@ -3121,17 +3429,10 @@ const getCatalogDispatchStatusMessage = (progress?: SocialAccountCatalogRunProgr
 
 const getCatalogLaunchGuardMessage = (
   progress?: SocialAccountCatalogRunProgressSnapshot | null,
-  cookieHealth?: SocialProfileCookieHealth | null,
 ): string | null => {
   const operationalState = normalizeCatalogRunState(progress?.operational_state);
   if (operationalState === "blocked_auth") {
-    if (isInstagramPostsAuthVerified(cookieHealth)) {
-      return null;
-    }
-    const reason = formatDiagnosticToken(progress?.repairable_reason);
-    return reason
-      ? `Catalog launch is blocked until the required manual auth is complete. Reason: ${reason}.`
-      : "Catalog launch is blocked until the required manual auth is complete.";
+    return null;
   }
   const dispatchMessage = getCatalogDispatchStatusMessage(progress);
   if (dispatchMessage?.tone === "red") {
@@ -3154,9 +3455,6 @@ const formatCookieHealthWarningLabel = (cookieHealth?: SocialProfileCookieHealth
   }
   return "Warning";
 };
-
-const INSTAGRAM_BACKFILL_BLOCKED_AUTH_MESSAGE =
-  "Instagram backfill blocked before jobs were queued. Local cookies are present, but Modal posts auth was not accepted by Instagram. Complete manual auth first, then sync already validated cookies and rerun Backfill Posts.";
 
 const isInstagramPostsAuthVerified = (cookieHealth?: SocialProfileCookieHealth | null): boolean => {
   const health = cookieHealth?.posts_auth_health ?? null;
@@ -3507,9 +3805,16 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   const [hashtagsError, setHashtagsError] = useState<SocialAccountRequestError | null>(null);
   const [hashtagsLoadedRequestKey, setHashtagsLoadedRequestKey] = useState<string | null>(null);
   const [hashtagWindow, setHashtagWindow] = useState<(typeof HASHTAG_WINDOW_OPTIONS)[number]["value"]>("all");
+  const [hashtagAssignmentStatus, setHashtagAssignmentStatus] = useState<HashtagAssignmentStatus>("all");
   const [savingHashtag, setSavingHashtag] = useState<string | null>(null);
+  const [bulkSavingHashtags, setBulkSavingHashtags] = useState(false);
+  const [bulkAssignShowId, setBulkAssignShowId] = useState<string>("");
+  const [bulkSelectedHashtags, setBulkSelectedHashtags] = useState<Set<string>>(new Set());
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [draftAssignments, setDraftAssignments] = useState<Record<string, SocialAccountProfileHashtagAssignment[]>>({});
+  const [hashtagConflicts, setHashtagConflicts] = useState<SocialHashtagAssignmentBackfillConflict[]>([]);
+  const [hashtagConflictsLoading, setHashtagConflictsLoading] = useState(false);
+  const [hashtagConflictsError, setHashtagConflictsError] = useState<string | null>(null);
   const [hashtagTimeline, setHashtagTimeline] = useState<SocialAccountProfileHashtagTimeline | null>(null);
   const [hashtagTimelineLoading, setHashtagTimelineLoading] = useState(false);
   const [hashtagTimelineError, setHashtagTimelineError] = useState<string | null>(null);
@@ -3703,7 +4008,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       setSharedAccountSourcesLoading(false);
     }
   }, [fetchAdminWithAuth, sharedAccountSources.length, sharedAccountSourcesLoading, user]);
-  const hashtagsRequestKey = `hashtags:${platform}:${handle}:${hashtagWindow}`;
+  const hashtagsRequestKey = `hashtags:${platform}:${handle}:${hashtagWindow}:${hashtagAssignmentStatus}`;
   const hashtagTimelineRequestKey = `hashtags-timeline:${platform}:${handle}:${hashtagWindow}`;
   const collaboratorsRequestKey = `collaborators-tags:${platform}:${handle}`;
   const selectedTabPrimaryReadActive =
@@ -3748,10 +4053,11 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   }, []);
   const visibleCatalogRecentRuns = useMemo(() => {
     const runs = summary?.catalog_recent_runs ?? [];
-    if (pendingDismissedCatalogRunIds.size === 0) {
-      return runs;
-    }
-    return runs.filter((run) => !pendingDismissedCatalogRunIds.has(String(run.run_id || "").trim()));
+    const filteredRuns =
+      pendingDismissedCatalogRunIds.size === 0
+        ? runs
+        : runs.filter((run) => !pendingDismissedCatalogRunIds.has(String(run.run_id || "").trim()));
+    return dedupeCatalogRecentRuns(filteredRuns);
   }, [pendingDismissedCatalogRunIds, summary?.catalog_recent_runs]);
   const activeCatalogRun = useMemo<SocialAccountCatalogRun | null>(() => {
     const runs = visibleCatalogRecentRuns;
@@ -3892,6 +4198,12 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     setHashtagsError(null);
     setHashtagsLoadedRequestKey(null);
     setDraftAssignments({});
+    setBulkAssignShowId("");
+    setBulkSavingHashtags(false);
+    setBulkSelectedHashtags(new Set());
+    setHashtagConflicts([]);
+    setHashtagConflictsLoading(false);
+    setHashtagConflictsError(null);
     hashtagResponseCacheRef.current.clear();
     setCatalogProgressRunId(null);
     setCommentsProgressRunId(null);
@@ -4324,6 +4636,9 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     if (hashtagWindow !== "all") {
       query.set("window", hashtagWindow);
     }
+    if (hashtagAssignmentStatus !== "all") {
+      query.set("assignment_status", hashtagAssignmentStatus);
+    }
     const data = await withSocialProfileRequestDedup(hashtagsRequestKey, async () => {
       const response = await fetchAdminWithAuth(
         `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/hashtags${
@@ -4347,7 +4662,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     setHashtags(nextItems);
     setHashtagsLoadedRequestKey(hashtagsRequestKey);
     setDraftAssignments(nextDraftAssignments);
-  }, [fetchAdminWithAuth, handle, hashtagWindow, hashtagsRequestKey, platform, user]);
+  }, [fetchAdminWithAuth, handle, hashtagAssignmentStatus, hashtagWindow, hashtagsRequestKey, platform, user]);
 
   const refreshHashtagTimeline = useCallback(async () => {
     if (!user || platform !== "instagram") return;
@@ -4461,6 +4776,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   }, [applyProfileSnapshotSummary, checking, hasAccess, user]);
 
   useEffect(() => {
+    const liveProfileTotalRetryRequested = liveProfileTotalRequestNonce > 0;
     if (
       checking ||
       !user ||
@@ -4469,7 +4785,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       summaryLoading ||
       !hasCurrentSummary ||
       !secondaryReadsGateOpen ||
-      Boolean(secondaryReadsPressurePause) ||
+      (!liveProfileTotalRetryRequested && Boolean(secondaryReadsPressurePause)) ||
       secondaryReadBudgetSlot < 2
     ) {
       return;
@@ -4714,15 +5030,15 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
           undefined,
           { preferredUser: user },
         );
-        const data = (await response.json().catch(() => ({}))) as Partial<CatalogPostsResponse> & { error?: string };
+        const data = (await response.json().catch(() => ({}))) as Partial<CatalogPostsResponse> & ProxyErrorPayload;
         if (!response.ok) {
-          throw new Error(data.error || "Failed to load social account catalog posts");
+          throw buildSocialAccountRequestError(data, "Failed to load social account catalog posts");
         }
         if (cancelled) return;
         setCatalogPosts(normalizeCatalogPostsResponse(data, catalogPage, 25));
       } catch (error) {
         if (cancelled) return;
-        setCatalogPostsError(error instanceof Error ? error.message : "Failed to load social account catalog posts");
+        setCatalogPostsError(formatCatalogGalleryErrorMessage(error));
       } finally {
         if (!cancelled) setCatalogPostsLoading(false);
       }
@@ -4750,6 +5066,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   const hasLoadedExactHashtagWindow = hashtagsLoadedRequestKey === hashtagsRequestKey;
   const useSummaryTopHashtagsPreview = shouldUseSummaryTopHashtagsPreview({
     activeTab: selectedTab,
+    hashtagAssignmentStatus,
     hashtagWindow,
     summaryTopHashtags: summary?.top_hashtags ?? [],
     hasLoadedExactWindow: hasLoadedExactHashtagWindow,
@@ -4820,6 +5137,59 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     selectedTab,
     useSummaryTopHashtagsPreview,
     shouldDeferSecondaryCatalogReads,
+    summaryUninitialized,
+    user,
+  ]);
+
+  useEffect(() => {
+    if (
+      checking ||
+      !user ||
+      !hasAccess ||
+      selectedTab !== "hashtags" ||
+      !hasCurrentSummary ||
+      summaryUninitialized
+    ) {
+      return;
+    }
+    let cancelled = false;
+
+    const loadHashtagConflicts = async () => {
+      setHashtagConflictsLoading(true);
+      setHashtagConflictsError(null);
+      try {
+        const response = await fetchAdminWithAuth(
+          `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/hashtags/conflicts?limit=10`,
+          undefined,
+          { preferredUser: user },
+        );
+        const data = (await response.json().catch(() => ({}))) as HashtagConflictsResponse & { error?: string };
+        if (!response.ok) {
+          throw new Error(data.error || "Failed to load hashtag backfill conflicts");
+        }
+        if (cancelled) return;
+        setHashtagConflicts(data.items ?? []);
+      } catch (error) {
+        if (cancelled) return;
+        setHashtagConflicts([]);
+        setHashtagConflictsError(error instanceof Error ? error.message : "Failed to load hashtag backfill conflicts");
+      } finally {
+        if (!cancelled) setHashtagConflictsLoading(false);
+      }
+    };
+
+    void loadHashtagConflicts();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    checking,
+    fetchAdminWithAuth,
+    handle,
+    hasAccess,
+    hasCurrentSummary,
+    platform,
+    selectedTab,
     summaryUninitialized,
     user,
   ]);
@@ -5009,6 +5379,15 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     supportsCatalog,
   ]);
 
+  const instagramCompletionYear = useMemo(() => {
+    const startYear = readBackfillMonthYear(instagramBackfillMonthStart);
+    const endYear = readBackfillMonthYear(instagramBackfillMonthEnd);
+    if (startYear !== null && endYear !== null && startYear === endYear) {
+      return startYear;
+    }
+    return endYear ?? startYear ?? getCurrentUtcYear();
+  }, [instagramBackfillMonthEnd, instagramBackfillMonthStart]);
+
   useEffect(() => {
     if (checking || !user || !hasAccess || platform !== "instagram" || selectedTab !== "catalog") {
       setInstagramCompletionSummary(null);
@@ -5022,17 +5401,17 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     const loadCompletionSummary = async () => {
       try {
         const response = await fetchAdminWithAuth(
-          `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/completion-summary?year=2025`,
+          `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/completion-summary?year=${instagramCompletionYear}`,
           undefined,
           { preferredUser: user },
         );
         const data = (await response.json().catch(() => ({}))) as Partial<InstagramCompletionSummary> & { error?: string };
         if (!response.ok) {
-          throw new Error(data.error || "Failed to load 2025 completion summary");
+          throw new Error(data.error || `Failed to load ${instagramCompletionYear} completion summary`);
         }
         if (!cancelled) setInstagramCompletionSummary(data as InstagramCompletionSummary);
       } catch (error) {
-        pauseSecondaryReadsForPressure(error, "Failed to load 2025 completion summary");
+        pauseSecondaryReadsForPressure(error, `Failed to load ${instagramCompletionYear} completion summary`);
         if (!cancelled) {
           setInstagramCompletionSummary(null);
           setInstagramCompletionSummaryError("Unavailable");
@@ -5050,6 +5429,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     fetchAdminWithAuth,
     handle,
     hasAccess,
+    instagramCompletionYear,
     pauseSecondaryReadsForPressure,
     platform,
     selectedTab,
@@ -5076,6 +5456,8 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     }
     return "Cataloged / Profile total";
   }, [summary?.live_total_posts, supportsCatalog]);
+
+  const displayedInstagramCompletionYear = instagramCompletionSummary?.year ?? instagramCompletionYear;
 
   const applyCatalogGapAnalysisStatus = useCallback(
     (payload: CatalogGapAnalysisStatusPayload) => {
@@ -5579,6 +5961,13 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   ]);
   const shouldRenderCatalogRunProgressCard =
     shouldShowCatalogRunProgressCard && supportsCatalog && shouldDisplayCatalogRunProgressCard;
+  const shouldDeemphasizeCatalogSummaryState = shouldShowCatalogRunProgressCard && supportsCatalog;
+  const catalogRecentHistoryRuns = useMemo(() => {
+    const displayedRunId =
+      shouldRenderCatalogRunProgressCard ? String(displayedCatalogRunId || "").trim().toLowerCase() : "";
+    if (!displayedRunId) return visibleCatalogRecentRuns;
+    return visibleCatalogRecentRuns.filter((run) => String(run.run_id || "").trim().toLowerCase() !== displayedRunId);
+  }, [displayedCatalogRunId, shouldRenderCatalogRunProgressCard, visibleCatalogRecentRuns]);
 
   useEffect(() => {
     if (checking || !user || !hasAccess || !supportsCatalog) return;
@@ -6086,8 +6475,8 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   }, [activeCommentsSummarySnapshot.data, applyProfileSnapshotSummary]);
 
   const catalogLaunchGuardMessage = useMemo(() => {
-    return getCatalogLaunchGuardMessage(catalogRunProgress, cookieHealth);
-  }, [catalogRunProgress, cookieHealth]);
+    return getCatalogLaunchGuardMessage(catalogRunProgress);
+  }, [catalogRunProgress]);
   const instagramCommentsModalAuthActive = useMemo(() => {
     if (platform !== "instagram") return false;
     const activeCommentsStatus = String(activeCommentsRunProgressData?.run_status || "").trim().toLowerCase();
@@ -6146,26 +6535,6 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     cancellableCatalogRunIsActive ||
     activeCommentsRunBlocksActions ||
     Boolean(catalogLaunchGuardMessage);
-
-  useEffect(() => {
-    if (platform !== "instagram") return;
-    if (String(catalogRunProgress?.operational_state || "").trim().toLowerCase() !== "blocked_auth") return;
-    if (isInstagramPostsAuthVerified(cookieHealth)) {
-      setCatalogActionMessage((current) => (current === INSTAGRAM_BACKFILL_BLOCKED_AUTH_MESSAGE ? null : current));
-      return;
-    }
-    const repairStatus = String(catalogRunProgress?.repair_status || catalogRunProgress?.auth_repair_status || "")
-      .trim()
-      .toLowerCase();
-    if (repairStatus === "running" || repairStatus === "succeeded") return;
-    setCatalogActionMessage(INSTAGRAM_BACKFILL_BLOCKED_AUTH_MESSAGE);
-  }, [
-    catalogRunProgress?.auth_repair_status,
-    catalogRunProgress?.operational_state,
-    catalogRunProgress?.repair_status,
-    cookieHealth,
-    platform,
-  ]);
 
   useEffect(() => {
     if (platform !== "instagram") return;
@@ -7020,6 +7389,8 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     catalogRunProgress?.run_status ?? displayedCatalogRunStatus,
     catalogLaneCards,
   );
+  const catalogLaneSummaryLabel = getCatalogLaneSummaryLabel(displayedCatalogRunStatus, catalogAllLanesComplete);
+  const catalogLaneSummaryTone = getCatalogLaneSummaryTone(displayedCatalogRunStatus, catalogAllLanesComplete);
 
   const catalogTerminalCoverageMessage = useMemo(() => {
     if (catalogProgressMode !== "coverage") return null;
@@ -7183,6 +7554,44 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       { key: "media", label: "Media", summary: lanes.media },
     ];
   }, [instagramCompletionSummary?.lanes]);
+
+  const streamingCommentsGapRows = useMemo(
+    () =>
+      buildInstagramCommentsGapDisplayRows(
+        activeCommentsRunProgressData?.target_progress_rows,
+        activeCommentsRunProgressData?.target_progress,
+        activeCommentsRunProgressData?.retry_progress?.target_progress_rows,
+        activeCommentsRunProgressData?.largest_remaining_gaps,
+        activeCommentsRunProgressData?.retry_progress?.largest_remaining_gaps,
+        activeCommentsRunProgressData?.largest_gaps,
+        activeCommentsRunProgressData?.incomplete_targets,
+      ),
+    [activeCommentsRunProgressData],
+  );
+
+  const summaryCommentsGapRows = useMemo(
+    () => buildInstagramCommentsGapDisplayRows(instagramCompletionSummary?.comment_gap_posts),
+    [instagramCompletionSummary?.comment_gap_posts],
+  );
+
+  const dashboardCommentsGapRows =
+    streamingCommentsGapRows.length > 0 ? streamingCommentsGapRows : summaryCommentsGapRows;
+  const dashboardCommentsGapSourceLabel =
+    streamingCommentsGapRows.length > 0
+      ? activeCommentsRunId
+        ? `Live stream · run ${shortRunId(activeCommentsRunId)}`
+        : "Live stream"
+      : summaryCommentsGapRows.length > 0
+        ? `${displayedInstagramCompletionYear} summary`
+        : null;
+  const commentsStreamingBanner = useMemo(
+    () =>
+      buildInstagramCommentsStreamingBanner(
+        catalogRunProgress?.comments_streaming ?? activeCommentsRunProgressData?.catalog_streaming,
+        activeCommentsRunId,
+      ),
+    [activeCommentsRunId, activeCommentsRunProgressData?.catalog_streaming, catalogRunProgress?.comments_streaming],
+  );
 
   const catalogProgressDiagnosticRows = useMemo(
     () => buildCatalogProgressDiagnosticRows(catalogRunProgress, summary),
@@ -7784,6 +8193,32 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       }));
   }, [summary?.per_show_counts]);
 
+  const visibleUnassignedHashtags = useMemo(() => {
+    return hashtags.filter((item) => (draftAssignments[item.hashtag] ?? item.assignments ?? []).length === 0);
+  }, [draftAssignments, hashtags]);
+
+  const selectedVisibleUnassignedHashtags = useMemo(() => {
+    const visibleKeys = new Set(visibleUnassignedHashtags.map((item) => item.hashtag));
+    return Array.from(bulkSelectedHashtags).filter((hashtag) => visibleKeys.has(hashtag));
+  }, [bulkSelectedHashtags, visibleUnassignedHashtags]);
+
+  useEffect(() => {
+    if (!bulkAssignShowId && showOptions[0]?.show_id) {
+      setBulkAssignShowId(showOptions[0].show_id);
+    }
+    if (bulkAssignShowId && showOptions.length > 0 && !showOptions.some((show) => show.show_id === bulkAssignShowId)) {
+      setBulkAssignShowId(showOptions[0].show_id);
+    }
+  }, [bulkAssignShowId, showOptions]);
+
+  useEffect(() => {
+    const visibleKeys = new Set(visibleUnassignedHashtags.map((item) => item.hashtag));
+    setBulkSelectedHashtags((current) => {
+      const next = new Set(Array.from(current).filter((hashtag) => visibleKeys.has(hashtag)));
+      return next.size === current.size ? current : next;
+    });
+  }, [visibleUnassignedHashtags]);
+
   const reviewShowOptionsByItem = useMemo<Record<string, ShowOption[]>>(() => {
     const optionsByItem: Record<string, ShowOption[]> = {};
     for (const item of reviewQueue) {
@@ -7856,16 +8291,41 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   const addHashtagAssignmentRow = (hashtag: string) => {
     const fallbackShow = showOptions[0];
     if (!fallbackShow) return;
-    const nextAssignments = [...(draftAssignments[hashtag] ?? []), { show_id: fallbackShow.show_id }];
+    const nextAssignments = [
+      ...(draftAssignments[hashtag] ?? []),
+      { show_id: fallbackShow.show_id, assignment_scope: "global" as const, platform: null },
+    ];
     updateHashtagAssignments(hashtag, nextAssignments);
+  };
+
+  const toggleBulkSelectedHashtag = (hashtag: string, checked: boolean) => {
+    setBulkSelectedHashtags((current) => {
+      const next = new Set(current);
+      if (checked) {
+        next.add(hashtag);
+      } else {
+        next.delete(hashtag);
+      }
+      return next;
+    });
+  };
+
+  const selectAllVisibleUnassignedHashtags = () => {
+    setBulkSelectedHashtags(new Set(visibleUnassignedHashtags.map((item) => item.hashtag)));
+  };
+
+  const clearBulkSelectedHashtags = () => {
+    setBulkSelectedHashtags(new Set());
   };
 
   const saveHashtagAssignments = async (hashtag: string) => {
     if (!user) return;
-    const assignments = (draftAssignments[hashtag] ?? [])
+    const assignments: SocialAccountProfileHashtagAssignment[] = (draftAssignments[hashtag] ?? [])
       .filter((assignment) => assignment.show_id)
       .map((assignment) => ({
         show_id: assignment.show_id,
+        assignment_scope: "global" as const,
+        platform: null,
       }));
 
     setSavingHashtag(hashtag);
@@ -7887,14 +8347,58 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       setHashtags(data.items ?? hashtags);
       setDraftAssignments((current) => ({
         ...current,
-        [hashtag]: (data.items ?? []).find((item) => item.hashtag === hashtag)?.assignments ?? assignments,
+        [hashtag]:
+          (data.items ?? []).find((item) => item.hashtag === hashtag)?.assignments?.map((assignment) =>
+            normalizeHashtagAssignmentDraft(assignment),
+          ) ?? assignments,
       }));
-      setSaveMessage(`Saved assignments for #${hashtag}`);
+      setSaveMessage(`Saved shared assignments for #${hashtag}`);
       await refreshProfileSnapshotNow();
     } catch (error) {
       setSaveMessage(error instanceof Error ? error.message : "Failed to save hashtag assignments");
     } finally {
       setSavingHashtag(null);
+    }
+  };
+
+  const saveBulkHashtagAssignments = async () => {
+    if (!user || !bulkAssignShowId || selectedVisibleUnassignedHashtags.length === 0) return;
+    const selectedShow = showOptions.find((show) => show.show_id === bulkAssignShowId);
+    const assignments: SocialAccountProfileHashtagAssignment[] = [
+      { show_id: bulkAssignShowId, assignment_scope: "global" as const, platform: null },
+    ];
+    setBulkSavingHashtags(true);
+    setSaveMessage(null);
+    try {
+      const response = await fetchAdminWithAuth(
+        `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/hashtags`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            hashtags: selectedVisibleUnassignedHashtags.map((hashtag) => ({ hashtag, assignments })),
+          }),
+        },
+        { preferredUser: user },
+      );
+      const data = (await response.json().catch(() => ({}))) as HashtagsResponse & { error?: string };
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to save bulk hashtag assignments");
+      }
+      const nextItems = cloneHashtagItems(data.items ?? hashtags);
+      setHashtags(nextItems);
+      setDraftAssignments(buildHashtagDraftAssignments(nextItems));
+      setBulkSelectedHashtags(new Set());
+      setSaveMessage(
+        `Saved ${formatInteger(selectedVisibleUnassignedHashtags.length)} shared assignments${
+          selectedShow?.show_name ? ` to ${selectedShow.show_name}` : ""
+        }`,
+      );
+      await refreshProfileSnapshotNow();
+    } catch (error) {
+      setSaveMessage(error instanceof Error ? error.message : "Failed to save bulk hashtag assignments");
+    } finally {
+      setBulkSavingHashtags(false);
     }
   };
 
@@ -8441,7 +8945,10 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       }
     }
     const localCookieHealthBlocksCatalogLaunch =
-      platformRequiresCookies && platform !== "tiktok" && effectiveCookieHealth?.healthy === false;
+      platformRequiresCookies &&
+      platform !== "tiktok" &&
+      !(platform === "instagram" && action === "backfill") &&
+      effectiveCookieHealth?.healthy === false;
     if (localCookieHealthBlocksCatalogLaunch) {
       // effectiveCookieHealth is guaranteed non-null here (the platformRequiresCookies
       // branch above returns early when it cannot be resolved), but narrow explicitly
@@ -9786,7 +10293,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                   </div>
                 ) : null}
                 <div className="mt-4 flex flex-col gap-1">
-                  <h2 className="text-base font-semibold text-zinc-900">Library Totals</h2>
+                  <h2 className="text-base font-semibold text-zinc-900">Coverage</h2>
                   <p className="text-xs text-zinc-500">
                     These are all-time saved records for this profile. Active backfill progress is shown separately below.
                   </p>
@@ -9889,7 +10396,9 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                   <div className="mt-3 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
                     <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
                       <div>
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">2025 Completion</p>
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
+                          {displayedInstagramCompletionYear} Completion
+                        </p>
                         <h3 className="mt-1 text-base font-semibold text-zinc-900">
                           {instagramCompletionSummaryLoading
                             ? "Loading..."
@@ -9901,7 +10410,8 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                       {instagramCompletionSummary ? (
                         <p className="text-xs text-zinc-500">
                           {formatInteger(instagramCompletionSummary.total_reported_comments)} reported comments ·{" "}
-                          {formatInteger(instagramCompletionSummary.accounted_comments)} accounted
+                          {formatInteger(instagramCompletionSummary.saved_comments)} saved ·{" "}
+                          {formatInteger(instagramCompletionSummary.missing_comments)} missing
                         </p>
                       ) : null}
                     </div>
@@ -9920,6 +10430,134 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                         ))}
                       </div>
                     ) : null}
+                    <div className="mt-3 rounded-xl border border-sky-100 bg-sky-50 px-3 py-3">
+                      {commentsStreamingBanner ? (
+                        <div
+                          className="mb-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-3 text-emerald-950"
+                          data-testid="instagram-comments-streaming-banner"
+                        >
+                          <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
+                            <div>
+                              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-800">
+                                Comments Are Streaming From Saved Catalog Posts
+                              </p>
+                              <p className="mt-1 max-w-3xl text-xs">{commentsStreamingBanner.detail}</p>
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              <span className="rounded-full bg-white px-2 py-1 text-[11px] font-semibold text-emerald-700">
+                                {commentsStreamingBanner.stateLabel}
+                              </span>
+                              {commentsStreamingBanner.runLabel ? (
+                                <span className="rounded-full bg-white px-2 py-1 text-[11px] font-semibold text-emerald-700">
+                                  {commentsStreamingBanner.runLabel}
+                                </span>
+                              ) : null}
+                            </div>
+                          </div>
+                          {commentsStreamingBanner.metricItems.length > 0 ? (
+                            <div className="mt-3 flex flex-wrap gap-2">
+                              {commentsStreamingBanner.metricItems.map((item) => (
+                                <span
+                                  key={item}
+                                  className="rounded-full border border-emerald-200 bg-white px-2 py-1 text-[11px] font-semibold text-emerald-800"
+                                >
+                                  {item}
+                                </span>
+                              ))}
+                            </div>
+                          ) : null}
+                          <div className="mt-3 border-t border-emerald-200 pt-3">
+                            <p className="text-xs font-semibold text-emerald-900">
+                              Next: {commentsStreamingBanner.nextActionLabel}
+                            </p>
+                            <p className="mt-1 text-xs text-emerald-800">{commentsStreamingBanner.nextActionDetail}</p>
+                          </div>
+                          {commentsStreamingBanner.historyItems.length > 0 ? (
+                            <div className="mt-3">
+                              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-emerald-800">
+                                Recent Streaming Activity
+                              </p>
+                              <ul className="mt-1 space-y-1 text-xs text-emerald-900">
+                                {commentsStreamingBanner.historyItems.map((item) => (
+                                  <li key={item}>{item}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : null}
+                      <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
+                        <div>
+                          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-sky-800">
+                          Comments Stream After Posts Save
+                          </p>
+                          <p className="mt-1 max-w-3xl text-xs text-sky-900">
+                            Catalog saves posts first, comments can start as soon as those posts land, public-first recovery stays
+                            the default, and auth-backed follow-up is only for leftover blocked gaps.
+                          </p>
+                        </div>
+                        {dashboardCommentsGapSourceLabel ? (
+                          <span className="rounded-full bg-white px-2 py-1 text-[11px] font-semibold text-sky-700">
+                            {dashboardCommentsGapSourceLabel}
+                          </span>
+                        ) : null}
+                      </div>
+                      {dashboardCommentsGapRows.length > 0 ? (
+                        <div className="mt-3 overflow-x-auto">
+                          <p className="mb-2 text-xs font-semibold text-sky-900">
+                            Posts waiting in the streaming comments lane
+                          </p>
+                          <table className="min-w-full text-left text-xs">
+                            <thead className="text-zinc-500">
+                              <tr>
+                                <th className="pb-2 pr-3 font-semibold uppercase tracking-[0.14em]">Post</th>
+                                <th className="pb-2 pr-3 font-semibold uppercase tracking-[0.14em]">Gap</th>
+                                <th className="pb-2 pr-3 font-semibold uppercase tracking-[0.14em]">Saved / reported</th>
+                                <th className="pb-2 pr-3 font-semibold uppercase tracking-[0.14em]">State</th>
+                                <th className="pb-2 font-semibold uppercase tracking-[0.14em]">Recovery hint</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-sky-100">
+                              {dashboardCommentsGapRows.map((row) => (
+                                <tr key={row.key}>
+                                  <td className="py-2 pr-3">
+                                    <span className="font-semibold text-zinc-900">{row.label}</span>
+                                    <span className="ml-2 inline-flex rounded-full bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-sky-700">
+                                      Public-first
+                                    </span>
+                                  </td>
+                                  <td className="py-2 pr-3 tabular-nums text-amber-700">
+                                    {formatInteger(row.missingCommentGap)}
+                                  </td>
+                                  <td className="py-2 pr-3 tabular-nums text-zinc-700">
+                                    {formatInteger(row.savedCommentCount)} / {formatInteger(row.reportedCommentCount)}
+                                  </td>
+                                  <td className="py-2 pr-3 text-zinc-700">
+                                    {[row.status ? formatRunStatusLabel(row.status) : null, row.phase ? formatDiagnosticToken(row.phase) : null]
+                                      .filter(Boolean)
+                                      .join(" · ") || "Gap open"}
+                                  </td>
+                                  <td className="py-2 text-zinc-600">
+                                    {[
+                                      row.reason ? formatDiagnosticToken(row.reason) : null,
+                                      row.hasTopLevelCursor ? "top cursor saved" : null,
+                                      row.replyResumeCount ? `${formatInteger(row.replyResumeCount)} replies queued` : null,
+                                    ]
+                                      .filter(Boolean)
+                                      .join(" · ") || "Awaiting next comments pass"}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      ) : (
+                        <p className="mt-3 text-xs text-zinc-600">
+                          No live gap rows are available right now. This card will show stored gap priorities between runs when the
+                          completion summary includes them.
+                        </p>
+                      )}
+                    </div>
                   </div>
                 ) : null}
                 {pendingReviewOpen ? (
@@ -10087,6 +10725,10 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                         remaining unchecked posts can be resumed from this card.
                       </p>
                     ) : null}
+                    <p className="mt-2 text-xs text-zinc-500">
+                      Posts and comments stream separately: once posts are saved, comments can begin immediately, public recovery
+                      remains first, and account-backed follow-up is reserved for leftover blocked gaps.
+                    </p>
                     {activeCommentsRunScopeNotice ? (
                       <p className="mt-2 text-xs font-medium text-sky-700">{activeCommentsRunScopeNotice}</p>
                     ) : null}
@@ -10474,11 +11116,19 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
         </AdminGlobalHeader>
 
         <main className="mx-auto max-w-6xl px-6 py-8">
-          {summaryLoading && !hasSummary && !shouldRenderCatalogRunProgressCard ? (
+          {summaryLoading && !hasSummary && !summaryError && !shouldDeemphasizeCatalogSummaryState ? (
             <div className="text-sm text-zinc-500">Loading account summary…</div>
           ) : null}
-          {summaryError && !shouldRenderCatalogRunProgressCard ? (
-            <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{summaryError}</div>
+          {summaryError ? (
+            <div
+              className={`rounded-xl border px-4 py-3 text-sm ${
+                shouldDeemphasizeCatalogSummaryState
+                  ? "border-amber-200 bg-amber-50 text-amber-800"
+                  : "border-red-200 bg-red-50 text-red-700"
+              }`}
+            >
+              {summaryError}
+            </div>
           ) : null}
           {(() => {
             // Unified, always-visible data freshness/performance status row.
@@ -10533,9 +11183,9 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
               <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                 <div>
                   <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
-                    Current Truth
+                    Live Backfill
                   </p>
-                  <h2 className="mt-1 text-lg font-semibold text-zinc-900">Instagram Backfill Status</h2>
+                  <h2 className="mt-1 text-lg font-semibold text-zinc-900">Live Backfill Status</h2>
                   <p className="mt-1 text-sm text-zinc-500">
                     Active run progress is the source of truth for what is running now. Library totals are all-time saved data.
                   </p>
@@ -10666,7 +11316,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
               <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                 <div>
                   <div className="flex flex-wrap items-center gap-2">
-                    <h2 className="text-lg font-semibold text-zinc-900">Post/details Run</h2>
+                    <h2 className="text-lg font-semibold text-zinc-900">Worker and Lane Details</h2>
                     <span
                       className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] ${getCatalogRunStatusTone(
                         displayedCatalogRunStatus,
@@ -10676,12 +11326,10 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                     </span>
                     <span
                       className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] ${
-                        catalogAllLanesComplete
-                          ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                          : "border-amber-200 bg-amber-50 text-amber-700"
+                        catalogLaneSummaryTone
                       }`}
                     >
-                      {catalogAllLanesComplete ? "All Lanes Complete" : "Lanes Still Running"}
+                      {catalogLaneSummaryLabel}
                     </span>
                     {(displayedCatalogRunStatus === "failed" || displayedCatalogRunStatus === "cancelled") &&
                       displayedCatalogRunId && (
@@ -10714,7 +11362,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                     ) : null}
                   </div>
                   <p className="mt-1 text-sm text-zinc-500">
-                    Truth source: catalog run progress · Run {shortRunId(displayedCatalogRunId)} · {displayedCatalogRunStatusLabel}
+                    Details source: catalog run progress · Run {shortRunId(displayedCatalogRunId)} · {displayedCatalogRunStatusLabel}
                     {catalogRunProgress?.created_at ? ` · queued ${formatDateTime(catalogRunProgress.created_at)}` : ""}
                     {catalogRunProgress?.launch_group_id ? ` · launch ${shortRunId(catalogRunProgress.launch_group_id)}` : ""}
                     {shouldShowCatalogLaunchState(
@@ -11466,10 +12114,14 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                 <section className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
                   <h2 className="text-lg font-semibold text-zinc-900">Recent Catalog Runs</h2>
                   <div className="mt-4 space-y-2">
-                    {visibleCatalogRecentRuns.length === 0 ? (
-                      <p className="text-sm text-zinc-500">No catalog runs recorded yet.</p>
+                    {catalogRecentHistoryRuns.length === 0 ? (
+                      <p className="text-sm text-zinc-500">
+                        {shouldRenderCatalogRunProgressCard
+                          ? "Current run is shown above. No older catalog runs need attention."
+                          : "No catalog runs recorded yet."}
+                      </p>
                     ) : (
-                      visibleCatalogRecentRuns.map((run) => {
+                      catalogRecentHistoryRuns.map((run) => {
                         const laneCards = buildCatalogLaneCards({
                           runStatus: run.status,
                           selectedTasks: run.selected_tasks,
@@ -11480,8 +12132,10 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                         const aggregateStatus = getCatalogAggregateRunStatus(run.status, laneCards);
                         const aggregateStatusLabel = formatCatalogAggregateRunStatusLabel(run.status, laneCards);
                         const allLanesComplete = getCatalogAllLanesComplete(run.status, laneCards);
+                        const laneSummaryLabel = getCatalogLaneSummaryLabel(aggregateStatus || run.status, allLanesComplete);
+                        const laneSummaryTone = getCatalogLaneSummaryTone(aggregateStatus || run.status, allLanesComplete);
                         return (
-                        <div key={run.job_id || run.run_id} className="rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3">
+                        <div key={run.run_id || run.job_id} className="rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3">
                           <div className="flex items-start justify-between gap-3">
                             <div>
                               <div className="flex flex-wrap items-center gap-2">
@@ -11493,13 +12147,9 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                                   {aggregateStatusLabel}
                                 </span>
                                 <span
-                                  className={`rounded-full border px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] ${
-                                    allLanesComplete
-                                      ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                                      : "border-amber-200 bg-amber-50 text-amber-700"
-                                  }`}
+                                  className={`rounded-full border px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] ${laneSummaryTone}`}
                                 >
-                                  {allLanesComplete ? "All Lanes Complete" : "Lanes Still Running"}
+                                  {laneSummaryLabel}
                                 </span>
                                 <span className="text-xs font-semibold text-zinc-500">Run {shortRunId(run.run_id)}</span>
                                 {run.launch_group_id ? (
@@ -11752,46 +12402,134 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                   <div>
                     <h2 className="text-lg font-semibold text-zinc-900">Hashtags</h2>
                     <p className="text-sm text-zinc-500">
-                      Show-level assignments only. Season context below is observed from post dates, not manually assigned.
+                      Assignments apply across account handles and every supported platform.
                     </p>
                     {saveMessage ? <p className="mt-2 text-sm text-zinc-600">{saveMessage}</p> : null}
                   </div>
-                  <label className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500">
-                    Window
-                    <select
-                      value={hashtagWindow}
-                      onChange={(event) =>
-                        setHashtagWindow(event.target.value as (typeof HASHTAG_WINDOW_OPTIONS)[number]["value"])
-                      }
-                      className="mt-1 block rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm font-medium normal-case tracking-normal text-zinc-700"
-                    >
-                      {HASHTAG_WINDOW_OPTIONS.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                  <div className="flex flex-wrap gap-3">
+                    <label className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500">
+                      Assignments
+                      <select
+                        value={hashtagAssignmentStatus}
+                        onChange={(event) => setHashtagAssignmentStatus(event.target.value as HashtagAssignmentStatus)}
+                        className="mt-1 block rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm font-medium normal-case tracking-normal text-zinc-700"
+                      >
+                        {HASHTAG_ASSIGNMENT_STATUS_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500">
+                      Window
+                      <select
+                        value={hashtagWindow}
+                        onChange={(event) =>
+                          setHashtagWindow(event.target.value as (typeof HASHTAG_WINDOW_OPTIONS)[number]["value"])
+                        }
+                        className="mt-1 block rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm font-medium normal-case tracking-normal text-zinc-700"
+                      >
+                        {HASHTAG_WINDOW_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
                 </div>
                 {hashtagsLoading ? <p className="mt-4 text-sm text-zinc-500">Loading hashtags…</p> : null}
                 {!hashtagsLoading && hashtagsErrorMessage ? (
                   <p className={`mt-4 text-sm ${hashtagsErrorToneClass}`}>{hashtagsErrorMessage}</p>
                 ) : null}
+                {!hashtagsLoading && hashtagAssignmentStatus === "unassigned" && hashtags.length > 0 ? (
+                  <div className="mt-4 rounded-xl border border-zinc-200 bg-zinc-50 p-3">
+                    <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+                      <div>
+                        <p className="text-sm font-semibold text-zinc-900">Bulk assign visible unassigned hashtags</p>
+                        <p className="text-xs text-zinc-500">
+                          {formatInteger(selectedVisibleUnassignedHashtags.length)} selected of{" "}
+                          {formatInteger(visibleUnassignedHashtags.length)} visible unassigned hashtags.
+                        </p>
+                      </div>
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+                        <label className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500">
+                          Show
+                          <select
+                            value={bulkAssignShowId}
+                            onChange={(event) => setBulkAssignShowId(event.target.value)}
+                            className="mt-1 block min-w-60 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm font-medium normal-case tracking-normal text-zinc-700"
+                          >
+                            {showOptions.map((show) => (
+                              <option key={show.show_id} value={show.show_id}>
+                                {show.show_name}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <Button
+                          onClick={selectAllVisibleUnassignedHashtags}
+                          disabled={visibleUnassignedHashtags.length === 0 || bulkSavingHashtags}
+                          size="sm"
+                          variant="outline"
+                          className={NYT_DASHBOARD_BUTTON_CLASS}
+                        >
+                          Select Visible
+                        </Button>
+                        <Button
+                          onClick={clearBulkSelectedHashtags}
+                          disabled={selectedVisibleUnassignedHashtags.length === 0 || bulkSavingHashtags}
+                          size="sm"
+                          variant="outline"
+                          className={NYT_DASHBOARD_BUTTON_CLASS}
+                        >
+                          Clear
+                        </Button>
+                        <Button
+                          onClick={() => void saveBulkHashtagAssignments()}
+                          disabled={
+                            selectedVisibleUnassignedHashtags.length === 0 ||
+                            !bulkAssignShowId ||
+                            bulkSavingHashtags
+                          }
+                          size="sm"
+                          variant="primary"
+                          className={NYT_DASHBOARD_PRIMARY_BUTTON_CLASS}
+                        >
+                          {bulkSavingHashtags ? "Saving…" : "Assign Selected"}
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
                 {!hashtagsLoading && hashtags.length > 0 ? (
                   <div className="mt-4 space-y-4">
                     {hashtags.map((item) => {
                       const assignments = draftAssignments[item.hashtag] ?? [];
+                      const canBulkSelect = hashtagAssignmentStatus === "unassigned" && assignments.length === 0;
                       return (
                         <div key={item.hashtag} className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
                           <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                            <div>
-                              <p className="text-lg font-semibold text-zinc-900">{item.display_hashtag ?? `#${item.hashtag}`}</p>
+                            <div className="flex gap-3">
+                              {canBulkSelect ? (
+                                <input
+                                  type="checkbox"
+                                  aria-label={`Select ${item.display_hashtag ?? `#${item.hashtag}`} for bulk assignment`}
+                                  checked={bulkSelectedHashtags.has(item.hashtag)}
+                                  onChange={(event) => toggleBulkSelectedHashtag(item.hashtag, event.target.checked)}
+                                  className="mt-1 h-4 w-4 rounded border-zinc-300 text-zinc-900"
+                                />
+                              ) : null}
+                              <div>
+                                <p className="text-lg font-semibold text-zinc-900">{item.display_hashtag ?? `#${item.hashtag}`}</p>
                               <p className="text-xs text-zinc-500">
                                 {formatInteger(item.usage_count)} uses · First seen {formatDateTime(item.first_seen_at)} · Last seen {formatDateTime(item.latest_seen_at)}
                               </p>
                               <p className="mt-2 text-xs text-zinc-500">
                                 Observed on {(item.observed_shows ?? []).map((show) => show.show_name).filter(Boolean).join(", ") || "no assigned shows yet"}
                               </p>
+                              </div>
                             </div>
                             <div className="flex flex-wrap gap-2">
                               <Button
@@ -11822,7 +12560,10 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                               assignments.map((assignment, index) => {
                                 const selectedShowId = assignment.show_id ?? showOptions[0]?.show_id ?? "";
                                 return (
-                                  <div key={`${item.hashtag}-${assignment.show_id ?? "show"}-${index}`} className="grid gap-3 rounded-xl border border-zinc-200 bg-white p-3 lg:grid-cols-[1fr_auto]">
+                                  <div
+                                    key={`${item.hashtag}-${assignment.show_id ?? "show"}-${index}`}
+                                    className="grid gap-3 rounded-xl border border-zinc-200 bg-white p-3 lg:grid-cols-[minmax(0,1fr)_auto]"
+                                  >
                                     <label className="text-sm font-medium text-zinc-700">
                                       Show
                                       <select
@@ -11873,53 +12614,99 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                 {!hashtagsLoading && hashtags.length === 0 && !hashtagsErrorMessage ? (
                   <p className="mt-4 text-sm text-zinc-500">No hashtags found for this account.</p>
                 ) : null}
-                {supportsCatalog ? (
-                  <div className="mt-8 border-t border-zinc-200 pt-6">
+                <div className="mt-8 border-t border-zinc-200 pt-6">
                   <div className="flex flex-col gap-2">
-                    <h3 className="text-base font-semibold text-zinc-900">Unknown Hashtags</h3>
+                    <h3 className="text-base font-semibold text-zinc-900">Backfill Conflict History</h3>
                     <p className="text-sm text-zinc-500">
-                      Review newly observed hashtags that have not been assigned to a show yet.
+                      Legacy platform-specific assignments that were merged into shared hashtag assignments.
                     </p>
                   </div>
-                  {reviewQueueLoading ? <p className="mt-4 text-sm text-zinc-500">Loading review queue…</p> : null}
-                  {reviewQueueError ? <p className="mt-4 text-sm text-red-700">{reviewQueueError}</p> : null}
-                  {!reviewQueueLoading && !reviewQueueError ? (
+                  {hashtagConflictsLoading ? (
+                    <p className="mt-4 text-sm text-zinc-500">Loading conflict history…</p>
+                  ) : null}
+                  {hashtagConflictsError ? (
+                    <p className="mt-4 text-sm text-red-700">{hashtagConflictsError}</p>
+                  ) : null}
+                  {!hashtagConflictsLoading && !hashtagConflictsError && hashtagConflicts.length === 0 ? (
+                    <p className="mt-4 text-sm text-zinc-500">No hashtag backfill conflicts recorded.</p>
+                  ) : null}
+                  {!hashtagConflictsLoading && !hashtagConflictsError && hashtagConflicts.length > 0 ? (
                     <div className="mt-4 space-y-3">
-                      {reviewQueue.length === 0 ? (
-                        <p className="text-sm text-zinc-500">No unknown hashtags are waiting for review.</p>
-                      ) : (
-                        reviewQueue.map((item) => {
-                          const draft = reviewDrafts[item.id] ?? buildReviewResolutionDraft(item, reviewShowOptionsByItem[item.id] ?? []);
-                          const itemShowOptions = reviewShowOptionsByItem[item.id] ?? [];
-                          const canResolve =
-                            draft.resolution_action === "mark_non_show" ||
-                            (draft.resolution_action === "assign_show" && Boolean(draft.show_id));
-                          return (
-                            <div key={item.id} className="rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-4">
-                              <div className="flex flex-col gap-4">
-                                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                                  <div>
-                                    <p className="font-semibold text-zinc-900">{item.display_hashtag ?? `#${item.hashtag}`}</p>
-                                    <p className="text-xs text-zinc-500">
-                                      {formatInteger(item.usage_count)} uses · First seen {formatDateTime(item.first_seen_at)} · Last seen {formatDateTime(item.last_seen_at)}
-                                    </p>
+                      {hashtagConflicts.map((conflict) => (
+                        <div
+                          key={conflict.id ?? conflict.hashtag}
+                          className="rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3"
+                        >
+                          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                            <div>
+                              <p className="font-semibold text-zinc-900">
+                                {conflict.display_hashtag ?? `#${conflict.hashtag}`}
+                              </p>
+                              <p className="mt-1 text-xs text-zinc-500">
+                                {formatInteger(conflict.distinct_show_count)} shows ·{" "}
+                                {formatHashtagConflictAction(conflict.resolution_action)} · Resolved{" "}
+                                {formatDateTime(conflict.resolved_at)}
+                              </p>
+                            </div>
+                            <p className="text-xs text-zinc-500 lg:max-w-xl lg:text-right">
+                              {formatHashtagConflictLegacyAssignments(conflict.legacy_assignments)}
+                              {(conflict.legacy_assignments ?? []).length > 3
+                                ? `; +${formatInteger((conflict.legacy_assignments ?? []).length - 3)} more`
+                                : ""}
+                            </p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+                {supportsCatalog ? (
+                  <div className="mt-8 border-t border-zinc-200 pt-6">
+                    <div className="flex flex-col gap-2">
+                      <h3 className="text-base font-semibold text-zinc-900">Unknown Hashtags</h3>
+                      <p className="text-sm text-zinc-500">
+                        Review newly observed hashtags that have not been assigned to a show yet.
+                      </p>
+                    </div>
+                    {reviewQueueLoading ? <p className="mt-4 text-sm text-zinc-500">Loading review queue…</p> : null}
+                    {reviewQueueError ? <p className="mt-4 text-sm text-red-700">{reviewQueueError}</p> : null}
+                    {!reviewQueueLoading && !reviewQueueError ? (
+                      <div className="mt-4 space-y-3">
+                        {reviewQueue.length === 0 ? (
+                          <p className="text-sm text-zinc-500">No unknown hashtags are waiting for review.</p>
+                        ) : (
+                          reviewQueue.map((item) => {
+                            const draft = reviewDrafts[item.id] ?? buildReviewResolutionDraft(item, reviewShowOptionsByItem[item.id] ?? []);
+                            const itemShowOptions = reviewShowOptionsByItem[item.id] ?? [];
+                            const canResolve =
+                              draft.resolution_action === "mark_non_show" ||
+                              (draft.resolution_action === "assign_show" && Boolean(draft.show_id));
+                            return (
+                              <div key={item.id} className="rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-4">
+                                <div className="flex flex-col gap-4">
+                                  <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                                    <div>
+                                      <p className="font-semibold text-zinc-900">{item.display_hashtag ?? `#${item.hashtag}`}</p>
+                                      <p className="text-xs text-zinc-500">
+                                        {formatInteger(item.usage_count)} uses · First seen {formatDateTime(item.first_seen_at)} · Last seen {formatDateTime(item.last_seen_at)}
+                                      </p>
+                                    </div>
+                                    <Button
+                                      disabled={resolvingReviewItemId === item.id || !canResolve}
+                                      onClick={() =>
+                                        void resolveReviewItem(item.id, {
+                                          resolution_action: draft.resolution_action,
+                                          show_id:
+                                            draft.resolution_action === "mark_non_show" ? undefined : draft.show_id || undefined,
+                                        })
+                                      }
+                                      size="sm"
+                                      variant="primary"
+                                      className={NYT_DASHBOARD_PRIMARY_BUTTON_CLASS}
+                                    >
+                                      {resolvingReviewItemId === item.id ? "Saving…" : "Resolve"}
+                                    </Button>
                                   </div>
-                                  <Button
-                                    disabled={resolvingReviewItemId === item.id || !canResolve}
-                                    onClick={() =>
-                                      void resolveReviewItem(item.id, {
-                                        resolution_action: draft.resolution_action,
-                                        show_id:
-                                          draft.resolution_action === "mark_non_show" ? undefined : draft.show_id || undefined,
-                                      })
-                                    }
-                                    size="sm"
-                                    variant="primary"
-                                    className={NYT_DASHBOARD_PRIMARY_BUTTON_CLASS}
-                                  >
-                                    {resolvingReviewItemId === item.id ? "Saving…" : "Resolve"}
-                                  </Button>
-                                </div>
                                 <div>
                                   <p className="text-xs text-zinc-500">
                                     Suggested shows: {item.suggested_shows?.map((show) => show.show_name).filter(Boolean).join(", ") || "No suggestions yet"}
@@ -12054,8 +12841,8 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
           ) : null}
 
           {instagramBackfillDialogOpen ? (
-            <div className="fixed inset-0 z-40 flex items-center justify-center bg-zinc-950/55 px-4 py-6">
-              <div className="w-full max-w-xl rounded-3xl border border-zinc-200 bg-white p-6 shadow-2xl">
+            <div className="fixed inset-0 z-40 flex items-start justify-center bg-zinc-950/55 px-4 py-6 sm:items-center">
+              <div className="flex max-h-[calc(100vh-3rem)] w-full max-w-xl flex-col overflow-hidden rounded-3xl border border-zinc-200 bg-white p-6 shadow-2xl">
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">Instagram Backfill</p>
@@ -12074,31 +12861,32 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                     Close
                   </Button>
                 </div>
-                <div className="mt-5 space-y-3">
-                  {INSTAGRAM_BACKFILL_TASK_OPTIONS.map((option) => {
-                    const checked = instagramBackfillSelectedTasks.includes(option.value);
-                    return (
-                      <label
-                        key={option.value}
-                        className={`flex cursor-pointer items-start gap-3 rounded-2xl border px-4 py-4 ${
-                          checked ? "border-zinc-900 bg-zinc-50" : "border-zinc-200 bg-white"
-                        }`}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={() => toggleInstagramBackfillTask(option.value)}
-                          className="mt-1 h-4 w-4 rounded border-zinc-300 text-zinc-900 focus:ring-zinc-900"
-                        />
-                        <div>
-                          <p className="font-semibold text-zinc-900">{option.label}</p>
-                          <p className="mt-1 text-sm text-zinc-500">{option.description}</p>
-                        </div>
-                      </label>
-                    );
-                  })}
-                </div>
-                <div className="mt-5 rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-4">
+                <div className="mt-5 min-h-0 flex-1 overflow-y-auto pr-1">
+                  <div className="space-y-3">
+                    {INSTAGRAM_BACKFILL_TASK_OPTIONS.map((option) => {
+                      const checked = instagramBackfillSelectedTasks.includes(option.value);
+                      return (
+                        <label
+                          key={option.value}
+                          className={`flex cursor-pointer items-start gap-3 rounded-2xl border px-4 py-4 ${
+                            checked ? "border-zinc-900 bg-zinc-50" : "border-zinc-200 bg-white"
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => toggleInstagramBackfillTask(option.value)}
+                            className="mt-1 h-4 w-4 rounded border-zinc-300 text-zinc-900 focus:ring-zinc-900"
+                          />
+                          <div>
+                            <p className="font-semibold text-zinc-900">{option.label}</p>
+                            <p className="mt-1 text-sm text-zinc-500">{option.description}</p>
+                          </div>
+                        </label>
+                      );
+                    })}
+                  </div>
+                  <div className="mt-5 rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-4">
                   <p className="font-semibold text-zinc-900">Bounded Window</p>
                   <p className="mt-1 text-sm text-zinc-500">
                     Backfill only posts published from the start month through the end month.
@@ -12258,8 +13046,9 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                     The comments lane fetches full per-post threads, not a shallow profile export.
                   </p>
                 </div>
-                <div className="mt-6 flex items-center justify-between gap-3">
-                  <p className="text-xs text-zinc-500">
+                </div>
+                <div className="-mx-6 -mb-6 mt-6 flex flex-col gap-3 border-t border-zinc-200 bg-white px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
+                  <p className="text-xs text-zinc-500 sm:max-w-sm">
                     {instagramBackfillSelectedTasks.length > 0
                       ? `Selected: ${
                           instagramBackfillMonthStart ? formatMonthYear(instagramBackfillMonthStart) : "open start"
