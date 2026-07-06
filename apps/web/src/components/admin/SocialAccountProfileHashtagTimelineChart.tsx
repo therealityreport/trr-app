@@ -112,25 +112,30 @@ const firstVisiblePoint = (
   return series.points.find((point) => point.in_top_ten) ?? null;
 };
 
+const formatDroppedOutRailLabel = (rank: number): string => `Dropped out (${rank}+)`;
+
 export default function SocialAccountProfileHashtagTimelineChart({ timeline, loading = false, error }: Props) {
   const chartModel = useMemo(() => {
     if (!timeline || timeline.years.length === 0) return null;
+    const topRankLimit = Math.max(1, Math.floor(timeline.top_rank_limit || 10));
+    const offChartRank = Math.max(topRankLimit + 1, Math.floor(timeline.off_chart_rank || topRankLimit + 1));
     const leftRail = 78;
     const rightRail = 152;
     const topRail = 52;
-    const bottomRail = 68;
+    const bottomRail = 90;
     const columnGap = Math.max(130, Math.round(760 / Math.max(timeline.years.length, 2)));
     const width = leftRail + rightRail + Math.max(columnGap * Math.max(timeline.years.length - 1, 1), 520);
-    const height = topRail + bottomRail + 10 * 42;
+    const height = topRail + bottomRail + (topRankLimit + 1) * 42;
     const plotWidth = width - leftRail - rightRail;
     const plotHeight = height - topRail - bottomRail;
-    const rankStep = plotHeight / 9;
+    const rankStep = plotHeight / topRankLimit;
     const xByOrder = new Map<number, number>();
     for (const year of timeline.years) {
       const denominator = Math.max(timeline.years.length - 1, 1);
       xByOrder.set(year.order, leftRail + ((year.order - 1) / denominator) * plotWidth);
     }
-    const yForRank = (rank: number) => topRail + (clamp(rank, 1, 10) - 1) * rankStep;
+    const yForRank = (rank: number) =>
+      topRail + (clamp(rank, 1, offChartRank) - 1) * rankStep;
     return {
       leftRail,
       rightRail,
@@ -141,6 +146,8 @@ export default function SocialAccountProfileHashtagTimelineChart({ timeline, loa
       plotWidth,
       plotHeight,
       rankStep,
+      topRankLimit,
+      offChartRank,
       xByOrder,
       yForRank,
     };
@@ -224,7 +231,7 @@ export default function SocialAccountProfileHashtagTimelineChart({ timeline, loa
                   fill="url(#timeline-surface)"
                 />
 
-                {Array.from({ length: 10 }, (_, index) => {
+                {Array.from({ length: chartModel.topRankLimit }, (_, index) => {
                   const rank = index + 1;
                   const y = chartModel.yForRank(rank);
                   return (
@@ -253,6 +260,29 @@ export default function SocialAccountProfileHashtagTimelineChart({ timeline, loa
                     </g>
                   );
                 })}
+
+                <g key="dropped-out-rail">
+                  <line
+                    x1={chartModel.leftRail}
+                    x2={chartModel.width - chartModel.rightRail}
+                    y1={chartModel.yForRank(chartModel.offChartRank)}
+                    y2={chartModel.yForRank(chartModel.offChartRank)}
+                    stroke="#d4d4d8"
+                    strokeWidth={1}
+                    strokeDasharray="2 8"
+                  />
+                  <text
+                    x={chartModel.leftRail - 16}
+                    y={chartModel.yForRank(chartModel.offChartRank) + 4}
+                    textAnchor="end"
+                    fill="#71717a"
+                    fontSize="11"
+                    fontWeight="700"
+                    style={{ fontFamily: FONT_FAMILY.body, letterSpacing: "0.03em" }}
+                  >
+                    {formatDroppedOutRailLabel(chartModel.offChartRank)}
+                  </text>
+                </g>
 
                 {timeline?.years.map((year) => {
                   const x = chartModel.xByOrder.get(year.order) ?? 0;
@@ -400,7 +430,8 @@ export default function SocialAccountProfileHashtagTimelineChart({ timeline, loa
             <div className="mt-4 flex flex-col gap-3 text-xs text-zinc-500 sm:flex-row sm:items-center sm:justify-between">
               <p className="leading-5">
                 Rank 1 sits at the top. Faded arcs show the full span between a hashtag&apos;s first and last top-ten year,
-                including the years when it slipped outside the chart.
+                including the years when it slipped outside the chart. {formatDroppedOutRailLabel(chartModel.offChartRank)}
+                {" "}uses a separate rail below rank {chartModel.topRankLimit}.
               </p>
               <p className="font-semibold uppercase tracking-[0.18em] text-zinc-400">
                 {timeline?.series.length ?? 0} tracked hashtags

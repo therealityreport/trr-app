@@ -75,4 +75,14 @@ describe("workspace shared env contract", () => {
     expect(contract).toContain("TRR_REMOTE_DEBUG_LOG_ENABLED");
     expect(contract).toContain("Hard kill switch for remote /api/debug-log writes");
   });
+
+  it("projects admin host capabilities through explicit app env keys", () => {
+    const envExamplePath = path.join(process.cwd(), ".env.example");
+    const envKeys = readEnvKeys(fs.readFileSync(envExamplePath, "utf-8"));
+
+    expect(envKeys.has("ADMIN_APP_ORIGIN"), "missing admin origin projection").toBe(true);
+    expect(envKeys.has("ADMIN_APP_HOSTS"), "missing admin API host allowlist projection").toBe(true);
+    expect(envKeys.has("ADMIN_ENFORCE_HOST"), "missing admin host enforcement projection").toBe(true);
+    expect(envKeys.has("ADMIN_STRICT_HOST_ROUTING"), "missing strict host routing projection").toBe(true);
+  });
 });

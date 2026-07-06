@@ -589,6 +589,22 @@ const CATALOG_STAGE_SORT_ORDER: Record<string, number> = {
   other: 99,
 };
 
+const getSupportedSocialAccountTab = (
+  platform: SocialPlatformSlug | string,
+  preferredTab: SocialAccountProfileTab,
+): SocialAccountProfileTab => {
+  const normalizedPlatform = String(platform || "").trim().toLowerCase() as SocialPlatformSlug;
+  const supportsCatalog = SOCIAL_ACCOUNT_CATALOG_ENABLED_PLATFORMS.includes(normalizedPlatform);
+  const supportsComments = SOCIAL_ACCOUNT_COMMENTS_ENABLED_PLATFORMS.includes(normalizedPlatform);
+  const supportsSocialBlade = SOCIAL_ACCOUNT_SOCIALBLADE_ENABLED_PLATFORMS.includes(normalizedPlatform);
+
+  if (preferredTab === "posts") return supportsCatalog ? "catalog" : "posts";
+  if (preferredTab === "catalog" && !supportsCatalog) return "stats";
+  if (preferredTab === "comments" && !supportsComments) return "stats";
+  if (preferredTab === "socialblade" && !supportsSocialBlade) return "stats";
+  return preferredTab;
+};
+
 const buildCatalogProgressRunStorageKey = (platform: string, handle: string) =>
   `${CATALOG_PROGRESS_RUN_STORAGE_PREFIX}:${platform.trim().toLowerCase()}:${handle.trim().toLowerCase()}`;
 
@@ -3755,6 +3771,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   const [catalogDetail, setCatalogDetail] = useState<SocialAccountCatalogPostDetail | null>(null);
   const [catalogDetailLoading, setCatalogDetailLoading] = useState(false);
   const [catalogDetailError, setCatalogDetailError] = useState<string | null>(null);
+  const catalogDetailRequestKeyRef = useRef<string | null>(null);
   const [catalogCardPreview, setCatalogCardPreview] = useState<{
     total: number;
     latestPostedAt: string | null;
@@ -3829,6 +3846,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   const [catalogGapAnalysisLoading, setCatalogGapAnalysisLoading] = useState(false);
   const [catalogGapAnalysisError, setCatalogGapAnalysisError] = useState<SocialAccountRequestError | null>(null);
   const [catalogGapAnalysisRequestNonce, setCatalogGapAnalysisRequestNonce] = useState(0);
+  const catalogGapAnalysisOperationRef = useRef<string | null>(null);
 
   const [collaboratorsTags, setCollaboratorsTags] = useState<CollaboratorsTagsResponse | null>(null);
   const [collaboratorsLoading, setCollaboratorsLoading] = useState(false);
@@ -4229,6 +4247,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     setCatalogGapAnalysis(null);
     setCatalogGapAnalysisStatus("idle");
     setCatalogGapAnalysisOperationId(null);
+    catalogGapAnalysisOperationRef.current = null;
     setCatalogGapAnalysisStale(false);
     setCatalogGapAnalysisLoading(false);
     setCatalogGapAnalysisError(null);
@@ -5460,15 +5479,19 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   const displayedInstagramCompletionYear = instagramCompletionSummary?.year ?? instagramCompletionYear;
 
   const applyCatalogGapAnalysisStatus = useCallback(
-    (payload: CatalogGapAnalysisStatusPayload) => {
+    (payload: CatalogGapAnalysisStatusPayload, expectedOperationId?: string | null): boolean => {
       const normalizedStatus = payload.status ?? "idle";
       const operationId =
         typeof payload.operation_id === "string" && payload.operation_id.trim()
           ? payload.operation_id.trim()
           : null;
+      if (expectedOperationId && operationId && operationId !== expectedOperationId) {
+        return false;
+      }
       setCatalogGapAnalysis(payload.result ?? null);
       setCatalogGapAnalysisStatus(normalizedStatus);
       setCatalogGapAnalysisOperationId(operationId);
+      catalogGapAnalysisOperationRef.current = operationId;
       setCatalogGapAnalysisStale(Boolean(payload.stale));
       setCatalogGapAnalysisLoading(normalizedStatus === "queued" || normalizedStatus === "running");
       if (normalizedStatus === "failed") {
@@ -5478,6 +5501,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       } else {
         setCatalogGapAnalysisError(null);
       }
+      return true;
     },
     [],
   );
@@ -5661,6 +5685,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
         setCatalogGapAnalysis(null);
         setCatalogGapAnalysisStatus("idle");
         setCatalogGapAnalysisOperationId(null);
+        catalogGapAnalysisOperationRef.current = null;
         setCatalogGapAnalysisStale(false);
         setCatalogGapAnalysisError(null);
         setCatalogGapAnalysisLoading(false);
@@ -5674,6 +5699,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       setCatalogGapAnalysis(null);
       setCatalogGapAnalysisStatus("idle");
       setCatalogGapAnalysisOperationId(null);
+      catalogGapAnalysisOperationRef.current = null;
       setCatalogGapAnalysisStale(false);
       setCatalogGapAnalysisError(null);
       setCatalogGapAnalysisLoading(false);
@@ -5780,7 +5806,11 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
         }
         if (cancelled) return;
         saturationAttempt = 0;
-        applyCatalogGapAnalysisStatus(data);
+        const applied = applyCatalogGapAnalysisStatus(data, catalogGapAnalysisOperationId);
+        if (!applied) {
+          scheduleNextPoll(CATALOG_GAP_ANALYSIS_POLL_INTERVAL_MS);
+          return;
+        }
         if (data.status === "queued" || data.status === "running") {
           scheduleNextPoll(CATALOG_GAP_ANALYSIS_POLL_INTERVAL_MS);
         }
@@ -5850,6 +5880,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     }
 
     let cancelled = false;
+    const controller = new AbortController();
     const timeout = window.setTimeout(() => {
       void (async () => {
         setPostSearchLoading(true);
@@ -5862,20 +5893,20 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
           });
           const response = await fetchAdminWithAuth(
             `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/posts?${query.toString()}`,
-            undefined,
+            { signal: controller.signal },
             { preferredUser: user },
           );
           const data = (await response.json().catch(() => ({}))) as PostsResponse & { error?: string };
           if (!response.ok) {
             throw new Error(data.error || "Failed to search social account captions");
           }
-          if (cancelled) return;
+          if (cancelled || controller.signal.aborted) return;
           setPostSearchResults(data);
         } catch (error) {
-          if (cancelled) return;
+          if (cancelled || controller.signal.aborted) return;
           setPostSearchError(error instanceof Error ? error.message : "Failed to search social account captions");
         } finally {
-          if (!cancelled) {
+          if (!cancelled && !controller.signal.aborted) {
             setPostSearchLoading(false);
           }
         }
@@ -5885,6 +5916,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     return () => {
       cancelled = true;
       window.clearTimeout(timeout);
+      controller.abort();
     };
   }, [checking, fetchAdminWithAuth, handle, hasAccess, platform, postSearchExpanded, summaryUninitialized, trimmedPostSearchQuery, user]);
 
@@ -7378,10 +7410,11 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
         selectedTasks: catalogRunProgress?.selected_tasks,
         effectiveSelectedTasks: catalogRunProgress?.effective_selected_tasks,
         commentsRunId: catalogRunProgress?.comments_run_id,
-        attachedFollowups: catalogRunProgress?.attached_followups,
+        attachedFollowups: catalogRunProgress?.attached_followups ?? displayedCatalogRunSummary?.attached_followups,
       }),
 	    [
 	      catalogRunProgress,
+	      displayedCatalogRunSummary?.attached_followups,
 	      displayedCatalogRunStatus,
 	    ],
 	  );
@@ -9171,6 +9204,8 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       if (!user) return;
       const normalizedSourceId = String(sourceId || "").trim();
       if (!normalizedSourceId) return;
+      const requestKey = `${platform}:${handle}:${normalizedSourceId}:${Date.now()}:${Math.random()}`;
+      catalogDetailRequestKeyRef.current = requestKey;
       setCatalogDetailSourceId(normalizedSourceId);
       setCatalogDetail(null);
       setCatalogDetailError(null);
@@ -9188,12 +9223,16 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
           throw buildSocialAccountRequestError(data, "Failed to load catalog post detail");
         }
         const data = (await response.json().catch(() => ({}))) as SocialAccountCatalogPostDetail;
+        if (catalogDetailRequestKeyRef.current !== requestKey) return;
         setCatalogDetail(data);
       } catch (error) {
+        if (catalogDetailRequestKeyRef.current !== requestKey) return;
         const requestError = toSocialAccountRequestError(error, "Failed to load catalog post detail");
         setCatalogDetailError(requestError.message);
       } finally {
-        setCatalogDetailLoading(false);
+        if (catalogDetailRequestKeyRef.current === requestKey) {
+          setCatalogDetailLoading(false);
+        }
       }
     },
     [fetchAdminWithAuth, handle, platform, user],
@@ -9336,6 +9375,10 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
 
       let result = data.result ?? null;
       let status = data.status ?? "idle";
+      const expectedOperationId =
+        typeof data.operation_id === "string" && data.operation_id.trim()
+          ? data.operation_id.trim()
+          : null;
       let attempts = 0;
 
       while (!result && (status === "queued" || status === "running") && attempts < 30) {
@@ -9352,7 +9395,10 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
         if (!statusResponse.ok) {
           throw buildSocialAccountRequestError(statusData, "Failed to fetch social account catalog gap analysis");
         }
-        applyCatalogGapAnalysisStatus(statusData);
+        const applied = applyCatalogGapAnalysisStatus(statusData, expectedOperationId);
+        if (!applied) {
+          continue;
+        }
         result = statusData.result ?? null;
         status = statusData.status ?? "idle";
       }
@@ -9983,7 +10029,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                             const href = buildSocialAccountProfileUrl({
                               platform: sourcePlatform,
                               handle: sourceHandle,
-                              tab: selectedTab,
+                              tab: getSupportedSocialAccountTab(sourcePlatform, selectedTab),
                             }) as Route;
                             const content = (
                               <>

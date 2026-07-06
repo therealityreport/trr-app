@@ -62,6 +62,7 @@ vi.mock("@/lib/admin/show-admin-routes", async () => {
 });
 
 import SocialAccountProfilePage from "@/components/admin/SocialAccountProfilePage";
+import SocialAccountProfileHashtagTimelineChart from "@/components/admin/SocialAccountProfileHashtagTimelineChart";
 
 const jsonResponse = (body: unknown, status = 200): Response =>
   new Response(JSON.stringify(body), {
@@ -177,6 +178,38 @@ describe("SocialAccountProfile hashtag timeline", () => {
 
     expect(screen.getByRole("heading", { name: "Hashtags" })).toBeInTheDocument();
     expect(screen.getByText("Unknown Hashtags")).toBeInTheDocument();
+  });
+
+  it("renders dropped-out hashtags on a separate rail below rank ten", () => {
+    render(
+      <SocialAccountProfileHashtagTimelineChart
+        timeline={{
+          platform: "instagram",
+          account_handle: "bravotv",
+          years: [
+            { year: 2022, label: "2022", order: 1 },
+            { year: 2023, label: "2023", order: 2 },
+          ],
+          series: [
+            {
+              hashtag: "bravo",
+              display_hashtag: "#bravo",
+              first_top_order: 1,
+              last_top_order: 1,
+              points: [
+                { year: 2022, label: "2022", order: 1, rank: 10, usage_count: 5, in_top_ten: true, segment_id: 1 },
+                { year: 2023, label: "2023", order: 2, rank: 11, usage_count: 0, in_top_ten: false, segment_id: null },
+              ],
+            },
+          ],
+          top_rank_limit: 10,
+          off_chart_rank: 11,
+        }}
+      />,
+    );
+
+    expect(screen.getByRole("img", { name: "Bump chart showing yearly top ten Instagram hashtags" })).toBeInTheDocument();
+    expect(screen.getAllByText(/Dropped out \(11\+\)/)).toHaveLength(2);
   });
 
   it("shows the quiet empty state when the timeline has fewer than two years", async () => {

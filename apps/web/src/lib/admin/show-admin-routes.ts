@@ -1113,14 +1113,6 @@ export function buildAdminRedditCommunityUrl(input: {
     return appendQuery(ADMIN_REDDIT_BASE_PATH, nextQuery);
   }
   const season = parsePositiveSeasonNumber(input.seasonNumber);
-  if (season && trimmedShowSlug) {
-    return buildShowRedditCommunityUrl({
-      showSlug: trimmedShowSlug,
-      communitySlug: trimmedCommunity,
-      seasonNumber: season,
-      query: nextQuery,
-    });
-  }
   const encodedCommunity = encodeURIComponent(trimmedCommunity);
   const basePath = trimmedShowSlug
     ? `${ADMIN_REDDIT_BASE_PATH}/${encodedCommunity}/${encodeURIComponent(trimmedShowSlug)}`

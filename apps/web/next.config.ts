@@ -156,16 +156,6 @@ const nextConfig: NextConfig = {
         destination: "/:showId/social/s:seasonNumber/w:weekIndex",
         permanent: false,
       },
-      {
-        source: "/shows/:showId((?!settings$)[^/]+)/:rest*",
-        destination: "/:showId/:rest*",
-        permanent: false,
-      },
-      {
-        source: "/shows/:showId((?!settings$)[^/]+)",
-        destination: "/:showId",
-        permanent: false,
-      },
     ];
   },
   async rewrites() {

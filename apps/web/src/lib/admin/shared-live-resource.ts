@@ -168,12 +168,15 @@ class SharedLiveResourceCoordinator<T> {
   private readonly snapshotKey: string;
   private readonly channelName: string;
   private readonly channel: BroadcastChannel | null;
+  private readonly onEmpty: (coordinator: SharedLiveResourceCoordinator<T>) => void;
   private config: SharedResourceConfig<T>;
   private pendingPollRequest: SharedPollRequest | null = null;
   private consecutiveRetryableErrorCount = 0;
+  private disposed = false;
 
-  constructor(config: SharedResourceConfig<T>) {
+  constructor(config: SharedResourceConfig<T>, onEmpty: (coordinator: SharedLiveResourceCoordinator<T>) => void) {
     this.config = config;
+    this.onEmpty = onEmpty;
     this.key = config.key;
     this.leaseKey = `trr:shared-live:${this.key}:lease:${SNAPSHOT_VERSION}`;
     this.snapshotKey = `trr:shared-live:${this.key}:snapshot:${SNAPSHOT_VERSION}`;
@@ -212,6 +215,10 @@ class SharedLiveResourceCoordinator<T> {
 
   unsubscribe(id: string): void {
     this.subscribers.delete(id);
+    if (this.subscribers.size === 0) {
+      this.onEmpty(this);
+      return;
+    }
     this.reconcile();
   }
 
@@ -246,10 +253,18 @@ class SharedLiveResourceCoordinator<T> {
    * avoid leaking coordinator state between cases.
    */
   dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
     this.clearTimer();
     this.stopExecutor();
     this.subscribers.clear();
     this.releaseLeaderLease();
+    if (typeof window !== "undefined") {
+      window.removeEventListener("storage", this.handleStorageEvent);
+    }
+    if (typeof document !== "undefined") {
+      document.removeEventListener("visibilitychange", this.handleVisibilityChange);
+    }
     if (this.channel) {
       try {
         this.channel.close();
@@ -625,7 +640,11 @@ const getCoordinator = <T,>(config: SharedResourceConfig<T>): SharedLiveResource
     existing.updateConfig(config);
     return existing;
   }
-  const coordinator = new SharedLiveResourceCoordinator<T>(config);
+  const coordinator = new SharedLiveResourceCoordinator<T>(config, (emptyCoordinator) => {
+    if (registry[config.key] !== emptyCoordinator) return;
+    emptyCoordinator.dispose();
+    delete registry[config.key];
+  });
   registry[config.key] = coordinator as SharedLiveResourceCoordinator<unknown>;
   return coordinator;
 };

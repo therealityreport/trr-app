@@ -487,6 +487,7 @@ export function InstagramCatalogBackfillMockupView({
   const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
   const hasLoadedRef = useRef(false);
   const refreshInFlightRef = useRef(false);
+  const refreshRequestIdRef = useRef(0);
   const completionInFlightRef = useRef(false);
   const completionLastRequestedAtRef = useRef(0);
   const normalizedPlatform = platform;
@@ -552,9 +553,11 @@ export function InstagramCatalogBackfillMockupView({
     }
     if (refreshInFlightRef.current) return;
     refreshInFlightRef.current = true;
+    const requestId = ++refreshRequestIdRef.current;
     if (options?.showLoading || !hasLoadedRef.current) setLoading(true);
     setError(null);
     setCommentsProgressError(null);
+    const isCurrentRequest = () => refreshRequestIdRef.current === requestId;
     try {
       const recentRunsResponse = await fetchAdminWithAuth(
         `/api/admin/trr-api/social/profiles/${encodeURIComponent(normalizedPlatform)}/${encodeURIComponent(
@@ -567,6 +570,7 @@ export function InstagramCatalogBackfillMockupView({
       if (!recentRunsResponse.ok) {
         throw buildRequestError(recentRunsPayload, "Failed to load recent catalog runs");
       }
+      if (!isCurrentRequest()) return;
       const nextRecentRuns = dedupeCatalogRuns(recentRunsPayload.catalog_recent_runs ?? []);
       setRecentRuns(nextRecentRuns);
       const activeRun = getActiveCatalogRun(nextRecentRuns);
@@ -581,6 +585,7 @@ export function InstagramCatalogBackfillMockupView({
           recentLogLimit: 8,
           fast: true,
         });
+        if (!isCurrentRequest()) return;
         setProgress(progressPayload);
         const commentsRunId = resolveCommentsRunId(progressPayload, activeRun);
         if (commentsRunId) {
@@ -596,9 +601,11 @@ export function InstagramCatalogBackfillMockupView({
             if (!commentsResponse.ok) {
               throw buildRequestError(commentsPayload, "Failed to load comments run progress");
             }
+            if (!isCurrentRequest()) return;
             setCommentsProgress(commentsPayload);
             setCommentsProgressError(null);
           } catch (caught) {
+            if (!isCurrentRequest()) return;
             setCommentsProgress(null);
             setCommentsProgressError(
               caught instanceof Error ? caught.message : "Failed to load comments run progress",
@@ -613,14 +620,18 @@ export function InstagramCatalogBackfillMockupView({
         setCommentsProgress(null);
         setCommentsProgressError(null);
       }
+      if (!isCurrentRequest()) return;
       setLastUpdatedAt(new Date());
       void refreshCompletionSummary({ force: Boolean(options?.showLoading) });
     } catch (caught) {
+      if (!isCurrentRequest()) return;
       setError(caught instanceof Error ? caught.message : "Failed to load live catalog backfill data");
     } finally {
-      hasLoadedRef.current = true;
-      refreshInFlightRef.current = false;
-      setLoading(false);
+      if (isCurrentRequest()) {
+        hasLoadedRef.current = true;
+        refreshInFlightRef.current = false;
+        setLoading(false);
+      }
     }
   }, [
     checking,
@@ -645,6 +656,8 @@ export function InstagramCatalogBackfillMockupView({
     }, REFRESH_INTERVAL_MS);
     return () => {
       cancelled = true;
+      refreshRequestIdRef.current += 1;
+      refreshInFlightRef.current = false;
       window.clearInterval(intervalId);
     };
   }, [checking, hasAccess, refreshDashboard, user]);

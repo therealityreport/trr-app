@@ -74,6 +74,34 @@ afterEach(() => {
   }
 });
 
+function followProxyRedirects(initialUrl: string, limit = 5): { locations: string[]; statuses: number[] } {
+  const locations: string[] = [];
+  const statuses: number[] = [];
+  const seen = new Set<string>();
+  let currentUrl = initialUrl;
+
+  for (let index = 0; index < limit; index += 1) {
+    if (seen.has(currentUrl)) {
+      throw new Error(`Proxy redirect loop detected at ${currentUrl}`);
+    }
+    seen.add(currentUrl);
+
+    const response = proxy(new NextRequest(currentUrl));
+    statuses.push(response.status);
+
+    const location = response.headers.get("location");
+    if ((response.status === 307 || response.status === 308) && location) {
+      locations.push(location);
+      currentUrl = location;
+      continue;
+    }
+
+    return { locations, statuses };
+  }
+
+  throw new Error(`Proxy redirect chain exceeded ${limit} hops from ${initialUrl}`);
+}
+
 describe("admin host proxy", () => {
   it("keeps loopback admin paths local unless the legacy local admin fallback is enabled", () => {
     process.env.NODE_ENV = "development";
@@ -352,6 +380,18 @@ describe("admin host proxy", () => {
 
     expect(response.status).toBe(307);
     expect(response.headers.get("location")).toBe(`http://admin.localhost:3000${pathname}`);
+  });
+
+  it("keeps root show settings aliases on the public placeholder route", () => {
+    process.env.ADMIN_APP_ORIGIN = "http://admin.localhost:3000";
+    process.env.ADMIN_ENFORCE_HOST = "true";
+    process.env.ADMIN_STRICT_HOST_ROUTING = "false";
+
+    const request = new NextRequest("http://localhost:3000/rhoslc/settings");
+    const response = proxy(request);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("location")).toBeNull();
   });
 
   it.each([
@@ -877,6 +917,20 @@ describe("admin host proxy", () => {
 
     expect(response.status).toBe(307);
     expect(response.headers.get("location")).toBe(expectedLocation);
+  });
+
+  it("settles legacy admin show social-week URLs after one 307", () => {
+    process.env.ADMIN_APP_ORIGIN = "http://admin.localhost:3000";
+    delete process.env.ADMIN_APP_HOSTS;
+    process.env.ADMIN_ENFORCE_HOST = "true";
+    process.env.ADMIN_STRICT_HOST_ROUTING = "false";
+
+    const chain = followProxyRedirects(
+      "http://admin.localhost:3000/admin/trr-shows/rhoslc/seasons/6/social/week/0/youtube",
+    );
+
+    expect(chain.locations).toEqual(["http://admin.localhost:3000/rhoslc/s6/social/w0/youtube"]);
+    expect(chain.statuses).toEqual([307, 200]);
   });
 
   it("redirects internal admin person workspace URLs back to the short canonical /people URL", () => {

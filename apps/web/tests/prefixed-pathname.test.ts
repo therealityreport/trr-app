@@ -12,4 +12,9 @@ describe("extractPrefixedPathSegment", () => {
   it("returns undefined when the segment does not match the expected prefix", () => {
     expect(extractPrefixedPathSegment("/rhoslc/social/reddit/BravoRealHousewives", 1, "s")).toBeUndefined();
   });
+
+  it("rejects numeric-prefixed helper tokens with extra path text", () => {
+    expect(extractPrefixedPathSegment("/rhoslc/s6abc/social/w01", 1, "s")).toBeUndefined();
+    expect(extractPrefixedPathSegment("/rhoslc/s6/social/w01-extra", 3, "w")).toBeUndefined();
+  });
 });

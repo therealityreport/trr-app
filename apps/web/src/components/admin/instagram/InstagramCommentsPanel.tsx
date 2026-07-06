@@ -788,6 +788,7 @@ export default function InstagramCommentsPanel({
   const [relayCheckpointShowFilter, setRelayCheckpointShowFilter] = useState("");
   const [selectedPost, setSelectedPost] = useState<SocialAccountProfilePost | null>(null);
   const [modalRefreshKey, setModalRefreshKey] = useState(0);
+  const manuallyClosedPostSourceIdRef = useRef<string | null>(null);
   const handledTerminalRunRef = useRef<string | null>(null);
   const terminalCoverageRefreshRunRef = useRef<string | null>(null);
   const mountedAtMsRef = useRef(Date.now());
@@ -912,6 +913,7 @@ export default function InstagramCommentsPanel({
     const sourceId = String(selectedPostParam || "").trim();
     if (!sourceId || !posts) return;
     if (selectedPost?.source_id === sourceId) return;
+    if (manuallyClosedPostSourceIdRef.current === sourceId) return;
     const postFromUrl = posts.items.find((item) => item.source_id === sourceId);
     if (postFromUrl) {
       setSelectedPost(postFromUrl);
@@ -1518,15 +1520,17 @@ export default function InstagramCommentsPanel({
   const openPostComments = useCallback(
     (post: SocialAccountProfilePost, event?: MouseEvent<HTMLAnchorElement | HTMLButtonElement>) => {
       event?.preventDefault();
+      manuallyClosedPostSourceIdRef.current = null;
       setSelectedPost(post);
       replacePostParam(String(post.source_id || "").trim() || null);
     },
     [replacePostParam],
   );
   const closePostComments = useCallback(() => {
+    manuallyClosedPostSourceIdRef.current = String(selectedPost?.source_id || selectedPostParam || "").trim() || null;
     setSelectedPost(null);
     replacePostParam(null);
-  }, [replacePostParam]);
+  }, [replacePostParam, selectedPost?.source_id, selectedPostParam]);
   const fetchPostCommentsAdmin = useCallback(
     (input: RequestInfo | URL, init?: RequestInit) =>
       fetchAdminWithAuth(input, init, { preferredUser: user }),
