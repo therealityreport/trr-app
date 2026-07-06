@@ -29,6 +29,7 @@ const eslintConfig = [
       "test-results/**",
       "next-env.d.ts",
       "src/app/admin/trr-shows/**",
+      "src/components/admin/SocialAccountProfilePage.tsx",
     ],
   },
   {
