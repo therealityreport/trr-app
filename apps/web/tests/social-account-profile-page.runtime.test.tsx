@@ -7772,12 +7772,7 @@ describe("SocialAccountProfilePage", () => {
       if (url.includes("/posts?page=1&page_size=25&search=old")) {
         firstSearchSignal = init?.signal ?? null;
         return new Promise<Response>((resolve, reject) => {
-          init?.signal?.addEventListener("abort", () => {
-            const abortError = new Error("caption search aborted");
-            abortError.name = "AbortError";
-            reject(abortError);
-          });
-          window.setTimeout(() => {
+          const timeoutId = window.setTimeout(() => {
             resolve(
               jsonResponse({
                 items: [
@@ -7796,6 +7791,12 @@ describe("SocialAccountProfilePage", () => {
               }),
             );
           }, 1_000);
+          init?.signal?.addEventListener("abort", () => {
+            window.clearTimeout(timeoutId);
+            const abortError = new Error("caption search aborted");
+            abortError.name = "AbortError";
+            reject(abortError);
+          });
         });
       }
       if (url.includes("/posts?page=1&page_size=25&search=new")) {
