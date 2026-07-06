@@ -15,7 +15,7 @@
     "typecheck": "rm -rf .next/dev/types .next/types && tsc -p tsconfig.typecheck.json --noEmit",
     "typecheck:fandom": "tsc -p tsconfig.typecheck.fandom.json --noEmit",
     "validate:quick": "pnpm run generated:check && pnpm exec vitest run -c vitest.config.mts tests/validation.test.ts tests/shared-env-contract.test.ts tests/safe-next-build.test.ts",
-    "lint": "eslint",
+    "lint": "NODE_OPTIONS=--max-old-space-size=8192 eslint",
     "clean": "rm -rf .next",
     "generated:check": "node scripts/generate-admin-api-references.mjs --check && node scripts/generate-brand-font-artifacts.mjs --check",
     "generate:brand-font-artifacts": "node scripts/generate-brand-font-artifacts.mjs",
