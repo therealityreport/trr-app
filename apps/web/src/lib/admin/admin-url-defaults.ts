@@ -1,9 +1,51 @@
 export const CLASSIC_LOCAL_ADMIN_ORIGIN = "http://admin.localhost:3000";
 export const PORTLESS_APP_ORIGIN = "https://trr.localhost";
 export const PORTLESS_ADMIN_ORIGIN = "https://admin.trr.localhost";
-export const PORTLESS_ADMIN_DASHBOARD_URL = `${PORTLESS_ADMIN_ORIGIN}/admin`;
+export const PORTLESS_ADMIN_DASHBOARD_URL = PORTLESS_ADMIN_ORIGIN;
 export const PORTLESS_API_ORIGIN = "https://api.trr.localhost";
+export const PORTLESS_API_HEALTH_URL = `${PORTLESS_API_ORIGIN}/health/live`;
+export const PORTLESS_WORDLE_ORIGIN = "https://wordle.trr.localhost";
 export const LEGACY_LOCAL_ADMIN_FALLBACK_ENV = "TRR_LEGACY_LOCAL_ADMIN_FALLBACK";
+
+export const PORTLESS_ROUTE_DEFINITIONS = {
+  app: {
+    id: "trr",
+    label: "App",
+    url: PORTLESS_APP_ORIGIN,
+    expectedPath: "/",
+  },
+  admin: {
+    id: "admin.trr",
+    label: "Admin",
+    url: PORTLESS_ADMIN_DASHBOARD_URL,
+    expectedPath: "/",
+  },
+  api: {
+    id: "api.trr",
+    label: "API",
+    url: PORTLESS_API_HEALTH_URL,
+    expectedPath: "/health/live",
+  },
+  wordle: {
+    id: "wordle.trr",
+    label: "Wordle",
+    url: PORTLESS_WORDLE_ORIGIN,
+    expectedPath: "/",
+  },
+} as const;
+
+export const PORTLESS_ROUTE_LINKS = [
+  PORTLESS_ROUTE_DEFINITIONS.admin,
+  PORTLESS_ROUTE_DEFINITIONS.app,
+  PORTLESS_ROUTE_DEFINITIONS.api,
+] as const;
+
+export const PORTLESS_STATUS_ROUTES = [
+  PORTLESS_ROUTE_DEFINITIONS.app,
+  PORTLESS_ROUTE_DEFINITIONS.admin,
+  PORTLESS_ROUTE_DEFINITIONS.api,
+  PORTLESS_ROUTE_DEFINITIONS.wordle,
+] as const;
 
 const LOOPBACK_ADMIN_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
 

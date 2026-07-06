@@ -56,6 +56,9 @@ const nextConfig: NextConfig = {
   reactStrictMode: true,
   typedRoutes: TYPED_ROUTES_ENABLED,
   distDir: DIST_DIR,
+  allowedDevOrigins: IS_DEV
+    ? ["admin.trr.localhost", "trr.localhost", "api.trr.localhost", "localhost"]
+    : undefined,
   experimental: BUILD_WORKER_COUNT
     ? {
         cpus: BUILD_WORKER_COUNT,
@@ -151,16 +154,6 @@ const nextConfig: NextConfig = {
       {
         source: "/:showId/social/s:seasonNumber(\\d+)/w:weekIndex(\\d+)/details",
         destination: "/:showId/social/s:seasonNumber/w:weekIndex",
-        permanent: false,
-      },
-      {
-        source: "/shows/:showId((?!settings$)[^/]+)/:rest*",
-        destination: "/:showId/:rest*",
-        permanent: false,
-      },
-      {
-        source: "/shows/:showId((?!settings$)[^/]+)",
-        destination: "/:showId",
         permanent: false,
       },
     ];

@@ -51,6 +51,16 @@ describe("show refresh health center wiring", () => {
     expect(showPage).toMatch(/gallery media refresh/);
   });
 
+  it("auto-runs the full refresh once per viewed show", () => {
+    expect(showPage).toMatch(/searchParams\.get\("showRefreshOperationId"\) \?\? searchParams\.get\("showCoreOperationId"\)/);
+    expect(showPage).toMatch(/searchParams\.get\("showRefreshStarted"\) === "1"/);
+    expect(showPage).toMatch(/trr:show-full-auto-refresh:\$\{showId\}/);
+    expect(showPage).toMatch(/if \(preNavigationShowRefreshStarted\) return;/);
+    expect(showPage).toMatch(/if \(!autoShowCorePauseLoaded\) return;/);
+    expect(showPage).toMatch(/if \(autoShowCorePaused\) return;/);
+    expect(showPage).toMatch(/void refreshAllShowData\(\);/);
+  });
+
   it("removes duplicate gallery headings and stale inline progress bars from season assets", () => {
     expect(seasonPage).not.toMatch(/Season Images/);
     expect(seasonPage).not.toMatch(/Season Videos/);

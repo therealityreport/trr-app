@@ -2818,6 +2818,7 @@ export default function TrrShowDetailPage() {
   const [refreshLogEntries, setRefreshLogEntries] = useState<RefreshLogEntry[]>([]);
   const [refreshLogOpen, setRefreshLogOpen] = useState(false);
   const [autoShowCorePaused, setAutoShowCorePaused] = useState(false);
+  const [autoShowCorePauseLoaded, setAutoShowCorePauseLoaded] = useState(false);
   const [autoShowCorePauseSaving, setAutoShowCorePauseSaving] = useState(false);
   const [autoShowCorePauseError, setAutoShowCorePauseError] = useState<string | null>(null);
   const healthCenterScrollTopRef = useRef(0);
@@ -10516,15 +10517,20 @@ export default function TrrShowDetailPage() {
       ? episodeIdIgnoredSeasonZeroWarning.count
       : null);
 
-  const preNavigationShowCoreOperationId = useMemo(() => {
-    const value = searchParams.get("showCoreOperationId");
+  const preNavigationShowRefreshOperationId = useMemo(() => {
+    const value = searchParams.get("showRefreshOperationId") ?? searchParams.get("showCoreOperationId");
     return value && value.trim().length > 0 ? value.trim() : null;
   }, [searchParams]);
+  const preNavigationShowRefreshStarted = useMemo(
+    () => preNavigationShowRefreshOperationId !== null || searchParams.get("showRefreshStarted") === "1",
+    [preNavigationShowRefreshOperationId, searchParams],
+  );
 
   useEffect(() => {
     let cancelled = false;
     const loadAutoShowCoreSettings = async () => {
       try {
+        setAutoShowCorePauseLoaded(false);
         setAutoShowCorePauseError(null);
         const headers = await getAuthHeaders();
         const response = await fetch(`/api/admin/trr-api/shows/settings/show-core-auto-refresh`, {
@@ -10543,6 +10549,10 @@ export default function TrrShowDetailPage() {
           setAutoShowCorePauseError(
             err instanceof Error ? err.message : "Failed to load auto-refresh setting",
           );
+        }
+      } finally {
+        if (!cancelled) {
+          setAutoShowCorePauseLoaded(true);
         }
       }
     };
@@ -10578,42 +10588,6 @@ export default function TrrShowDetailPage() {
       }
     })();
   }, [autoShowCorePaused, getAuthHeaders]);
-
-  useEffect(() => {
-    if (!showId || !episodeIdGapWarning) return;
-    if (autoShowCorePaused) return;
-    if (refreshingShowAll || refreshingTargets.show_core) return;
-
-    const warningCount =
-      typeof episodeIdGapWarning.count === "number" && Number.isFinite(episodeIdGapWarning.count)
-        ? episodeIdGapWarning.count
-        : 0;
-    const storageKey = `trr:show-core-auto-refresh:${showId}:${warningCount}`;
-    try {
-      if (window.sessionStorage.getItem(storageKey) === "1") return;
-      window.sessionStorage.setItem(storageKey, "1");
-    } catch {
-      // Session storage is best-effort; a blocked storage API should not block repair.
-    }
-
-    appendRefreshLog({
-      category: "Show Core",
-      message: "Episode ID gaps detected; starting show core refresh.",
-      current: null,
-      total: null,
-      topic: "show_core",
-    });
-    setRefreshLogOpen(true);
-    void refreshShow("show_core");
-  }, [
-    appendRefreshLog,
-    episodeIdGapWarning,
-    autoShowCorePaused,
-    refreshShow,
-    refreshingShowAll,
-    refreshingTargets.show_core,
-    showId,
-  ]);
 
   const retryRefreshTarget = useCallback(
     async (target: string, parentOperationId: string) => {
@@ -10912,6 +10886,32 @@ export default function TrrShowDetailPage() {
     loadUnifiedNews,
     refreshShow,
     refreshingShowAll,
+    showId,
+  ]);
+
+  useEffect(() => {
+    if (!showId) return;
+    if (preNavigationShowRefreshStarted) return;
+    if (!autoShowCorePauseLoaded) return;
+    if (autoShowCorePaused) return;
+    if (refreshingShowAll || Object.values(refreshingTargets).some(Boolean)) return;
+
+    const storageKey = `trr:show-full-auto-refresh:${showId}`;
+    try {
+      if (window.sessionStorage.getItem(storageKey) === "1") return;
+      window.sessionStorage.setItem(storageKey, "1");
+    } catch {
+      // Session storage is best-effort; a blocked storage API should not block refresh.
+    }
+
+    void refreshAllShowData();
+  }, [
+    autoShowCorePaused,
+    autoShowCorePauseLoaded,
+    preNavigationShowRefreshStarted,
+    refreshAllShowData,
+    refreshingShowAll,
+    refreshingTargets,
     showId,
   ]);
 
@@ -12533,13 +12533,15 @@ export default function TrrShowDetailPage() {
                 </div>
               )}
             </div>
-            {preNavigationShowCoreOperationId && (
+            {preNavigationShowRefreshStarted && (
               <div className="mt-4 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900">
-                <p className="font-semibold">Show core refresh started before navigation.</p>
-                <p className="mt-0.5 text-xs text-blue-800">
-                  Active operation ID:{" "}
-                  <span className="font-mono">{preNavigationShowCoreOperationId}</span>
-                </p>
+                <p className="font-semibold">Show refresh started before navigation.</p>
+                {preNavigationShowRefreshOperationId && (
+                  <p className="mt-0.5 text-xs text-blue-800">
+                    Active operation ID:{" "}
+                    <span className="font-mono">{preNavigationShowRefreshOperationId}</span>
+                  </p>
+                )}
               </div>
             )}
             {(episodeIdGapWarning || ignoredSeasonZeroCount !== null) && (
@@ -12570,7 +12572,7 @@ export default function TrrShowDetailPage() {
                         ? ` Ignored season 0 specials: ${ignoredSeasonZeroCount.toLocaleString()}.`
                         : ""}
                       {autoShowCorePaused && episodeIdGapWarning
-                        ? " Automatic show core refreshes are paused."
+                        ? " Automatic show refreshes are paused."
                         : ""}
                       {autoShowCorePauseError ? ` ${autoShowCorePauseError}` : ""}
                     </p>

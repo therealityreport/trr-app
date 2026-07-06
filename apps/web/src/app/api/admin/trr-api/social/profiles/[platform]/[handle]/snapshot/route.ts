@@ -10,6 +10,7 @@ import { buildSnapshotResponse } from "@/lib/server/admin/admin-snapshot-route";
 import {
   fetchSocialBackendJson,
   SOCIAL_PROXY_LONG_TIMEOUT_MS,
+  SOCIAL_PROXY_PROGRESS_TIMEOUT_MS,
   socialProxyErrorResponse,
 } from "@/lib/server/trr-api/social-admin-proxy";
 
@@ -21,7 +22,6 @@ const LIVE_TTL_MS = 5 * 60_000;
 const LIVE_STALE_MS = 15 * 60_000;
 const RUN_PROGRESS_TTL_MS = 3_000;
 const RUN_PROGRESS_STALE_MS = 30_000;
-const DIRECT_PROGRESS_TIMEOUT_MS = 12_000;
 const ACTIVE_PROFILE_WORK_STATUSES = new Set(["queued", "pending", "retrying", "running", "cancelling"]);
 
 export const dynamic = "force-dynamic";
@@ -49,26 +49,6 @@ const activeCatalogRunId = (summary: Record<string, unknown> | null): string | n
   }
   return null;
 };
-
-const hasActiveCommentsCoverage = (summary: Record<string, unknown> | null): boolean => {
-  const coverage = readNestedRecord(summary?.comments_coverage);
-  if (!coverage) return false;
-  const activeRunId = String(coverage.active_run_id ?? "").trim();
-  if (activeRunId) return true;
-  const status = String(
-    coverage.effective_status ?? coverage.last_attempt_status ?? coverage.last_comments_run_status ?? "",
-  )
-    .trim()
-    .toLowerCase();
-  return ACTIVE_PROFILE_WORK_STATUSES.has(status);
-};
-
-const hasActiveCatalogWork = (summary: Record<string, unknown> | null): boolean => {
-  return activeCatalogRunId(summary) !== null;
-};
-
-const hasActiveProfileWork = (snapshot: SocialProfileSnapshotPayload): boolean =>
-  hasActiveCommentsCoverage(snapshot.summary) || hasActiveCatalogWork(snapshot.summary);
 
 const buildDegradedProgressPayload = (runId: string, reason: string): Record<string, unknown> => ({
   run_id: runId,
@@ -108,7 +88,7 @@ const fetchDirectCatalogProgress = async ({
         fallbackError: "Failed to fetch social account catalog run progress",
         queryString: progressParams.toString(),
         retries: 0,
-        timeoutMs: DIRECT_PROGRESS_TIMEOUT_MS,
+        timeoutMs: SOCIAL_PROXY_PROGRESS_TIMEOUT_MS,
       },
     )) as Record<string, unknown>;
     return { progress, source: "direct-progress" };
@@ -239,22 +219,13 @@ export async function GET(request: NextRequest, context: RouteContext) {
       } satisfies SocialProfileSnapshotPayload;
     };
 
-    let snapshot = await getOrCreateAdminSnapshot({
+    const snapshot = await getOrCreateAdminSnapshot({
       cacheKey,
       ttlMs,
       staleIfErrorTtlMs,
       forceRefresh,
       fetcher: fetchProfileDashboardSnapshot,
     });
-    if (!forceRefresh && snapshot.meta.cacheStatus === "hit" && hasActiveProfileWork(snapshot.data)) {
-      snapshot = await getOrCreateAdminSnapshot({
-        cacheKey,
-        ttlMs,
-        staleIfErrorTtlMs,
-        forceRefresh: true,
-        fetcher: fetchProfileDashboardSnapshot,
-      });
-    }
 
     const dashboardFreshness: Record<string, unknown> =
       snapshot.data.dashboard_freshness && typeof snapshot.data.dashboard_freshness === "object"

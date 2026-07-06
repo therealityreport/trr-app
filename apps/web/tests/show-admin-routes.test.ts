@@ -602,8 +602,8 @@ describe("show-admin-routes", () => {
         postId: "1abcde",
         title: "The Real Housewives Of Salt Lake City - Season 6 - Episode 1 - Pre Episode Discussion",
         author: "AutoModerator",
-      }),
-    ).toBe(
+    }),
+  ).toBe(
       "/rhoslc/social/reddit/BravoRealHousewives/s6/e1/the-real-housewives-of-salt-lake-city-season-6-episode-1-pre-episode-discussion--u-automoderator",
     );
 

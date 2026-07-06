@@ -269,7 +269,7 @@ const healthyCookieHealth = (platform: string) => ({
   source_kind: "default_file",
 });
 
-const INSTAGRAM_BACKFILL_DEFAULT_TASKS = ["post_details", "comments"] as const;
+const INSTAGRAM_BACKFILL_DEFAULT_TASKS = ["post_details", "comments", "media"] as const;
 const TIKTOK_BACKFILL_DEFAULT_TASKS = ["post_details", "comments", "media"] as const;
 
 const createStorageMock = (): Storage => {
@@ -350,7 +350,7 @@ describe("SocialAccountProfilePage", () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes("/summary")) {
-        return jsonResponse(baseSummary);
+        return jsonResponse({ ...baseSummary, network_name: "Bravo" });
       }
       if (url.includes("/snapshot")) {
         return jsonResponse({
@@ -411,7 +411,7 @@ describe("SocialAccountProfilePage", () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes("/summary")) {
-        return jsonResponse(baseSummary);
+        return jsonResponse({ ...baseSummary, network_name: "Bravo" });
       }
       if (url.includes("/snapshot")) {
         return jsonResponse({
@@ -603,7 +603,7 @@ describe("SocialAccountProfilePage", () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes("/summary")) {
-        return jsonResponse(baseSummary);
+        return jsonResponse({ ...baseSummary, network_name: "Bravo" });
       }
       throw new Error(`Unhandled request: ${url}`);
     });
@@ -886,7 +886,9 @@ describe("SocialAccountProfilePage", () => {
 
     render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="stats" />);
 
-    expect(await screen.findByText("Showing cached dashboard data from 2 minutes ago.")).toBeInTheDocument();
+    const statusRow = await screen.findByRole("status");
+    expect(statusRow).toHaveTextContent("Data status: Cached");
+    expect(statusRow).toHaveTextContent("updated 2 minutes ago");
     expect(screen.getByText("All-time Saved Comments")).toBeInTheDocument();
   });
 
@@ -915,9 +917,9 @@ describe("SocialAccountProfilePage", () => {
 
     render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="stats" />);
 
-    expect(
-      await screen.findByText("Backend dashboard refresh failed. Showing the last successful profile data."),
-    ).toBeInTheDocument();
+    const statusRow = await screen.findByRole("status");
+    expect(statusRow).toHaveTextContent("Data status: Degraded");
+    expect(statusRow).toHaveTextContent("showing the last successful profile data");
     expect(screen.getByText("All-time Saved Comments")).toBeInTheDocument();
     expect(screen.queryByText("Failed to load social account profile summary")).not.toBeInTheDocument();
   });
@@ -1586,6 +1588,40 @@ describe("SocialAccountProfilePage", () => {
     });
   });
 
+  it("falls back to a supported tab when the account switcher target cannot render the current tab", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse({ ...baseSummary, network_name: "Bravo" });
+      }
+      if (url.includes("/social/shared/sources")) {
+        return jsonResponse({
+          sources: [
+            {
+              platform: "twitter",
+              account_handle: "bravodailydish",
+              display_name: "Bravo Daily Dish",
+              network_name: "Bravo",
+              metadata: { profile_kind: "show_official" },
+            },
+          ],
+        });
+      }
+      if (url.includes("/socialblade")) {
+        return jsonResponse(baseSocialBladeResponse);
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="socialblade" />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /Instagram/i }));
+
+    const target = await screen.findByRole("link", { name: /Bravo Daily Dish/i });
+    expect(target).toHaveAttribute("href", "/social/twitter/bravodailydish");
+    expect(target).not.toHaveAttribute("href", "/social/twitter/bravodailydish/socialblade");
+  });
+
   it("shows the Comments tab only for platforms with saved discussion support", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
@@ -1639,6 +1675,10 @@ describe("SocialAccountProfilePage", () => {
             mode: "profile",
             source_scope: "network",
             refresh_policy: "stale_or_missing",
+            max_comments_per_post: 0,
+            comments_load_strategy: "public_relay",
+            date_start: null,
+            date_end: null,
           }),
         );
         return jsonResponse({ run_id: "comments-run-12345678", status: "queued" });
@@ -1716,6 +1756,7 @@ describe("SocialAccountProfilePage", () => {
   });
 
   it("queues an incomplete fill comments scrape from the comments tab", async () => {
+    const scrapeCalls: Array<Record<string, unknown>> = [];
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.includes("/summary")) {
@@ -1729,30 +1770,10 @@ describe("SocialAccountProfilePage", () => {
       }
       if (url.includes("/comments/scrape")) {
         expect(init?.method).toBe("POST");
-        expect(init?.body).toBe(
-          JSON.stringify({
-            mode: "profile",
-            source_scope: "network",
-            refresh_policy: "stale_or_missing",
-            target_filter: "incomplete",
-          }),
-        );
+        const body = init?.body && typeof init.body === "string" ? JSON.parse(init.body) : {};
+        scrapeCalls.push(body as Record<string, unknown>);
         return jsonResponse({
-          run_id: "incfill1-12345678",
           status: "queued",
-          auth_repair_attempted: true,
-          auth_repair_status: "succeeded",
-          comments_auth_probe: { status: "valid", shortcode: "SHORT1" },
-        });
-      }
-      if (url.includes("/comments/runs/incfill1-12345678/progress")) {
-        return jsonResponse({
-          run_id: "incfill1-12345678",
-          platform: "instagram",
-          account_handle: "bravotv",
-          run_status: "completed",
-          job_status: "completed",
-          target_filter: "incomplete",
         });
       }
       throw new Error(`Unhandled request: ${url}`);
@@ -1762,7 +1783,87 @@ describe("SocialAccountProfilePage", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Incomplete Fill" }));
 
-    expect(await screen.findByText("Manual Instagram Auth validated. Incomplete Fill queued. Run incfill1.")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(scrapeCalls).toHaveLength(1);
+    });
+    expect(scrapeCalls[0]).toMatchObject({
+      mode: "profile",
+      source_scope: "network",
+      refresh_policy: "stale_or_missing",
+      target_filter: "incomplete",
+      max_comments_per_post: 0,
+      comments_load_strategy: "public_relay",
+      date_start: null,
+      date_end: null,
+    });
+    expect(scrapeCalls[0]).not.toHaveProperty("dry_run");
+  });
+
+  it("previews incomplete fill with public relay without enqueueing a run", async () => {
+    const scrapeCalls: Array<{ url: string; body: Record<string, unknown> }> = [];
+    setWindowLocation(
+      "https://admin.therealityreport.com/social/instagram/bravotv/comments?date_start=2026-01-01&date_end=2027-01-01",
+    );
+
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse(baseSummary);
+      }
+      if (url.includes("/posts?page=1&page_size=25&comments_only=true")) {
+        return jsonResponse({
+          items: [],
+          pagination: { page: 1, page_size: 25, total: 0, total_pages: 1 },
+        });
+      }
+      if (url.includes("/comments/audit-cursor-retries")) {
+        return jsonResponse({ ok: true, selected_target_source_ids_count: 0, rows: [] });
+      }
+      if (url.includes("/comments/scrape")) {
+        const body = init?.body && typeof init.body === "string" ? JSON.parse(init.body) : {};
+        scrapeCalls.push({ url, body: body as Record<string, unknown> });
+        return jsonResponse({
+          dry_run: true,
+          target_source_ids_count: 12,
+          comments_shard_count: 2,
+          comments_load_strategy: "public_relay",
+          comments_session_scope: "public_relay",
+          date_start: "2026-01-01T00:00:00+00:00",
+          date_end: "2027-01-01T00:00:00+00:00",
+          sample_target_source_ids: ["DTgXh94kXyo", "DYiDH6pN-1Z"],
+        });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="comments" />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Preview Incomplete Fill" }));
+
+    await waitFor(() => {
+      expect(scrapeCalls).toHaveLength(1);
+    });
+    expect(scrapeCalls[0].body).toMatchObject({
+      mode: "profile",
+      source_scope: "network",
+      refresh_policy: "stale_or_missing",
+      target_filter: "incomplete",
+      max_comments_per_post: 0,
+      comments_load_strategy: "public_relay",
+      date_start: "2026-01-01",
+      date_end: "2027-01-01",
+      dry_run: true,
+    });
+    expect(
+      await screen.findByText(
+        /Incomplete Fill preview: 12 targets \/ 2 shards \/ public relay .* DTgXh94kXyo, DYiDH6pN-1Z/i,
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Incomplete Fill Preview")).toBeInTheDocument();
+    expect(screen.getByText("Dry-run only. No run was queued and no workers were dispatched.")).toBeInTheDocument();
+    expect(screen.getByText(/Public relay does not require auth cookies/i)).toBeInTheDocument();
+    expect(scrapeCalls[0].url).not.toContain("dry_run=true");
+    expect(screen.queryByText(/Run incfill/i)).not.toBeInTheDocument();
   });
 
   it("keeps incomplete fill clickable when no incomplete comment targets are known", async () => {
@@ -2545,7 +2646,7 @@ describe("SocialAccountProfilePage", () => {
     render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="comments" />);
 
     expect(
-      await screen.findByText("Stopped by operator. 7 targets remain; run Sync Comments to resume."),
+      await screen.findByText("Stopped by operator. 7 targets remain; use Incomplete Fill to continue only unfinished posts."),
     ).toBeInTheDocument();
   });
 
@@ -2595,7 +2696,7 @@ describe("SocialAccountProfilePage", () => {
     const { unmount } = render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="comments" />);
 
     expect(
-      await screen.findByText("Stopped by operator. 7 targets remain; run Sync Comments to resume."),
+      await screen.findByText("Stopped by operator. 7 targets remain; use Incomplete Fill to continue only unfinished posts."),
     ).toBeInTheDocument();
     await waitFor(() => {
       expect(summaryRequests).toBeGreaterThanOrEqual(2);
@@ -2908,6 +3009,70 @@ describe("SocialAccountProfilePage", () => {
     expect(within(dialog).getByText("14 Instagram rows")).toBeInTheDocument();
   });
 
+  it("opens a comments modal once when a post link is double-clicked", async () => {
+    let commentFetches = 0;
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/snapshot")) {
+        return profileSnapshotResponse(baseSummary);
+      }
+      if (url.includes("/summary")) {
+        return jsonResponse(baseSummary);
+      }
+      if (url.includes("/posts?page=1&page_size=25&comments_only=true")) {
+        return jsonResponse({
+          items: [
+            {
+              id: "post-1",
+              source_id: "DVfQnTcjsCA",
+              platform: "instagram",
+              account_handle: "bravotv",
+              content: "Double click caption.",
+              url: "https://www.instagram.com/p/DVfQnTcjsCA/",
+              posted_at: "2026-04-09T14:30:00.000Z",
+              saved_comments: 1,
+              metrics: { likes: 10, comments_count: 1 },
+            },
+          ],
+          pagination: { page: 1, page_size: 25, total: 1, total_pages: 1 },
+        });
+      }
+      if (url.includes("/comments?post_source_id=DVfQnTcjsCA&page=1&page_size=25")) {
+        commentFetches += 1;
+        return jsonResponse({
+          items: [
+            {
+              id: "comment-1",
+              comment_id: "178",
+              post_id: "post-1",
+              post_source_id: "DVfQnTcjsCA",
+              username: "andycohen",
+              text: "Loaded once",
+              likes: 1,
+              is_reply: false,
+              created_at: "2026-04-09T15:00:00.000Z",
+              parent_comment_id: null,
+            },
+          ],
+          pagination: { page: 1, page_size: 25, total: 1, total_pages: 1 },
+        });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="comments" />);
+
+    const postLink = await screen.findByRole("link", { name: "DVfQnTcjsCA" });
+    fireEvent.click(postLink);
+    fireEvent.click(postLink);
+
+    const dialog = await screen.findByRole("dialog", { name: "Comments for DVfQnTcjsCA" });
+    expect(within(dialog).getByText("Loaded once")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(commentFetches).toBe(1);
+    });
+  });
+
   it("sorts comments table columns through the posts query", async () => {
     const postRequestUrls: string[] = [];
 
@@ -3048,6 +3213,71 @@ describe("SocialAccountProfilePage", () => {
     const replyComment = within(dialog).getByText("Direct URL reply saved under parent");
     expect(parentComment.compareDocumentPosition(replyComment) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(within(dialog).getByText("1,551 Instagram rows")).toBeInTheDocument();
+  });
+
+  it("keeps the post comments modal closed after a posts refresh", async () => {
+    setWindowLocation("https://admin.therealityreport.com/social/instagram/bravotv/comments?post=DVfQnTcjsCA");
+    const postsRequests: string[] = [];
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse(baseSummary);
+      }
+      if (url.includes("/posts?page=1&page_size=25&comments_only=true")) {
+        postsRequests.push(url);
+        return jsonResponse({
+          items: [
+            {
+              id: "post-1",
+              source_id: "DVfQnTcjsCA",
+              platform: "instagram",
+              account_handle: "bravotv",
+              content: "URL-selected caption.",
+              url: "https://www.instagram.com/p/DVfQnTcjsCA/",
+              posted_at: "2026-04-09T14:30:00.000Z",
+              saved_comments: 2,
+              metrics: { likes: 842, comments_count: 2 },
+            },
+          ],
+          pagination: { page: 1, page_size: 25, total: 1, total_pages: 1 },
+        });
+      }
+      if (url.includes("/comments?post_source_id=DVfQnTcjsCA&page=1&page_size=25")) {
+        return jsonResponse({
+          items: [
+            {
+              id: "comment-1",
+              comment_id: "178",
+              post_id: "post-1",
+              post_source_id: "DVfQnTcjsCA",
+              username: "andycohen",
+              text: "Direct URL comment",
+              likes: 22,
+              is_reply: false,
+              created_at: "2026-04-09T15:00:00.000Z",
+              parent_comment_id: null,
+            },
+          ],
+          pagination: { page: 1, page_size: 25, total: 1, total_pages: 1 },
+        });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="comments" />);
+
+    const dialog = await screen.findByRole("dialog", { name: "Comments for DVfQnTcjsCA" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Comments for DVfQnTcjsCA" })).not.toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Sort by Likes descending" }));
+    await waitFor(() => {
+      expect(postsRequests.some((url) => url.includes("sort_by=likes"))).toBe(true);
+    });
+    expect(screen.queryByRole("dialog", { name: "Comments for DVfQnTcjsCA" })).not.toBeInTheDocument();
   });
 
   it("filters commentable posts to incomplete comment totals through the posts query", async () => {
@@ -3552,6 +3782,48 @@ describe("SocialAccountProfilePage", () => {
     });
   });
 
+  it("renders SocialBlade chart and table rows chronologically when the response order is reversed", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return Promise.resolve(jsonResponse(baseSummary));
+      }
+      if (url.includes("/socialblade")) {
+        return Promise.resolve(
+          jsonResponse({
+            ...baseSocialBladeResponse,
+            daily_channel_metrics_60day: {
+              ...baseSocialBladeResponse.daily_channel_metrics_60day,
+              data: [
+                { Date: "2026-04-08", "Followers Total": "1000" },
+                { Date: "2026-04-07", "Followers Total": "990" },
+              ],
+            },
+            daily_total_followers_chart: {
+              ...baseSocialBladeResponse.daily_total_followers_chart,
+              data: [
+                { date: "2026-04-08", followers: 1000 },
+                { date: "2026-04-07", followers: 990 },
+              ],
+            },
+          }),
+        );
+      }
+      throw new Error(`Unhandled request: ${url} (${init?.method ?? "GET"})`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="socialblade" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Followers Growth")).toBeInTheDocument();
+    });
+
+    expect(screen.getByText("+10")).toBeInTheDocument();
+    const rows = Array.from(document.querySelectorAll("tbody tr"));
+    expect(rows[0]?.textContent).toContain("2026-04-07");
+    expect(rows[1]?.textContent).toContain("2026-04-08");
+  });
+
   it("preserves the active source scope across SocialBlade refresh and following pagination", async () => {
     const refreshBodies: unknown[] = [];
     const relationshipUrls: string[] = [];
@@ -3629,6 +3901,51 @@ describe("SocialAccountProfilePage", () => {
     expect(new URL(relationshipUrls[1], "http://localhost").searchParams.toString()).toBe(
       "type=following&source_scope=creator&page=2&page_size=100",
     );
+  });
+
+  it("does not offer another following page when fallback pagination has no continuation signal", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse(baseSummary);
+      }
+      if (url.includes("/relationships")) {
+        const searchParams = new URL(url, "http://localhost").searchParams;
+        return jsonResponse({
+          owner: { username: "bravotv" },
+          relationship_type: "following",
+          items: Array.from({ length: 100 }, (_, index) => ({
+            id: `relationship-${index + 1}`,
+            relationship_type: "following",
+            user: {
+              username: `fallback_${index + 1}`,
+              full_name: `Fallback ${index + 1}`,
+            },
+          })),
+          pagination: {
+            page: Number(searchParams.get("page") ?? "1"),
+            page_size: Number(searchParams.get("page_size") ?? "100"),
+          },
+        });
+      }
+      if (url.includes("/socialblade")) {
+        return jsonResponse(baseSocialBladeResponse);
+      }
+      throw new Error(`Unhandled request: ${url} (${init?.method ?? "GET"})`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="socialblade" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Followers Growth")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Open following list" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("@fallback_1")).toBeInTheDocument();
+    });
+    expect(screen.queryByRole("button", { name: "Load next following page" })).not.toBeInTheDocument();
   });
 
   it("surfaces SocialBlade refresh errors on the account tab", async () => {
@@ -3727,7 +4044,9 @@ describe("SocialAccountProfilePage", () => {
     render(<SocialAccountProfilePage platform="instagram" handle="bravodailydish" activeTab="stats" />);
 
     await waitFor(() => {
-      expect(screen.getByText("Summary read timed out before completion. Retry in a moment.")).toBeInTheDocument();
+      expect(
+        screen.getByText("Account summary temporarily unavailable. Saved profile totals may be stale until the summary reloads."),
+      ).toBeInTheDocument();
     });
 
     expect(liveSummaryCalls).toBe(0);
@@ -3758,7 +4077,9 @@ describe("SocialAccountProfilePage", () => {
     render(<SocialAccountProfilePage platform="instagram" handle="bravodailydish" activeTab="stats" />);
 
     await waitFor(() => {
-      expect(screen.getByText("Summary read timed out before completion. Retry in a moment.")).toBeInTheDocument();
+      expect(
+        screen.getByText("Account summary temporarily unavailable. Saved profile totals may be stale until the summary reloads."),
+      ).toBeInTheDocument();
     });
 
     expect(liveSummaryCalls).toBe(1);
@@ -3798,7 +4119,9 @@ describe("SocialAccountProfilePage", () => {
     render(<SocialAccountProfilePage platform="instagram" handle="bravodailydish" activeTab="stats" />);
 
     await waitFor(() => {
-      expect(screen.getByText("Summary read timed out before completion. Retry in a moment.")).toBeInTheDocument();
+      expect(
+        screen.getByText("Account summary temporarily unavailable. Saved profile totals may be stale until the summary reloads."),
+      ).toBeInTheDocument();
     });
     expect(
       screen.queryByText("Could not reach TRR-Backend. Confirm TRR-Backend is running and TRR_API_URL is correct."),
@@ -3905,7 +4228,6 @@ describe("SocialAccountProfilePage", () => {
       expect(screen.getAllByText("Loading…").length).toBeGreaterThan(0);
     });
 
-    expect(screen.getByText("Loading account summary…")).toBeInTheDocument();
     expect(screen.queryByText("0 / 0")).not.toBeInTheDocument();
     expect(screen.queryByText("Never")).not.toBeInTheDocument();
 
@@ -4042,7 +4364,8 @@ describe("SocialAccountProfilePage", () => {
     expect(checkboxes).toHaveLength(4);
     expect(checkboxes[0]).toBeChecked();
     expect(checkboxes[1]).toBeChecked();
-    expect(checkboxes[2]).not.toBeChecked();
+    // Media is now checked by default (all three lanes run by default).
+    expect(checkboxes[2]).toBeChecked();
 
     fireEvent.click(screen.getByRole("button", { name: "Start Backfill" }));
 
@@ -4134,6 +4457,109 @@ describe("SocialAccountProfilePage", () => {
           String(input).includes("/catalog/backfill"),
         ),
       ).toBe(true);
+    });
+  });
+
+  it("requires explicit Live APPLY before a 2025 Instagram backfill is finalized", async () => {
+    const runId = "11111111-1111-4111-8111-111111111111";
+    const requiredConfirmation = `APPLY INSTAGRAM 2025 BACKFILL ${runId}`;
+    const backfillRequests: Array<Record<string, unknown>> = [];
+
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse(baseSummary);
+      }
+      if (url.includes("/cookies/health")) {
+        return jsonResponse(healthyCookieHealth("instagram"));
+      }
+      if (url.includes("/snapshot")) {
+        return jsonResponse({
+          summary: baseSummary,
+          catalog_run_progress: null,
+          generated_at: "2026-05-03T15:31:47.000Z",
+        });
+      }
+      if (url.includes(`/catalog/runs/${runId}/progress`)) {
+        return jsonResponse({
+          run_id: runId,
+          run_status: "queued",
+          launch_state: "pending_apply_confirmation",
+          source_scope: "network",
+          selected_tasks: [...INSTAGRAM_BACKFILL_DEFAULT_TASKS],
+          effective_selected_tasks: [...INSTAGRAM_BACKFILL_DEFAULT_TASKS],
+          stages: {},
+          per_handle: [],
+          recent_log: [],
+          summary: { total_jobs: 0, completed_jobs: 0, failed_jobs: 0, active_jobs: 0 },
+        });
+      }
+      if (url.includes("/catalog/backfill")) {
+        expect(init?.method).toBe("POST");
+        const body = typeof init?.body === "string" ? JSON.parse(init.body) : {};
+        backfillRequests.push(body);
+        if (!body.apply_run_id) {
+          expect(body).toMatchObject({
+            source_scope: "network",
+            backfill_scope: "bounded_window",
+            date_start: "2025-01-01T00:00:00.000Z",
+            date_end: "2025-12-31T23:59:59.999Z",
+            selected_tasks: [...INSTAGRAM_BACKFILL_DEFAULT_TASKS],
+          });
+          return jsonResponse({
+            run_id: runId,
+            status: "queued",
+            catalog_run_id: runId,
+            launch_state: "pending_apply_confirmation",
+            launch_task_resolution_pending: true,
+            requires_apply_confirmation: true,
+            apply_required: true,
+            apply_run_id: runId,
+            required_confirmation: requiredConfirmation,
+          });
+        }
+        expect(body).toMatchObject({
+          apply_run_id: runId,
+          operator_confirmation: requiredConfirmation,
+        });
+        return jsonResponse({
+          run_id: runId,
+          status: "queued",
+          catalog_run_id: runId,
+          launch_state: "finalizing",
+          launch_task_resolution_pending: true,
+          requires_apply_confirmation: false,
+          apply_required: false,
+        });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Backfill Posts" })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Backfill Posts" }));
+    expect(await screen.findByText("Choose what this backfill should run")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Start month (MM-YYYY)"), { target: { value: "2025-01" } });
+    fireEvent.change(screen.getByLabelText("End month (MM-YYYY)"), { target: { value: "2025-12" } });
+    fireEvent.click(screen.getByRole("button", { name: "Start Backfill" }));
+
+    expect(await screen.findByText("Live APPLY Required")).toBeInTheDocument();
+    expect(screen.getByText(requiredConfirmation)).toBeInTheDocument();
+    expect(backfillRequests).toHaveLength(1);
+    expect(backfillRequests[0].apply_run_id).toBeUndefined();
+
+    fireEvent.click(screen.getByRole("button", { name: "Confirm Live APPLY" }));
+
+    await waitFor(() => {
+      expect(backfillRequests).toHaveLength(2);
+    });
+    expect(backfillRequests[1]).toMatchObject({
+      apply_run_id: runId,
+      operator_confirmation: requiredConfirmation,
     });
   });
 
@@ -4276,21 +4702,18 @@ describe("SocialAccountProfilePage", () => {
     });
   });
 
-  it("auto-refreshes unhealthy TikTok cookies before starting backfill", async () => {
-    const cookieHealthResponses = [
-      {
-        platform: "tiktok",
-        required: true,
-        healthy: false,
-        reason: "expired",
-        refresh_supported: true,
-        refresh_available: true,
-        refresh_action: "cookie_refresh",
-        refresh_label: "Refresh Cookies",
-        source_kind: "default_file",
-      },
-      healthyCookieHealth("tiktok"),
-    ];
+  it("starts TikTok backfill through Modal even when local cookies are unhealthy", async () => {
+    const unhealthyCookieHealth = {
+      platform: "tiktok",
+      required: true,
+      healthy: false,
+      reason: "expired",
+      refresh_supported: true,
+      refresh_available: true,
+      refresh_action: "cookie_refresh",
+      refresh_label: "Refresh Cookies",
+      source_kind: "default_file",
+    };
 
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
@@ -4303,16 +4726,10 @@ describe("SocialAccountProfilePage", () => {
         });
       }
       if (url.includes("/cookies/health")) {
-        return jsonResponse(cookieHealthResponses.shift() ?? healthyCookieHealth("tiktok"));
+        return jsonResponse(unhealthyCookieHealth);
       }
       if (url.includes("/cookies/refresh")) {
-        expect(init?.method).toBe("POST");
-        return jsonResponse({
-          success: true,
-          healthy: true,
-          reason: null,
-          refresh_action: "cookie_refresh",
-        });
+        throw new Error("TikTok backfill should not refresh local cookies before Modal launch");
       }
       if (url.includes("/catalog/backfill")) {
         expect(init?.method).toBe("POST");
@@ -4441,9 +4858,8 @@ describe("SocialAccountProfilePage", () => {
     expect(checkboxes).toHaveLength(4);
     expect(checkboxes[0]).toBeChecked();
     expect(checkboxes[1]).toBeChecked();
-    expect(checkboxes[2]).not.toBeChecked();
-
-    fireEvent.click(checkboxes[2]);
+    // Media is now checked by default (all three lanes run by default), so no click needed.
+    expect(checkboxes[2]).toBeChecked();
 
     const selectedSummary = Array.from(document.querySelectorAll("p"))
       .map((element) => element.textContent?.replace(/\s+/g, " ").trim() ?? "")
@@ -4615,11 +5031,12 @@ describe("SocialAccountProfilePage", () => {
 
     render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
 
-    const recentRunsHeading = await screen.findByText("Recent Catalog Runs");
-    const recentRunsSection = recentRunsHeading.closest("section");
-    expect(recentRunsSection).not.toBeNull();
-    expect(within(recentRunsSection as HTMLElement).getByText("Deferred")).toBeInTheDocument();
-    expect(within(recentRunsSection as HTMLElement).getByText("Waiting for target readiness")).toBeInTheDocument();
+    const progressHeading = await screen.findByText("Worker and Lane Details");
+    const progressSection = progressHeading.closest("section");
+    expect(progressSection).not.toBeNull();
+    const progress = within(progressSection as HTMLElement);
+    expect(progress.getByText("Deferred")).toBeInTheDocument();
+    expect(progress.getByText("Waiting for target readiness")).toBeInTheDocument();
   });
 
   it("uses attached follow-up state for the recent backfill aggregate label", async () => {
@@ -4663,6 +5080,194 @@ describe("SocialAccountProfilePage", () => {
     const recentRuns = within(recentRunsSection as HTMLElement);
     expect(recentRuns.getByText("Backfill Running")).toBeInTheDocument();
     expect(recentRuns.queryByText("Catalog Completed")).not.toBeInTheDocument();
+  });
+
+  it("dedupes catalog recent runs and keeps the displayed active run out of history", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse({
+          ...baseSummary,
+          catalog_recent_runs: [
+            {
+              job_id: "active-job-a",
+              run_id: "active-run-4324",
+              status: "running",
+              created_at: "2026-05-03T17:05:53Z",
+              selected_tasks: ["post_details", "comments", "media"],
+              effective_selected_tasks: ["post_details", "comments", "media"],
+            },
+            {
+              job_id: "active-job-b",
+              run_id: "active-run-4324",
+              status: "running",
+              created_at: "2026-05-03T17:05:54Z",
+              selected_tasks: ["post_details", "comments", "media"],
+              effective_selected_tasks: ["post_details", "comments", "media"],
+            },
+            {
+              job_id: "old-job-a",
+              run_id: "old-run-1234",
+              status: "cancelled",
+              created_at: "2026-05-02T17:05:53Z",
+            },
+          ],
+        });
+      }
+      if (url.includes("/catalog/runs/active-run-4324/progress")) {
+        return jsonResponse({
+          run_id: "active-run-4324",
+          run_status: "running",
+          selected_tasks: ["post_details", "comments", "media"],
+          effective_selected_tasks: ["post_details", "comments", "media"],
+          post_progress: {
+            completed_posts: 74,
+            total_posts: 17574,
+          },
+          summary: {
+            total_jobs: 2,
+            completed_jobs: 0,
+            failed_jobs: 0,
+            active_jobs: 2,
+            items_found_total: 74,
+          },
+          stages: {},
+          per_handle: [],
+          recent_log: [],
+          alerts: [],
+        });
+      }
+      if (url.includes("/cookies/health")) {
+        return jsonResponse(healthyCookieHealth("instagram"));
+      }
+      if (url.includes("/catalog/posts")) {
+        return jsonResponse({
+          items: [],
+          pagination: { page: 1, page_size: 25, total: 0, total_pages: 1 },
+        });
+      }
+      if (url.includes("/catalog/review-queue")) {
+        return jsonResponse({ items: [] });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
+
+    expect(await screen.findByText("Live Backfill Status")).toBeInTheDocument();
+    const recentRunsHeading = await screen.findByText("Recent Catalog Runs");
+    const recentRunsSection = recentRunsHeading.closest("section");
+    expect(recentRunsSection).not.toBeNull();
+    const recentRuns = within(recentRunsSection as HTMLElement);
+    expect(recentRuns.queryByText("Run active-r")).not.toBeInTheDocument();
+    expect(recentRuns.getByText("Run old-run-")).toBeInTheDocument();
+  });
+
+  it("does not mark cancelled historical catalog runs as still running because a follow-up lane is pending", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse({
+          ...baseSummary,
+          catalog_recent_runs: [
+            {
+              job_id: "cancelled-job-a",
+              run_id: "cancelled-run-1",
+              status: "cancelled",
+              created_at: "2026-05-02T17:05:53Z",
+              completed_at: "2026-05-02T17:15:53Z",
+              selected_tasks: ["post_details", "comments", "media"],
+              effective_selected_tasks: ["post_details", "comments", "media"],
+              comments_run_id: "comments-pending-1",
+              attached_followups: {
+                comments: {
+                  run_id: "comments-pending-1",
+                  state: "pending",
+                  status: "pending",
+                  source: "deferred_after_catalog",
+                },
+                media: {
+                  attachment_id: "media-pending-1",
+                  state: "pending",
+                  status: "queued",
+                  source: "catalog_media_mirror",
+                  enqueued_job_ids: [],
+                  enqueued_job_count: 0,
+                },
+              },
+            },
+          ],
+        });
+      }
+      if (url.includes("/cookies/health")) {
+        return jsonResponse(healthyCookieHealth("instagram"));
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
+
+    const recentRunsHeading = await screen.findByText("Recent Catalog Runs");
+    const recentRunsSection = recentRunsHeading.closest("section");
+    expect(recentRunsSection).not.toBeNull();
+    const recentRuns = within(recentRunsSection as HTMLElement);
+    expect(recentRuns.getByText("Run Cancelled")).toBeInTheDocument();
+    expect(recentRuns.queryByText("Lanes Still Running")).not.toBeInTheDocument();
+    expect(recentRuns.getAllByText("Cancelled").length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("does not mark failed historical catalog runs as still running because a follow-up lane is pending", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse({
+          ...baseSummary,
+          catalog_recent_runs: [
+            {
+              job_id: "failed-job-a",
+              run_id: "failed-run-1",
+              status: "failed",
+              created_at: "2026-05-02T17:05:53Z",
+              completed_at: "2026-05-02T17:15:53Z",
+              selected_tasks: ["post_details", "comments", "media"],
+              effective_selected_tasks: ["post_details", "comments", "media"],
+              comments_run_id: "comments-pending-failed-1",
+              attached_followups: {
+                comments: {
+                  run_id: "comments-pending-failed-1",
+                  state: "pending",
+                  status: "pending",
+                  source: "deferred_after_catalog",
+                },
+                media: {
+                  attachment_id: "media-pending-failed-1",
+                  state: "pending",
+                  status: "queued",
+                  source: "catalog_media_mirror",
+                  enqueued_job_ids: [],
+                  enqueued_job_count: 0,
+                },
+              },
+            },
+          ],
+        });
+      }
+      if (url.includes("/cookies/health")) {
+        return jsonResponse(healthyCookieHealth("instagram"));
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
+
+    const recentRunsHeading = await screen.findByText("Recent Catalog Runs");
+    const recentRunsSection = recentRunsHeading.closest("section");
+    expect(recentRunsSection).not.toBeNull();
+    const recentRuns = within(recentRunsSection as HTMLElement);
+    expect(recentRuns.getByText("Run Failed")).toBeInTheDocument();
+    expect(recentRuns.queryByText("Lanes Still Running")).not.toBeInTheDocument();
+    expect(recentRuns.queryByText("Pending")).not.toBeInTheDocument();
+    expect(recentRuns.getAllByText("Not Started").length).toBeGreaterThanOrEqual(1);
   });
 
   it("does not render stale active launch or follow-up states on terminal catalog runs", async () => {
@@ -4868,6 +5473,251 @@ describe("SocialAccountProfilePage", () => {
     });
   });
 
+  it("shows a compact current-year completion split for bounded backfills", async () => {
+    const expectedYear = new Date().getUTCFullYear();
+
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse({
+          ...baseSummary,
+          catalog_recent_runs: [],
+        });
+      }
+      if (url.includes("/snapshot")) {
+        return jsonResponse({
+          summary: {
+            ...baseSummary,
+            catalog_recent_runs: [],
+          },
+        });
+      }
+      if (url.includes(`/completion-summary?year=${expectedYear}`)) {
+        return jsonResponse({
+          year: expectedYear,
+          total_posts: 437,
+          total_reported_comments: 1820,
+          saved_comments: 1764,
+          missing_comments: 56,
+          accounted_comments: 1820,
+          lanes: {
+            comments: { finished: 320, in_progress: 18, not_started: 99 },
+            details: { finished: 401, in_progress: 11, not_started: 25 },
+            media: { finished: 288, in_progress: 44, not_started: 105 },
+          },
+        });
+      }
+      if (url.includes("/cookies/health")) {
+        return jsonResponse(healthyCookieHealth("instagram"));
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
+
+    const completionHeading = await screen.findByText(`${expectedYear} Completion`);
+    const completionCard = completionHeading.closest("div.rounded-2xl.border.border-zinc-200.bg-white");
+    expect(completionCard).not.toBeNull();
+    const completion = within(completionCard as HTMLElement);
+    expect(completion.getByText("437 posts")).toBeInTheDocument();
+    expect(completion.getByText("1,820 reported comments · 1,764 saved · 56 missing")).toBeInTheDocument();
+    expect(completion.getByText("Details")).toBeInTheDocument();
+    expect(completion.getByText("Comments")).toBeInTheDocument();
+    expect(completion.getByText("Media")).toBeInTheDocument();
+    expect(completion.getByText("401 finished")).toBeInTheDocument();
+    expect(completion.getByText("320 finished")).toBeInTheDocument();
+    expect(completion.getByText("288 finished")).toBeInTheDocument();
+    expect(
+      mocks.fetchAdminWithAuth.mock.calls.some(([input]) =>
+        String(input).includes(`/completion-summary?year=${expectedYear}`),
+      ),
+    ).toBe(true);
+    expect(
+      mocks.fetchAdminWithAuth.mock.calls.some(([input]) =>
+        String(input).includes("/completion-summary?year=2025"),
+      ),
+    ).toBe(false);
+  });
+
+  it("shows live catalog-to-comments streaming metadata in the Instagram completion card", async () => {
+    const expectedYear = new Date().getUTCFullYear();
+    const progressPayload = {
+      run_id: "catalog-stream-run-1",
+      run_status: "running",
+      source_scope: "network",
+      selected_tasks: ["post_details", "comments"],
+      effective_selected_tasks: ["post_details", "comments"],
+      comments_run_id: "comments-stream-run-1",
+      comments_streaming: {
+        enabled: true,
+        state: "appending",
+        source: "catalog_batch_persist",
+        comments_run_id: "comments-stream-run-1",
+        targets_seen: 139,
+        targets_enqueued: 137,
+        targets_skipped_duplicate: 2,
+        append_failures: 0,
+        worker_count: 8,
+        last_batch_source_ids_count: 3,
+        last_enqueue_lag_ms: 275,
+        max_enqueue_lag_ms: 400,
+        average_enqueue_lag_ms: 337.5,
+        enqueue_attempt_count: 2,
+        next_action: {
+          code: "workers_processing_streamed_posts",
+          label: "Workers processing streamed posts",
+          detail:
+            "Saved catalog posts have been queued to public-first comments workers. Keep the catalog run open while new batches arrive.",
+        },
+        history: [
+          {
+            recorded_at: "2026-07-01T12:00:00Z",
+            state: "appending",
+            enqueue_targets_seen: 3,
+            enqueue_targets_enqueued: 2,
+            last_enqueue_lag_ms: 275,
+          },
+        ],
+      },
+      stages: {},
+      per_handle: [],
+      recent_log: [],
+      alerts: [],
+      summary: {
+        total_jobs: 1,
+        completed_jobs: 0,
+        failed_jobs: 0,
+        active_jobs: 1,
+      },
+    };
+
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse({
+          ...baseSummary,
+          catalog_recent_runs: [
+            {
+              run_id: "catalog-stream-run-1",
+              status: "running",
+              created_at: "2026-06-12T12:00:00Z",
+              selected_tasks: ["post_details", "comments"],
+              effective_selected_tasks: ["post_details", "comments"],
+              comments_run_id: "comments-stream-run-1",
+            },
+          ],
+          comments_coverage: {
+            ...baseSummary.comments_coverage,
+            active_run_id: "comments-stream-run-1",
+          },
+        });
+      }
+      if (url.includes("/snapshot")) {
+        return jsonResponse({
+          summary: {
+            ...baseSummary,
+            catalog_recent_runs: [
+              {
+                run_id: "catalog-stream-run-1",
+                status: "running",
+                created_at: "2026-06-12T12:00:00Z",
+                selected_tasks: ["post_details", "comments"],
+                effective_selected_tasks: ["post_details", "comments"],
+                comments_run_id: "comments-stream-run-1",
+              },
+            ],
+            comments_coverage: {
+              ...baseSummary.comments_coverage,
+              active_run_id: "comments-stream-run-1",
+            },
+          },
+          catalog_run_progress: progressPayload,
+        });
+      }
+      if (url.includes("/catalog/runs/catalog-stream-run-1/progress")) {
+        return jsonResponse(progressPayload);
+      }
+      if (url.includes("/comments/runs/comments-stream-run-1/progress")) {
+        return jsonResponse({
+          run_id: "comments-stream-run-1",
+          platform: "instagram",
+          account_handle: "bravotv",
+          run_status: "running",
+          summary: {
+            comments_processed_total: 320,
+            comments_inserted_total: 42,
+          },
+          post_progress: {
+            completed_posts: 27,
+            total_posts: 137,
+          },
+          worker_counters: {
+            total: 8,
+            running: 8,
+            queued: 0,
+            completed: 0,
+            failed: 0,
+          },
+          target_progress_rows: [
+            {
+              source_id: "DVstream1",
+              shortcode: "DVstream1",
+              status: "running",
+              current_phase: "comments_fetch",
+              latest_reason: "public recovery pending",
+              reported_comment_count: 12,
+              saved_comment_count: 4,
+              missing_comment_gap: 8,
+            },
+          ],
+        });
+      }
+      if (url.includes(`/completion-summary?year=${expectedYear}`)) {
+        return jsonResponse({
+          year: expectedYear,
+          total_posts: 437,
+          total_reported_comments: 1820,
+          saved_comments: 1764,
+          missing_comments: 56,
+          accounted_comments: 1820,
+          lanes: {
+            comments: { finished: 320, in_progress: 18, not_started: 99 },
+            details: { finished: 401, in_progress: 11, not_started: 25 },
+            media: { finished: 288, in_progress: 44, not_started: 105 },
+          },
+        });
+      }
+      if (url.includes("/cookies/health")) {
+        return jsonResponse(healthyCookieHealth("instagram"));
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
+
+    const banner = await screen.findByTestId("instagram-comments-streaming-banner");
+    const streaming = within(banner);
+    expect(streaming.getByText("Comments Are Streaming From Saved Catalog Posts")).toBeInTheDocument();
+    expect(streaming.getByText("Appending")).toBeInTheDocument();
+    expect(streaming.getByText("run comments")).toBeInTheDocument();
+    expect(streaming.getByText("137 posts enqueued")).toBeInTheDocument();
+    expect(streaming.getByText("139 posts seen")).toBeInTheDocument();
+    expect(streaming.getByText("2 skipped as duplicates")).toBeInTheDocument();
+    expect(streaming.getByText("8 comment workers")).toBeInTheDocument();
+    expect(streaming.getByText("3 posts in latest batch")).toBeInTheDocument();
+    expect(streaming.getByText("275 ms enqueue lag")).toBeInTheDocument();
+    expect(streaming.getByText("400 ms max lag")).toBeInTheDocument();
+    expect(streaming.getByText("337.5 ms average lag")).toBeInTheDocument();
+    expect(streaming.getByText("2 enqueue attempts")).toBeInTheDocument();
+    expect(streaming.getByText("Next: Workers processing streamed posts")).toBeInTheDocument();
+    expect(streaming.getByText(/Saved catalog posts have been queued to public-first comments workers/)).toBeInTheDocument();
+    expect(streaming.getByText("Recent Streaming Activity")).toBeInTheDocument();
+    expect(streaming.getByText(/Appending · 3 seen · 2 enqueued · 275 ms/)).toBeInTheDocument();
+    expect(await screen.findByText("Posts waiting in the streaming comments lane")).toBeInTheDocument();
+    expect(screen.getByText("DVstream1")).toBeInTheDocument();
+    expect(screen.getByText("Public-first")).toBeInTheDocument();
+  });
+
   it("uses resolved attached follow-up status over stale stage graph lanes", async () => {
     const attachedFollowups = {
       comments: {
@@ -4979,6 +5829,7 @@ describe("SocialAccountProfilePage", () => {
       expect(progress.getByText("Cancelled")).toBeInTheDocument();
       expect(progress.getByText("New")).toBeInTheDocument();
       expect(progress.getByText("Run comments")).toBeInTheDocument();
+      expect(progress.getByText("Lanes Pending")).toBeInTheDocument();
     });
     expect(progress.queryByText("Queued")).not.toBeInTheDocument();
 
@@ -5161,6 +6012,94 @@ describe("SocialAccountProfilePage", () => {
       "https://www.facebook.com/bravotv/posts/fb-post-1",
     );
     expect(screen.getByText("Facebook ID fb-post-1")).toBeInTheDocument();
+  });
+
+  it("ignores stale catalog detail responses after another post is opened", async () => {
+    const staleDetail = deferredResponse();
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse(baseSummary);
+      }
+      if (url.includes("/cookies/health")) {
+        return jsonResponse(healthyCookieHealth("instagram"));
+      }
+      if (url.includes("/catalog/posts/source-1/detail")) {
+        return staleDetail.promise;
+      }
+      if (url.includes("/catalog/posts/source-2/detail")) {
+        return jsonResponse({
+          platform: "instagram",
+          account_handle: "bravotv",
+          source_id: "source-2",
+          title: "Current detail row",
+          content: "Current catalog detail should stay visible.",
+          permalink: "https://www.instagram.com/p/source-2/",
+          posted_at: "2026-04-02T12:00:00Z",
+          saved_metrics: { likes: 22, comments_count: 3, views: 200, engagement: 25 },
+        });
+      }
+      if (url.includes("/catalog/posts")) {
+        return jsonResponse({
+          items: [
+            {
+              id: "catalog-1",
+              source_id: "source-1",
+              platform: "instagram",
+              account_handle: "bravotv",
+              title: "Slow detail row",
+              content: "First card",
+              assignment_status: "assigned",
+              posted_at: "2026-04-01T12:00:00Z",
+              metrics: { likes: 11, comments_count: 2 },
+            },
+            {
+              id: "catalog-2",
+              source_id: "source-2",
+              platform: "instagram",
+              account_handle: "bravotv",
+              title: "Fast detail row",
+              content: "Second card",
+              assignment_status: "assigned",
+              posted_at: "2026-04-02T12:00:00Z",
+              metrics: { likes: 22, comments_count: 3 },
+            },
+          ],
+          pagination: { page: 1, page_size: 25, total: 2, total_pages: 1 },
+        });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
+
+    fireEvent.click(await screen.findByText("Slow detail row"));
+    await waitFor(() => {
+      expect(screen.getByText("Loading catalog post detail…")).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByText("Fast detail row"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Current catalog detail should stay visible.")).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      staleDetail.resolve(
+        jsonResponse({
+          platform: "instagram",
+          account_handle: "bravotv",
+          source_id: "source-1",
+          title: "Stale detail row",
+          content: "Stale catalog detail must not replace the current modal.",
+          permalink: "https://www.instagram.com/p/source-1/",
+          posted_at: "2026-04-01T12:00:00Z",
+          saved_metrics: { likes: 11, comments_count: 2, views: 100, engagement: 13 },
+        }),
+      );
+    });
+
+    expect(screen.getByText("Current catalog detail should stay visible.")).toBeInTheDocument();
+    expect(screen.queryByText("Stale catalog detail must not replace the current modal.")).not.toBeInTheDocument();
   });
 
   it("renders catalog detail media from media_urls and thumbnail-only assets", async () => {
@@ -5452,7 +6391,7 @@ describe("SocialAccountProfilePage", () => {
     expect(screen.queryByText("Checking cookies…")).not.toBeInTheDocument();
   });
 
-  it("does not auto-repair Instagram auth before starting backfill", async () => {
+  it("starts Instagram backfill without auto-repairing local auth first", async () => {
     let cookieHealthChecks = 0;
     const backfillBodies: unknown[] = [];
 
@@ -5499,17 +6438,13 @@ describe("SocialAccountProfilePage", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Start Backfill" }));
 
     await waitFor(() => {
-      expect(
-        screen.getByText("Backfill was not started. Complete Manual Instagram Auth and confirm before rerunning Backfill."),
-      ).toBeInTheDocument();
+      expect(backfillBodies).toHaveLength(1);
     });
-    expect(backfillBodies).toEqual([]);
-    expect(
-      screen.getByText(/Manual Instagram auth can surface CAPTCHA, verification code, checkpoint, or account-lock prompts/i),
-    ).toBeInTheDocument();
+    expect(screen.queryByText(/Backfill was not started/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Manual Instagram auth can surface CAPTCHA/i)).not.toBeInTheDocument();
   });
 
-  it("does not start backfill when Instagram auth is unhealthy during pre-launch gating", async () => {
+  it("starts Instagram backfill when local auth is unhealthy during pre-launch checks", async () => {
     let backfillCalled = false;
 
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
@@ -5547,14 +6482,12 @@ describe("SocialAccountProfilePage", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Start Backfill" }));
 
     await waitFor(() => {
-      expect(
-        screen.getByText("Backfill was not started. Complete Manual Instagram Auth and confirm before rerunning Backfill."),
-      ).toBeInTheDocument();
+      expect(backfillCalled).toBe(true);
     });
-    expect(backfillCalled).toBe(false);
+    expect(screen.queryByText(/Backfill was not started/i)).not.toBeInTheDocument();
   });
 
-  it("blocks Instagram backfill on non-local runtimes until manual auth is completed locally", async () => {
+  it("starts Instagram backfill on non-local runtimes without local manual-auth gating", async () => {
     let backfillCalled = false;
 
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
@@ -5589,11 +6522,9 @@ describe("SocialAccountProfilePage", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Start Backfill" }));
 
     await waitFor(() => {
-      expect(
-        screen.getByText("Backfill cannot continue until Manual Instagram Auth is completed from a local TRR-Backend host."),
-      ).toBeInTheDocument();
+      expect(backfillCalled).toBe(true);
     });
-    expect(backfillCalled).toBe(false);
+    expect(screen.queryByText(/Manual Instagram Auth is completed from a local TRR-Backend host/i)).not.toBeInTheDocument();
   });
 
   it("surfaces structured backfill startup errors from the proxy", async () => {
@@ -6827,6 +7758,97 @@ describe("SocialAccountProfilePage", () => {
     expect(screen.queryByRole("heading", { name: "Collaborators / Tags", level: 2 })).not.toBeInTheDocument();
   });
 
+  it("debounces caption search and aborts a stale in-flight search", async () => {
+    let firstSearchSignal: AbortSignal | null = null;
+
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse({
+          ...baseSummary,
+          platform: "instagram",
+        });
+      }
+      if (url.includes("/posts?page=1&page_size=25&search=old")) {
+        firstSearchSignal = init?.signal ?? null;
+        return new Promise<Response>((resolve, reject) => {
+          const timeoutId = window.setTimeout(() => {
+            resolve(
+              jsonResponse({
+                items: [
+                  {
+                    id: "old-post",
+                    source_id: "old",
+                    platform: "instagram",
+                    account_handle: "bravotv",
+                    title: "Old caption",
+                    content: "This stale result should never render.",
+                    posted_at: "2026-03-18T12:00:00.000Z",
+                    metrics: {},
+                  },
+                ],
+                pagination: { page: 1, page_size: 25, total: 1, total_pages: 1 },
+              }),
+            );
+          }, 1_000);
+          init?.signal?.addEventListener("abort", () => {
+            window.clearTimeout(timeoutId);
+            const abortError = new Error("caption search aborted");
+            abortError.name = "AbortError";
+            reject(abortError);
+          });
+        });
+      }
+      if (url.includes("/posts?page=1&page_size=25&search=new")) {
+        return jsonResponse({
+          items: [
+            {
+              id: "new-post",
+              source_id: "new",
+              platform: "instagram",
+              account_handle: "bravotv",
+              title: "New caption",
+              content: "This is the current search result.",
+              posted_at: "2026-03-19T12:00:00.000Z",
+              metrics: {},
+            },
+          ],
+          pagination: { page: 1, page_size: 25, total: 1, total_pages: 1 },
+        });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="hashtags" />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Open caption search" })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Open caption search" }));
+    const searchbox = await screen.findByRole("searchbox", { name: "Search captions" });
+    vi.useFakeTimers();
+    fireEvent.change(searchbox, { target: { value: "old" } });
+
+    act(() => {
+      vi.advanceTimersByTime(250);
+    });
+    await Promise.resolve();
+    expect(firstSearchSignal).not.toBeNull();
+
+    fireEvent.change(searchbox, { target: { value: "new" } });
+    expect(firstSearchSignal?.aborted).toBe(true);
+
+    act(() => {
+      vi.advanceTimersByTime(250);
+    });
+    await Promise.resolve();
+    vi.useRealTimers();
+
+    expect(await screen.findByText("New caption")).toBeInTheDocument();
+    expect(screen.queryByText("Old caption")).not.toBeInTheDocument();
+  }, 10_000);
+
   it("shows the caption search control beside the tab pills before any tab change", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
@@ -7266,7 +8288,7 @@ describe("SocialAccountProfilePage", () => {
       );
 
       await act(async () => {
-        await new Promise((resolve) => setTimeout(resolve, 3_900));
+        await new Promise((resolve) => setTimeout(resolve, 3_500));
       });
       expect(progressCalls).toBe(2);
 
@@ -10256,7 +11278,9 @@ it("prefers terminal cancelled status labels over stale recovering state", async
     rerender(<SocialAccountProfilePage platform="instagram" handle="bravowwhl" activeTab="stats" />);
 
     await waitFor(() => {
-      expect(screen.getByText("Summary read timed out before completion. Retry in a moment.")).toBeInTheDocument();
+      expect(
+        screen.getByText("Account summary temporarily unavailable. Saved profile totals may be stale until the summary reloads."),
+      ).toBeInTheDocument();
     });
     expect(screen.queryByRole("heading", { name: "Source Status" })).not.toBeInTheDocument();
     expect(screen.queryByText("Bravo network source")).not.toBeInTheDocument();
@@ -11784,9 +12808,6 @@ it("renders blocked-auth manual-auth controls and starts the sync flow", async (
           "Instagram blocked this catalog run before jobs were queued. Complete manual auth first, then sync already validated cookies.",
         ),
       ).toBeInTheDocument();
-      expect(
-        screen.getByText(/Instagram backfill blocked before jobs were queued\. Local cookies are present/i),
-      ).toBeInTheDocument();
       expect(screen.getByText("Instagram posts auth blocked")).toBeInTheDocument();
     });
     expect(screen.queryByRole("button", { name: "Retry Locally" })).not.toBeInTheDocument();
@@ -12710,6 +13731,164 @@ it("uses the newest inspected catalog run from the summary when discovery outran
     expect(gapStatusPollCount).toBeGreaterThanOrEqual(1);
   });
 
+  it("ignores stale gap-analysis polls before rendering the follow-up repair action", async () => {
+    let gapStatusPollCount = 0;
+    let syncNewerCalled = false;
+    let backfillCalled = false;
+
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse({
+          ...baseSummary,
+          total_posts: 20,
+          live_total_posts: 20,
+          catalog_total_posts: 12,
+          live_catalog_total_posts: 12,
+          catalog_recent_runs: [
+            {
+              run_id: "run-gap-stale-poll-1",
+              status: "completed",
+              created_at: "2026-03-20T12:00:00.000Z",
+            },
+          ],
+        });
+      }
+      if (url.includes("/catalog/freshness")) {
+        expect(init?.method).toBe("POST");
+        return jsonResponse({
+          platform: "instagram",
+          account_handle: "bravotv",
+          eligible: true,
+          live_total_posts_current: 20,
+          stored_total_posts: 12,
+          delta_posts: 8,
+          needs_recent_sync: true,
+          checked_at: "2026-03-20T12:30:00.000Z",
+        });
+      }
+      if (url.includes("/catalog/gap-analysis/run")) {
+        expect(init?.method).toBe("POST");
+        return jsonResponse({
+          platform: "instagram",
+          account_handle: "bravotv",
+          status: "queued",
+          operation_id: "gap-op-current",
+          result: null,
+          stale: false,
+        });
+      }
+      if (url.includes("/catalog/gap-analysis")) {
+        gapStatusPollCount += 1;
+        if (gapStatusPollCount === 1) {
+          return jsonResponse({
+            platform: "instagram",
+            account_handle: "bravotv",
+            status: "completed",
+            operation_id: "gap-op-stale",
+            stale: true,
+            result: {
+              platform: "instagram",
+              account_handle: "bravotv",
+              gap_type: "tail_gap",
+              catalog_posts: 12,
+              materialized_posts: 20,
+              expected_total_posts: 20,
+              live_total_posts_current: 20,
+              missing_from_catalog_count: 8,
+              sample_missing_source_ids: ["old-post"],
+              has_resumable_frontier: true,
+              needs_recent_sync: false,
+              recommended_action: "backfill_posts",
+              latest_catalog_run_status: "completed",
+              active_run_status: null,
+            },
+          });
+        }
+        return jsonResponse({
+          platform: "instagram",
+          account_handle: "bravotv",
+          status: "completed",
+          operation_id: "gap-op-current",
+          stale: false,
+          result: {
+            platform: "instagram",
+            account_handle: "bravotv",
+            gap_type: "head_gap",
+            catalog_posts: 12,
+            materialized_posts: 20,
+            expected_total_posts: 20,
+            live_total_posts_current: 20,
+            missing_from_catalog_count: 8,
+            sample_missing_source_ids: ["new-post"],
+            has_resumable_frontier: false,
+            needs_recent_sync: true,
+            recommended_action: "sync_newer",
+            latest_catalog_run_status: "completed",
+            active_run_status: null,
+          },
+        });
+      }
+      if (url.includes("/catalog/sync-newer")) {
+        syncNewerCalled = true;
+        return jsonResponse({
+          run_id: "catalog-run-current-12345678",
+          status: "queued",
+          catalog_action: "sync_newer",
+          catalog_action_scope: "head_gap",
+        });
+      }
+      if (url.includes("/cookies/health")) {
+        return jsonResponse(healthyCookieHealth("instagram"));
+      }
+      if (url.includes("/catalog/backfill")) {
+        backfillCalled = true;
+        return jsonResponse({ run_id: "catalog-run-stale-12345678", status: "queued" });
+      }
+      if (url.includes("/catalog/posts")) {
+        return jsonResponse({ items: [], pagination: { page: 1, page_size: 25, total: 0, total_pages: 1 } });
+      }
+      if (url.includes("/catalog/review-queue")) {
+        return jsonResponse({ items: [] });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Run Gap Analysis" })).toBeInTheDocument();
+    });
+    vi.useFakeTimers();
+    fireEvent.click(screen.getByRole("button", { name: "Run Gap Analysis" }));
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      vi.advanceTimersByTime(4_000);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(gapStatusPollCount).toBe(1);
+    expect(screen.queryByRole("button", { name: "Backfill Posts Now" })).not.toBeInTheDocument();
+
+    await act(async () => {
+      vi.advanceTimersByTime(4_000);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    vi.useRealTimers();
+
+    expect(screen.getByRole("button", { name: "Sync Newer Now" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Sync Newer Now" }));
+
+    await waitFor(() => {
+      expect(syncNewerCalled).toBe(true);
+    });
+    expect(backfillCalled).toBe(false);
+  }, 10_000);
+
   it("groups catalog diagnostic failures without rendering duplicate raw backend banners", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
@@ -12800,6 +13979,42 @@ it("uses the newest inspected catalog run from the summary when discovery outran
       ).toBeInTheDocument();
     });
     expect(screen.queryByText("Local TRR-Backend is saturated. Showing last successful data while retrying.")).not.toBeInTheDocument();
+    expect(screen.queryByText("TRR-Backend request timed out.")).not.toBeInTheDocument();
+  });
+
+  it("scopes catalog post timeouts to the gallery instead of showing the raw backend timeout", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse({
+          ...baseSummary,
+          catalog_recent_runs: [],
+        });
+      }
+      if (url.includes("/catalog/posts")) {
+        return jsonResponse(
+          {
+            error: "TRR-Backend request timed out.",
+            code: "UPSTREAM_TIMEOUT",
+            retryable: true,
+            upstream_status: 504,
+          },
+          504,
+        );
+      }
+      if (url.includes("/catalog/review-queue")) {
+        return jsonResponse({ items: [] });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("Catalog gallery temporarily unavailable. Saved post cards will reload when the gallery request succeeds."),
+      ).toBeInTheDocument();
+    });
     expect(screen.queryByText("TRR-Backend request timed out.")).not.toBeInTheDocument();
   });
 

@@ -12,6 +12,7 @@ import {
   resolvePostgresApplicationName,
   resolvePostgresPoolSizing,
   resolvePostgresConnectionString,
+  resolvePgPoolConnectionString,
   resolvePostgresSslConfig,
   resolveRuntimeConnectionLane,
   shouldAttachPostgresPoolToVercel,
@@ -155,6 +156,16 @@ describe("resolvePostgresSslConfig", () => {
     );
 
     expect(config).toEqual({ rejectUnauthorized: false });
+  });
+
+  it("strips pg ssl query keys so the explicit ssl object is not overwritten", () => {
+    const value = resolvePgPoolConnectionString(
+      "postgresql://postgres.ref:secret@aws-1-us-east-1.pooler.supabase.com:5432/postgres?sslmode=require&application_name=trr-app&sslrootcert=/tmp/root.crt",
+    );
+
+    expect(value).toBe(
+      "postgresql://postgres.ref:secret@aws-1-us-east-1.pooler.supabase.com:5432/postgres?application_name=trr-app",
+    );
   });
 
   it("loads ssl CA files from the canonical env name", () => {

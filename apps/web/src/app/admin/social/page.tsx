@@ -87,6 +87,7 @@ import { resolvePreferredShowRouteSlug } from "@/lib/admin/show-route-slug";
 import { fetchAdminWithAuth } from "@/lib/admin/client-auth";
 import { recordAdminLoadSample } from "@/lib/admin/admin-load-samples";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
+import { getTrrAppFlags } from "@/lib/trr-app-flags";
 
 const sectionEyebrowClass =
   "text-xs font-semibold uppercase tracking-[0.25em] text-zinc-500";
@@ -149,10 +150,128 @@ type SharedSourceDraft = {
   handle: string;
   displayName: string;
 };
+type SocialQueueStatusBucket = Record<string, number | string | null | undefined>;
+type SocialQueueStatusPayload = {
+  degraded?: boolean;
+  queue?: {
+    by_stage?: Record<string, SocialQueueStatusBucket>;
+    by_stage_platform?: Record<string, Record<string, SocialQueueStatusBucket>>;
+    media_runs?: SocialMediaQueueRun[];
+    media_queued_jobs?: SocialMediaQueueQueuedJob[];
+    media_queued_jobs_stale_after_seconds?: number | string | null;
+    media_stale_claims?: {
+      total?: number | string | null;
+      by_stage?: Record<string, number | string | null | undefined>;
+      by_platform?: Record<string, number | string | null | undefined>;
+      stale_after_seconds?: number | string | null;
+    };
+    error?: string | null;
+  };
+};
+type SocialMediaQueueRun = {
+  run_id?: string | null;
+  status?: string | null;
+  oldest_job_created_at?: string | null;
+  latest_job_at?: string | null;
+  active?: number | string | null;
+  stale?: boolean | number | string | null;
+  stages?: Record<string, SocialQueueStatusBucket>;
+};
+type SocialMediaQueueQueuedJob = {
+  id?: string | null;
+  run_id?: string | null;
+  platform?: string | null;
+  status?: string | null;
+  stage?: string | null;
+  account_handle?: string | null;
+  source_id?: string | null;
+  post_id?: string | null;
+  created_at?: string | null;
+  available_at?: string | null;
+  queued_age_seconds?: number | string | null;
+  stale?: boolean | number | string | null;
+};
+type SocialMediaQueueRecoveryHistoryRow = {
+  id: string;
+  runId: string;
+  stage: "media_mirror" | "comment_media_mirror" | "all";
+  recoveredCount: number;
+  dispatchedCount: number;
+  resultSummary: string;
+  recoveredAt: string;
+};
+type SocialMediaQueueDrainHistoryRow = {
+  id: string;
+  runId: string;
+  accountHandle: string;
+  stage: "media_mirror" | "comment_media_mirror" | "all";
+  beforeRemaining: number;
+  recoveredCount: number;
+  dispatchedCount: number;
+  afterRemaining: number;
+  stopReason: string | null;
+  nextRecommendedAction: string | null;
+  drainedAt: string;
+};
+type SocialMediaQueueSnapshotLink = {
+  name: string;
+  href: string;
+  createdAt: string | null;
+  runId: string | null;
+  stage: string | null;
+};
+type SocialMediaQueueBadgeSummary = {
+  queued: number;
+  pending: number;
+  running: number;
+  retrying: number;
+  stale: number;
+  active: number;
+  staleAfterSeconds: number | null;
+  degraded: boolean;
+  stages: Array<{
+    key: "media_mirror" | "comment_media_mirror";
+    label: string;
+    queued: number;
+    pending: number;
+    running: number;
+    retrying: number;
+    stale: number;
+    active: number;
+  }>;
+  runs: Array<{
+    runId: string;
+    label: string;
+    status: string;
+    active: number;
+    stale: boolean;
+    latestJobAt: string | null;
+  }>;
+  queuedJobs: Array<{
+    id: string;
+    runId: string | null;
+    stage: "media_mirror" | "comment_media_mirror";
+    status: string;
+    accountHandle: string | null;
+    sourceId: string | null;
+    queuedAgeSeconds: number;
+    stale: boolean;
+    createdAt: string | null;
+  }>;
+  queuedJobsStaleAfterSeconds: number | null;
+};
 type CachedLandingData = {
   payload: SocialLandingPayload;
   cachedAt: string | null;
 };
+const SOCIAL_MEDIA_QUEUE_STAGES = ["media_mirror", "comment_media_mirror"] as const;
+const SOCIAL_MEDIA_QUEUE_STAGE_LABELS: Record<(typeof SOCIAL_MEDIA_QUEUE_STAGES)[number], string> = {
+  media_mirror: "Post media",
+  comment_media_mirror: "Comment media",
+};
+const SOCIAL_MEDIA_RECOVERY_CONFIRMATION = "RECOVER MEDIA MIRROR JOBS";
+const SOCIAL_MEDIA_DRAIN_CONFIRMATION = "DRAIN BRAVO MEDIA";
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SHOW_SOCIAL_HANDLE_FIELD_BY_PLATFORM: Record<EditableShowSocialPlatform, string> = {
   instagram: "instagram_handle",
   facebook: "facebook_handle",
@@ -180,6 +299,185 @@ const formatPlatformLabel = (platform: SocialLandingPlatform): string => {
 const getPlatformIconKey = (
   platform: SocialLandingPlatform,
 ): SocialPlatformTabIconKey => platform === "twitter" ? "twitter" : platform;
+
+const toNonNegativeInt = (value: unknown): number => {
+  const parsed = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 0;
+};
+
+const getFirstNonNegativeInt = (
+  source: Record<string, unknown> | null | undefined,
+  keys: readonly string[],
+): number => {
+  for (const key of keys) {
+    const value = source?.[key];
+    if (value !== null && value !== undefined) {
+      return toNonNegativeInt(value);
+    }
+  }
+  return 0;
+};
+
+const getFirstString = (
+  source: Record<string, unknown> | null | undefined,
+  keys: readonly string[],
+): string | null => {
+  for (const key of keys) {
+    const value = source?.[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return null;
+};
+
+const queueBucketCount = (
+  bucket: SocialQueueStatusBucket | undefined,
+  status: string,
+): number => toNonNegativeInt(bucket?.[status]);
+
+const buildMediaQueueRunOptions = (
+  runs: readonly SocialMediaQueueRun[] | undefined,
+): SocialMediaQueueBadgeSummary["runs"] =>
+  (Array.isArray(runs) ? runs : [])
+    .map((run) => {
+      const runId = typeof run.run_id === "string" ? run.run_id.trim() : "";
+      if (!UUID_PATTERN.test(runId)) return null;
+      const active =
+        toNonNegativeInt(run.active) ||
+        SOCIAL_MEDIA_QUEUE_STAGES.reduce((total, stage) => {
+          const bucket = run.stages?.[stage];
+          return (
+            total +
+            queueBucketCount(bucket, "queued") +
+            queueBucketCount(bucket, "pending") +
+            queueBucketCount(bucket, "running") +
+            queueBucketCount(bucket, "retrying")
+          );
+        }, 0);
+      const latestJobAt =
+        typeof run.latest_job_at === "string" && run.latest_job_at.trim()
+          ? run.latest_job_at.trim()
+          : null;
+      const timestamp = formatCompactTimestamp(latestJobAt);
+      const shortRunId = runId.slice(0, 8);
+      const status =
+        typeof run.status === "string" && run.status.trim()
+          ? run.status.trim().toLowerCase()
+          : "unknown";
+      return {
+        runId,
+        label: `${shortRunId} · ${active.toLocaleString()} active${
+          timestamp ? ` · ${timestamp}` : ""
+        }`,
+        status,
+        active,
+        stale: Boolean(run.stale),
+        latestJobAt,
+      };
+    })
+    .filter((run): run is NonNullable<typeof run> => Boolean(run));
+
+const buildMediaQueueQueuedJobs = (
+  jobs: readonly SocialMediaQueueQueuedJob[] | undefined,
+): SocialMediaQueueBadgeSummary["queuedJobs"] =>
+  (Array.isArray(jobs) ? jobs : [])
+    .map((job) => {
+      const id = typeof job.id === "string" ? job.id.trim() : "";
+      const stage = typeof job.stage === "string" ? job.stage.trim() : "";
+      if (!id || !SOCIAL_MEDIA_QUEUE_STAGES.includes(stage as (typeof SOCIAL_MEDIA_QUEUE_STAGES)[number])) {
+        return null;
+      }
+      const runId = typeof job.run_id === "string" && UUID_PATTERN.test(job.run_id.trim())
+        ? job.run_id.trim()
+        : null;
+      return {
+        id,
+        runId,
+        stage: stage as "media_mirror" | "comment_media_mirror",
+        status: typeof job.status === "string" && job.status.trim()
+          ? job.status.trim().toLowerCase()
+          : "queued",
+        accountHandle: typeof job.account_handle === "string" && job.account_handle.trim()
+          ? job.account_handle.trim().replace(/^@/, "")
+          : null,
+        sourceId: typeof job.source_id === "string" && job.source_id.trim()
+          ? job.source_id.trim()
+          : null,
+        queuedAgeSeconds: toNonNegativeInt(job.queued_age_seconds),
+        stale: Boolean(job.stale),
+        createdAt: typeof job.created_at === "string" && job.created_at.trim()
+          ? job.created_at.trim()
+          : null,
+      };
+    })
+    .filter((job): job is NonNullable<typeof job> => Boolean(job))
+    .sort((left, right) => right.queuedAgeSeconds - left.queuedAgeSeconds);
+
+const buildMediaQueueBadgeSummary = (
+  payload: SocialQueueStatusPayload | null | undefined,
+): SocialMediaQueueBadgeSummary | null => {
+  const queue = payload?.queue;
+  if (!queue) return null;
+  const staleByStage = queue.media_stale_claims?.by_stage ?? {};
+  const stages = SOCIAL_MEDIA_QUEUE_STAGES.map((stage) => {
+    const stagePlatformBucket = queue.by_stage_platform?.[stage]?.instagram;
+    const stageBucket = queue.by_stage?.[stage];
+    const bucket = stagePlatformBucket ?? stageBucket;
+    const queued = queueBucketCount(bucket, "queued");
+    const pending = queueBucketCount(bucket, "pending");
+    const running = queueBucketCount(bucket, "running");
+    const retrying = queueBucketCount(bucket, "retrying");
+    const stale = toNonNegativeInt(staleByStage[stage]);
+    return {
+      key: stage,
+      label: SOCIAL_MEDIA_QUEUE_STAGE_LABELS[stage],
+      queued,
+      pending,
+      running,
+      retrying,
+      stale,
+      active: queued + pending + running + retrying,
+    };
+  });
+  const mediaCounts = SOCIAL_MEDIA_QUEUE_STAGES.reduce(
+    (acc, stage) => {
+      const stagePlatformBucket = queue.by_stage_platform?.[stage]?.instagram;
+      const stageBucket = queue.by_stage?.[stage];
+      const bucket = stagePlatformBucket ?? stageBucket;
+      acc.queued += queueBucketCount(bucket, "queued");
+      acc.pending += queueBucketCount(bucket, "pending");
+      acc.running += queueBucketCount(bucket, "running");
+      acc.retrying += queueBucketCount(bucket, "retrying");
+      return acc;
+    },
+    { queued: 0, pending: 0, running: 0, retrying: 0 },
+  );
+  const stale = toNonNegativeInt(queue.media_stale_claims?.total);
+  const staleAfterSecondsValue = queue.media_stale_claims?.stale_after_seconds;
+  const staleAfterSeconds =
+    staleAfterSecondsValue === null || staleAfterSecondsValue === undefined
+      ? null
+      : toNonNegativeInt(staleAfterSecondsValue);
+  const queuedJobsStaleAfterSecondsValue = queue.media_queued_jobs_stale_after_seconds;
+  const queuedJobsStaleAfterSeconds =
+    queuedJobsStaleAfterSecondsValue === null || queuedJobsStaleAfterSecondsValue === undefined
+      ? null
+      : toNonNegativeInt(queuedJobsStaleAfterSecondsValue);
+  return {
+    ...mediaCounts,
+    stale,
+    active:
+      mediaCounts.queued +
+      mediaCounts.pending +
+      mediaCounts.running +
+      mediaCounts.retrying,
+    staleAfterSeconds,
+    degraded: Boolean(payload?.degraded || queue.error),
+    stages,
+    runs: buildMediaQueueRunOptions(queue.media_runs),
+    queuedJobs: buildMediaQueueQueuedJobs(queue.media_queued_jobs),
+    queuedJobsStaleAfterSeconds,
+  };
+};
 
 const getMetadataString = (
   metadata: Record<string, unknown> | null | undefined,
@@ -259,6 +557,23 @@ const formatCompactTimestamp = (value: string | null | undefined): string | null
     hour: "numeric",
     minute: "2-digit",
   }).format(date);
+};
+
+const formatQueueAge = (seconds: number): string => {
+  const safeSeconds = Math.max(0, Math.floor(seconds));
+  if (safeSeconds >= 86_400) {
+    const days = Math.floor(safeSeconds / 86_400);
+    return `${days.toLocaleString()}d`;
+  }
+  if (safeSeconds >= 3_600) {
+    const hours = Math.floor(safeSeconds / 3_600);
+    return `${hours.toLocaleString()}h`;
+  }
+  if (safeSeconds >= 60) {
+    const minutes = Math.floor(safeSeconds / 60);
+    return `${minutes.toLocaleString()}m`;
+  }
+  return `${safeSeconds.toLocaleString()}s`;
 };
 
 const formatInventoryCount = (count: number, total: number): string =>
@@ -683,6 +998,49 @@ const ScrapeJobHealthBadge = ({
   );
 };
 
+const SocialMediaQueueBadge = ({
+  summary,
+}: {
+  summary: SocialMediaQueueBadgeSummary | null;
+}) => {
+  if (!summary) return null;
+  const hasStale = summary.stale > 0;
+  const hasActive = summary.active > 0;
+  const Icon = hasStale || summary.degraded ? AlertTriangle : CircleCheck;
+  const toneClassName =
+    hasStale || summary.degraded
+      ? "border-amber-300 bg-amber-50 text-amber-900"
+      : hasActive
+        ? "border-sky-200 bg-sky-50 text-sky-800"
+        : "border-emerald-200 bg-emerald-50 text-emerald-800";
+  const detail = hasStale
+    ? `${summary.stale.toLocaleString()} stale · ${summary.active.toLocaleString()} active`
+    : hasActive
+      ? `${summary.active.toLocaleString()} active · ${summary.running.toLocaleString()} running`
+      : "no active media jobs";
+  const staleWindow = summary.staleAfterSeconds
+    ? `${Math.round(summary.staleAfterSeconds / 60).toLocaleString()} min`
+    : "configured window";
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold ${toneClassName}`}
+        >
+          <Icon aria-hidden="true" className="h-3.5 w-3.5" />
+          <span>Media queue</span>
+          <span className="text-current/70">{detail}</span>
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>
+        Instagram media mirror and comment media mirror queue depth. Stale means
+        a running media job has missed the {staleWindow} heartbeat window.
+      </TooltipContent>
+    </Tooltip>
+  );
+};
+
 const SocialProgressStatusBadge = ({
   status,
 }: {
@@ -718,6 +1076,372 @@ const SocialProgressStatusBadge = ({
             : "Progress freshness for the social landing rollup.")}
       </TooltipContent>
     </Tooltip>
+  );
+};
+
+const MediaQueueDrilldownPanel = ({
+  summary,
+  runId,
+  stage,
+  drainAccountHandle,
+  recovering,
+  draining,
+  recoveryMessage,
+  recoveryError,
+  recoveryHistory,
+  drainMessage,
+  drainError,
+  drainHistory,
+  snapshotLinks,
+  onRunIdChange,
+  onStageChange,
+  onDrainAccountHandleChange,
+  onRecover,
+  onDrain,
+}: {
+  summary: SocialMediaQueueBadgeSummary | null;
+  runId: string;
+  stage: "media_mirror" | "comment_media_mirror" | "all";
+  drainAccountHandle: string;
+  recovering: boolean;
+  draining: boolean;
+  recoveryMessage: string | null;
+  recoveryError: string | null;
+  recoveryHistory: readonly SocialMediaQueueRecoveryHistoryRow[];
+  drainMessage: string | null;
+  drainError: string | null;
+  drainHistory: readonly SocialMediaQueueDrainHistoryRow[];
+  snapshotLinks: readonly SocialMediaQueueSnapshotLink[];
+  onRunIdChange: (nextValue: string) => void;
+  onStageChange: (nextValue: "media_mirror" | "comment_media_mirror" | "all") => void;
+  onDrainAccountHandleChange: (nextValue: string) => void;
+  onRecover: () => void;
+  onDrain: () => void;
+}) => {
+  const runIdValid = UUID_PATTERN.test(runId.trim());
+  const selectedRunId = summary?.runs.some((run) => run.runId === runId.trim())
+    ? runId.trim()
+    : "";
+  const rows =
+    summary?.stages?.length
+      ? summary.stages
+      : SOCIAL_MEDIA_QUEUE_STAGES.map((key) => ({
+          key,
+          label: SOCIAL_MEDIA_QUEUE_STAGE_LABELS[key],
+          queued: 0,
+          pending: 0,
+          running: 0,
+          retrying: 0,
+          stale: 0,
+          active: 0,
+        }));
+  const queuedJobs = summary?.queuedJobs ?? [];
+
+  return (
+    <section className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <p className={sectionEyebrowClass}>Media Queue</p>
+          <h2 className="text-lg font-semibold text-zinc-900">
+            Mirror recovery
+          </h2>
+        </div>
+        <div className="grid gap-2 sm:grid-cols-[minmax(0,260px)_minmax(0,300px)_180px_minmax(0,160px)_auto_auto]">
+          <select
+            value={selectedRunId}
+            onChange={(event) => onRunIdChange(event.target.value)}
+            aria-label="Media recovery run"
+            className="min-h-10 rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none transition focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20"
+          >
+            <option value="">Recent media run</option>
+            {summary?.runs.map((run) => (
+              <option key={run.runId} value={run.runId}>
+                {run.stale ? "Stale · " : ""}{run.label}
+              </option>
+            ))}
+          </select>
+          <input
+            type="text"
+            value={runId}
+            onChange={(event) => onRunIdChange(event.target.value)}
+            placeholder="Run ID"
+            aria-label="Media recovery run ID"
+            className="min-h-10 rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none transition focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20"
+          />
+          <select
+            value={stage}
+            onChange={(event) =>
+              onStageChange(
+                event.target.value as "media_mirror" | "comment_media_mirror" | "all",
+              )
+            }
+            aria-label="Media recovery stage"
+            className="min-h-10 rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none transition focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20"
+          >
+            <option value="media_mirror">Post media</option>
+            <option value="comment_media_mirror">Comment media</option>
+            <option value="all">All media</option>
+          </select>
+          <Button
+            type="button"
+            onClick={onRecover}
+            disabled={!runIdValid || recovering}
+            className="min-h-10"
+          >
+            <RefreshCw aria-hidden="true" className={recovering ? "animate-spin" : ""} />
+            Recover stale
+          </Button>
+          <input
+            type="text"
+            value={drainAccountHandle}
+            onChange={(event) => onDrainAccountHandleChange(event.target.value)}
+            placeholder="Account"
+            aria-label="Drain media account"
+            className="min-h-10 rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none transition focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20"
+          />
+          <Button
+            type="button"
+            onClick={onDrain}
+            disabled={!runIdValid || draining}
+            className="min-h-10"
+            variant="secondary"
+          >
+            <RefreshCw aria-hidden="true" className={draining ? "animate-spin" : ""} />
+            Drain Bravo media
+          </Button>
+        </div>
+      </div>
+
+      <div className="mt-5 grid gap-3 md:grid-cols-2">
+        {rows.map((row) => {
+          const hasStale = row.stale > 0;
+          return (
+            <div
+              key={row.key}
+              className={`rounded-xl border p-4 ${
+                hasStale
+                  ? "border-amber-200 bg-amber-50"
+                  : "border-zinc-200 bg-zinc-50"
+              }`}
+            >
+              <div className="flex items-center justify-between gap-3">
+                <p className="font-semibold text-zinc-900">{row.label}</p>
+                <span
+                  className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${
+                    hasStale
+                      ? "border-amber-300 bg-white text-amber-800"
+                      : "border-zinc-200 bg-white text-zinc-600"
+                  }`}
+                >
+                  {row.stale.toLocaleString()} stale
+                </span>
+              </div>
+              <div className="mt-4 grid grid-cols-4 gap-2 text-center text-xs">
+                {[
+                  ["Queued", row.queued],
+                  ["Retrying", row.retrying],
+                  ["Running", row.running],
+                  ["Active", row.active],
+                ].map(([label, value]) => (
+                  <div key={label} className="rounded-lg bg-white px-2 py-2">
+                    <p className="font-semibold text-zinc-900">
+                      {Number(value).toLocaleString()}
+                    </p>
+                    <p className="mt-1 text-zinc-500">{label}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="mt-5 rounded-xl border border-zinc-200 bg-zinc-50 p-4">
+        <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+          <p className="font-semibold text-zinc-900">Oldest queued media jobs</p>
+          <span className="text-xs font-semibold text-zinc-500">
+            {summary?.queuedJobsStaleAfterSeconds
+              ? `stale after ${formatQueueAge(summary.queuedJobsStaleAfterSeconds)}`
+              : "oldest first"}
+          </span>
+        </div>
+        {queuedJobs.length ? (
+          <div className="mt-3 divide-y divide-zinc-200 overflow-hidden rounded-lg border border-zinc-200 bg-white">
+            {queuedJobs.slice(0, 6).map((job) => (
+              <div
+                key={job.id}
+                className="grid gap-2 px-3 py-2 text-sm sm:grid-cols-[minmax(0,1fr)_auto]"
+              >
+                <div className="min-w-0">
+                  <p className="truncate font-medium text-zinc-900">
+                    {job.sourceId || job.id}
+                  </p>
+                  <p className="text-xs text-zinc-500">
+                    {SOCIAL_MEDIA_QUEUE_STAGE_LABELS[job.stage]} · {job.status}
+                    {job.accountHandle ? ` · @${job.accountHandle}` : ""}
+                    {job.runId ? ` · ${job.runId.slice(0, 8)}` : ""}
+                  </p>
+                </div>
+                <span
+                  className={`inline-flex items-center justify-center rounded-full border px-2.5 py-1 text-xs font-semibold ${
+                    job.stale
+                      ? "border-amber-300 bg-amber-50 text-amber-800"
+                      : "border-zinc-200 bg-zinc-50 text-zinc-600"
+                  }`}
+                >
+                  {formatQueueAge(job.queuedAgeSeconds)}
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="mt-3 text-sm text-zinc-500">
+            No queued media jobs are visible in the current snapshot.
+          </p>
+        )}
+      </div>
+
+      {recoveryMessage ? (
+        <p className="mt-3 text-sm font-medium text-emerald-700">
+          {recoveryMessage}
+        </p>
+      ) : null}
+      {recoveryError ? (
+        <p className="mt-3 text-sm font-medium text-red-700">{recoveryError}</p>
+      ) : null}
+      {drainMessage ? (
+        <p className="mt-3 text-sm font-medium text-emerald-700">
+          {drainMessage}
+        </p>
+      ) : null}
+      {drainError ? (
+        <p className="mt-3 text-sm font-medium text-red-700">{drainError}</p>
+      ) : null}
+
+      <div className="mt-5 grid gap-4 lg:grid-cols-2">
+        <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4">
+          <div className="flex items-center justify-between gap-3">
+            <p className="font-semibold text-zinc-900">Recovery history</p>
+            <span className="text-xs font-semibold text-zinc-500">
+              {recoveryHistory.length.toLocaleString()} row{recoveryHistory.length === 1 ? "" : "s"}
+            </span>
+          </div>
+          {recoveryHistory.length > 0 ? (
+            <div className="mt-3 divide-y divide-zinc-200 overflow-hidden rounded-lg border border-zinc-200 bg-white">
+              {recoveryHistory.map((row) => (
+                <div key={row.id} className="grid gap-1 px-3 py-2 text-sm sm:grid-cols-[1fr_auto]">
+                  <div className="min-w-0">
+                    <p className="truncate font-medium text-zinc-900">
+                      {row.runId}
+                    </p>
+                    <p className="text-xs text-zinc-500">
+                      {row.stage === "all"
+                        ? "All media"
+                        : SOCIAL_MEDIA_QUEUE_STAGE_LABELS[row.stage]} · {formatCompactTimestamp(row.recoveredAt) || row.recoveredAt}
+                    </p>
+                  </div>
+                  <p className="text-xs font-semibold text-zinc-600 sm:text-right">
+                    {row.recoveredCount.toLocaleString()} recovered · {row.dispatchedCount.toLocaleString()} dispatched
+                  </p>
+                  <p className="text-xs text-zinc-500 sm:col-span-2">
+                    {row.resultSummary}
+                  </p>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="mt-3 text-sm text-zinc-500">
+              Recoveries made from this panel will appear here.
+            </p>
+          )}
+        </div>
+
+        <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4">
+          <div className="flex items-center justify-between gap-3">
+            <p className="font-semibold text-zinc-900">Drain history</p>
+            <span className="text-xs font-semibold text-zinc-500">
+              {drainHistory.length.toLocaleString()} row{drainHistory.length === 1 ? "" : "s"}
+            </span>
+          </div>
+          {drainHistory.length > 0 ? (
+            <div className="mt-3 divide-y divide-zinc-200 overflow-hidden rounded-lg border border-zinc-200 bg-white">
+              {drainHistory.map((row) => (
+                <div key={row.id} className="grid gap-2 px-3 py-2 text-sm">
+                  <div className="min-w-0">
+                    <p className="truncate font-medium text-zinc-900">
+                      @{row.accountHandle} · {row.runId}
+                    </p>
+                    <p className="text-xs text-zinc-500">
+                      {row.stage === "all"
+                        ? "All media"
+                        : SOCIAL_MEDIA_QUEUE_STAGE_LABELS[row.stage]} · {formatCompactTimestamp(row.drainedAt) || row.drainedAt}
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-4 gap-2 text-center text-xs">
+                    {[
+                      ["Before", row.beforeRemaining],
+                      ["Recovered", row.recoveredCount],
+                      ["Dispatched", row.dispatchedCount],
+                      ["After", row.afterRemaining],
+                    ].map(([label, value]) => (
+                      <div key={label} className="rounded-lg bg-zinc-50 px-2 py-2">
+                        <p className="font-semibold text-zinc-900">
+                          {Number(value).toLocaleString()}
+                        </p>
+                        <p className="mt-1 text-zinc-500">{label}</p>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="text-xs text-zinc-500">
+                    Stop: {row.stopReason || "none"} · Next: {row.nextRecommendedAction || "none"}
+                  </p>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="mt-3 text-sm text-zinc-500">
+              Drain results made from this panel will appear here.
+            </p>
+          )}
+        </div>
+
+        <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4">
+          <div className="flex items-center justify-between gap-3">
+            <p className="font-semibold text-zinc-900">Queue snapshots</p>
+            <span className="text-xs font-semibold text-zinc-500">
+              {snapshotLinks.length.toLocaleString()} link{snapshotLinks.length === 1 ? "" : "s"}
+            </span>
+          </div>
+          {snapshotLinks.length > 0 ? (
+            <div className="mt-3 space-y-2">
+              {snapshotLinks.slice(0, 5).map((snapshot) => (
+                <a
+                  key={snapshot.name}
+                  href={snapshot.href}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex min-w-0 items-center justify-between gap-3 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-800 transition hover:border-zinc-300 hover:bg-zinc-50"
+                >
+                  <span className="min-w-0">
+                    <span className="block truncate font-medium">
+                      {snapshot.runId ? snapshot.runId.slice(0, 8) : snapshot.name}
+                    </span>
+                    <span className="block text-xs text-zinc-500">
+                      {snapshot.stage || "all"} · {formatCompactTimestamp(snapshot.createdAt) || "snapshot"}
+                    </span>
+                  </span>
+                  <ExternalLink aria-hidden="true" className="h-4 w-4 shrink-0" />
+                </a>
+              ))}
+            </div>
+          ) : (
+            <p className="mt-3 text-sm text-zinc-500">
+              No saved queue snapshot logs are available yet.
+            </p>
+          )}
+        </div>
+      </div>
+    </section>
   );
 };
 
@@ -1050,6 +1774,55 @@ const loadLandingData = async (
     payload: coerceLandingPayload(data, { progressStale: cacheStatus?.includes("stale") ?? false }),
     cacheable: response.headers.get("x-trr-cacheable") !== "0",
   };
+};
+
+const loadMediaQueueSummary = async (
+  currentUser: User,
+): Promise<SocialMediaQueueBadgeSummary | null> => {
+  const startedAt = nowMs();
+  const response = await fetchAdminWithAuth(
+    "/api/admin/trr-api/social/ingest/queue-status?fresh=true&detail=summary",
+    undefined,
+    {
+      allowDevAdminBypass: true,
+      preferredUser: currentUser,
+    },
+  );
+  recordAdminLoadSample({
+    surface: "admin-social-landing-api",
+    path: "/admin/social",
+    source: "api",
+    duration_ms: nowMs() - startedAt,
+    cache_status: response.headers.get("x-trr-cache"),
+    server_timing: response.headers.get("server-timing"),
+  });
+  const data = (await response.json().catch(() => ({}))) as
+    | ({ error?: string } & SocialQueueStatusPayload)
+    | undefined;
+  if (!response.ok) {
+    throw new Error(data?.error || "Failed to load social media queue status");
+  }
+  return buildMediaQueueBadgeSummary(data);
+};
+
+const loadMediaQueueSnapshotLinks = async (
+  currentUser: User,
+): Promise<SocialMediaQueueSnapshotLink[]> => {
+  const response = await fetchAdminWithAuth(
+    "/api/admin/social/media-queue/snapshots",
+    undefined,
+    {
+      allowDevAdminBypass: true,
+      preferredUser: currentUser,
+    },
+  );
+  const data = (await response.json().catch(() => ({}))) as
+    | { snapshots?: SocialMediaQueueSnapshotLink[]; error?: string }
+    | undefined;
+  if (!response.ok) {
+    throw new Error(data?.error || "Failed to load media queue snapshots");
+  }
+  return Array.isArray(data?.snapshots) ? data.snapshots : [];
 };
 
 const readCachedLandingData = (): CachedLandingData | null => {
@@ -2095,12 +2868,36 @@ const NetworkSourceGroupCard = ({
 
 export default function AdminSocialMediaPage() {
   const { user, checking, hasAccess } = useAdminGuard();
+  const appFlags = getTrrAppFlags();
+  const adminSocialIngestionUiEnabled = appFlags.adminSocialIngestionUi;
+  const adminSocialScraperTriggersEnabled = appFlags.adminSocialScraperTriggers;
   const [landing, setLanding] = useState<SocialLandingPayload | null>(null);
   const landingLoadStartedAtRef = useRef<number>(nowMs());
   const landingNavigationSampleRecordedRef = useRef(false);
   const [landingFreshnessAt, setLandingFreshnessAt] = useState<string | null>(null);
   const [loadingLanding, setLoadingLanding] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [mediaQueueSummary, setMediaQueueSummary] =
+    useState<SocialMediaQueueBadgeSummary | null>(null);
+  const [mediaRecoveryRunId, setMediaRecoveryRunId] = useState("");
+  const [mediaRecoveryStage, setMediaRecoveryStage] =
+    useState<"media_mirror" | "comment_media_mirror" | "all">("media_mirror");
+  const [mediaDrainAccountHandle, setMediaDrainAccountHandle] = useState("bravotv");
+  const [recoveringMediaQueue, setRecoveringMediaQueue] = useState(false);
+  const [drainingMediaQueue, setDrainingMediaQueue] = useState(false);
+  const [mediaRecoveryMessage, setMediaRecoveryMessage] = useState<string | null>(null);
+  const [mediaRecoveryError, setMediaRecoveryError] = useState<string | null>(null);
+  const [mediaRecoveryHistory, setMediaRecoveryHistory] = useState<
+    SocialMediaQueueRecoveryHistoryRow[]
+  >([]);
+  const [mediaDrainMessage, setMediaDrainMessage] = useState<string | null>(null);
+  const [mediaDrainError, setMediaDrainError] = useState<string | null>(null);
+  const [mediaDrainHistory, setMediaDrainHistory] = useState<
+    SocialMediaQueueDrainHistoryRow[]
+  >([]);
+  const [mediaQueueSnapshotLinks, setMediaQueueSnapshotLinks] = useState<
+    SocialMediaQueueSnapshotLink[]
+  >([]);
   const [reloadingSharedSources, setReloadingSharedSources] = useState(false);
   const [sharedSourceReloadMessage, setSharedSourceReloadMessage] = useState<string | null>(null);
   const [addHandleDialogOpen, setAddHandleDialogOpen] = useState(false);
@@ -2172,6 +2969,260 @@ export default function AdminSocialMediaPage() {
       cancelled = true;
     };
   }, [checking, hasAccess, user]);
+
+  const recoverStaleMediaQueueJobs = async () => {
+    if (!user || !adminSocialScraperTriggersEnabled) return;
+    const runId = mediaRecoveryRunId.trim();
+    if (!UUID_PATTERN.test(runId)) {
+      setMediaRecoveryError("Enter a valid run ID.");
+      return;
+    }
+
+    setRecoveringMediaQueue(true);
+    setMediaRecoveryError(null);
+    setMediaRecoveryMessage(null);
+    try {
+      const response = await fetchAdminWithAuth(
+        "/api/admin/trr-api/social/ingest/media-mirror/recover-stale",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            run_id: runId,
+            stage: mediaRecoveryStage,
+            stale_after_seconds: 900,
+            recover_limit: 5,
+            dispatch_limit: 8,
+            confirm_recovery: SOCIAL_MEDIA_RECOVERY_CONFIRMATION,
+          }),
+        },
+        { allowDevAdminBypass: true, preferredUser: user },
+      );
+      const data = (await response.json().catch(() => ({}))) as
+        | {
+            error?: string;
+            recovered_count?: number;
+            recovered_by_stage?: Record<string, unknown[]>;
+            dispatch?: { dispatched_job_ids?: unknown[] };
+          }
+        | undefined;
+      if (!response.ok) {
+        throw new Error(data?.error || "Failed to recover stale media jobs");
+      }
+      const dispatchedCount = Array.isArray(data?.dispatch?.dispatched_job_ids)
+        ? data.dispatch.dispatched_job_ids.length
+        : 0;
+      const recoveredCount = toNonNegativeInt(data?.recovered_count);
+      const recoveredByStage = data?.recovered_by_stage ?? {};
+      const stageSummary = SOCIAL_MEDIA_QUEUE_STAGES.map((stageKey) => {
+        const stageRows = recoveredByStage[stageKey];
+        const count = Array.isArray(stageRows) ? stageRows.length : 0;
+        return count > 0
+          ? `${SOCIAL_MEDIA_QUEUE_STAGE_LABELS[stageKey]} ${count.toLocaleString()}`
+          : null;
+      }).filter((item): item is string => Boolean(item));
+      const resultSummary = [
+        stageSummary.length ? stageSummary.join(", ") : "No stale claims recovered",
+        `${dispatchedCount.toLocaleString()} dispatch follow-up${dispatchedCount === 1 ? "" : "s"}`,
+      ].join("; ");
+      setMediaRecoveryMessage(
+        `Recovered ${recoveredCount.toLocaleString()} stale media job${
+          recoveredCount === 1 ? "" : "s"
+        }; dispatched ${dispatchedCount.toLocaleString()}.`,
+      );
+      setMediaRecoveryHistory((current) => [
+        {
+          id: `${Date.now()}:${runId}:${mediaRecoveryStage}`,
+          runId,
+          stage: mediaRecoveryStage,
+          recoveredCount,
+          dispatchedCount,
+          resultSummary,
+          recoveredAt: new Date().toISOString(),
+        },
+        ...current,
+      ].slice(0, 10));
+      const nextSummary = await loadMediaQueueSummary(user);
+      setMediaQueueSummary(nextSummary);
+    } catch (error) {
+      setMediaRecoveryError(
+        error instanceof Error ? error.message : "Failed to recover stale media jobs",
+      );
+    } finally {
+      setRecoveringMediaQueue(false);
+    }
+  };
+
+  const drainBravoMediaQueueJobs = async () => {
+    if (!user || !adminSocialScraperTriggersEnabled) return;
+    const runId = mediaRecoveryRunId.trim();
+    const accountHandle = mediaDrainAccountHandle.trim().replace(/^@/, "") || "bravotv";
+    if (!UUID_PATTERN.test(runId)) {
+      setMediaDrainError("Enter a valid run ID.");
+      return;
+    }
+
+    setDrainingMediaQueue(true);
+    setMediaDrainError(null);
+    setMediaDrainMessage(null);
+    try {
+      const response = await fetchAdminWithAuth(
+        "/api/admin/trr-api/social/ingest/media-mirror/drain-account",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            run_id: runId,
+            account_handle: accountHandle,
+            stage: mediaRecoveryStage,
+            recover_limit: 25,
+            dispatch_limit: 8,
+            confirm_drain: SOCIAL_MEDIA_DRAIN_CONFIRMATION,
+          }),
+        },
+        { allowDevAdminBypass: true, preferredUser: user },
+      );
+      const data = (await response.json().catch(() => ({}))) as
+        | ({ error?: string; dispatch?: { dispatched_job_ids?: unknown[] } } & Record<string, unknown>)
+        | undefined;
+      if (!response.ok) {
+        throw new Error(data?.error || "Failed to drain Bravo media jobs");
+      }
+
+      const nestedDrain =
+        data?.drain && typeof data.drain === "object"
+          ? (data.drain as Record<string, unknown>)
+          : data?.status && typeof data.status === "object"
+            ? (data.status as Record<string, unknown>)
+            : data;
+      const dispatchedCount = Array.isArray(data?.dispatch?.dispatched_job_ids)
+        ? data.dispatch.dispatched_job_ids.length
+        : getFirstNonNegativeInt(nestedDrain, [
+            "dispatched",
+            "dispatched_count",
+            "dispatched_job_count",
+          ]);
+      const beforeRemaining = getFirstNonNegativeInt(nestedDrain, [
+        "before_remaining",
+        "before_remaining_count",
+        "remaining_before",
+      ]);
+      const recoveredCount = getFirstNonNegativeInt(nestedDrain, [
+        "recovered",
+        "recovered_count",
+        "recovered_job_count",
+      ]);
+      const afterRemaining = getFirstNonNegativeInt(nestedDrain, [
+        "after_remaining",
+        "after_remaining_count",
+        "remaining_after",
+      ]);
+      const stopReason = getFirstString(nestedDrain, ["stop_reason", "reason"]);
+      const nextRecommendedAction = getFirstString(nestedDrain, [
+        "next_recommended_action",
+        "next_action",
+        "recommended_action",
+      ]);
+
+      setMediaDrainMessage(
+        `Drained @${accountHandle}: ${beforeRemaining.toLocaleString()} before, ${recoveredCount.toLocaleString()} recovered, ${dispatchedCount.toLocaleString()} dispatched, ${afterRemaining.toLocaleString()} after.`,
+      );
+      setMediaDrainHistory((current) => [
+        {
+          id: `${Date.now()}:${runId}:${accountHandle}:${mediaRecoveryStage}`,
+          runId,
+          accountHandle,
+          stage: mediaRecoveryStage,
+          beforeRemaining,
+          recoveredCount,
+          dispatchedCount,
+          afterRemaining,
+          stopReason,
+          nextRecommendedAction,
+          drainedAt: new Date().toISOString(),
+        },
+        ...current,
+      ].slice(0, 10));
+      const nextSummary = await loadMediaQueueSummary(user);
+      setMediaQueueSummary(nextSummary);
+    } catch (error) {
+      setMediaDrainError(
+        error instanceof Error ? error.message : "Failed to drain Bravo media jobs",
+      );
+    } finally {
+      setDrainingMediaQueue(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!adminSocialIngestionUiEnabled) {
+      setMediaRecoveryRunId("");
+      return;
+    }
+    const firstRunId = mediaQueueSummary?.runs[0]?.runId;
+    if (!mediaRecoveryRunId && firstRunId) {
+      setMediaRecoveryRunId(firstRunId);
+    }
+  }, [adminSocialIngestionUiEnabled, mediaQueueSummary, mediaRecoveryRunId]);
+
+  useEffect(() => {
+    if (checking || !user || !hasAccess || !adminSocialIngestionUiEnabled) {
+      setMediaQueueSummary(null);
+      setMediaQueueSnapshotLinks([]);
+      return;
+    }
+
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const summary = await loadMediaQueueSummary(user);
+        if (!cancelled) {
+          setMediaQueueSummary(summary);
+        }
+      } catch {
+        if (!cancelled) {
+          setMediaQueueSummary({
+            queued: 0,
+            pending: 0,
+            running: 0,
+            retrying: 0,
+            stale: 0,
+            active: 0,
+            staleAfterSeconds: null,
+            degraded: true,
+            stages: SOCIAL_MEDIA_QUEUE_STAGES.map((key) => ({
+              key,
+              label: SOCIAL_MEDIA_QUEUE_STAGE_LABELS[key],
+              queued: 0,
+              pending: 0,
+              running: 0,
+              retrying: 0,
+              stale: 0,
+              active: 0,
+            })),
+            runs: [],
+            queuedJobs: [],
+            queuedJobsStaleAfterSeconds: null,
+          });
+        }
+      }
+      try {
+        const snapshots = await loadMediaQueueSnapshotLinks(user);
+        if (!cancelled) {
+          setMediaQueueSnapshotLinks(snapshots);
+        }
+      } catch {
+        if (!cancelled) {
+          setMediaQueueSnapshotLinks([]);
+        }
+      }
+    };
+
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [adminSocialIngestionUiEnabled, checking, hasAccess, user]);
 
   const saveShowHandleOverrides = async (
     show: ShowProfileSet,
@@ -2483,6 +3534,9 @@ export default function AdminSocialMediaPage() {
               {landing ? (
                 <div className="mt-3 flex flex-wrap items-center gap-2">
                   <ScrapeJobHealthBadge health={scrapeJobHealth} />
+                  {adminSocialIngestionUiEnabled ? (
+                    <SocialMediaQueueBadge summary={mediaQueueSummary} />
+                  ) : null}
                   <SocialProgressStatusBadge status={landing.social_progress_status} />
                 </div>
               ) : null}
@@ -2553,6 +3607,49 @@ export default function AdminSocialMediaPage() {
                   void reloadSharedSourcesFromSupabase();
                 }}
               />
+
+              {adminSocialIngestionUiEnabled ? (
+                <MediaQueueDrilldownPanel
+                  summary={mediaQueueSummary}
+                  runId={mediaRecoveryRunId}
+                  stage={mediaRecoveryStage}
+                  drainAccountHandle={mediaDrainAccountHandle}
+                  recovering={recoveringMediaQueue}
+                  draining={drainingMediaQueue}
+                  recoveryMessage={mediaRecoveryMessage}
+                  recoveryError={mediaRecoveryError}
+                  recoveryHistory={mediaRecoveryHistory}
+                  drainMessage={mediaDrainMessage}
+                  drainError={mediaDrainError}
+                  drainHistory={mediaDrainHistory}
+                  snapshotLinks={mediaQueueSnapshotLinks}
+                  onRunIdChange={(nextValue) => {
+                    setMediaRecoveryRunId(nextValue);
+                    setMediaRecoveryError(null);
+                    setMediaRecoveryMessage(null);
+                    setMediaDrainError(null);
+                    setMediaDrainMessage(null);
+                  }}
+                  onStageChange={(nextValue) => {
+                    setMediaRecoveryStage(nextValue);
+                    setMediaRecoveryError(null);
+                    setMediaRecoveryMessage(null);
+                    setMediaDrainError(null);
+                    setMediaDrainMessage(null);
+                  }}
+                  onDrainAccountHandleChange={(nextValue) => {
+                    setMediaDrainAccountHandle(nextValue);
+                    setMediaDrainError(null);
+                    setMediaDrainMessage(null);
+                  }}
+                  onRecover={() => {
+                    void recoverStaleMediaQueueJobs();
+                  }}
+                  onDrain={() => {
+                    void drainBravoMediaQueueJobs();
+                  }}
+                />
+              ) : null}
 
               <section className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
                 <div className="mb-4 flex items-center justify-between gap-3">

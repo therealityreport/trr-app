@@ -55,6 +55,8 @@ type InstagramFollowingResponse = {
     page_size?: number;
     total?: number;
     total_pages?: number;
+    has_more?: boolean;
+    next_page?: number | null;
   };
 };
 
@@ -152,6 +154,16 @@ function formatRelativeAge(ageHours: number | null | undefined): string {
   if (ageHours < 1) return `${Math.max(1, Math.round(ageHours * 60))}m ago`;
   if (ageHours < 48) return `${ageHours.toFixed(ageHours >= 10 ? 0 : 1)}h ago`;
   return `${Math.round(ageHours / 24)}d ago`;
+}
+
+function sortSocialBladeChartPoints(
+  points: Array<{ date: string; followers: number }>,
+): Array<{ date: string; followers: number }> {
+  return [...points].sort((a, b) => a.date.localeCompare(b.date));
+}
+
+function sortSocialBladeMetricRows(rows: Array<Record<string, string>>): Array<Record<string, string>> {
+  return [...rows].sort((a, b) => String(a.Date ?? "").localeCompare(String(b.Date ?? "")));
 }
 
 function getFreshnessChip(data: SocialBladeGrowthData | null): { label: string; className: string } {
@@ -630,7 +642,6 @@ export default function SocialGrowthSection({
 
   const followingPagination = followingData?.pagination ?? null;
   const followingCurrentPage = readPositiveInteger(followingPagination?.page, followingData ? 1 : 0);
-  const followingPageSize = readPositiveInteger(followingPagination?.page_size, FOLLOWING_PAGE_SIZE);
   const followingTotalPages =
     typeof followingPagination?.total_pages === "number" && followingPagination.total_pages > 0
       ? Math.floor(followingPagination.total_pages)
@@ -639,20 +650,25 @@ export default function SocialGrowthSection({
     typeof followingPagination?.total === "number" && followingPagination.total >= 0
       ? Math.floor(followingPagination.total)
       : null;
+  const followingExplicitHasMore =
+    typeof followingPagination?.has_more === "boolean" ? followingPagination.has_more : null;
+  const followingNextPage =
+    typeof followingPagination?.next_page === "number" && followingPagination.next_page > followingCurrentPage
+      ? Math.floor(followingPagination.next_page)
+      : null;
   const followingLoadedCount = followingData?.items?.length ?? 0;
-  const followingHasNextPage = Boolean(
-    followingData &&
-      (followingTotalPages !== null
-        ? followingCurrentPage < followingTotalPages
-        : followingTotal !== null
-          ? followingLoadedCount < followingTotal
-          : followingLoadedCount >= followingPageSize),
-  );
+  const followingHasNextPage = Boolean(followingData) && (() => {
+    if (followingExplicitHasMore !== null) return followingExplicitHasMore;
+    if (followingNextPage !== null) return true;
+    if (followingTotalPages !== null) return followingCurrentPage < followingTotalPages;
+    if (followingTotal !== null) return followingLoadedCount < followingTotal;
+    return false;
+  })();
 
   const loadNextFollowingPage = useCallback(() => {
     if (!followingHasNextPage || followingLoading) return;
-    void loadFollowingPage(Math.max(1, followingCurrentPage) + 1);
-  }, [followingCurrentPage, followingHasNextPage, followingLoading, loadFollowingPage]);
+    void loadFollowingPage(followingNextPage ?? Math.max(1, followingCurrentPage) + 1);
+  }, [followingCurrentPage, followingHasNextPage, followingLoading, followingNextPage, loadFollowingPage]);
 
   useEffect(() => {
     setFollowingData(null);
@@ -751,7 +767,8 @@ export default function SocialGrowthSection({
   const { profile_stats: stats, rankings, daily_total_followers_chart: chart, daily_channel_metrics_60day: metrics } = data;
   const freshnessChip = getFreshnessChip(data);
   const effectiveAvatarUrl = avatarUrl || resolveSocialBladeAvatarUrl(data);
-  const chartPoints = chart?.data ?? [];
+  const chartPoints = sortSocialBladeChartPoints(chart?.data ?? []);
+  const metricRows = sortSocialBladeMetricRows(metrics?.data ?? []);
   const statsCards = [
     {
       key: "followers",
@@ -1100,7 +1117,7 @@ export default function SocialGrowthSection({
         <FollowerGrowthChart data={chartPoints} metricLabel={metricLabel} />
       </div>
 
-      {metrics?.data.length ? (
+      {metricRows.length ? (
         <div className="rounded-2xl border border-zinc-200 bg-white shadow-sm">
           <div className="border-b border-zinc-100 px-6 py-4">
             <p className="text-xs font-semibold uppercase tracking-[0.25em] text-zinc-400">Daily Channel Metrics</p>
@@ -1123,7 +1140,7 @@ export default function SocialGrowthSection({
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-100">
-                {metrics.data.map((row, i) => (
+                {metricRows.map((row, i) => (
                   <tr key={`${row.Date ?? "row"}-${i}`} className="transition-colors hover:bg-zinc-50/50">
                     {metrics.headers.map((header) => (
                       <td key={header} className="px-4 py-2 text-xs tabular-nums text-zinc-700">

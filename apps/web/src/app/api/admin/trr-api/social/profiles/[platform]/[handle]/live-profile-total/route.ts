@@ -21,6 +21,19 @@ type RouteContext = {
 const LIVE_PROFILE_TOTAL_CACHE_NAMESPACE = "admin-social-profile-live-total";
 const LIVE_PROFILE_TOTAL_CACHE_TTL_MS = 5 * 60_000;
 const LIVE_PROFILE_TOTAL_STALE_TTL_MS = 15 * 60_000;
+const LIVE_PROFILE_TOTAL_BACKEND_TIMEOUT_MS = 4_000;
+
+const buildLiveProfileTotalFallback = (platform: string, handle: string, reason: string): Record<string, unknown> => ({
+  platform,
+  handle,
+  account_handle: handle,
+  live_total_posts_current: null,
+  profile_url: null,
+  status: "degraded",
+  degraded: true,
+  degraded_reason: reason,
+  generated_at: new Date().toISOString(),
+});
 
 export async function GET(request: NextRequest, context: RouteContext) {
   try {
@@ -53,7 +66,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
               adminContext,
               fallbackError: "Failed to fetch social account live profile total",
               retries: 0,
-              timeoutMs: 30_000,
+              timeoutMs: LIVE_PROFILE_TOTAL_BACKEND_TIMEOUT_MS,
             },
           );
           setRouteResponseCache(
@@ -73,7 +86,12 @@ export async function GET(request: NextRequest, context: RouteContext) {
           headers: { "x-trr-cache": "stale", "x-trr-cacheable": "0" },
         });
       }
-      throw error;
+      return NextResponse.json(buildLiveProfileTotalFallback(platform, handle, "backend_timeout_or_error"), {
+        headers: {
+          "x-trr-cache": "fallback",
+          "x-trr-cacheable": "0",
+        },
+      });
     }
   } catch (error) {
     return socialProxyErrorResponse(error, "[api] Failed to fetch social account live profile total");

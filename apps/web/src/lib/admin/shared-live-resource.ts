@@ -71,6 +71,14 @@ type SharedResourceConfig<T> =
   | ({ mode: "sse" } & SharedSseConfig<T>)
   | ({ mode: "manualRefetch" } & SharedManualConfig);
 
+const mergeSharedPollRequests = (
+  current: SharedPollRequest | null,
+  next: SharedPollRequest,
+): SharedPollRequest => ({
+  cause: next.cause ?? current?.cause ?? "manual",
+  forceRefresh: Boolean(current?.forceRefresh || next.forceRefresh),
+});
+
 const areSharedLiveSnapshotsEqual = <T,>(
   left: SharedLiveSnapshot<T>,
   right: SharedLiveSnapshot<T>,
@@ -160,12 +168,15 @@ class SharedLiveResourceCoordinator<T> {
   private readonly snapshotKey: string;
   private readonly channelName: string;
   private readonly channel: BroadcastChannel | null;
+  private readonly onEmpty: (coordinator: SharedLiveResourceCoordinator<T>) => void;
   private config: SharedResourceConfig<T>;
   private pendingPollRequest: SharedPollRequest | null = null;
   private consecutiveRetryableErrorCount = 0;
+  private disposed = false;
 
-  constructor(config: SharedResourceConfig<T>) {
+  constructor(config: SharedResourceConfig<T>, onEmpty: (coordinator: SharedLiveResourceCoordinator<T>) => void) {
     this.config = config;
+    this.onEmpty = onEmpty;
     this.key = config.key;
     this.leaseKey = `trr:shared-live:${this.key}:lease:${SNAPSHOT_VERSION}`;
     this.snapshotKey = `trr:shared-live:${this.key}:snapshot:${SNAPSHOT_VERSION}`;
@@ -204,6 +215,10 @@ class SharedLiveResourceCoordinator<T> {
 
   unsubscribe(id: string): void {
     this.subscribers.delete(id);
+    if (this.subscribers.size === 0) {
+      this.onEmpty(this);
+      return;
+    }
     this.reconcile();
   }
 
@@ -216,10 +231,18 @@ class SharedLiveResourceCoordinator<T> {
 
   requestImmediateRefresh(request?: SharedPollRequest): void {
     if (!this.shouldRunInThisTab()) return;
-    this.pendingPollRequest = request ?? { cause: "manual" };
+    this.pendingPollRequest = mergeSharedPollRequests(
+      this.pendingPollRequest,
+      request ?? { cause: "manual" },
+    );
     this.clearTimer();
     if (this.config.mode === "sse") {
       this.stopExecutor();
+      this.scheduleTick(0);
+      return;
+    }
+    if (this.inFlight) {
+      return;
     }
     this.scheduleTick(0);
   }
@@ -230,10 +253,18 @@ class SharedLiveResourceCoordinator<T> {
    * avoid leaking coordinator state between cases.
    */
   dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
     this.clearTimer();
     this.stopExecutor();
     this.subscribers.clear();
     this.releaseLeaderLease();
+    if (typeof window !== "undefined") {
+      window.removeEventListener("storage", this.handleStorageEvent);
+    }
+    if (typeof document !== "undefined") {
+      document.removeEventListener("visibilitychange", this.handleVisibilityChange);
+    }
     if (this.channel) {
       try {
         this.channel.close();
@@ -336,7 +367,7 @@ class SharedLiveResourceCoordinator<T> {
       if (this.config.mode === "poll") {
         const nextDelayMs = await this.runPoll();
         if (this.shouldRunInThisTab()) {
-          this.scheduleTick(nextDelayMs ?? this.config.intervalMs);
+          this.scheduleTick(this.pendingPollRequest ? 0 : nextDelayMs ?? this.config.intervalMs);
         }
         return;
       }
@@ -609,7 +640,11 @@ const getCoordinator = <T,>(config: SharedResourceConfig<T>): SharedLiveResource
     existing.updateConfig(config);
     return existing;
   }
-  const coordinator = new SharedLiveResourceCoordinator<T>(config);
+  const coordinator = new SharedLiveResourceCoordinator<T>(config, (emptyCoordinator) => {
+    if (registry[config.key] !== emptyCoordinator) return;
+    emptyCoordinator.dispose();
+    delete registry[config.key];
+  });
   registry[config.key] = coordinator as SharedLiveResourceCoordinator<unknown>;
   return coordinator;
 };

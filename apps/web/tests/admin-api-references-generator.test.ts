@@ -52,4 +52,32 @@ describe("admin api references generator", () => {
       ),
     ).toBe(true);
   });
+
+  it("normalizes dynamic backend URL query templates without leaking template source", () => {
+    expect(
+      GENERATED_ADMIN_API_REFERENCE_INVENTORY.nodes.some(
+        (node) =>
+          node.id === "backend:GET:/api/v1/admin/people/socialblade/history" &&
+          node.pathPattern === "/api/v1/admin/people/socialblade/history",
+      ),
+    ).toBe(true);
+    expect(
+      GENERATED_ADMIN_API_REFERENCE_INVENTORY.nodes.some((node) =>
+        node.pathPattern?.includes("[query]`"),
+      ),
+    ).toBe(false);
+    for (const node of GENERATED_ADMIN_API_REFERENCE_INVENTORY.nodes) {
+      if (!node.pathPattern) continue;
+      expect(node.pathPattern).not.toContain("?");
+      expect(node.pathPattern).not.toContain("#");
+      expect(node.pathPattern).not.toMatch(/\[(?:query|search|params|searchParams)\]/i);
+    }
+    expect(
+      GENERATED_ADMIN_API_REFERENCE_INVENTORY.edges.some(
+        (edge) =>
+          edge.from === "route:GET:/api/admin/trr-api/social-growth/history" &&
+          edge.to === "backend:GET:/api/v1/admin/people/socialblade/history",
+      ),
+    ).toBe(true);
+  });
 });

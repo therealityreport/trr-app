@@ -175,7 +175,10 @@ type PreNavigationShowCoreState = {
   showId: string;
   operationId: string | null;
   paused: boolean;
+  started: boolean;
 };
+
+const AUTO_SHOW_REFRESH_TARGETS = ["show_core", "links", "bravo", "cast_profiles", "cast_media"] as const;
 
 export default function TrrShowsPage() {
   const router = useRouter();
@@ -192,7 +195,7 @@ export default function TrrShowsPage() {
   const [syncingLists, setSyncingLists] = useState(false);
   const [syncListsNotice, setSyncListsNotice] = useState<string | null>(null);
   const [syncListsError, setSyncListsError] = useState<string | null>(null);
-  const [preNavigationShowCore, setPreNavigationShowCore] = useState<PreNavigationShowCoreState | null>(null);
+  const [preNavigationShowRefresh, setPreNavigationShowRefresh] = useState<PreNavigationShowCoreState | null>(null);
 
   // Covered shows state
   const [coveredShows, setCoveredShows] = useState<CoveredShow[]>([]);
@@ -211,14 +214,17 @@ export default function TrrShowsPage() {
     [user],
   );
 
-  const enqueueShowCoreBeforeNavigation = useCallback(
-    async (showId: string): Promise<{ operationId: string | null; paused: boolean }> => {
+  const enqueueShowAutoRefresh = useCallback(
+    async (
+      showId: string,
+      source: "admin_show_list_add" | "admin_show_list_pre_navigation",
+    ): Promise<{ operationId: string | null; paused: boolean; started: boolean }> => {
       const settingsResponse = await fetchWithAuth(
         "/api/admin/trr-api/shows/settings/show-core-auto-refresh",
       );
       const settings = (await settingsResponse.json().catch(() => ({}))) as { paused?: unknown };
       if (settingsResponse.ok && settings.paused === true) {
-        return { operationId: null, paused: true };
+        return { operationId: null, paused: true, started: false };
       }
 
       const controller = new AbortController();
@@ -236,10 +242,10 @@ export default function TrrShowsPage() {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            targets: ["show_core"],
+            targets: AUTO_SHOW_REFRESH_TARGETS,
             force_new_operation: true,
             auto_refresh: true,
-            source: "admin_show_list_pre_navigation",
+            source,
           }),
           timeoutMs: 3_000,
           externalSignal: controller.signal,
@@ -258,10 +264,10 @@ export default function TrrShowsPage() {
         });
       } catch (err) {
         if (!sawOperationStart) {
-          console.warn("Failed to enqueue show core before navigation:", err);
+          console.warn("Failed to enqueue show auto-refresh:", err);
         }
       }
-      return { operationId, paused: false };
+      return { operationId, paused: false, started: sawOperationStart };
     },
     [fetchWithAuth, user],
   );
@@ -271,24 +277,34 @@ export default function TrrShowsPage() {
       if (shouldUseNormalLinkNavigation(event)) return;
       event.preventDefault();
 
-      setPreNavigationShowCore({ showId, operationId: null, paused: false });
-      void enqueueShowCoreBeforeNavigation(showId)
+      setPreNavigationShowRefresh({ showId, operationId: null, paused: false, started: false });
+      void enqueueShowAutoRefresh(showId, "admin_show_list_pre_navigation")
         .catch((err) => {
-          console.warn("Failed to check or start show core before navigation:", err);
-          return { operationId: null, paused: false };
+          console.warn("Failed to check or start show auto-refresh before navigation:", err);
+          return { operationId: null, paused: false, started: false };
         })
         .then((result) => {
-          setPreNavigationShowCore({ showId, operationId: result.operationId, paused: result.paused });
-          const targetHref = result.operationId
-            ? (`${href}${String(href).includes("?") ? "&" : "?"}showCoreOperationId=${encodeURIComponent(result.operationId)}` as Route)
+          setPreNavigationShowRefresh({
+            showId,
+            operationId: result.operationId,
+            paused: result.paused,
+            started: result.started,
+          });
+          const param = result.operationId
+            ? `showRefreshOperationId=${encodeURIComponent(result.operationId)}`
+            : result.started
+              ? "showRefreshStarted=1"
+              : null;
+          const targetHref = param
+            ? (`${href}${String(href).includes("?") ? "&" : "?"}${param}` as Route)
             : href;
           setTimeout(() => {
-            setPreNavigationShowCore((current) => (current?.showId === showId ? null : current));
+            setPreNavigationShowRefresh((current) => (current?.showId === showId ? null : current));
             router.push(targetHref);
           }, result.operationId || result.paused ? 650 : 0);
         });
     },
-    [enqueueShowCoreBeforeNavigation, router],
+    [enqueueShowAutoRefresh, router],
   );
 
   // Fetch covered shows
@@ -362,6 +378,17 @@ export default function TrrShowsPage() {
         }
 
         await fetchCoveredShows();
+        setPreNavigationShowRefresh({ showId: show.id, operationId: null, paused: false, started: false });
+        const autoRefresh = await enqueueShowAutoRefresh(show.id, "admin_show_list_add");
+        setPreNavigationShowRefresh({
+          showId: show.id,
+          operationId: autoRefresh.operationId,
+          paused: autoRefresh.paused,
+          started: autoRefresh.started,
+        });
+        setTimeout(() => {
+          setPreNavigationShowRefresh((current) => (current?.showId === show.id ? null : current));
+        }, autoRefresh.operationId || autoRefresh.paused ? 3_000 : 650);
       } catch (err) {
         console.error("Failed to add covered show:", err);
         setError(err instanceof Error ? err.message : "Failed to add show");
@@ -369,7 +396,7 @@ export default function TrrShowsPage() {
         setAddingShowId(null);
       }
     },
-    [fetchCoveredShows, fetchWithAuth]
+    [enqueueShowAutoRefresh, fetchCoveredShows, fetchWithAuth]
   );
 
   // Remove show from covered list
@@ -661,13 +688,15 @@ export default function TrrShowsPage() {
                                 {metaText && (
                                   <p className="mt-1 text-xs text-zinc-500">{metaText}</p>
                                 )}
-                                {preNavigationShowCore?.showId === show.id && (
+                                {preNavigationShowRefresh?.showId === show.id && (
                                   <p className="mt-1 text-xs font-medium text-amber-700">
-                                    {preNavigationShowCore.paused
-                                      ? "Show core auto-refresh paused"
-                                      : preNavigationShowCore.operationId
-                                        ? `Show core op ${preNavigationShowCore.operationId.slice(0, 8)}`
-                                        : "Starting show core..."}
+                                    {preNavigationShowRefresh.paused
+                                      ? "Auto-refresh paused"
+                                      : preNavigationShowRefresh.operationId
+                                        ? `Refresh op ${preNavigationShowRefresh.operationId.slice(0, 8)}`
+                                        : preNavigationShowRefresh.started
+                                          ? "Refresh started"
+                                        : "Starting auto-refresh..."}
                                   </p>
                                 )}
                               </Link>
@@ -854,13 +883,15 @@ export default function TrrShowsPage() {
                               ? totalEpisodes.toLocaleString()
                               : "—"}
                           </span>
-                          {preNavigationShowCore?.showId === show.trr_show_id && (
+                          {preNavigationShowRefresh?.showId === show.trr_show_id && (
                             <span className="mt-1 block text-xs font-medium text-amber-700">
-                              {preNavigationShowCore.paused
-                                ? "Show core auto-refresh paused"
-                                : preNavigationShowCore.operationId
-                                  ? `Show core op ${preNavigationShowCore.operationId.slice(0, 8)}`
-                                  : "Starting show core..."}
+                              {preNavigationShowRefresh.paused
+                                ? "Auto-refresh paused"
+                                : preNavigationShowRefresh.operationId
+                                  ? `Refresh op ${preNavigationShowRefresh.operationId.slice(0, 8)}`
+                                  : preNavigationShowRefresh.started
+                                    ? "Refresh started"
+                                  : "Starting auto-refresh..."}
                             </span>
                           )}
                         </div>

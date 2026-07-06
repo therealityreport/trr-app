@@ -16,7 +16,6 @@ import type {
   NormalizedR2FontRecord,
   RationaleChip,
   ScoreBreakdown,
-  ScoreBreakdownProfile,
   ScoringMode,
   VisualEvidenceHealth,
 } from "./types.ts";
@@ -29,71 +28,19 @@ import {
   normalizeFontKey,
   roleSupportsDisplay,
 } from "./normalization.ts";
-
-const CLASSIFICATION_MAX = 18;
-const ROLE_MAX = 20;
-const WIDTH_MAX = 15;
-const WEIGHT_COVERAGE_MAX = 15;
-const STYLE_SUPPORT_MAX = 10;
-const TRAIT_COMPATIBILITY_MAX = 10;
-const FAMILY_AFFINITY_MAX = 20;
-const VISUAL_AFFINITY_MAX = 15;
-
-type WeightedProfile = {
-  name: ScoreBreakdownProfile;
-  structuralWeights: {
-    classification: number;
-    role: number;
-    width: number;
-    weightCoverage: number;
-    styleSupport: number;
-    traitCompatibility: number;
-  };
-  identityWeight: number;
-  visualWeight: number;
-};
-
-const WEIGHTED_PROFILES: Record<ScoreBreakdownProfile, WeightedProfile> = {
-  "explicit-mapping-visual": {
-    name: "explicit-mapping-visual",
-    structuralWeights: {
-      classification: 6,
-      role: 10,
-      width: 10,
-      weightCoverage: 7,
-      styleSupport: 4,
-      traitCompatibility: 3,
-    },
-    identityWeight: 5,
-    visualWeight: 55,
-  },
-  "balanced-visual": {
-    name: "balanced-visual",
-    structuralWeights: {
-      classification: 12,
-      role: 18,
-      width: 14,
-      weightCoverage: 10,
-      styleSupport: 6,
-      traitCompatibility: 5,
-    },
-    identityWeight: 10,
-    visualWeight: 25,
-  },
-  "metadata-only": {
-    name: "metadata-only",
-    structuralWeights: {
-      classification: 17,
-      role: 25,
-      width: 19,
-      weightCoverage: 14,
-      styleSupport: 8,
-      traitCompatibility: 7,
-    },
-    identityWeight: 10,
-    visualWeight: 0,
-  },
-};
+import {
+  CLASSIFICATION_MAX,
+  FAMILY_AFFINITY_MAX,
+  RISK_PENALTY_MAX,
+  ROLE_MAX,
+  STYLE_SUPPORT_MAX,
+  TRAIT_COMPATIBILITY_MAX,
+  VISUAL_AFFINITY_MAX,
+  WEIGHT_COVERAGE_MAX,
+  WEIGHTED_PROFILES,
+  WIDTH_MAX,
+  type WeightedProfile,
+} from "./scoring-profiles.ts";
 
 export type RankingScoringOptions = {
   glyphComparisonArtifact?: GlyphComparisonArtifact | null;
@@ -230,15 +177,15 @@ function familyNameScore(
 
 function riskPenalty(source: BrandFontRecord, candidate: NormalizedR2FontRecord, rule: BrandFontMatchRule | null): number {
   if (rule?.demoteDisplayOnlyForBody && source.roleType === "body" && candidate.bodyRisk === "high") {
-    return 20;
+    return RISK_PENALTY_MAX;
   }
   if (source.roleType === "body") {
-    return candidate.bodyRisk === "high" ? 20 : candidate.bodyRisk === "medium" ? 10 : 0;
+    return candidate.bodyRisk === "high" ? RISK_PENALTY_MAX : candidate.bodyRisk === "medium" ? 10 : 0;
   }
   if (roleSupportsDisplay(source.roleType)) {
-    return candidate.displayRisk === "high" ? 20 : candidate.displayRisk === "medium" ? 10 : 0;
+    return candidate.displayRisk === "high" ? RISK_PENALTY_MAX : candidate.displayRisk === "medium" ? 10 : 0;
   }
-  return candidate.bodyRisk === "high" ? 20 : candidate.bodyRisk === "medium" ? 10 : 0;
+  return candidate.bodyRisk === "high" ? RISK_PENALTY_MAX : candidate.bodyRisk === "medium" ? 10 : 0;
 }
 
 function dedupe<T>(values: readonly T[]): T[] {
@@ -275,7 +222,10 @@ function buildLookup(
   glyphArtifact: GlyphComparisonArtifact | null | undefined,
   expectedInputHash?: string,
 ) {
-  return buildGlyphComparisonLookup(glyphArtifact ?? GENERATED_GLYPH_COMPARISON_ARTIFACT, expectedInputHash);
+  return buildGlyphComparisonLookup(
+    glyphArtifact === undefined ? GENERATED_GLYPH_COMPARISON_ARTIFACT : glyphArtifact,
+    expectedInputHash,
+  );
 }
 
 function visualAffinityScore(
@@ -486,7 +436,7 @@ function scoreCandidate(
       familyName,
     },
     currentSubstituteTop,
-    scoringMode: hasRecordVisualEvidence ? "visual+metadata" : "metadata-only",
+    scoringMode: visual.pair ? visual.scoringMode : "metadata-only",
     visualDiagnostics: visual.pair
       ? {
           aggregateVisualAffinity: visual.aggregateVisualAffinity,
@@ -579,6 +529,7 @@ export function buildBrandFontMatchResults(
       matchSource: candidate.matchSource,
       scoreBreakdown: candidate.scoreBreakdown,
       scoringMode: candidate.scoringMode,
+      visualDiagnostics: candidate.visualDiagnostics,
     }));
 
     const resultScoringMode: ScoringMode = rankedMatches.some((match) => match.scoringMode === "visual+metadata")

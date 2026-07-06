@@ -23,7 +23,6 @@ const elapsedMs = (start: number): number => Math.round(performance.now() - star
 const PROGRESS_CACHE_NAMESPACE = "social-account-catalog-run-progress";
 const PROGRESS_CACHE_TTL_MS = 5_000;
 const PROGRESS_CACHE_STALE_MS = 60_000;
-const FAST_PROGRESS_TIMEOUT_MS = 12_000;
 
 const markProgressDegraded = (value: unknown, reason: string): unknown => {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -101,7 +100,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
     const upstreamStart = performance.now();
     let data: unknown;
     const isFastPoll = isFastProgressRequest(request);
-    const timeoutMs = isFastPoll ? FAST_PROGRESS_TIMEOUT_MS : SOCIAL_PROXY_PROGRESS_TIMEOUT_MS;
+    const timeoutMs = SOCIAL_PROXY_PROGRESS_TIMEOUT_MS;
     try {
       const fetchProgress = () =>
         fetchSocialBackendJson(path, {
@@ -158,7 +157,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
       upstream_ms: upstreamMs,
       response_ms: responseMs,
       total_ms: elapsedMs(totalStart),
-      timeout_ms: isFastProgressRequest(request) ? FAST_PROGRESS_TIMEOUT_MS : SOCIAL_PROXY_PROGRESS_TIMEOUT_MS,
+      timeout_ms: SOCIAL_PROXY_PROGRESS_TIMEOUT_MS,
       retries: 0,
       failed: true,
     });

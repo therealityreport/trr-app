@@ -1,8 +1,10 @@
 import "server-only";
 
 import { readdir, readFile, stat, open } from "node:fs/promises";
+import type { Dirent } from "node:fs";
 import { join } from "node:path";
 import os from "node:os";
+import { getPortlessStatus, type PortlessStatusSnapshot } from "@/lib/server/admin/portless-status";
 import { safeExec } from "@/lib/server/admin/shell-exec";
 
 export interface BranchInfo {
@@ -97,9 +99,57 @@ export interface OutstandingTasks {
   claudePlans: ClaudePlanItem[];
 }
 
+export interface VercelPreviewReadinessCheck {
+  status: number | null;
+  stdout: string;
+  stderr: string;
+  enabled: boolean | null;
+}
+
+export interface VercelPreviewReadiness {
+  artifactPath: string;
+  generatedAt: string | null;
+  projectName: string | null;
+  teamSlug: string | null;
+  teamId: string | null;
+  activeProjectDir: string | null;
+  latestDeploymentUrl: string | null;
+  webAnalyticsEnabled: boolean | null;
+  speedInsightsEnabled: boolean | null;
+  checks: {
+    webAnalytics: VercelPreviewReadinessCheck | null;
+    speedInsights: VercelPreviewReadinessCheck | null;
+    deployments: VercelPreviewReadinessCheck | null;
+  };
+  errors: string[];
+}
+
+export interface VercelCleanupLink {
+  ok: boolean;
+  classification: string;
+  projectDir: string;
+  projectFile: string;
+  projectName: string;
+  projectId: string;
+  teamId: string;
+  cleanupPath: string;
+  error?: string;
+}
+
+export interface VercelCleanupDoctor {
+  ok: boolean;
+  expectedName: string;
+  expectedId: string;
+  links: VercelCleanupLink[];
+  errors: string[];
+}
+
 export interface DevDashboardData {
   repos: RepoStatus[];
   tasks: OutstandingTasks;
+  portlessStatus: PortlessStatusSnapshot;
+  vercelPreviewReadiness: VercelPreviewReadiness | null;
+  vercelCleanupDoctor: VercelCleanupDoctor;
   generatedAt: string;
 }
 
@@ -122,10 +172,250 @@ const REPOS: RepoConfig[] = [
   },
 ];
 
+const WORKSPACE_ROOT = "/Users/thomashulihan/Projects/TRR";
+const TRR_APP_ROOT = "/Users/thomashulihan/Projects/TRR/TRR-APP";
+const VERCEL_PREVIEW_READY_RELATIVE_PATH = ".logs/workspace/vercel-preview-ready/latest.json";
+const EXPECTED_VERCEL_PROJECT_NAME = "trr-app";
+const EXPECTED_VERCEL_PROJECT_ID = "prj_MHpStkwr26rV5kjt0f80zqhwZpAs";
+const KNOWN_STALE_VERCEL_PROJECTS = new Map([
+  ["web|prj_0nWn8xpm9ikhcvhzE3ma4jUXTe1p", "stale-old-web-project"],
+]);
+const VERCEL_SCAN_PRUNED_DIRS = new Set([".git", "node_modules", ".next", "dist", "build", ".turbo", ".venv", "__pycache__"]);
+
 function clipError(text: string, maxLen = 400) {
   const trimmed = text.trim();
   if (trimmed.length <= maxLen) return trimmed;
   return `${trimmed.slice(0, maxLen)}…`;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function readOptionalString(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
+function readOptionalNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function parseEnabledFromCliOutput(output: string): boolean | null {
+  const start = output.indexOf("{");
+  const end = output.lastIndexOf("}");
+  if (start === -1 || end === -1 || end < start) {
+    return null;
+  }
+
+  try {
+    const parsed: unknown = JSON.parse(output.slice(start, end + 1));
+    if (!isRecord(parsed)) return null;
+    return typeof parsed.enabled === "boolean" ? parsed.enabled : null;
+  } catch {
+    return null;
+  }
+}
+
+function parseVercelPreviewCheck(value: unknown): VercelPreviewReadinessCheck | null {
+  if (!isRecord(value)) return null;
+  const stdout = typeof value.stdout === "string" ? value.stdout : "";
+  return {
+    status: readOptionalNumber(value.status),
+    stdout,
+    stderr: typeof value.stderr === "string" ? value.stderr : "",
+    enabled: parseEnabledFromCliOutput(stdout),
+  };
+}
+
+function emptyVercelPreviewReadiness(artifactPath: string, errors: string[]): VercelPreviewReadiness {
+  return {
+    artifactPath,
+    generatedAt: null,
+    projectName: null,
+    teamSlug: null,
+    teamId: null,
+    activeProjectDir: null,
+    latestDeploymentUrl: null,
+    webAnalyticsEnabled: null,
+    speedInsightsEnabled: null,
+    checks: {
+      webAnalytics: null,
+      speedInsights: null,
+      deployments: null,
+    },
+    errors,
+  };
+}
+
+export async function readVercelPreviewReadinessArtifact(
+  workspaceRoot = WORKSPACE_ROOT,
+): Promise<VercelPreviewReadiness | null> {
+  const artifactPath = join(workspaceRoot, VERCEL_PREVIEW_READY_RELATIVE_PATH);
+
+  let raw: string;
+  try {
+    raw = await readFile(artifactPath, "utf-8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return null;
+    }
+    return emptyVercelPreviewReadiness(artifactPath, [
+      `Failed to read preview readiness artifact: ${(error as Error).message}`,
+    ]);
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    return emptyVercelPreviewReadiness(artifactPath, [
+      `Preview readiness artifact JSON parse failed: ${(error as Error).message}`,
+    ]);
+  }
+
+  if (!isRecord(parsed)) {
+    return emptyVercelPreviewReadiness(artifactPath, ["Preview readiness artifact is not a JSON object."]);
+  }
+
+  const checks = isRecord(parsed.checks) ? parsed.checks : {};
+  const webAnalytics = parseVercelPreviewCheck(checks.webAnalytics);
+  const speedInsights = parseVercelPreviewCheck(checks.speedInsights);
+  const deployments = parseVercelPreviewCheck(checks.deployments);
+  const errors: string[] = [];
+
+  if (webAnalytics && webAnalytics.status !== null && webAnalytics.status !== 0) {
+    errors.push(`Web Analytics check exited ${webAnalytics.status}: ${clipError(webAnalytics.stderr || webAnalytics.stdout)}`);
+  }
+  if (speedInsights && speedInsights.status !== null && speedInsights.status !== 0) {
+    errors.push(`Speed Insights check exited ${speedInsights.status}: ${clipError(speedInsights.stderr || speedInsights.stdout)}`);
+  }
+  if (deployments && deployments.status !== null && deployments.status !== 0) {
+    errors.push(`Deployments check exited ${deployments.status}: ${clipError(deployments.stderr || deployments.stdout)}`);
+  }
+
+  return {
+    artifactPath,
+    generatedAt: readOptionalString(parsed.generatedAt),
+    projectName: readOptionalString(parsed.projectName),
+    teamSlug: readOptionalString(parsed.teamSlug),
+    teamId: readOptionalString(parsed.teamId),
+    activeProjectDir: readOptionalString(parsed.activeProjectDir),
+    latestDeploymentUrl: readOptionalString(parsed.latestDeploymentUrl),
+    webAnalyticsEnabled: webAnalytics?.enabled ?? null,
+    speedInsightsEnabled: speedInsights?.enabled ?? null,
+    checks: {
+      webAnalytics,
+      speedInsights,
+      deployments,
+    },
+    errors,
+  };
+}
+
+function classifyVercelProjectLink(name: string, projectId: string) {
+  if (name === EXPECTED_VERCEL_PROJECT_NAME && projectId === EXPECTED_VERCEL_PROJECT_ID) {
+    return { ok: true, classification: "project-of-record" };
+  }
+  const knownStale = KNOWN_STALE_VERCEL_PROJECTS.get(`${name}|${projectId}`);
+  if (knownStale) {
+    return { ok: false, classification: knownStale };
+  }
+  if (name === EXPECTED_VERCEL_PROJECT_NAME) {
+    return { ok: false, classification: "expected-name-wrong-id" };
+  }
+  if (name === "web") {
+    return { ok: false, classification: "stale-web-project-name" };
+  }
+  return { ok: false, classification: "unknown-project-link" };
+}
+
+async function collectVercelProjectFiles(root: string, projectFiles: string[] = []): Promise<string[]> {
+  let entries: Dirent<string>[];
+  try {
+    entries = await readdir(root, { withFileTypes: true });
+  } catch {
+    return projectFiles;
+  }
+
+  const hasProjectJson = entries.some((entry) => entry.isFile() && entry.name === "project.json");
+  if (root.endsWith("/.vercel") && hasProjectJson) {
+    projectFiles.push(join(root, "project.json"));
+    return projectFiles;
+  }
+
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    if (VERCEL_SCAN_PRUNED_DIRS.has(entry.name)) continue;
+    await collectVercelProjectFiles(join(root, entry.name), projectFiles);
+  }
+  return projectFiles;
+}
+
+export async function readVercelCleanupDoctor(scanRoot = TRR_APP_ROOT): Promise<VercelCleanupDoctor> {
+  const links: VercelCleanupLink[] = [];
+  const errors: string[] = [];
+  const projectFiles = await collectVercelProjectFiles(scanRoot);
+
+  for (const projectFile of projectFiles.sort()) {
+    const projectDir = projectFile.replace(/\/\.vercel\/project\.json$/, "");
+    const cleanupPath = join(projectDir, ".vercel");
+    try {
+      const parsed: unknown = JSON.parse(await readFile(projectFile, "utf-8"));
+      if (!isRecord(parsed)) {
+        links.push({
+          ok: false,
+          classification: "unreadable-project-link",
+          projectDir,
+          projectFile,
+          projectName: "",
+          projectId: "",
+          teamId: "",
+          cleanupPath,
+          error: "project.json is not a JSON object",
+        });
+        continue;
+      }
+
+      const projectName = readOptionalString(parsed.projectName) ?? "";
+      const projectId = readOptionalString(parsed.projectId) ?? "";
+      const teamId = readOptionalString(parsed.orgId) ?? readOptionalString(parsed.teamId) ?? "";
+      const classified = classifyVercelProjectLink(projectName, projectId);
+      links.push({
+        ok: classified.ok,
+        classification: classified.classification,
+        projectDir,
+        projectFile,
+        projectName,
+        projectId,
+        teamId,
+        cleanupPath,
+      });
+    } catch (error) {
+      links.push({
+        ok: false,
+        classification: "unreadable-project-link",
+        projectDir,
+        projectFile,
+        projectName: "",
+        projectId: "",
+        teamId: "",
+        cleanupPath,
+        error: (error as Error).message,
+      });
+    }
+  }
+
+  if (links.length === 0) {
+    errors.push(`No local Vercel project links found under ${scanRoot}.`);
+  }
+
+  return {
+    ok: links.length > 0 && links.every((link) => link.ok),
+    expectedName: EXPECTED_VERCEL_PROJECT_NAME,
+    expectedId: EXPECTED_VERCEL_PROJECT_ID,
+    links,
+    errors,
+  };
 }
 
 function parseBranchRefs(output: string, currentBranch: string): BranchInfo[] {
@@ -791,12 +1081,19 @@ export async function getDevDashboardData(): Promise<DevDashboardData> {
   const repoStatusesPromise = Promise.allSettled(REPOS.map((repo) => collectRepoStatus(repo)));
   const taskPlansPromise = Promise.allSettled(REPOS.map((repo) => collectTaskPlans(repo)));
   const claudePlansPromise = collectClaudePlans();
+  const portlessStatusPromise = getPortlessStatus();
+  const vercelPreviewReadinessPromise = readVercelPreviewReadinessArtifact();
+  const vercelCleanupDoctorPromise = readVercelCleanupDoctor();
 
-  const [repoStatusesSettled, taskPlansSettled, claudePlans] = await Promise.all([
-    repoStatusesPromise,
-    taskPlansPromise,
-    claudePlansPromise,
-  ]);
+  const [repoStatusesSettled, taskPlansSettled, claudePlans, portlessStatus, vercelPreviewReadiness, vercelCleanupDoctor] =
+    await Promise.all([
+      repoStatusesPromise,
+      taskPlansPromise,
+      claudePlansPromise,
+      portlessStatusPromise,
+      vercelPreviewReadinessPromise,
+      vercelCleanupDoctorPromise,
+    ]);
 
   const repos: RepoStatus[] = [];
   for (let i = 0; i < REPOS.length; i += 1) {
@@ -842,6 +1139,9 @@ export async function getDevDashboardData(): Promise<DevDashboardData> {
       taskPlans: filteredTaskPlans,
       claudePlans,
     },
+    portlessStatus,
+    vercelPreviewReadiness,
+    vercelCleanupDoctor,
     generatedAt,
   };
 }

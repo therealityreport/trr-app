@@ -1,39 +1,9 @@
 import "server-only";
 
-import {
-  PORTLESS_ADMIN_DASHBOARD_URL,
-  PORTLESS_API_ORIGIN,
-  PORTLESS_APP_ORIGIN,
-} from "@/lib/admin/admin-url-defaults";
+import { PORTLESS_STATUS_ROUTES } from "@/lib/admin/admin-url-defaults";
 import { getWorkspaceRoot, safeExec } from "@/lib/server/admin/shell-exec";
 
 const TRR_ROUTE_NAMES = new Set(["trr", "admin.trr", "api.trr", "wordle.trr"]);
-const EXPECTED_ROUTES = [
-  {
-    id: "trr",
-    label: "App",
-    url: PORTLESS_APP_ORIGIN,
-    expectedPath: "/",
-  },
-  {
-    id: "admin.trr",
-    label: "Admin",
-    url: PORTLESS_ADMIN_DASHBOARD_URL,
-    expectedPath: "/admin",
-  },
-  {
-    id: "api.trr",
-    label: "API",
-    url: `${PORTLESS_API_ORIGIN}/health/live`,
-    expectedPath: "/health/live",
-  },
-  {
-    id: "wordle.trr",
-    label: "Wordle",
-    url: "https://wordle.trr.localhost",
-    expectedPath: "/",
-  },
-] as const;
 
 export interface PortlessRouteStatus {
   url: string;
@@ -42,9 +12,24 @@ export interface PortlessRouteStatus {
   kind: string;
 }
 
+export interface PortlessServiceStatus {
+  manager_state: string | null;
+  installed: boolean | null;
+  proxy_on_443: boolean | null;
+  https: boolean | null;
+  tld: string | null;
+  lan_mode: boolean | null;
+  wildcard: boolean | null;
+  state_directory: string | null;
+  service_entry: string | null;
+  raw_output: string;
+  raw_error?: string;
+}
+
 export interface PortlessStatusSnapshot {
   status: "ok" | "unavailable";
   checked_at: string;
+  service: PortlessServiceStatus | null;
   routes: Array<{
     id: string;
     label: string;
@@ -71,6 +56,35 @@ function routeNameFromUrl(url: string) {
   }
 }
 
+function readServiceValue(output: string, label: string): string | null {
+  const match = output.match(new RegExp(`^\\s*${label}:\\s*(.+?)\\s*$`, "im"));
+  return match?.[1]?.trim() || null;
+}
+
+function readServiceBoolean(output: string, label: string): boolean | null {
+  const value = readServiceValue(output, label)?.toLowerCase();
+  if (!value) return null;
+  if (["yes", "true", "enabled", "responding", "running"].includes(value)) return true;
+  if (["no", "false", "disabled", "not responding", "stopped"].includes(value)) return false;
+  return null;
+}
+
+export function parsePortlessServiceStatus(output: string, error?: string): PortlessServiceStatus {
+  return {
+    manager_state: readServiceValue(output, "Manager state"),
+    installed: readServiceBoolean(output, "Installed"),
+    proxy_on_443: readServiceBoolean(output, "Proxy on 443"),
+    https: readServiceBoolean(output, "HTTPS"),
+    tld: readServiceValue(output, "TLD"),
+    lan_mode: readServiceBoolean(output, "LAN mode"),
+    wildcard: readServiceBoolean(output, "Wildcard"),
+    state_directory: readServiceValue(output, "State directory"),
+    service_entry: readServiceValue(output, "Service entry"),
+    raw_output: output,
+    raw_error: error,
+  };
+}
+
 export function parsePortlessList(output: string): PortlessRouteStatus[] {
   return output
     .split("\n")
@@ -94,10 +108,11 @@ export function buildPortlessStatusSnapshot(input: {
   routes: PortlessRouteStatus[];
   exitCode: number;
   stderr?: string;
+  service?: PortlessServiceStatus | null;
   checkedAt?: string;
 }): PortlessStatusSnapshot {
   const routeByName = new Map(input.routes.map((route) => [route.name, route]));
-  const expectedRoutes = EXPECTED_ROUTES.map((expected) => {
+  const expectedRoutes = PORTLESS_STATUS_ROUTES.map((expected) => {
     const route = routeByName.get(expected.id);
     const wildcardFallback =
       expected.id === "admin.trr" && !route && routeByName.get("trr")?.kind !== "alias"
@@ -119,6 +134,7 @@ export function buildPortlessStatusSnapshot(input: {
   return {
     status: input.exitCode === 0 ? "ok" : "unavailable",
     checked_at: input.checkedAt ?? new Date().toISOString(),
+    service: input.service ?? null,
     routes: expectedRoutes,
     static_alias_count: staticAliasCount,
     uses_static_aliases: staticAliasCount > 0,
@@ -129,11 +145,15 @@ export function buildPortlessStatusSnapshot(input: {
 }
 
 export async function getPortlessStatus(): Promise<PortlessStatusSnapshot> {
-  const result = await safeExec("portless", ["list"], getWorkspaceRoot(), 5_000);
+  const [result, serviceResult] = await Promise.all([
+    safeExec("portless", ["list"], getWorkspaceRoot(), 5_000),
+    safeExec("portless", ["service", "status"], getWorkspaceRoot(), 5_000),
+  ]);
   const routes = result.exitCode === 0 ? parsePortlessList(result.stdout) : [];
   return buildPortlessStatusSnapshot({
     routes,
     exitCode: result.exitCode,
     stderr: result.stderr,
+    service: parsePortlessServiceStatus(serviceResult.stdout, serviceResult.exitCode === 0 ? undefined : serviceResult.stderr),
   });
 }

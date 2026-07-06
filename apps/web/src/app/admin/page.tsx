@@ -11,10 +11,10 @@ import { buildAdminRootBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
 import { fetchAdminWithAuth } from "@/lib/admin/client-auth";
 import { ADMIN_DASHBOARD_TOOLS } from "@/lib/admin/admin-navigation";
 import {
+  PORTLESS_API_HEALTH_URL,
   PORTLESS_ADMIN_DASHBOARD_URL,
-  PORTLESS_ADMIN_ORIGIN,
-  PORTLESS_API_ORIGIN,
-  PORTLESS_APP_ORIGIN,
+  PORTLESS_ROUTE_DEFINITIONS,
+  PORTLESS_ROUTE_LINKS,
 } from "@/lib/admin/admin-url-defaults";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 
@@ -363,11 +363,6 @@ function PortlessUrlCard() {
     };
   }, []);
 
-  const links = [
-    ["Admin", PORTLESS_ADMIN_DASHBOARD_URL],
-    ["App", PORTLESS_APP_ORIGIN],
-    ["API", `${PORTLESS_API_ORIGIN}/health/live`],
-  ] as const;
   const usesStaticAliases = snapshot?.uses_static_aliases === true;
   const statusLabel =
     wrongAdminHost ? "Wrong host" : usesStaticAliases ? "Aliases" : state === "ready" ? "Clean" : state.toUpperCase();
@@ -385,10 +380,12 @@ function PortlessUrlCard() {
     setDiagnosticsState("copying");
     const diagnostics = {
       copied_at: new Date().toISOString(),
+      clean_admin_url: PORTLESS_ADMIN_DASHBOARD_URL,
+      current_route: window.location.href,
       current_url: window.location.href,
       expected_admin_url: PORTLESS_ADMIN_DASHBOARD_URL,
-      expected_app_url: PORTLESS_APP_ORIGIN,
-      expected_api_url: `${PORTLESS_API_ORIGIN}/health/live`,
+      expected_app_url: PORTLESS_ROUTE_DEFINITIONS.app.url,
+      expected_api_url: PORTLESS_API_HEALTH_URL,
       wrong_admin_host: isWrongAdminHost(),
       status_state: state,
       portless_status: snapshot,
@@ -427,8 +424,8 @@ function PortlessUrlCard() {
           {wrongAdminHost ? (
             <p>
               This admin page is loaded from the wrong local host. Open the clean admin dashboard at{" "}
-              <a className="font-semibold underline" href={`${PORTLESS_ADMIN_ORIGIN}/admin`}>
-                {PORTLESS_ADMIN_ORIGIN}/admin
+              <a className="font-semibold underline" href={PORTLESS_ADMIN_DASHBOARD_URL}>
+                {PORTLESS_ADMIN_DASHBOARD_URL}
               </a>
               .
             </p>
@@ -447,14 +444,14 @@ function PortlessUrlCard() {
         </div>
       ) : null}
       <div className="mt-5 grid gap-2">
-        {links.map(([label, href]) => (
+        {PORTLESS_ROUTE_LINKS.map(({ label, url }) => (
           <a
             key={label}
-            href={href}
+            href={url}
             className="group flex items-center justify-between gap-3 border border-black px-3 py-3 text-sm transition hover:bg-black hover:text-white"
           >
             <span className="font-semibold">{label}</span>
-            <span className="min-w-0 truncate font-mono text-xs opacity-70 group-hover:opacity-100">{href}</span>
+            <span className="min-w-0 truncate font-mono text-xs opacity-70 group-hover:opacity-100">{url}</span>
           </a>
         ))}
       </div>
@@ -469,9 +466,16 @@ function PortlessUrlCard() {
       >
         {actionLabel}
       </Button>
-      <p className="mt-4 break-words text-xs leading-6 text-black/60">
-        Current route: {currentUrl ?? "checking"}
-      </p>
+      <dl className="mt-4 grid gap-2 border border-black px-3 py-3 text-xs">
+        <div className="grid gap-1">
+          <dt className="font-semibold uppercase tracking-[0.12em] text-black/60">Clean entry URL</dt>
+          <dd className="break-words font-mono text-black/75">{PORTLESS_ADMIN_DASHBOARD_URL}</dd>
+        </div>
+        <div className="grid gap-1">
+          <dt className="font-semibold uppercase tracking-[0.12em] text-black/60">Current route</dt>
+          <dd className="break-words font-mono text-black/75">{currentUrl ?? "checking"}</dd>
+        </div>
+      </dl>
       <dl className="mt-4 grid gap-2 text-xs">
         {(snapshot?.routes ?? []).map((route) => (
           <div key={route.id} className="grid grid-cols-[5rem_minmax(0,1fr)_5rem] gap-2 border border-black px-3 py-2">

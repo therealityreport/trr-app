@@ -19,7 +19,7 @@ make dev-portless
 ```
 
 Then open the public app at `https://trr.localhost` or the admin dashboard at
-`https://admin.trr.localhost/admin`. See
+`https://admin.trr.localhost`. See
 `../../docs/workspace/portless-clean-urls.md` for the shared local URL runbook.
 
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
@@ -61,7 +61,7 @@ Notes
 Use a dedicated local admin origin to mirror production isolation:
 
 - Public app: `https://trr.localhost`
-- Admin app: `https://admin.trr.localhost/admin`
+- Admin app: `https://admin.trr.localhost`
 
 Add these values in `.env.local`:
 

@@ -29,6 +29,12 @@ vi.mock('@/lib/db/users', () => ({
 import FinishPage from '@/app/auth/finish/page';
 import { ALL_SHOWS } from '@/lib/data/shows';
 
+const REQUESTED_SHOWS = [
+  'Summer House',
+  'The Real Housewives of Rhode Island',
+  'Love Island USA',
+];
+
 describe('/auth/finish interactions', () => {
   beforeEach(() => {
     sessionStorage.clear();
@@ -61,6 +67,31 @@ describe('/auth/finish interactions', () => {
       expect(screen.getByRole('button', { name: s })).toHaveAttribute('aria-pressed', 'true');
     }
     expectedLogs.expectCalled();
+  });
+
+  it('renders API-provided covered shows in the picker list', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        shows: REQUESTED_SHOWS.map((name) => ({ id: name, name, alternativeNames: [] })),
+      }),
+    } as Response));
+
+    render(<FinishPage />);
+
+    for (const show of REQUESTED_SHOWS) {
+      expect(await screen.findByRole('button', { name: show })).toBeInTheDocument();
+    }
+  });
+
+  it('falls back to the local show list when the API is unavailable', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('shows unavailable')));
+
+    render(<FinishPage />);
+
+    expect(await screen.findByRole('button', { name: ALL_SHOWS[0] })).toBeInTheDocument();
+    consoleError.mockRestore();
   });
 
   it('captures show requests from the request CTA', async () => {

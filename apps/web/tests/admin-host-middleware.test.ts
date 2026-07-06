@@ -74,6 +74,34 @@ afterEach(() => {
   }
 });
 
+function followProxyRedirects(initialUrl: string, limit = 5): { locations: string[]; statuses: number[] } {
+  const locations: string[] = [];
+  const statuses: number[] = [];
+  const seen = new Set<string>();
+  let currentUrl = initialUrl;
+
+  for (let index = 0; index < limit; index += 1) {
+    if (seen.has(currentUrl)) {
+      throw new Error(`Proxy redirect loop detected at ${currentUrl}`);
+    }
+    seen.add(currentUrl);
+
+    const response = proxy(new NextRequest(currentUrl));
+    statuses.push(response.status);
+
+    const location = response.headers.get("location");
+    if ((response.status === 307 || response.status === 308) && location) {
+      locations.push(location);
+      currentUrl = location;
+      continue;
+    }
+
+    return { locations, statuses };
+  }
+
+  throw new Error(`Proxy redirect chain exceeded ${limit} hops from ${initialUrl}`);
+}
+
 describe("admin host proxy", () => {
   it("keeps loopback admin paths local unless the legacy local admin fallback is enabled", () => {
     process.env.NODE_ENV = "development";
@@ -194,7 +222,7 @@ describe("admin host proxy", () => {
     );
   });
 
-  it("redirects the clean Portless admin host root to the admin dashboard", () => {
+  it("serves the clean Portless admin host root as the admin dashboard", () => {
     process.env.NODE_ENV = "development";
     process.env.ADMIN_APP_ORIGIN = "https://admin.trr.localhost";
     process.env.ADMIN_APP_HOSTS = "admin.trr.localhost,trr.localhost,admin.localhost,localhost,127.0.0.1,[::1]";
@@ -205,6 +233,7 @@ describe("admin host proxy", () => {
     const response = proxy(request);
 
     expect(response.status).toBe(307);
+    expect(response.headers.get("x-middleware-rewrite")).toBeNull();
     expect(response.headers.get("location")).toBe("https://admin.trr.localhost/admin");
   });
 
@@ -223,6 +252,7 @@ describe("admin host proxy", () => {
     const response = proxy(request);
 
     expect(response.status).toBe(307);
+    expect(response.headers.get("x-middleware-rewrite")).toBeNull();
     expect(response.headers.get("location")).toBe("https://admin.trr.localhost/admin");
   });
 
@@ -242,6 +272,24 @@ describe("admin host proxy", () => {
     expect(response.headers.get("location")).toBe(
       "https://admin.trr.localhost/admin/social/instagram/bravotv/posts",
     );
+  });
+
+  it("rewrites Portless short admin paths through the local HTTP Next origin", () => {
+    process.env.NODE_ENV = "development";
+    process.env.ADMIN_APP_ORIGIN = "https://admin.trr.localhost";
+    process.env.ADMIN_APP_HOSTS = "admin.trr.localhost,trr.localhost,admin.localhost,localhost,127.0.0.1,[::1]";
+    process.env.ADMIN_ENFORCE_HOST = "true";
+    process.env.ADMIN_STRICT_HOST_ROUTING = "false";
+
+    const request = new NextRequest("https://localhost:3002/social", {
+      headers: {
+        "x-forwarded-host": "admin.trr.localhost",
+      },
+    });
+    const response = proxy(request);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-middleware-rewrite")).toBe("http://localhost:3002/admin/social");
   });
 
   it("redirects /design-system requests on public host to admin origin", () => {
@@ -315,6 +363,7 @@ describe("admin host proxy", () => {
 
   it.each([
     "/dev-dashboard",
+    "/dev-dashboard/instagram-catalog-backfill-mockup",
     "/docs",
     "/groups",
     "/shows/settings",
@@ -331,6 +380,18 @@ describe("admin host proxy", () => {
 
     expect(response.status).toBe(307);
     expect(response.headers.get("location")).toBe(`http://admin.localhost:3000${pathname}`);
+  });
+
+  it("keeps root show settings aliases on the public placeholder route", () => {
+    process.env.ADMIN_APP_ORIGIN = "http://admin.localhost:3000";
+    process.env.ADMIN_ENFORCE_HOST = "true";
+    process.env.ADMIN_STRICT_HOST_ROUTING = "false";
+
+    const request = new NextRequest("http://localhost:3000/rhoslc/settings");
+    const response = proxy(request);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("location")).toBeNull();
   });
 
   it.each([
@@ -386,7 +447,7 @@ describe("admin host proxy", () => {
     expect(response.headers.get("x-middleware-next")).toBe("1");
   });
 
-  it("redirects the canonical admin-host root to the admin dashboard", () => {
+  it("serves the canonical admin-host root as the admin dashboard", () => {
     process.env.ADMIN_APP_ORIGIN = "http://admin.localhost:3000";
     process.env.ADMIN_ENFORCE_HOST = "true";
     process.env.ADMIN_STRICT_HOST_ROUTING = "false";
@@ -394,11 +455,12 @@ describe("admin host proxy", () => {
     const request = new NextRequest("http://admin.localhost:3000/");
     const response = proxy(request);
 
-    expect(response.status).toBe(307);
-    expect(response.headers.get("location")).toBe("http://admin.localhost:3000/admin");
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-middleware-rewrite")).toBe("http://admin.localhost:3000/admin");
+    expect(response.headers.get("location")).toBeNull();
   });
 
-  it("redirects the default local admin UI host root to the admin dashboard in development", () => {
+  it("serves the default local admin UI host root as the admin dashboard in development", () => {
     process.env.NODE_ENV = "development";
     delete process.env.ADMIN_APP_ORIGIN;
     delete process.env.ADMIN_APP_HOSTS;
@@ -408,8 +470,9 @@ describe("admin host proxy", () => {
     const request = new NextRequest("http://admin.localhost:3000/");
     const response = proxy(request);
 
-    expect(response.status).toBe(307);
-    expect(response.headers.get("location")).toBe("http://admin.localhost:3000/admin");
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-middleware-rewrite")).toBe("http://admin.localhost:3000/admin");
+    expect(response.headers.get("location")).toBeNull();
   });
 
   it("keeps /admin on the canonical admin host as the dashboard route", () => {
@@ -437,6 +500,10 @@ describe("admin host proxy", () => {
     ["/admin/design-docs/overview", "http://admin.localhost:3000/design-docs/overview"],
     ["/admin/api-references", "http://admin.localhost:3000/api-references"],
     ["/admin/dev-dashboard/skills-and-agents", "http://admin.localhost:3000/dev-dashboard/skills-and-agents"],
+    [
+      "/admin/dev-dashboard/instagram-catalog-backfill-mockup",
+      "http://admin.localhost:3000/dev-dashboard/instagram-catalog-backfill-mockup",
+    ],
   ])("redirects %s to the canonical admin-host URL", (pathname, expectedLocation) => {
     process.env.ADMIN_APP_ORIGIN = "http://admin.localhost:3000";
     process.env.ADMIN_ENFORCE_HOST = "true";
@@ -457,6 +524,10 @@ describe("admin host proxy", () => {
     ["/design-docs/overview", "http://admin.localhost:3000/admin/design-docs/overview"],
     ["/api-references", "http://admin.localhost:3000/admin/api-references"],
     ["/dev-dashboard/skills-and-agents", "http://admin.localhost:3000/admin/dev-dashboard/skills-and-agents"],
+    [
+      "/dev-dashboard/instagram-catalog-backfill-mockup",
+      "http://admin.localhost:3000/admin/dev-dashboard/instagram-catalog-backfill-mockup",
+    ],
     ["/rhoslc", "http://admin.localhost:3000/admin/trr-shows/rhoslc"],
     ["/rhoslc/credits", "http://admin.localhost:3000/admin/trr-shows/rhoslc/credits"],
     ["/rhoslc/social", "http://admin.localhost:3000/admin/trr-shows/rhoslc/social"],
@@ -505,6 +576,7 @@ describe("admin host proxy", () => {
     "/social/instagram/bravotv",
     "/social/instagram/bravotv/socialblade",
     "/social/instagram/bravotv/catalog",
+    "/social/instagram/bravotv/catalog/alt-1",
     "/social/instagram/bravotv/posts",
     "/social/instagram/bravotv/hashtags",
     "/social/instagram/bravotv/collaborators-tags",
@@ -521,6 +593,24 @@ describe("admin host proxy", () => {
     expect(response.headers.get("x-middleware-next")).toBe("1");
     expect(response.headers.get("x-middleware-rewrite")).toBeNull();
     expect(response.headers.get("location")).toBeNull();
+  });
+
+  it.each([
+    ["/social/profiles/instagram/bravotv", "http://admin.localhost:3000/social/instagram/bravotv"],
+    [
+      "/social/profiles/instagram/bravotv/comments?run_id=demo",
+      "http://admin.localhost:3000/social/instagram/bravotv/comments?run_id=demo",
+    ],
+  ])("redirects legacy social profile URL %s to its canonical profile route", (pathname, expectedLocation) => {
+    process.env.ADMIN_APP_ORIGIN = "http://admin.localhost:3000";
+    process.env.ADMIN_ENFORCE_HOST = "true";
+    process.env.ADMIN_STRICT_HOST_ROUTING = "false";
+
+    const request = new NextRequest(`http://admin.localhost:3000${pathname}`);
+    const response = proxy(request);
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe(expectedLocation);
   });
 
   it.each([
@@ -648,6 +738,23 @@ describe("admin host proxy", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("x-middleware-next")).toBe("1");
+  });
+
+  it("does not rewrite admin API progress routes into admin UI pages", () => {
+    process.env.ADMIN_APP_ORIGIN = "http://admin.localhost:3000";
+    delete process.env.ADMIN_APP_HOSTS;
+    process.env.ADMIN_ENFORCE_HOST = "true";
+    process.env.ADMIN_STRICT_HOST_ROUTING = "false";
+
+    const request = new NextRequest(
+      "http://admin.localhost:3000/api/admin/trr-api/social/profiles/instagram/bravotv/comments/runs/5bc3a298-b647-4f2b-ad49-d3d7b95e35a4/progress",
+    );
+    const response = proxy(request);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-middleware-next")).toBe("1");
+    expect(response.headers.get("x-middleware-rewrite")).toBeNull();
+    expect(response.headers.get("location")).toBeNull();
   });
 
   it("keeps /admin requests on the current production host when no explicit admin origin is configured", () => {
@@ -810,6 +917,20 @@ describe("admin host proxy", () => {
 
     expect(response.status).toBe(307);
     expect(response.headers.get("location")).toBe(expectedLocation);
+  });
+
+  it("settles legacy admin show social-week URLs after one 307", () => {
+    process.env.ADMIN_APP_ORIGIN = "http://admin.localhost:3000";
+    delete process.env.ADMIN_APP_HOSTS;
+    process.env.ADMIN_ENFORCE_HOST = "true";
+    process.env.ADMIN_STRICT_HOST_ROUTING = "false";
+
+    const chain = followProxyRedirects(
+      "http://admin.localhost:3000/admin/trr-shows/rhoslc/seasons/6/social/week/0/youtube",
+    );
+
+    expect(chain.locations).toEqual(["http://admin.localhost:3000/rhoslc/s6/social/w0/youtube"]);
+    expect(chain.statuses).toEqual([307, 200]);
   });
 
   it("redirects internal admin person workspace URLs back to the short canonical /people URL", () => {

@@ -43,6 +43,18 @@ const parseConnectionPort = (connectionString: string): string | null => {
   }
 };
 
+export const resolvePgPoolConnectionString = (connectionString: string): string => {
+  try {
+    const url = new URL(connectionString);
+    for (const param of ["sslmode", "sslcert", "sslkey", "sslrootcert"]) {
+      url.searchParams.delete(param);
+    }
+    return url.toString();
+  } catch {
+    return connectionString;
+  }
+};
+
 const resolveCaBundle = (env: EnvLike = process.env): string | undefined => {
   const inline = env.DATABASE_SSL_CA;
   if (inline && inline.trim().length > 0) {
@@ -448,7 +460,7 @@ const getPool = (): Pool => {
   const applicationName = resolvePostgresApplicationName(process.env);
 
   const pool = new Pool({
-    connectionString,
+    connectionString: resolvePgPoolConnectionString(connectionString),
     ssl: resolvePostgresSslConfig(connectionString, process.env),
     application_name: applicationName,
     max,

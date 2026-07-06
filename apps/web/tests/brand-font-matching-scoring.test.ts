@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import { GENERATED_GLYPH_COMPARISON_ARTIFACT } from "@/lib/fonts/brand-fonts/glyph-comparison.ts";
-import { rankBrandFontCandidates } from "@/lib/fonts/brand-fonts/scoring.ts";
+import { getScoreBreakdownMaxima } from "@/lib/fonts/brand-fonts/scoring-profiles.ts";
+import { buildBrandFontMatchResults, rankBrandFontCandidates } from "@/lib/fonts/brand-fonts/scoring.ts";
 import type {
   BrandFontRecord,
   BrandFontMatchRule,
@@ -10,6 +11,24 @@ import type {
 } from "@/lib/fonts/brand-fonts/types.ts";
 
 describe("brand font matching scoring", () => {
+  it("exposes shared score profile maxima for the admin score breakdown UI", () => {
+    expect(getScoreBreakdownMaxima("explicit-mapping-visual")).toMatchObject({
+      classification: 6,
+      role: 10,
+      width: 10,
+      weightCoverage: 7,
+      styleSupport: 4,
+      traitCompatibility: 3,
+      familyName: 5,
+      visualAffinity: 55,
+      structuralTotal: 40,
+      identityTotal: 5,
+      visualTotal: 55,
+      penaltyTotal: 20,
+    });
+    expect(getScoreBreakdownMaxima("metadata-only").visualTotal).toBe(0);
+  });
+
   it("keeps the regenerated KarnakPro-Book to Gloucester visual score below the old inflated range", () => {
     const pair = GENERATED_GLYPH_COMPARISON_ARTIFACT.pairs.find(
       (entry) =>
@@ -205,6 +224,17 @@ describe("brand font matching scoring", () => {
         bodyRisk: "high",
         sourceUrl: "https://example.test/rude.woff2",
       },
+      {
+        familyName: "Gloucester Condensed",
+        weightsNormalized: [400, 700],
+        styles: ["normal"],
+        widthsNormalized: ["condensed"],
+        classification: "serif",
+        traitTokens: ["editorial", "text", "body-safe", "traditional"],
+        displayRisk: "medium",
+        bodyRisk: "low",
+        sourceUrl: "https://example.test/gloucester.woff2",
+      },
     ];
 
     const rules: BrandFontMatchRule[] = [
@@ -296,15 +326,17 @@ describe("brand font matching scoring", () => {
       record,
       catalog,
       rules,
-      { includeBelowCredible: true, limit: 2 },
+      { includeBelowCredible: true, limit: 3 },
       { glyphComparisonArtifact: glyphArtifact, expectedInputHash: "hash-1" },
     );
 
     const rude = ranked.find((entry) => entry.familyName === "Rude Slab Condensed");
     const velino = ranked.find((entry) => entry.familyName === "Velino Compressed Text");
+    const gloucester = ranked.find((entry) => entry.familyName === "Gloucester Condensed");
 
     expect(ranked[0]?.familyName).toBe("Rude Slab Condensed");
     expect(rude?.scoringMode).toBe("visual+metadata");
+    expect(gloucester?.scoringMode).toBe("metadata-only");
     expect(rude?.scoreBreakdown.profile).toBe("explicit-mapping-visual");
     expect(rude?.scoreBreakdown.visualAffinity ?? 0).toBeGreaterThan(
       velino?.scoreBreakdown.visualAffinity ?? 0,
@@ -313,6 +345,15 @@ describe("brand font matching scoring", () => {
       rude?.scoreBreakdown.structuralTotal ?? 0,
     );
     expect(rude?.scoreBreakdown.ruleBonus).toBe(0);
+
+    const generatedResult = buildBrandFontMatchResults([record], catalog, rules, {
+      glyphComparisonArtifact: glyphArtifact,
+      expectedInputHash: "hash-1",
+    });
+    const generatedRude = generatedResult.matches[0]?.matches.find(
+      (entry) => entry.familyName === "Rude Slab Condensed",
+    );
+    expect(generatedRude?.visualDiagnostics?.aggregateVisualAffinity).toBe(94);
   });
 
   it("falls back to metadata-only scoring when no glyph artifact is available", () => {
@@ -366,5 +407,18 @@ describe("brand font matching scoring", () => {
     expect(ranked[0]?.scoringMode).toBe("metadata-only");
     expect(ranked[0]?.scoreBreakdown.profile).toBe("metadata-only");
     expect(ranked[0]?.scoreBreakdown.visualAffinity).toBe(0);
+  });
+
+  it("reports explicit null glyph artifacts as missing during live reranks", () => {
+    const result = buildBrandFontMatchResults([], [], [], {
+      glyphComparisonArtifact: null,
+      expectedInputHash: "hash-1",
+    });
+
+    expect(result.visualEvidenceHealth).toMatchObject({
+      status: "missing",
+      reason: "missing-artifact",
+      compatible: false,
+    });
   });
 });

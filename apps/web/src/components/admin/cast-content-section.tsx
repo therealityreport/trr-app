@@ -113,7 +113,9 @@ export default function CastContentSection({
     setError(null);
     try {
       const res = await fetchAdminWithAuth(
-        `/api/admin/trr-api/shows/${showId}/cast-role-members?seasons=${seasonNumber}&exclude_zero_episode_members=1`
+        `/api/admin/trr-api/shows/${showId}/cast-role-members?seasons=${seasonNumber}&exclude_zero_episode_members=1`,
+        undefined,
+        { allowDevAdminBypass: true },
       );
       if (!res.ok) throw new Error(`Failed to fetch cast: ${res.status}`);
       const data: unknown[] = await res.json();

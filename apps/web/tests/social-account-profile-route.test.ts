@@ -78,6 +78,20 @@ describe("social account profile stats page", () => {
     expect(element.props.activeTab).toBe("catalog");
   });
 
+  it("keeps the canonical posts route on the shared profile component policy", async () => {
+    const page = await import("@/app/social/[platform]/[handle]/posts/page");
+    const element = await page.default({
+      params: Promise.resolve({
+        platform: "instagram",
+        handle: "bravotv",
+      }),
+    });
+
+    expect(element.props.platform).toBe("instagram");
+    expect(element.props.handle).toBe("bravotv");
+    expect(element.props.activeTab).toBe("posts");
+  });
+
   it("rejects unsupported public comments platforms", async () => {
     const page = await import("@/app/social/[platform]/[handle]/comments/page");
     await expect(
@@ -136,6 +150,18 @@ describe("social account profile stats page", () => {
         }),
       }),
     ).rejects.toThrow("NEXT_REDIRECT:/social/instagram/bravotv/catalog");
+  });
+
+  it("redirects legacy admin posts routes to the canonical public path", async () => {
+    const page = await import("@/app/admin/social/[platform]/[handle]/posts/page");
+    await expect(
+      page.default({
+        params: Promise.resolve({
+          platform: "Instagram",
+          handle: "@BravoTV",
+        }),
+      }),
+    ).rejects.toThrow("NEXT_REDIRECT:/social/instagram/bravotv/posts");
   });
 
   it("rejects unsupported legacy admin comments platforms", async () => {

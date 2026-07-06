@@ -7,6 +7,7 @@ import {
   buildCastRoleMember,
   buildSeasonCastMember,
   buildShowCastMember,
+  gotoSeasonSocialCastContent,
   mockAdminApi,
   waitForAdminReady,
 } from "./admin-fixtures";
@@ -52,6 +53,16 @@ test.describe("cast + season tabs smoke (mocked)", () => {
 
     await expect(cancelButton).toBeVisible({ timeout: 8_000 });
     return cancelButton;
+  };
+
+  const recoverCastContentAuthRace = async (page: Page) => {
+    const retryButton = page.getByRole("button", { name: "Retry" });
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      if (!(await retryButton.isVisible().catch(() => false))) return;
+      await page.waitForTimeout((attempt + 1) * 750);
+      await retryButton.click();
+      if (!(await retryButton.isVisible().catch(() => false))) return;
+    }
   };
 
   test("show deep-link role editor waits for cast intelligence before consuming URL params", async ({ page }) => {
@@ -171,5 +182,29 @@ test.describe("cast + season tabs smoke (mocked)", () => {
     await expect(
       page.getByText(/1\/1\/2 cast · 0\/0\/0 crew · 1\/1\/2 visible|1\/2\/2 cast · 0\/0\/0 crew · 1\/2\/2 visible/).first()
     ).toBeVisible({ timeout: 8_000 });
+  });
+
+  test("season social cast comparison queues SocialBlade refreshes with queued and running call ids", async ({ page }) => {
+    await mockAdminApi(page, {
+      castRoleMembers: roleMembers,
+      socialGrowthRefreshCallIdsByKey: {
+        [`${CAST_PERSON_PRIMARY_ID}:lisabarlow`]: "modal-lisa-001",
+        [`${CAST_PERSON_SECONDARY_ID}:heathergay`]: "modal-heat-001",
+      },
+      socialGrowthRefreshPollsBeforeData: 3,
+    });
+
+    await gotoSeasonSocialCastContent(page);
+    await recoverCastContentAuthRace(page);
+
+    await expect(page.getByRole("button", { name: "SOCIAL BLADE" })).toBeVisible({ timeout: 20_000 });
+    await page.getByRole("button", { name: "SOCIAL BLADE" }).click();
+    await expect(page.getByText("No SocialBlade data available")).toBeVisible({ timeout: 20_000 });
+
+    await page.getByRole("button", { name: "Refresh SocialBlade" }).click();
+
+    await expect(page.getByText("Queued in Modal").first()).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText(/modal-lisa|modal-heat/).first()).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText("Running in Modal").first()).toBeVisible({ timeout: 12_000 });
   });
 });

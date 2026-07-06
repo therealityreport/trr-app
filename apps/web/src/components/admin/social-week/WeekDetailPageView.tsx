@@ -46,6 +46,7 @@ import {
   type SocialSyncRetryKind,
   type SocialSyncSessionStreamPayload,
 } from "@/lib/admin/social-sync-session";
+import { buildIsoDayRange, SOCIAL_TIME_ZONE } from "@/lib/admin/social-timezone";
 import { invalidateAdminSnapshotFamilies } from "@/lib/admin/admin-snapshot-client";
 import { useSharedPollingResource, useSharedSseResource } from "@/lib/admin/shared-live-resource";
 import type { PhotoMetadata } from "@/lib/photo-metadata";
@@ -994,7 +995,6 @@ const UUID_RE =
 const looksLikeUuid = (value: string): boolean => UUID_RE.test(value);
 const ACTIVE_RUN_STATUSES = new Set<SocialRun["status"]>(["queued", "pending", "retrying", "running", "cancelling"]);
 const TERMINAL_RUN_STATUSES = new Set<SocialRun["status"]>(["completed", "failed", "cancelled"]);
-const SOCIAL_TIME_ZONE = "America/New_York";
 const DATE_TOKEN_RE = /^\d{4}-\d{2}-\d{2}$/;
 const COMMENT_SYNC_MAX_PASSES = 1;
 const COMMENT_SYNC_MAX_DURATION_MS = 90 * 60 * 1000;
@@ -1233,89 +1233,6 @@ const toLocalDateToken = (iso: string | null | undefined): string | null => {
   }
   if (!values.year || !values.month || !values.day) return null;
   return `${values.year}-${values.month}-${values.day}`;
-};
-
-const parseDateToken = (value: string): { year: number; month: number; day: number } | null => {
-  const match = DATE_TOKEN_RE.exec(value);
-  if (!match) return null;
-  return {
-    year: Number(match[0].slice(0, 4)),
-    month: Number(match[0].slice(5, 7)),
-    day: Number(match[0].slice(8, 10)),
-  };
-};
-
-const getTimeZoneOffsetMs = (timestampMs: number, timeZone: string): number => {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(new Date(timestampMs));
-  const values: Record<string, number> = {};
-  for (const part of parts) {
-    if (part.type === "literal") continue;
-    values[part.type] = Number(part.value);
-  }
-  const zonedAsUtc = Date.UTC(
-    values.year ?? 0,
-    (values.month ?? 1) - 1,
-    values.day ?? 1,
-    values.hour ?? 0,
-    values.minute ?? 0,
-    values.second ?? 0,
-  );
-  return zonedAsUtc - timestampMs;
-};
-
-const toZonedUtcIso = (
-  parts: { year: number; month: number; day: number },
-  time: { hour: number; minute: number; second: number; millisecond?: number },
-): string => {
-  const baseUtc = Date.UTC(
-    parts.year,
-    parts.month - 1,
-    parts.day,
-    time.hour,
-    time.minute,
-    time.second,
-    time.millisecond ?? 0,
-  );
-  const firstOffset = getTimeZoneOffsetMs(baseUtc, SOCIAL_TIME_ZONE);
-  let correctedUtc = baseUtc - firstOffset;
-  const secondOffset = getTimeZoneOffsetMs(correctedUtc, SOCIAL_TIME_ZONE);
-  if (secondOffset !== firstOffset) {
-    correctedUtc = baseUtc - secondOffset;
-  }
-  return new Date(correctedUtc).toISOString();
-};
-
-const addDays = (
-  parts: { year: number; month: number; day: number },
-  days: number,
-): { year: number; month: number; day: number } => {
-  const date = new Date(Date.UTC(parts.year, parts.month - 1, parts.day + days, 12, 0, 0));
-  return {
-    year: date.getUTCFullYear(),
-    month: date.getUTCMonth() + 1,
-    day: date.getUTCDate(),
-  };
-};
-
-const buildIsoDayRange = (dayLocal: string): { dateStart: string; dateEnd: string } | null => {
-  const parsed = parseDateToken(dayLocal);
-  if (!parsed) return null;
-  const dateStart = toZonedUtcIso(parsed, { hour: 0, minute: 0, second: 0, millisecond: 0 });
-  const nextDay = addDays(parsed, 1);
-  const nextDateStart = toZonedUtcIso(nextDay, { hour: 0, minute: 0, second: 0, millisecond: 0 });
-  return {
-    dateStart,
-    dateEnd: new Date(Date.parse(nextDateStart) - 1).toISOString(),
-  };
 };
 
 const toDayFilterLabel = (token: string | null): string | null => {
@@ -6269,12 +6186,15 @@ export default function WeekDetailPage() {
     } satisfies WorkerHealthPayload;
   }, [getSyncRunRequestHeaders]);
 
+  const shouldPollLiveWeekSnapshot =
+    hasValidNumericPathParams && isAdmin && (syncingComments ? !syncSessionStreamConnected : Boolean(data));
+
   const liveWeekSnapshot = useSharedPollingResource<{
     payload: WeekSocialSnapshot;
     cacheStatus: string;
   }>({
     key: `week-social-snapshot:${showIdForApi}:${seasonNumber}:${weekIndex}:${sourceScope}:${resolvedSeasonId ?? "none"}:${platformFilter}:${syncRunId ?? "none"}:${syncSessionId ?? "none"}`,
-    shouldRun: hasValidNumericPathParams && isAdmin && (syncingComments || Boolean(data)),
+    shouldRun: shouldPollLiveWeekSnapshot,
     intervalMs: syncingComments ? SYNC_ACTIVE_POLL_INTERVAL_MS : 30_000,
     fetchData: async (signal, request) =>
       await fetchWeekSnapshot({
