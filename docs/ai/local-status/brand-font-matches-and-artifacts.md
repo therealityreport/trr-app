@@ -26,7 +26,7 @@ handoff:
 - Updated the Fonts Library inventory so the hosted and Realitease font sections now derive from the actual `/hosted-fonts.css` stylesheet inventory instead of only hand-curated arrays:
   - added `apps/web/src/lib/fonts/hosted-font-catalog.ts`
   - `DesignSystemPageClient.tsx` now parses the served stylesheet and merges it with local usage/description overrides
-  - this keeps `http://admin.localhost:3000/design-system/fonts` aligned with the font files actually published from R2, including stylesheet-backed families such as `Rude Slab Condensed`
+  - this keeps `https://admin.trr.localhost/design-system/fonts` aligned with the font files actually published from R2, including stylesheet-backed families such as `Rude Slab Condensed`
 - Added checked-in generated artifacts under `apps/web/src/lib/fonts/brand-fonts/generated/` for:
   - discovered brand-font evidence snapshot
   - normalized brand registry

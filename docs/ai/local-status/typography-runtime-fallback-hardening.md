@@ -28,5 +28,5 @@ handoff:
   - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/layout.tsx`
   - `make dev` from `/Users/thomashulihan/Projects/TRR`
   - `curl http://127.0.0.1:3000/hub`
-  - `curl http://admin.localhost:3000/rhoslc/s6/social/w1/instagram`
+  - `curl https://admin.trr.localhost/rhoslc/s6/social/w1/instagram`
   - `curl http://127.0.0.1:3000/api/design-system/typography` -> `25` sets / `27` assignments

@@ -220,7 +220,22 @@ export async function mockAdminApi(page: Page, options: MockAdminApiOptions = {}
     const requestUrl = new URL(route.request().url());
     const path = requestUrl.pathname;
 
-    if (path === `/api/admin/trr-api/shows/${SHOW_ID}`) {
+    if (path === "/api/admin/getty-local/scrape") {
+      return json(route, {
+        prefetch_token: "mock-getty-prefetch-token",
+        status: "completed",
+        poll_after_ms: 0,
+        prefetch_mode: "discovery",
+        discovery_ready: true,
+        enrichment_pending: false,
+        merged_total: 0,
+        merged_events_total: 0,
+        candidate_manifest_total: 0,
+        detail_enrichment_total: 0,
+      });
+    }
+
+    if (path === `/api/admin/trr-api/shows/${SHOW_ID}` || path === `/api/admin/trr-api/shows/${SHOW_SLUG}`) {
       return json(route, {
         show: {
           id: SHOW_ID,

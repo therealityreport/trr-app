@@ -1,7 +1,23 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { SHOW_ID, mockAdminApi, waitForAdminReady } from "./admin-fixtures";
 
 const ADMIN_RECENT_SHOWS_STORAGE_KEY = "trr-admin-recent-shows-v1";
+
+const waitForRecentShow = async (page: Page, slug: string) => {
+  await expect
+    .poll(async () => {
+      return page.evaluate(
+        ([storageKey, expectedSlug]) => {
+          const raw = window.localStorage.getItem(storageKey);
+          if (!raw) return false;
+          const entries = JSON.parse(raw) as Array<{ slug?: unknown }>;
+          return entries.some((entry) => entry.slug === expectedSlug);
+        },
+        [ADMIN_RECENT_SHOWS_STORAGE_KEY, slug] as const,
+      );
+    })
+    .toBe(true);
+};
 
 test.describe("admin global header menu", () => {
   test("renders hamburger + logo and shows expected top-level menu content", async ({ page }) => {
@@ -35,7 +51,7 @@ test.describe("admin global header menu", () => {
     }
 
     await expect(nav.getByRole("button", { name: "Toggle shows submenu" })).toHaveAttribute("aria-expanded", "true");
-    await expect(nav.getByRole("link", { name: "View All Shows" })).toHaveAttribute("href", "/shows");
+    await expect(nav.getByRole("link", { name: "View All Shows" })).toHaveAttribute("href", "/admin/shows");
   });
 
   test("limits recent shows submenu to the latest five", async ({ page }) => {
@@ -104,6 +120,7 @@ test.describe("admin global header menu", () => {
     ]) {
       await page.goto(`/shows/${slug}`);
       await waitForAdminReady(page);
+      await waitForRecentShow(page, slug);
     }
 
     await page.goto("/");

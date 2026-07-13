@@ -107,5 +107,5 @@ Run:
 pnpm -C apps/web run lint
 pnpm -C apps/web exec next build --webpack
 pnpm -C apps/web run test:ci
-pnpm -C apps/web exec playwright test tests/e2e/homepage-visual-smoke.spec.ts tests/e2e/admin-dashboard-utility-copy.spec.ts
+pnpm -C apps/web exec playwright test tests/e2e/admin-entry-smoke.spec.ts tests/e2e/admin-dashboard-utility-copy.spec.ts
 ```

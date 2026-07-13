@@ -8,12 +8,12 @@ test.describe("admin breadcrumbs", () => {
 
     const breadcrumbNav = page.getByRole("navigation", { name: "Breadcrumb" });
     await expect(breadcrumbNav).toBeVisible();
-    await expect(breadcrumbNav.getByRole("link", { name: "Admin" })).toHaveAttribute("href", "/");
+    await expect(breadcrumbNav.getByRole("link", { name: "Admin" })).toHaveAttribute("href", "/admin");
   });
 
   test("renders clickable show crumb on season page", async ({ page }) => {
     await mockAdminApi(page);
-    await page.goto(`/shows/${SHOW_ID}/s${SEASON_NUMBER}`);
+    await page.goto(`/${SHOW_ID}/s${SEASON_NUMBER}/credits`);
     await waitForAdminReady(page);
 
     const breadcrumbNav = page.getByRole("navigation", { name: "Breadcrumb" });
