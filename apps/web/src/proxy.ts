@@ -19,6 +19,15 @@ import {
   resolveAdminOriginFromRequest,
 } from "@/lib/admin/admin-url-defaults";
 import { toFriendlyBrandSlug } from "@/lib/admin/brand-profile";
+import {
+  appendScreenalyticsRhobhS5E16TestDefaults,
+  buildScreenalyticsRunPath,
+  hasScreenalyticsRhobhS5E16TestSearch,
+  removeScreenalyticsLegacySearchParams,
+  SCREENALYTICS_CANONICAL_PATH,
+  SCREENALYTICS_INTERNAL_CAST_SCREENTIME_PATH,
+  SCREENALYTICS_RHOBH_S5_E16_TEST_PATH,
+} from "@/lib/admin/screenalytics-routes";
 
 const DEFAULT_DEV_ADMIN_API_HOSTS = ["admin.localhost", "localhost", "127.0.0.1", "[::1]", "::1"];
 const STATIC_PATH_PREFIXES = ["/_next", "/favicon.ico", "/robots.txt", "/sitemap.xml"];
@@ -26,7 +35,6 @@ const INTERNAL_ADMIN_REWRITE_HEADER = "x-trr-admin-rewrite";
 const CANONICAL_SOCIAL_PATH = "/social";
 const CANONICAL_API_REFERENCES_PATH = "/api-references";
 const CANONICAL_DEV_DASHBOARD_PATH = "/dev-dashboard";
-const CAST_SCREENTIME_ADMIN_PATH = "/admin/cast-screentime";
 const ROOT_SHOW_ROUTE_RESERVED_FIRST_SEGMENTS = new Set([
   "admin",
   "api",
@@ -45,6 +53,8 @@ const ROOT_SHOW_ROUTE_RESERVED_FIRST_SEGMENTS = new Set([
   "profile",
   "realations",
   "realitease",
+  "screenalytics",
+  "screenlaytics",
   "settings",
   "social",
   "social-media",
@@ -145,7 +155,7 @@ const ROOT_ONLY_ADMIN_SECTION_CANONICAL_PATHS = new Map<string, string>([
   ["people", "/people"],
   ["games", "/games"],
   ["screenalytics", "/screenalytics"],
-  ["screenlaytics", "/screenlaytics"],
+  ["screenlaytics", "/screenalytics"],
   ["surveys", "/surveys"],
   ["settings", "/settings"],
   ["users", "/users"],
@@ -166,10 +176,10 @@ const CANONICAL_ADMIN_REWRITE_PREFIXES = [
   [CANONICAL_DEV_DASHBOARD_PATH, ADMIN_DEV_DASHBOARD_PATH],
 ] as const;
 const LEGACY_SCREENALYTICS_ROUTE_PREFIXES = [
-  "/screenalytics",
   "/screenlaytics",
   "/admin/screenalytics",
   "/admin/screenlaytics",
+  "/admin/cast-screentime",
 ] as const;
 
 function parseOptionalBoolean(value: string | undefined): boolean | null {
@@ -298,12 +308,78 @@ function remapPathPrefix(pathname: string, fromPrefix: string, toPrefix: string)
   return `${toPrefix}${pathname.slice(fromPrefix.length)}`;
 }
 
-function mapLegacyScreenalyticsRoute(pathname: string, searchParams?: URLSearchParams): string | null {
-  for (const legacyPrefix of LEGACY_SCREENALYTICS_ROUTE_PREFIXES) {
-    if (remapPathPrefix(pathname, legacyPrefix, CAST_SCREENTIME_ADMIN_PATH)) {
-      return appendSearch(CAST_SCREENTIME_ADMIN_PATH, searchParams);
+function getScreenalyticsRunIdFromPath(pathname: string): string | null {
+  const segments = toPathSegments(pathname);
+  if (segments.length !== 3) return null;
+  if ((segments[0] ?? "").toLowerCase() !== "screenalytics") return null;
+  if ((segments[1] ?? "").toLowerCase() !== "runs") return null;
+  const runId = segments[2]?.trim();
+  return runId || null;
+}
+
+function getScreenalyticsRunIdFromSearch(searchParams?: URLSearchParams): string | null {
+  const runId = searchParams?.get("run_id") || searchParams?.get("run");
+  return runId?.trim() || null;
+}
+
+function mapScreenalyticsCanonicalRedirect(pathname: string, searchParams?: URLSearchParams): string | null {
+  if (pathname === SCREENALYTICS_CANONICAL_PATH) {
+    const runId = getScreenalyticsRunIdFromSearch(searchParams);
+    if (runId) {
+      return appendSearch(
+        buildScreenalyticsRunPath(runId),
+        removeScreenalyticsLegacySearchParams(searchParams),
+      );
+    }
+    if (hasScreenalyticsRhobhS5E16TestSearch(searchParams)) {
+      return appendSearch(SCREENALYTICS_RHOBH_S5_E16_TEST_PATH, removeScreenalyticsLegacySearchParams(searchParams));
     }
   }
+
+  for (const legacyPrefix of LEGACY_SCREENALYTICS_ROUTE_PREFIXES) {
+    const remapped = remapPathPrefix(pathname, legacyPrefix, SCREENALYTICS_CANONICAL_PATH);
+    if (!remapped) continue;
+
+    const runId = getScreenalyticsRunIdFromSearch(searchParams);
+    if (remapped === SCREENALYTICS_CANONICAL_PATH && runId) {
+      return appendSearch(
+        buildScreenalyticsRunPath(runId),
+        removeScreenalyticsLegacySearchParams(searchParams),
+      );
+    }
+    if (remapped === SCREENALYTICS_CANONICAL_PATH && hasScreenalyticsRhobhS5E16TestSearch(searchParams)) {
+      return appendSearch(SCREENALYTICS_RHOBH_S5_E16_TEST_PATH, removeScreenalyticsLegacySearchParams(searchParams));
+    }
+
+    return appendSearch(remapped, searchParams);
+  }
+  return null;
+}
+
+function mapScreenalyticsInternalRewrite(pathname: string, searchParams?: URLSearchParams): string | null {
+  if (pathname === SCREENALYTICS_RHOBH_S5_E16_TEST_PATH) {
+    return appendSearch(
+      SCREENALYTICS_INTERNAL_CAST_SCREENTIME_PATH,
+      appendScreenalyticsRhobhS5E16TestDefaults(searchParams),
+    );
+  }
+
+  const runId = getScreenalyticsRunIdFromPath(pathname);
+  if (runId) {
+    const params = new URLSearchParams(searchParams?.toString() ?? "");
+    params.set("run_id", runId);
+    params.delete("run");
+    return appendSearch(SCREENALYTICS_INTERNAL_CAST_SCREENTIME_PATH, params);
+  }
+
+  if (pathname === SCREENALYTICS_CANONICAL_PATH) {
+    return appendSearch(SCREENALYTICS_INTERNAL_CAST_SCREENTIME_PATH, searchParams);
+  }
+
+  if (pathname.startsWith(`${SCREENALYTICS_CANONICAL_PATH}/`)) {
+    return appendSearch(SCREENALYTICS_INTERNAL_CAST_SCREENTIME_PATH, searchParams);
+  }
+
   return null;
 }
 
@@ -536,6 +612,8 @@ function isCanonicalShortAdminPath(pathname: string): boolean {
   return (
     pathname === "/" ||
     pathname === "/shows" ||
+    pathname === "/screenalytics" ||
+    pathname.startsWith("/screenalytics/") ||
     pathname === "/social" ||
     pathname.startsWith("/social/") ||
     pathname === "/design-docs" ||
@@ -742,10 +820,15 @@ function mapCanonicalAdminUiRedirect(pathname: string, searchParams?: URLSearchP
   );
 }
 
-function mapCanonicalAdminUiRewrite(pathname: string): string | null {
+function mapCanonicalAdminUiRewrite(pathname: string, searchParams?: URLSearchParams): string | null {
   const legacyAdminSocialPath = mapLegacyAdminSocialPath(pathname);
   if (legacyAdminSocialPath) {
     return stripSearch(legacyAdminSocialPath);
+  }
+
+  const screenalyticsInternalRewrite = mapScreenalyticsInternalRewrite(pathname, searchParams);
+  if (screenalyticsInternalRewrite) {
+    return screenalyticsInternalRewrite;
   }
 
   if (pathname === "/") {
@@ -1036,15 +1119,18 @@ export function proxy(request: NextRequest): NextResponse {
   const requestHost = normalizeAdminHost(getForwardedRequestHost(request)) ?? normalizeAdminHost(request.nextUrl.hostname);
   const onCanonicalAdminHost = hostsMatch(canonicalAdminHost, requestHost);
   const isInternalAdminRewrite = request.headers.get(INTERNAL_ADMIN_REWRITE_HEADER) === "1";
-  const legacyScreenalyticsPath = mapLegacyScreenalyticsRoute(pathname, request.nextUrl.searchParams);
+  const screenalyticsCanonicalPath = isInternalAdminRewrite
+    ? null
+    : mapScreenalyticsCanonicalRedirect(pathname, request.nextUrl.searchParams);
   const legacyBrandsPath = mapLegacyBrandsPath(pathname, request.nextUrl.searchParams);
 
-  if (legacyScreenalyticsPath) {
-    const redirectOrigin = onCanonicalAdminHost ? request.nextUrl.origin : adminOrigin;
+  if (screenalyticsCanonicalPath) {
+    const requestUrlHost = normalizeAdminHost(request.nextUrl.hostname);
+    const redirectOrigin = onCanonicalAdminHost && requestHost === requestUrlHost ? request.nextUrl.origin : adminOrigin;
     if (!redirectOrigin) {
       return NextResponse.json({ error: "Admin origin is not configured." }, { status: 403 });
     }
-    return NextResponse.redirect(new URL(legacyScreenalyticsPath, redirectOrigin), 307);
+    return NextResponse.redirect(new URL(screenalyticsCanonicalPath, redirectOrigin), 307);
   }
 
   if (legacyBrandsPath) {
@@ -1102,7 +1188,7 @@ export function proxy(request: NextRequest): NextResponse {
       }
     }
 
-    const rewritePath = mapCanonicalAdminUiRewrite(pathname);
+    const rewritePath = mapCanonicalAdminUiRewrite(pathname, request.nextUrl.searchParams);
     if (rewritePath) {
       const targetUrl = buildInternalRewriteUrl(request, rewritePath);
       request.nextUrl.searchParams.forEach((value, key) => {
