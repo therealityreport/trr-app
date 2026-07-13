@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createGettyPrefetchJob,
   hydrateGettyPrefetchPayload,
+  InvalidGettyPrefetchTokenError,
   readGettyPrefetchPayload,
 } from "@/lib/server/admin/getty-local-scrape";
 
@@ -101,7 +102,9 @@ describe("Getty prefetch token validation", () => {
   it("short-circuits invalid body tokens during hydration", async () => {
     const rawBody = JSON.stringify({ getty_prefetch_token: "a/b" });
 
-    await expect(hydrateGettyPrefetchPayload(rawBody)).resolves.toBe(rawBody);
+    await expect(hydrateGettyPrefetchPayload(rawBody)).rejects.toBeInstanceOf(
+      InvalidGettyPrefetchTokenError,
+    );
 
     expect(readFileMock).not.toHaveBeenCalled();
   });

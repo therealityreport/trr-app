@@ -63,7 +63,7 @@ describe("client admin access", () => {
     const user = buildUser({ uid: "user-1" });
     const { checkServerAdminAccess } = await import("@/lib/admin/client-access");
 
-    await expect(checkServerAdminAccess(user)).resolves.toBe(true);
+    await expect(checkServerAdminAccess(user)).resolves.toBe("allowed");
 
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/admin/check",
@@ -90,7 +90,7 @@ describe("client admin access", () => {
       checkServerAdminAccess(
         buildUser({ uid: "seeded-admin-uid", email: "admin@example.com", emailVerified: true }),
       ),
-    ).resolves.toBe(false);
+    ).resolves.toBe("denied");
   });
 
   it("aborts a hung server check and fails closed", async () => {
@@ -108,7 +108,7 @@ describe("client admin access", () => {
     const accessPromise = checkServerAdminAccess(buildUser({ uid: "user-1" }));
     await vi.advanceTimersByTimeAsync(5000);
 
-    await expect(accessPromise).resolves.toBe(false);
+    await expect(accessPromise).resolves.toBe("unavailable");
     expect(observedSignal?.aborted).toBe(true);
   });
 
@@ -122,6 +122,27 @@ describe("client admin access", () => {
     );
     const { checkServerAdminAccess } = await import("@/lib/admin/client-access");
 
-    await expect(checkServerAdminAccess(buildUser({ uid: "user-1" }))).resolves.toBe(true);
+    await expect(checkServerAdminAccess(buildUser({ uid: "user-1" }))).resolves.toBe("allowed");
+  });
+
+  it("bounds token acquisition with the same deadline and does not fetch after timeout", async () => {
+    vi.useFakeTimers();
+    const user = buildUser({ getIdToken: vi.fn(() => new Promise<string>(() => {})) });
+    const { checkServerAdminAccess } = await import("@/lib/admin/client-access");
+
+    const accessPromise = checkServerAdminAccess(user);
+    await vi.advanceTimersByTimeAsync(5000);
+
+    await expect(accessPromise).resolves.toBe("unavailable");
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("reports network and malformed-response failures as unavailable", async () => {
+    const { checkServerAdminAccess } = await import("@/lib/admin/client-access");
+    vi.mocked(fetch).mockRejectedValueOnce(new Error("offline"));
+    await expect(checkServerAdminAccess(buildUser({}))).resolves.toBe("unavailable");
+
+    vi.mocked(fetch).mockResolvedValueOnce(new Response("{}", { status: 200 }));
+    await expect(checkServerAdminAccess(buildUser({}))).resolves.toBe("unavailable");
   });
 });

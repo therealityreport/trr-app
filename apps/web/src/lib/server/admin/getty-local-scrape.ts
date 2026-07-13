@@ -17,6 +17,13 @@ const normalizeGettyPrefetchToken = (token: string): string | null => {
   return GETTY_PREFETCH_TOKEN_RE.test(trimmed) ? trimmed : null;
 };
 
+export class InvalidGettyPrefetchTokenError extends Error {
+  constructor() {
+    super("getty_prefetch_token must be a UUID");
+    this.name = "InvalidGettyPrefetchTokenError";
+  }
+}
+
 export type GettyLocalScrapePayload = {
   person_name?: string;
   merged?: unknown[];
@@ -950,13 +957,11 @@ export const hydrateGettyPrefetchPayload = async (
   rawBody: string,
 ): Promise<string> => {
   const parsed = JSON.parse(rawBody) as Record<string, unknown>;
-  const prefetchToken =
-    typeof parsed.getty_prefetch_token === "string"
-      ? normalizeGettyPrefetchToken(parsed.getty_prefetch_token)
-      : null;
-  if (!prefetchToken) {
+  if (typeof parsed.getty_prefetch_token !== "string") {
     return rawBody;
   }
+  const prefetchToken = normalizeGettyPrefetchToken(parsed.getty_prefetch_token);
+  if (!prefetchToken) throw new InvalidGettyPrefetchTokenError();
   if (
     Array.isArray(parsed.getty_prefetched_assets) ||
     Array.isArray(parsed.getty_prefetched_events)

@@ -5,6 +5,7 @@ import { getInternalAdminBearerToken } from "@/lib/server/trr-api/internal-admin
 import {
   hydrateGettyPrefetchPayload,
   cleanupStaleGettyPrefetchFiles,
+  InvalidGettyPrefetchTokenError,
 } from "@/lib/server/admin/getty-local-scrape";
 
 export const dynamic = "force-dynamic";
@@ -80,7 +81,14 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       if (!bodyText.trim()) {
         bodyText = "{}";
       } else {
-        bodyText = await hydrateGettyPrefetchPayload(bodyText);
+        try {
+          bodyText = await hydrateGettyPrefetchPayload(bodyText);
+        } catch (error) {
+          if (error instanceof InvalidGettyPrefetchTokenError) {
+            return NextResponse.json({ error: error.message }, { status: 400 });
+          }
+          throw error;
+        }
         cleanupStaleGettyPrefetchFiles().catch(() => {});
       }
     }

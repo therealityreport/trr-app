@@ -5,9 +5,14 @@ const { requireAdminMock, getBackendApiUrlMock } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
   getBackendApiUrlMock: vi.fn(),
 }));
-const { hydrateGettyPrefetchPayloadMock, cleanupStaleGettyPrefetchFilesMock } = vi.hoisted(() => ({
+const {
+  hydrateGettyPrefetchPayloadMock,
+  cleanupStaleGettyPrefetchFilesMock,
+  InvalidGettyPrefetchTokenError,
+} = vi.hoisted(() => ({
   hydrateGettyPrefetchPayloadMock: vi.fn(),
   cleanupStaleGettyPrefetchFilesMock: vi.fn(),
+  InvalidGettyPrefetchTokenError: class InvalidGettyPrefetchTokenError extends Error {},
 }));
 
 vi.mock("@/lib/server/auth", () => ({
@@ -21,6 +26,7 @@ vi.mock("@/lib/server/trr-api/backend", () => ({
 vi.mock("@/lib/server/admin/getty-local-scrape", () => ({
   hydrateGettyPrefetchPayload: hydrateGettyPrefetchPayloadMock,
   cleanupStaleGettyPrefetchFiles: cleanupStaleGettyPrefetchFilesMock,
+  InvalidGettyPrefetchTokenError,
 }));
 
 import { POST } from "@/app/api/admin/trr-api/people/[personId]/refresh-images/stream/route";
@@ -294,6 +300,23 @@ describe("person refresh-images stream proxy route", () => {
     expect((forwarded.getty_prefetched_events as unknown[]).length).toBe(1);
     expect(forwarded.getty_prefetch_token).toBeUndefined();
     expect(hydrateGettyPrefetchPayloadMock).toHaveBeenCalled();
+  });
+
+  it("returns 400 without contacting the backend for an invalid Getty token", async () => {
+    hydrateGettyPrefetchPayloadMock.mockRejectedValue(
+      new InvalidGettyPrefetchTokenError("getty_prefetch_token must be a UUID"),
+    );
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await POST(
+      makeRequest("req-invalid-getty-token", { getty_prefetch_token: "bad/token" }),
+      { params: Promise.resolve({ personId: "person-1" }) },
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.text()).toContain("getty_prefetch_token must be a UUID");
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("hydrates discovery manifests via the shared hydration helper", async () => {

@@ -113,6 +113,7 @@ export function useAdminGuard() {
     let authReadyFallbackTimer: ReturnType<typeof setTimeout> | null = null;
     let accessCheckId = 0;
     let accessCheckPending = false;
+    let accessCheckUnavailable = false;
 
     const clearTransientUnauthTimer = () => {
       if (!transientUnauthTimer) return;
@@ -134,7 +135,14 @@ export function useAdminGuard() {
     };
 
     const evaluateInitialRedirect = () => {
-      if (!mounted || !authReady || !receivedAuthEmission || accessCheckPending || hasEvaluatedRedirect) {
+      if (
+        !mounted ||
+        !authReady ||
+        !receivedAuthEmission ||
+        accessCheckPending ||
+        accessCheckUnavailable ||
+        hasEvaluatedRedirect
+      ) {
         return;
       }
       hasEvaluatedRedirect = true;
@@ -188,6 +196,7 @@ export function useAdminGuard() {
       if (!currentUser) {
         accessCheckId += 1;
         accessCheckPending = false;
+        accessCheckUnavailable = false;
         pendingHasAccess = false;
 
         if (hadAuthenticatedSession && authReady) {
@@ -231,15 +240,21 @@ export function useAdminGuard() {
       const currentAccessCheckId = accessCheckId + 1;
       accessCheckId = currentAccessCheckId;
       accessCheckPending = true;
+      accessCheckUnavailable = false;
       pendingHasAccess = false;
       setChecking(true);
 
-      void checkServerAdminAccess(currentUser).then((nextHasAccess) => {
+      void checkServerAdminAccess(currentUser).then((result) => {
         if (!mounted || accessCheckId !== currentAccessCheckId || pendingUserKey !== nextUserKey) {
           return;
         }
         accessCheckPending = false;
-        applyResolvedAccess(nextUserKey, prevUserKey, nextHasAccess);
+        if (result === "unavailable") {
+          accessCheckUnavailable = true;
+          setChecking(false);
+          return;
+        }
+        applyResolvedAccess(nextUserKey, prevUserKey, result === "allowed");
       });
     };
 

@@ -207,6 +207,21 @@ describe("/api/debug-log route", () => {
     expect(requireAdminMock).not.toHaveBeenCalled();
   });
 
+  it("stops reading an oversized chunked body without a content-length header", async () => {
+    const request = new NextRequest("http://localhost/api/debug-log", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ message: "x".repeat(70 * 1024) }),
+    });
+    expect(request.headers.get("content-length")).toBeNull();
+
+    const response = await POST(request);
+
+    expect(response.status).toBe(413);
+    await expect(response.json()).resolves.toEqual({ error: "payload_too_large" });
+    expect(requireAdminMock).not.toHaveBeenCalled();
+  });
+
   it("returns 400 for malformed JSON before auth", async () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const request = new NextRequest("http://localhost/api/debug-log", {

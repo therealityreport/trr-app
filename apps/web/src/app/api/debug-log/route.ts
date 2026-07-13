@@ -60,10 +60,22 @@ async function readJsonBodyWithLimit(
     return TOO_LARGE_BODY;
   }
 
-  const rawBody = await request.text();
-  if (Buffer.byteLength(rawBody, "utf8") > MAX_DEBUG_LOG_BODY_BYTES) {
-    return TOO_LARGE_BODY;
+  const reader = request.body?.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  if (reader) {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      totalBytes += value.byteLength;
+      if (totalBytes > MAX_DEBUG_LOG_BODY_BYTES) {
+        await reader.cancel();
+        return TOO_LARGE_BODY;
+      }
+      chunks.push(value);
+    }
   }
+  const rawBody = Buffer.concat(chunks, totalBytes).toString("utf8");
   try {
     return JSON.parse(rawBody) as unknown;
   } catch {

@@ -3,8 +3,8 @@ import type { AdminApiReferenceInventory } from "@/lib/admin/api-references/type
 export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
   "inventorySchemaVersion": "1.0.0",
   "generatorVersion": "1.0.0",
-  "generatedAt": "2026-07-13T21:45:30.476Z",
-  "sourceCommitSha": "2ad56aefd4f0f9f1f7bc1a6e67ed620ccef51886",
+  "generatedAt": "2026-07-13T21:51:22.814Z",
+  "sourceCommitSha": "8cb8ada50ff8b01db41d596ff10a22cbb90bf52b",
   "overrideDigest": "cd85a76fd2fc977cbc691ccab80ce844f9ea783e118af35eb3d9766e5d61fd36",
   "nodes": [
     {
@@ -2038,7 +2038,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "POST",
       "sourceFile": "src/app/api/admin/trr-api/bravotv/images/people/[personId]/stream/route.ts",
       "sourceLocator": {
-        "line": 20,
+        "line": 21,
         "matchedText": "`/admin/bravotv/images/people/${personId}/stream`"
       },
       "provenance": "static_scan",
@@ -2213,7 +2213,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "POST",
       "sourceFile": "src/app/api/admin/trr-api/bravotv/images/shows/[showId]/stream/route.ts",
       "sourceLocator": {
-        "line": 20,
+        "line": 21,
         "matchedText": "`/admin/bravotv/images/shows/${showId}/stream`"
       },
       "provenance": "static_scan",
@@ -2823,7 +2823,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "POST",
       "sourceFile": "src/app/api/admin/trr-api/people/[personId]/refresh-images/route.ts",
       "sourceLocator": {
-        "line": 88,
+        "line": 96,
         "matchedText": "`/admin/person/${personId}/refresh-images`"
       },
       "provenance": "static_scan",
@@ -2892,7 +2892,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "POST",
       "sourceFile": "src/app/api/admin/trr-api/people/[personId]/refresh-images/stream/route.ts",
       "sourceLocator": {
-        "line": 238,
+        "line": 253,
         "matchedText": "`/admin/person/${personId}/refresh-images/stream`"
       },
       "provenance": "static_scan",
@@ -15458,7 +15458,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "POST",
       "sourceFile": "src/app/api/admin/trr-api/bravotv/images/people/[personId]/stream/route.ts",
       "sourceLocator": {
-        "line": 17,
+        "line": 18,
         "symbol": "POST"
       },
       "provenance": "static_scan",
@@ -15633,7 +15633,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "POST",
       "sourceFile": "src/app/api/admin/trr-api/bravotv/images/shows/[showId]/stream/route.ts",
       "sourceLocator": {
-        "line": 17,
+        "line": 18,
         "symbol": "POST"
       },
       "provenance": "static_scan",
@@ -16276,7 +16276,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "POST",
       "sourceFile": "src/app/api/admin/trr-api/people/[personId]/refresh-images/route.ts",
       "sourceLocator": {
-        "line": 63,
+        "line": 64,
         "symbol": "POST"
       },
       "provenance": "static_scan",
@@ -16346,7 +16346,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "POST",
       "sourceFile": "src/app/api/admin/trr-api/people/[personId]/refresh-images/stream/route.ts",
       "sourceLocator": {
-        "line": 206,
+        "line": 207,
         "symbol": "POST"
       },
       "provenance": "static_scan",
@@ -22419,7 +22419,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/api/admin/trr-api/bravotv/images/people/[personId]/stream/route.ts",
       "sourceLocator": {
-        "line": 20,
+        "line": 21,
         "matchedText": "`/admin/bravotv/images/people/${personId}/stream`"
       },
       "provenance": "static_scan",
@@ -22509,7 +22509,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/api/admin/trr-api/bravotv/images/shows/[showId]/stream/route.ts",
       "sourceLocator": {
-        "line": 20,
+        "line": 21,
         "matchedText": "`/admin/bravotv/images/shows/${showId}/stream`"
       },
       "provenance": "static_scan",
@@ -22797,7 +22797,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/api/admin/trr-api/people/[personId]/refresh-images/route.ts",
       "sourceLocator": {
-        "line": 88,
+        "line": 96,
         "matchedText": "`/admin/person/${personId}/refresh-images`"
       },
       "provenance": "static_scan",
@@ -22833,7 +22833,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/api/admin/trr-api/people/[personId]/refresh-images/stream/route.ts",
       "sourceLocator": {
-        "line": 238,
+        "line": 253,
         "matchedText": "`/admin/person/${personId}/refresh-images/stream`"
       },
       "provenance": "static_scan",
