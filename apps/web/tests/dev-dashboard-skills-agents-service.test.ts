@@ -36,6 +36,14 @@ description: Official OpenAI docs helper.
 `,
     );
     await writeTextFile(
+      path.join(homeDir, ".codex/skills/.system/openai-docs/agents/openai.yaml"),
+      `interface:
+  display_name: "System Skill Interface"
+  short_description: "System-level agent interface"
+  default_prompt: "Use the system skill."
+`,
+    );
+    await writeTextFile(
       path.join(homeDir, ".codex/skills/user-skill/SKILL.md"),
       `---
 name: User Skill
@@ -164,6 +172,13 @@ enabled = true
         expect.objectContaining({
           displayName: "Agent User Skill Interface",
           owningSkillName: "Agent User Skill",
+        }),
+      ]),
+    );
+    expect(data.agents.skillAgentInterfaces).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          displayName: "System Skill Interface",
         }),
       ]),
     );

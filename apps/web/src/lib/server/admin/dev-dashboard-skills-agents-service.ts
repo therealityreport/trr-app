@@ -430,8 +430,18 @@ async function buildSkillGroup(
 async function collectSkillAgentInterfaces(
   roots: string[],
   context: InventoryContext,
+  excludedRoots: string[] = [],
 ): Promise<SkillAgentInterfaceItem[]> {
-  const interfaceFiles = (await Promise.all(roots.map((root) => listFilesRecursive(root, "openai.yaml")))).flat();
+  const interfaceFiles = (
+    await Promise.all(roots.map((root) => listFilesRecursive(root, "openai.yaml")))
+  )
+    .flat()
+    .filter(
+      (interfaceFile) =>
+        !excludedRoots.some(
+          (excludedRoot) => interfaceFile === excludedRoot || interfaceFile.startsWith(`${excludedRoot}/`),
+        ),
+    );
 
   const interfaces = await Promise.all(
     interfaceFiles.map(async (interfaceFile) => {
@@ -638,6 +648,7 @@ export async function getDevDashboardSkillsAgentsData(
       join(context.homeDir, ".claude", "skills"),
     ],
     context,
+    [join(context.homeDir, ".codex", "skills", ".system")],
   );
 
   return {
