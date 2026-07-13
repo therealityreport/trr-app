@@ -11,9 +11,14 @@ const { getInternalAdminBearerTokenMock } = vi.hoisted(() => ({
 const { buildInternalAdminHeadersMock } = vi.hoisted(() => ({
   buildInternalAdminHeadersMock: vi.fn(),
 }));
-const { hydrateGettyPrefetchPayloadMock, cleanupStaleGettyPrefetchFilesMock } = vi.hoisted(() => ({
+const {
+  hydrateGettyPrefetchPayloadMock,
+  cleanupStaleGettyPrefetchFilesMock,
+  InvalidGettyPrefetchTokenError,
+} = vi.hoisted(() => ({
   hydrateGettyPrefetchPayloadMock: vi.fn(),
   cleanupStaleGettyPrefetchFilesMock: vi.fn(),
+  InvalidGettyPrefetchTokenError: class InvalidGettyPrefetchTokenError extends Error {},
 }));
 
 vi.mock("@/lib/server/auth", () => ({
@@ -32,6 +37,7 @@ vi.mock("@/lib/server/trr-api/internal-admin-auth", () => ({
 vi.mock("@/lib/server/admin/getty-local-scrape", () => ({
   hydrateGettyPrefetchPayload: hydrateGettyPrefetchPayloadMock,
   cleanupStaleGettyPrefetchFiles: cleanupStaleGettyPrefetchFilesMock,
+  InvalidGettyPrefetchTokenError,
 }));
 
 import { GET as getArtifactPreview } from "@/app/api/admin/trr-api/bravotv/images/runs/[runId]/artifacts/[...artifactName]/route";
@@ -240,6 +246,32 @@ describe("bravotv image admin proxy routes", () => {
         }),
       }),
     );
+  });
+
+  it.each([
+    ["person", startPersonStream, { personId: "person-1" }],
+    ["show", startShowStream, { showId: "show-1" }],
+  ] as const)("returns 400 for an invalid Getty token on %s streams", async (kind, handler, params) => {
+    hydrateGettyPrefetchPayloadMock.mockRejectedValue(
+      new InvalidGettyPrefetchTokenError("getty_prefetch_token must be a UUID"),
+    );
+    vi.stubGlobal("fetch", vi.fn());
+    const request = new NextRequest(
+      `http://localhost/api/admin/trr-api/bravotv/images/${kind === "person" ? "people/person-1" : "shows/show-1"}/stream`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ getty_prefetch_token: "bad/token" }),
+      },
+    );
+
+    const response = await handler(request, { params: Promise.resolve(params) } as never);
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "getty_prefetch_token must be a UUID",
+    });
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it("joins artifact catch-all segments and preserves pagination query strings", async () => {

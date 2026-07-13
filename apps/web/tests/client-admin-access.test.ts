@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { User } from "firebase/auth";
 
 function buildUser(overrides: Partial<User>): User {
@@ -16,7 +16,7 @@ function buildUser(overrides: Partial<User>): User {
     refreshToken: "refresh-token",
     tenantId: null,
     delete: vi.fn(),
-    getIdToken: vi.fn(),
+    getIdToken: vi.fn().mockResolvedValue("client-id-token"),
     getIdTokenResult: vi.fn(),
     reload: vi.fn(),
     toJSON: vi.fn(),
@@ -30,38 +30,119 @@ describe("client admin access", () => {
     delete process.env.NEXT_PUBLIC_ADMIN_EMAILS;
     delete process.env.NEXT_PUBLIC_ADMIN_UIDS;
     delete process.env.NEXT_PUBLIC_ADMIN_DISPLAY_NAMES;
+    vi.stubGlobal("fetch", vi.fn());
   });
 
-  it("no longer treats a seeded admin display name as admin-capable", async () => {
-    const { isClientAdmin } = await import("@/lib/admin/client-access");
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
 
-    // Display name is attacker-controllable, so it must never grant admin.
+  it("does not grant admin access from client-visible identity fields", async () => {
+    process.env.NEXT_PUBLIC_ADMIN_EMAILS = "admin@example.com";
+    process.env.NEXT_PUBLIC_ADMIN_UIDS = "seeded-admin-uid";
+    const { getAllowedAdminEmails, getAllowedAdminUids, isClientAdmin } = await import("@/lib/admin/client-access");
+
+    expect(isClientAdmin(buildUser({ uid: "seeded-admin-uid" }))).toBe(false);
+    expect(isClientAdmin(buildUser({ email: "admin@example.com", emailVerified: true }))).toBe(false);
     expect(isClientAdmin(buildUser({ displayName: "Codex Huli" }))).toBe(false);
     expect(isClientAdmin(buildUser({ displayName: "@codex_huli" }))).toBe(false);
     expect(isClientAdmin(buildUser({ displayName: "codex_huli" }))).toBe(false);
+    expect(getAllowedAdminEmails()).toEqual([]);
+    expect(getAllowedAdminUids()).toEqual([]);
   });
 
-  it("treats the seeded admin uid as admin-capable", async () => {
-    const { isClientAdmin } = await import("@/lib/admin/client-access");
+  it("returns true only when the server check returns a positive response", async () => {
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ hasAccess: true }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    const user = buildUser({ uid: "user-1" });
+    const { checkServerAdminAccess } = await import("@/lib/admin/client-access");
 
-    expect(isClientAdmin(buildUser({ uid: "MyoUFNjl9VP5iVGBi7tVqxUb8np2" }))).toBe(true);
+    await expect(checkServerAdminAccess(user)).resolves.toBe("allowed");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/admin/check",
+      expect.objectContaining({
+        method: "GET",
+        credentials: "same-origin",
+        cache: "no-store",
+      }),
+    );
+    const headers = new Headers(fetchMock.mock.calls[0]?.[1]?.headers);
+    expect(headers.get("authorization")).toBe("Bearer client-id-token");
   });
 
-  it("treats an allowlisted verified email as admin-capable", async () => {
-    process.env.NEXT_PUBLIC_ADMIN_EMAILS = "admin@example.com";
-    const { isClientAdmin } = await import("@/lib/admin/client-access");
+  it("returns false when the server check rejects the user", async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(JSON.stringify({ hasAccess: false }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    const { checkServerAdminAccess } = await import("@/lib/admin/client-access");
 
-    expect(
-      isClientAdmin(buildUser({ uid: "non-admin-uid", email: "admin@example.com", emailVerified: true })),
-    ).toBe(true);
+    await expect(
+      checkServerAdminAccess(
+        buildUser({ uid: "seeded-admin-uid", email: "admin@example.com", emailVerified: true }),
+      ),
+    ).resolves.toBe("denied");
   });
 
-  it("rejects an allowlisted email that is not verified", async () => {
-    process.env.NEXT_PUBLIC_ADMIN_EMAILS = "admin@example.com";
-    const { isClientAdmin } = await import("@/lib/admin/client-access");
+  it("aborts a hung server check and fails closed", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.mocked(fetch);
+    let observedSignal: AbortSignal | undefined;
+    fetchMock.mockImplementation((_, init) => {
+      observedSignal = init?.signal as AbortSignal | undefined;
+      return new Promise<Response>((_, reject) => {
+        observedSignal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+      });
+    });
+    const { checkServerAdminAccess } = await import("@/lib/admin/client-access");
 
-    expect(
-      isClientAdmin(buildUser({ uid: "non-admin-uid", email: "admin@example.com", emailVerified: false })),
-    ).toBe(false);
+    const accessPromise = checkServerAdminAccess(buildUser({ uid: "user-1" }));
+    await vi.advanceTimersByTimeAsync(5000);
+
+    await expect(accessPromise).resolves.toBe("unavailable");
+    expect(observedSignal?.aborted).toBe(true);
+  });
+
+  it("works without a browser window global", async () => {
+    vi.stubGlobal("window", undefined);
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(JSON.stringify({ hasAccess: true }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    const { checkServerAdminAccess } = await import("@/lib/admin/client-access");
+
+    await expect(checkServerAdminAccess(buildUser({ uid: "user-1" }))).resolves.toBe("allowed");
+  });
+
+  it("bounds token acquisition with the same deadline and does not fetch after timeout", async () => {
+    vi.useFakeTimers();
+    const user = buildUser({ getIdToken: vi.fn(() => new Promise<string>(() => {})) });
+    const { checkServerAdminAccess } = await import("@/lib/admin/client-access");
+
+    const accessPromise = checkServerAdminAccess(user);
+    await vi.advanceTimersByTimeAsync(5000);
+
+    await expect(accessPromise).resolves.toBe("unavailable");
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("reports network and malformed-response failures as unavailable", async () => {
+    const { checkServerAdminAccess } = await import("@/lib/admin/client-access");
+    vi.mocked(fetch).mockRejectedValueOnce(new Error("offline"));
+    await expect(checkServerAdminAccess(buildUser({}))).resolves.toBe("unavailable");
+
+    vi.mocked(fetch).mockResolvedValueOnce(new Response("{}", { status: 200 }));
+    await expect(checkServerAdminAccess(buildUser({}))).resolves.toBe("unavailable");
   });
 });

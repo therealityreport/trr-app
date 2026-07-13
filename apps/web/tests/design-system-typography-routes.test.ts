@@ -10,6 +10,8 @@ const {
   updateTypographySetMock,
   deleteTypographySetMock,
   upsertTypographyAssignmentMock,
+  resolvePostgresConnectionCandidatesMock,
+  buildTypographyStateSnapshotMock,
 } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
   getTypographyStateMock: vi.fn(),
@@ -17,6 +19,8 @@ const {
   updateTypographySetMock: vi.fn(),
   deleteTypographySetMock: vi.fn(),
   upsertTypographyAssignmentMock: vi.fn(),
+  resolvePostgresConnectionCandidatesMock: vi.fn(),
+  buildTypographyStateSnapshotMock: vi.fn(),
 }));
 
 vi.mock("@/lib/server/auth", () => ({
@@ -29,6 +33,14 @@ vi.mock("@/lib/server/admin/typography-repository", () => ({
   updateTypographySet: updateTypographySetMock,
   deleteTypographySet: deleteTypographySetMock,
   upsertTypographyAssignment: upsertTypographyAssignmentMock,
+}));
+
+vi.mock("@/lib/server/postgres", () => ({
+  resolvePostgresConnectionCandidates: resolvePostgresConnectionCandidatesMock,
+}));
+
+vi.mock("@/lib/server/admin/typography-seed", () => ({
+  buildTypographyStateSnapshot: buildTypographyStateSnapshotMock,
 }));
 
 import { GET as getTypography } from "@/app/api/admin/design-system/typography/route";
@@ -49,7 +61,11 @@ describe("design system typography routes", () => {
     updateTypographySetMock.mockReset();
     deleteTypographySetMock.mockReset();
     upsertTypographyAssignmentMock.mockReset();
+    resolvePostgresConnectionCandidatesMock.mockReset();
+    buildTypographyStateSnapshotMock.mockReset();
     requireAdminMock.mockResolvedValue({ uid: "admin-user" });
+    resolvePostgresConnectionCandidatesMock.mockReturnValue(["configured"]);
+    buildTypographyStateSnapshotMock.mockReturnValue({ sets: [], assignments: [] });
   });
 
   it("returns typography state", async () => {
@@ -73,6 +89,25 @@ describe("design system typography routes", () => {
     expect(payload).toEqual({ sets: [], assignments: [] });
     expect(requireAdminMock).not.toHaveBeenCalled();
     expect(getTypographyStateMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns seeded public typography without the repository when no runtime database is configured", async () => {
+    resolvePostgresConnectionCandidatesMock.mockReturnValue([]);
+    buildTypographyStateSnapshotMock.mockReturnValue({
+      sets: [{ id: "seeded-set" }],
+      assignments: [{ id: "seeded-assignment" }],
+    });
+
+    const response = await getPublicTypography();
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload).toEqual({
+      sets: [{ id: "seeded-set" }],
+      assignments: [{ id: "seeded-assignment" }],
+    });
+    expect(requireAdminMock).not.toHaveBeenCalled();
+    expect(getTypographyStateMock).not.toHaveBeenCalled();
   });
 
   it("caches admin and public typography GET responses", async () => {

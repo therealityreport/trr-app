@@ -4,6 +4,7 @@ import { getBackendApiUrl } from "@/lib/server/trr-api/backend";
 import {
   hydrateGettyPrefetchPayload,
   cleanupStaleGettyPrefetchFiles,
+  InvalidGettyPrefetchTokenError,
 } from "@/lib/server/admin/getty-local-scrape";
 import { getInternalAdminBearerToken } from "@/lib/server/trr-api/internal-admin-auth";
 import {
@@ -229,7 +230,21 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       if (!bodyText.trim()) {
         bodyText = "{}";
       } else {
-        bodyText = await hydrateGettyPrefetchPayload(bodyText);
+        try {
+          bodyText = await hydrateGettyPrefetchPayload(bodyText);
+        } catch (error) {
+          if (error instanceof InvalidGettyPrefetchTokenError) {
+            return buildErrorResponse(
+              {
+                stage: "proxy",
+                error: error.message,
+                ...(requestId ? { request_id: requestId } : {}),
+              },
+              400,
+            );
+          }
+          throw error;
+        }
         // Best-effort cleanup of stale prefetch state files.
         cleanupStaleGettyPrefetchFiles().catch(() => {});
       }

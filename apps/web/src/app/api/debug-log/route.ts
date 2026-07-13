@@ -1,8 +1,12 @@
+import { timingSafeEqual } from "node:crypto";
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdmin } from "@/lib/server/auth";
 
 const REDACTED = "[REDACTED]";
+const INVALID_JSON_BODY = Symbol("invalid_json_body");
 const MAX_DEPTH = 6;
+const MAX_DEBUG_LOG_BODY_BYTES = 64 * 1024;
+const TOO_LARGE_BODY = Symbol("too_large_body");
 const SENSITIVE_KEY_RE =
   /(token|secret|password|cookie|authorization|api[_-]?key|session|credential|jwt|bearer|email|uid|user[_-]?id)/i;
 
@@ -29,6 +33,56 @@ function remoteDebugLoggingEnabled(request: NextRequest): boolean {
   return envFlag("TRR_REMOTE_DEBUG_LOG_ENABLED");
 }
 
+function timingSafeStringEqual(left: string, right: string): boolean {
+  const leftBytes = Buffer.from(left);
+  const rightBytes = Buffer.from(right);
+  if (leftBytes.length !== rightBytes.length) {
+    const paddedLeft = Buffer.alloc(rightBytes.length);
+    leftBytes.copy(paddedLeft, 0, 0, Math.min(leftBytes.length, rightBytes.length));
+    timingSafeEqual(paddedLeft, rightBytes);
+    return false;
+  }
+  return timingSafeEqual(leftBytes, rightBytes);
+}
+
+function parseContentLength(request: NextRequest): number | null {
+  const rawContentLength = request.headers.get("content-length")?.trim();
+  if (!rawContentLength) return null;
+  const parsed = Number.parseInt(rawContentLength, 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+}
+
+async function readJsonBodyWithLimit(
+  request: NextRequest,
+): Promise<unknown | typeof INVALID_JSON_BODY | typeof TOO_LARGE_BODY> {
+  const contentLength = parseContentLength(request);
+  if (contentLength !== null && contentLength > MAX_DEBUG_LOG_BODY_BYTES) {
+    return TOO_LARGE_BODY;
+  }
+
+  const reader = request.body?.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  if (reader) {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      totalBytes += value.byteLength;
+      if (totalBytes > MAX_DEBUG_LOG_BODY_BYTES) {
+        await reader.cancel();
+        return TOO_LARGE_BODY;
+      }
+      chunks.push(value);
+    }
+  }
+  const rawBody = Buffer.concat(chunks, totalBytes).toString("utf8");
+  try {
+    return JSON.parse(rawBody) as unknown;
+  } catch {
+    return INVALID_JSON_BODY;
+  }
+}
+
 function redactPayload(value: unknown, depth = 0): unknown {
   if (depth > MAX_DEPTH) return "[TRUNCATED]";
   if (value === null || value === undefined) return value;
@@ -49,7 +103,7 @@ async function isAuthorized(request: NextRequest): Promise<boolean> {
     request.headers.get("x-trr-internal-admin-secret")?.trim() ||
     request.headers.get("x-internal-admin-secret")?.trim() ||
     "";
-  if (sharedSecretAuthEnabled && sharedSecret && providedSecret && providedSecret === sharedSecret) {
+  if (sharedSecretAuthEnabled && sharedSecret && providedSecret && timingSafeStringEqual(providedSecret, sharedSecret)) {
     return true;
   }
   try {
@@ -66,11 +120,18 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "remote_debug_logging_disabled" }, { status: 404 });
     }
 
+    const logEntry = await readJsonBodyWithLimit(request);
+    if (logEntry === TOO_LARGE_BODY) {
+      return NextResponse.json({ error: "payload_too_large" }, { status: 413 });
+    }
+    if (logEntry === INVALID_JSON_BODY) {
+      return NextResponse.json({ error: "invalid_json" }, { status: 400 });
+    }
+
     if (!(await isAuthorized(request))) {
       return NextResponse.json({ error: "forbidden" }, { status: 403 });
     }
 
-    const logEntry = await request.json();
     const redacted = redactPayload(logEntry);
 
     console.log('[PRODUCTION DEBUG]', JSON.stringify(redacted, null, 2));

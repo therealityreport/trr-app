@@ -13,7 +13,7 @@ const mocks = vi.hoisted(() => {
   return {
     router,
     replace: router.replace,
-    isClientAdmin: vi.fn(() => true),
+    checkServerAdminAccess: vi.fn(() => Promise.resolve("allowed")),
     isDevAdminBypassEnabledClient: vi.fn(() => false),
     isLocalDevHostname: vi.fn(() => false),
     getCurrentUser: () => currentUser,
@@ -48,8 +48,8 @@ const mocks = vi.hoisted(() => {
       readyResolver = null;
       currentUser = null;
       this.replace.mockReset();
-      this.isClientAdmin.mockReset();
-      this.isClientAdmin.mockReturnValue(true);
+      this.checkServerAdminAccess.mockReset();
+      this.checkServerAdminAccess.mockResolvedValue("allowed");
       this.isDevAdminBypassEnabledClient.mockReset();
       this.isDevAdminBypassEnabledClient.mockReturnValue(false);
       this.isLocalDevHostname.mockReset();
@@ -78,8 +78,8 @@ vi.mock("@/lib/firebase", () => ({
 }));
 
 vi.mock("@/lib/admin/client-access", () => ({
-  isClientAdmin: (...args: unknown[]) =>
-    (mocks.isClientAdmin as (...inner: unknown[]) => unknown)(...args),
+  checkServerAdminAccess: (...args: unknown[]) =>
+    (mocks.checkServerAdminAccess as (...inner: unknown[]) => unknown)(...args),
 }));
 
 vi.mock("@/lib/admin/dev-admin-bypass", () => ({
@@ -213,7 +213,7 @@ describe("useAdminGuard stability", () => {
   });
 
   it("redirects non-admin authenticated users to /hub", async () => {
-    mocks.isClientAdmin.mockReturnValue(false);
+    mocks.checkServerAdminAccess.mockResolvedValue("denied");
     render(<GuardObserver onUserKey={() => undefined} />);
 
     await act(async () => {
@@ -228,7 +228,7 @@ describe("useAdminGuard stability", () => {
   });
 
   it("does not redirect valid admin users", async () => {
-    mocks.isClientAdmin.mockReturnValue(true);
+    mocks.checkServerAdminAccess.mockResolvedValue("allowed");
     render(<GuardObserver onUserKey={() => undefined} />);
 
     await act(async () => {
@@ -239,6 +239,21 @@ describe("useAdminGuard stability", () => {
     await waitFor(() => {
       expect(screen.getByTestId("guard-state")).toHaveAttribute("data-checking", "0");
       expect(screen.getByTestId("guard-state")).toHaveAttribute("data-access", "1");
+    });
+    expect(mocks.replace).not.toHaveBeenCalled();
+  });
+
+  it("does not redirect an authenticated user when the server check is unavailable", async () => {
+    mocks.checkServerAdminAccess.mockResolvedValue("unavailable");
+    render(<GuardObserver onUserKey={() => undefined} />);
+
+    await act(async () => {
+      mocks.emit({ uid: "u-unavailable", email: "admin@example.com", displayName: "Admin User" });
+      mocks.resolveAuthReady();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("guard-state")).toHaveAttribute("data-checking", "0");
     });
     expect(mocks.replace).not.toHaveBeenCalled();
   });

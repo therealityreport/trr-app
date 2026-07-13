@@ -3,6 +3,7 @@ import { requireAdmin } from "@/lib/server/auth";
 import {
   cleanupStaleGettyPrefetchFiles,
   hydrateGettyPrefetchPayload,
+  InvalidGettyPrefetchTokenError,
 } from "@/lib/server/admin/getty-local-scrape";
 import { getBackendApiUrl } from "@/lib/server/trr-api/backend";
 import { getInternalAdminBearerToken } from "@/lib/server/trr-api/internal-admin-auth";
@@ -36,7 +37,14 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     ? await request.text().catch(() => "")
     : "";
   if (body.trim()) {
-    body = await hydrateGettyPrefetchPayload(body);
+    try {
+      body = await hydrateGettyPrefetchPayload(body);
+    } catch (error) {
+      if (error instanceof InvalidGettyPrefetchTokenError) {
+        return Response.json({ error: error.message }, { status: 400 });
+      }
+      throw error;
+    }
     cleanupStaleGettyPrefetchFiles().catch(() => {});
   }
   const backendResponse = await fetch(backendUrl, {

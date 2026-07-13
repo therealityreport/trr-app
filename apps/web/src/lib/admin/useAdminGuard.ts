@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { User } from "firebase/auth";
 import { auth } from "@/lib/firebase";
-import { isClientAdmin } from "./client-access";
+import { checkServerAdminAccess } from "./client-access";
 import { isDevAdminBypassEnabledClient, isLocalDevHostname } from "./dev-admin-bypass";
 
 const TRANSIENT_UNAUTH_GRACE_MS = 2500;
@@ -111,6 +111,9 @@ export function useAdminGuard() {
     let hadAuthenticatedSession = false;
     let transientUnauthTimer: ReturnType<typeof setTimeout> | null = null;
     let authReadyFallbackTimer: ReturnType<typeof setTimeout> | null = null;
+    let accessCheckId = 0;
+    let accessCheckPending = false;
+    let accessCheckUnavailable = false;
 
     const clearTransientUnauthTimer = () => {
       if (!transientUnauthTimer) return;
@@ -126,13 +129,20 @@ export function useAdminGuard() {
 
     const finishCheckingIfReady = () => {
       if (!mounted) return;
-      if (receivedAuthEmission) {
+      if (receivedAuthEmission && !accessCheckPending) {
         setChecking(false);
       }
     };
 
     const evaluateInitialRedirect = () => {
-      if (!mounted || !authReady || !receivedAuthEmission || hasEvaluatedRedirect) {
+      if (
+        !mounted ||
+        !authReady ||
+        !receivedAuthEmission ||
+        accessCheckPending ||
+        accessCheckUnavailable ||
+        hasEvaluatedRedirect
+      ) {
         return;
       }
       hasEvaluatedRedirect = true;
@@ -144,75 +154,13 @@ export function useAdminGuard() {
       lastHasAccess = pendingHasAccess;
     };
 
-    const markAuthReady = () => {
-      if (authReady) return;
-      authReady = true;
-      clearAuthReadyFallbackTimer();
-      if (!receivedAuthEmission) {
-        const snapshotUser = auth.currentUser;
-        const snapshotUserKey = buildUserKey(snapshotUser);
-        const snapshotHasAccess = Boolean(snapshotUser && isClientAdmin(snapshotUser));
-        receivedAuthEmission = true;
-        pendingUserKey = snapshotUserKey;
-        pendingHasAccess = snapshotHasAccess;
-        lastUserKey = snapshotUserKey;
-        lastHasAccess = snapshotHasAccess;
-        hadAuthenticatedSession = Boolean(snapshotUserKey);
-        setUser(snapshotUser);
-        setUserKey(snapshotUserKey);
-        setHasAccess(snapshotHasAccess);
-      }
-      finishCheckingIfReady();
-      evaluateInitialRedirect();
-    };
-
-    authReadyFallbackTimer = setTimeout(markAuthReady, getAdminAuthReadyTimeoutMs());
-    const authStateReady = (auth as { authStateReady?: () => Promise<void> }).authStateReady;
-    const authReadyPromise =
-      typeof authStateReady === "function"
-        ? Promise.resolve(authStateReady.call(auth)).catch(() => undefined)
-        : Promise.resolve();
-    void authReadyPromise.finally(markAuthReady);
-
-    const unsubscribe = auth.onAuthStateChanged((currentUser) => {
+    const applyResolvedAccess = (
+      nextUserKey: string | null,
+      prevUserKey: string | null,
+      nextHasAccess: boolean,
+    ) => {
       if (!mounted) return;
-
-      receivedAuthEmission = true;
-      const nextUserKey = buildUserKey(currentUser);
-      const prevUserKey = lastUserKey;
-      const nextHasAccess = Boolean(currentUser && isClientAdmin(currentUser));
-      pendingUserKey = nextUserKey;
       pendingHasAccess = nextHasAccess;
-
-      if (!currentUser && hadAuthenticatedSession && authReady) {
-        clearTransientUnauthTimer();
-        transientUnauthTimer = setTimeout(() => {
-          if (!mounted) return;
-          if (buildUserKey(auth.currentUser)) return;
-          lastUserKey = null;
-          lastHasAccess = false;
-          pendingUserKey = null;
-          pendingHasAccess = false;
-          setUser(null);
-          setUserKey(null);
-          setHasAccess(false);
-          setChecking(false);
-          router.replace("/");
-        }, TRANSIENT_UNAUTH_GRACE_MS);
-        return;
-      }
-
-      if (currentUser) {
-        hadAuthenticatedSession = true;
-        clearTransientUnauthTimer();
-      }
-
-      if (nextUserKey !== prevUserKey) {
-        lastUserKey = nextUserKey;
-        setUser(currentUser);
-        setUserKey(nextUserKey);
-      }
-
       setHasAccess((previous) => (previous === nextHasAccess ? previous : nextHasAccess));
 
       finishCheckingIfReady();
@@ -235,7 +183,101 @@ export function useAdminGuard() {
       }
 
       lastHasAccess = nextHasAccess;
-    });
+    };
+
+    const handleAuthUser = (currentUser: User | null) => {
+      if (!mounted) return;
+
+      receivedAuthEmission = true;
+      const nextUserKey = buildUserKey(currentUser);
+      const prevUserKey = lastUserKey;
+      pendingUserKey = nextUserKey;
+
+      if (!currentUser) {
+        accessCheckId += 1;
+        accessCheckPending = false;
+        accessCheckUnavailable = false;
+        pendingHasAccess = false;
+
+        if (hadAuthenticatedSession && authReady) {
+          clearTransientUnauthTimer();
+          transientUnauthTimer = setTimeout(() => {
+            if (!mounted) return;
+            if (buildUserKey(auth.currentUser)) return;
+            accessCheckId += 1;
+            accessCheckPending = false;
+            lastUserKey = null;
+            lastHasAccess = false;
+            pendingUserKey = null;
+            pendingHasAccess = false;
+            setUser(null);
+            setUserKey(null);
+            setHasAccess(false);
+            setChecking(false);
+            router.replace("/");
+          }, TRANSIENT_UNAUTH_GRACE_MS);
+          return;
+        }
+
+        if (nextUserKey !== prevUserKey) {
+          lastUserKey = nextUserKey;
+          setUser(null);
+          setUserKey(null);
+        }
+        applyResolvedAccess(nextUserKey, prevUserKey, false);
+        return;
+      }
+
+      hadAuthenticatedSession = true;
+      clearTransientUnauthTimer();
+
+      if (nextUserKey !== prevUserKey) {
+        lastUserKey = nextUserKey;
+        setUser(currentUser);
+        setUserKey(nextUserKey);
+      }
+
+      const currentAccessCheckId = accessCheckId + 1;
+      accessCheckId = currentAccessCheckId;
+      accessCheckPending = true;
+      accessCheckUnavailable = false;
+      pendingHasAccess = false;
+      setChecking(true);
+
+      void checkServerAdminAccess(currentUser).then((result) => {
+        if (!mounted || accessCheckId !== currentAccessCheckId || pendingUserKey !== nextUserKey) {
+          return;
+        }
+        accessCheckPending = false;
+        if (result === "unavailable") {
+          accessCheckUnavailable = true;
+          setChecking(false);
+          return;
+        }
+        applyResolvedAccess(nextUserKey, prevUserKey, result === "allowed");
+      });
+    };
+
+    const markAuthReady = () => {
+      if (authReady) return;
+      authReady = true;
+      clearAuthReadyFallbackTimer();
+      if (!receivedAuthEmission) {
+        handleAuthUser(auth.currentUser);
+      }
+      finishCheckingIfReady();
+      evaluateInitialRedirect();
+    };
+
+    authReadyFallbackTimer = setTimeout(markAuthReady, getAdminAuthReadyTimeoutMs());
+    const authStateReady = (auth as { authStateReady?: () => Promise<void> }).authStateReady;
+    const authReadyPromise =
+      typeof authStateReady === "function"
+        ? Promise.resolve(authStateReady.call(auth)).catch(() => undefined)
+        : Promise.resolve();
+    void authReadyPromise.finally(markAuthReady);
+
+    const unsubscribe = auth.onAuthStateChanged(handleAuthUser);
 
     return () => {
       mounted = false;
