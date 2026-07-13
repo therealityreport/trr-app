@@ -17,6 +17,7 @@ import {
   TRR_SHOW_ASSETS_CACHE_NAMESPACE,
   TRR_SHOW_ASSETS_CACHE_TTL_MS,
 } from "@/lib/server/trr-api/trr-show-read-route-cache";
+import { parseBoundedIntegerParam } from "@/lib/server/trr-api/query-integer-params";
 
 export const dynamic = "force-dynamic";
 const DEFAULT_VISIBLE_ASSET_LIMIT = 48;
@@ -42,10 +43,25 @@ export async function GET(_request: NextRequest, { params }: RouteParams) {
     }
 
     const { searchParams } = new URL(_request.url);
-    const parsedLimit = parseInt(searchParams.get("limit") ?? String(DEFAULT_VISIBLE_ASSET_LIMIT), 10);
-    const parsedOffset = parseInt(searchParams.get("offset") ?? "0", 10);
-    const limit = Number.isFinite(parsedLimit) ? parsedLimit : DEFAULT_VISIBLE_ASSET_LIMIT;
-    const offset = Number.isFinite(parsedOffset) ? parsedOffset : 0;
+    const limitResult = parseBoundedIntegerParam(searchParams.get("limit"), {
+      name: "limit",
+      defaultValue: DEFAULT_VISIBLE_ASSET_LIMIT,
+      min: 1,
+      max: FULL_FETCH_LIMIT,
+    });
+    if (!limitResult.ok) {
+      return NextResponse.json({ error: limitResult.error }, { status: 400 });
+    }
+    const offsetResult = parseBoundedIntegerParam(searchParams.get("offset"), {
+      name: "offset",
+      defaultValue: 0,
+      min: 0,
+    });
+    if (!offsetResult.ok) {
+      return NextResponse.json({ error: offsetResult.error }, { status: 400 });
+    }
+    const limit = limitResult.value;
+    const offset = offsetResult.value;
     const cursor = searchParams.get("cursor")?.trim() || null;
     const full =
       searchParams.get("full") === "1" ||

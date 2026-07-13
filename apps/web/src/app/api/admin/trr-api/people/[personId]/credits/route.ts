@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
+import { parseBoundedIntegerParam } from "@/lib/server/trr-api/query-integer-params";
 import {
   getEpisodeCreditsByPersonId,
   type PersonShowEpisodeCredit,
@@ -340,10 +341,25 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     }
 
     const { searchParams } = new URL(request.url);
-    const parsedLimit = Number.parseInt(searchParams.get("limit") ?? "50", 10);
-    const parsedOffset = Number.parseInt(searchParams.get("offset") ?? "0", 10);
-    const limit = Number.isFinite(parsedLimit) && parsedLimit > 0 ? parsedLimit : 50;
-    const offset = Number.isFinite(parsedOffset) && parsedOffset >= 0 ? parsedOffset : 0;
+    const limitResult = parseBoundedIntegerParam(searchParams.get("limit"), {
+      name: "limit",
+      defaultValue: 50,
+      min: 1,
+      max: 500,
+    });
+    if (!limitResult.ok) {
+      return NextResponse.json({ error: limitResult.error }, { status: 400 });
+    }
+    const offsetResult = parseBoundedIntegerParam(searchParams.get("offset"), {
+      name: "offset",
+      defaultValue: 0,
+      min: 0,
+    });
+    if (!offsetResult.ok) {
+      return NextResponse.json({ error: offsetResult.error }, { status: 400 });
+    }
+    const limit = limitResult.value;
+    const offset = offsetResult.value;
     const showIdRaw = searchParams.get("showId");
     const showId =
       typeof showIdRaw === "string" && showIdRaw.trim().length > 0

@@ -13,6 +13,7 @@ import {
   fetchAdminBackendJson,
   ADMIN_READ_PROXY_GALLERY_TIMEOUT_MS,
 } from "@/lib/server/trr-api/admin-read-proxy";
+import { parseBoundedIntegerParam } from "@/lib/server/trr-api/query-integer-params";
 
 export const dynamic = "force-dynamic";
 const PERSON_PHOTOS_CACHE_NAMESPACE = "admin-person-photos";
@@ -50,10 +51,25 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     }
 
     const { searchParams } = new URL(request.url);
-    const parsedLimit = parseInt(searchParams.get("limit") ?? "100", 10);
-    const parsedOffset = parseInt(searchParams.get("offset") ?? "0", 10);
-    const limit = Number.isFinite(parsedLimit) ? parsedLimit : 100;
-    const offset = Number.isFinite(parsedOffset) ? parsedOffset : 0;
+    const limitResult = parseBoundedIntegerParam(searchParams.get("limit"), {
+      name: "limit",
+      defaultValue: 100,
+      min: 1,
+      max: 500,
+    });
+    if (!limitResult.ok) {
+      return NextResponse.json({ error: limitResult.error }, { status: 400 });
+    }
+    const offsetResult = parseBoundedIntegerParam(searchParams.get("offset"), {
+      name: "offset",
+      defaultValue: 0,
+      min: 0,
+    });
+    if (!offsetResult.ok) {
+      return NextResponse.json({ error: offsetResult.error }, { status: 400 });
+    }
+    const limit = limitResult.value;
+    const offset = offsetResult.value;
     const sources = (searchParams.get("sources") ?? "")
       .split(",")
       .map((value) => value.trim())
@@ -66,7 +82,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     const requestRole =
       requestRoleRaw === "primary" || requestRoleRaw === "polling" ? requestRoleRaw : "secondary";
 
-    const requestedLimit = Math.max(1, Math.min(limit, 500));
+    const requestedLimit = limit;
     const cacheSearchParams = new URLSearchParams(searchParams);
     cacheSearchParams.delete("request_role");
     const cacheKey = buildUserScopedRouteCacheKey(

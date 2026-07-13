@@ -15,17 +15,13 @@ import {
   TRR_SEARCH_CACHE_NAMESPACE,
   TRR_SEARCH_CACHE_TTL_MS,
 } from "@/lib/server/trr-api/trr-show-read-route-cache";
+import { parseBoundedIntegerParam } from "@/lib/server/trr-api/query-integer-params";
 
 export const dynamic = "force-dynamic";
 
 const MIN_QUERY_LENGTH = 3;
 const DEFAULT_LIMIT = 8;
 const MAX_LIMIT = 20;
-const parseLimit = (raw: string | null): number => {
-  const parsed = Number.parseInt(raw ?? String(DEFAULT_LIMIT), 10);
-  if (!Number.isFinite(parsed)) return DEFAULT_LIMIT;
-  return Math.min(Math.max(parsed, 1), MAX_LIMIT);
-};
 
 export async function GET(request: NextRequest) {
   try {
@@ -39,7 +35,16 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const limit = parseLimit(request.nextUrl.searchParams.get("limit"));
+    const limitResult = parseBoundedIntegerParam(request.nextUrl.searchParams.get("limit"), {
+      name: "limit",
+      defaultValue: DEFAULT_LIMIT,
+      min: 1,
+      max: MAX_LIMIT,
+    });
+    if (!limitResult.ok) {
+      return NextResponse.json({ error: limitResult.error }, { status: 400 });
+    }
+    const limit = limitResult.value;
     const cacheKey = buildUserScopedRouteCacheKey(user.uid, "search", request.nextUrl.searchParams);
     const cached = getRouteResponseCache<Record<string, unknown>>(TRR_SEARCH_CACHE_NAMESPACE, cacheKey);
     if (cached) {

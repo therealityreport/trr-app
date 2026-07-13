@@ -90,4 +90,15 @@ describe("/api/admin/trr-api/search", () => {
       show_slug: "the-traitors-us",
     });
   });
+
+  it("rejects malformed explicit limits before proxying", async () => {
+    const response = await GET(
+      new NextRequest("http://localhost/api/admin/trr-api/search?q=ala&limit=abc"),
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(payload.error).toBe("limit must be an integer");
+    expect(fetchAdminBackendJsonMock).not.toHaveBeenCalled();
+  });
 });

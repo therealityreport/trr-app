@@ -15,6 +15,7 @@ import {
   TRR_SEASON_CAST_CACHE_NAMESPACE,
   TRR_SEASON_CAST_CACHE_TTL_MS,
 } from "@/lib/server/trr-api/trr-show-read-route-cache";
+import { parseBoundedIntegerParam } from "@/lib/server/trr-api/query-integer-params";
 
 export const dynamic = "force-dynamic";
 
@@ -40,10 +41,25 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     }
 
     const { searchParams } = new URL(request.url);
-    const limitParam = parseInt(searchParams.get("limit") ?? "500", 10);
-    const offsetParam = parseInt(searchParams.get("offset") ?? "0", 10);
-    const limit = Number.isFinite(limitParam) ? Math.min(limitParam, 500) : 500;
-    const offset = Number.isFinite(offsetParam) ? Math.max(offsetParam, 0) : 0;
+    const limitResult = parseBoundedIntegerParam(searchParams.get("limit"), {
+      name: "limit",
+      defaultValue: 500,
+      min: 1,
+      max: 500,
+    });
+    if (!limitResult.ok) {
+      return NextResponse.json({ error: limitResult.error }, { status: 400 });
+    }
+    const offsetResult = parseBoundedIntegerParam(searchParams.get("offset"), {
+      name: "offset",
+      defaultValue: 0,
+      min: 0,
+    });
+    if (!offsetResult.ok) {
+      return NextResponse.json({ error: offsetResult.error }, { status: 400 });
+    }
+    const limit = limitResult.value;
+    const offset = offsetResult.value;
     const includeArchiveOnly = (searchParams.get("include_archive_only") ?? "").toLowerCase() === "true";
     const photoFallbackMode = parsePhotoFallbackMode(searchParams.get("photo_fallback"));
 
