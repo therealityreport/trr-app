@@ -111,4 +111,17 @@ describe("client admin access", () => {
     await expect(accessPromise).resolves.toBe(false);
     expect(observedSignal?.aborted).toBe(true);
   });
+
+  it("works without a browser window global", async () => {
+    vi.stubGlobal("window", undefined);
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(JSON.stringify({ hasAccess: true }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    const { checkServerAdminAccess } = await import("@/lib/admin/client-access");
+
+    await expect(checkServerAdminAccess(buildUser({ uid: "user-1" }))).resolves.toBe(true);
+  });
 });

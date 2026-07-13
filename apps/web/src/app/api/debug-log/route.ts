@@ -3,8 +3,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAdmin } from "@/lib/server/auth";
 
 const REDACTED = "[REDACTED]";
+const INVALID_JSON_BODY = Symbol("invalid_json_body");
 const MAX_DEPTH = 6;
 const MAX_DEBUG_LOG_BODY_BYTES = 64 * 1024;
+const TOO_LARGE_BODY = Symbol("too_large_body");
 const SENSITIVE_KEY_RE =
   /(token|secret|password|cookie|authorization|api[_-]?key|session|credential|jwt|bearer|email|uid|user[_-]?id)/i;
 
@@ -50,17 +52,23 @@ function parseContentLength(request: NextRequest): number | null {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
 }
 
-async function readJsonBodyWithLimit(request: NextRequest): Promise<unknown | "too_large"> {
+async function readJsonBodyWithLimit(
+  request: NextRequest,
+): Promise<unknown | typeof INVALID_JSON_BODY | typeof TOO_LARGE_BODY> {
   const contentLength = parseContentLength(request);
   if (contentLength !== null && contentLength > MAX_DEBUG_LOG_BODY_BYTES) {
-    return "too_large";
+    return TOO_LARGE_BODY;
   }
 
   const rawBody = await request.text();
   if (Buffer.byteLength(rawBody, "utf8") > MAX_DEBUG_LOG_BODY_BYTES) {
-    return "too_large";
+    return TOO_LARGE_BODY;
   }
-  return JSON.parse(rawBody) as unknown;
+  try {
+    return JSON.parse(rawBody) as unknown;
+  } catch {
+    return INVALID_JSON_BODY;
+  }
 }
 
 function redactPayload(value: unknown, depth = 0): unknown {
@@ -101,8 +109,11 @@ export async function POST(request: NextRequest) {
     }
 
     const logEntry = await readJsonBodyWithLimit(request);
-    if (logEntry === "too_large") {
+    if (logEntry === TOO_LARGE_BODY) {
       return NextResponse.json({ error: "payload_too_large" }, { status: 413 });
+    }
+    if (logEntry === INVALID_JSON_BODY) {
+      return NextResponse.json({ error: "invalid_json" }, { status: 400 });
     }
 
     if (!(await isAuthorized(request))) {

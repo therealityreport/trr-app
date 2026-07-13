@@ -657,7 +657,6 @@ const allowedEmails = new Set<string>([
 const allowedUids = new Set<string>([
   ...DEFAULT_SERVER_ADMIN_UIDS,
   ...parseAllowlist(process.env.ADMIN_UID_ALLOWLIST, false),
-  ...parseAllowlist(process.env.NEXT_PUBLIC_ADMIN_UIDS, false),
 ]);
 
 // Diagnostics/observability only — display names are NOT an authorization

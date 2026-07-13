@@ -206,4 +206,21 @@ describe("/api/debug-log route", () => {
     expect(payload).toEqual({ error: "payload_too_large" });
     expect(requireAdminMock).not.toHaveBeenCalled();
   });
+
+  it("returns 400 for malformed JSON before auth", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const request = new NextRequest("http://localhost/api/debug-log", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{not-json",
+    });
+
+    const response = await POST(request);
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ error: "invalid_json" });
+    expect(requireAdminMock).not.toHaveBeenCalled();
+    expect(errorSpy).not.toHaveBeenCalled();
+    errorSpy.mockRestore();
+  });
 });

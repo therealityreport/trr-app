@@ -27,7 +27,7 @@ export async function checkServerAdminAccess(user: User | null): Promise<boolean
   }
 
   const abortController = new AbortController();
-  const timeoutId = window.setTimeout(() => abortController.abort(), ADMIN_CHECK_TIMEOUT_MS);
+  const timeoutId = setTimeout(() => abortController.abort(), ADMIN_CHECK_TIMEOUT_MS);
   try {
     const response = await fetch("/api/admin/check", {
       method: "GET",
@@ -42,7 +42,7 @@ export async function checkServerAdminAccess(user: User | null): Promise<boolean
   } catch {
     return false;
   } finally {
-    window.clearTimeout(timeoutId);
+    clearTimeout(timeoutId);
   }
 }
 

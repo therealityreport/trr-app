@@ -25,6 +25,7 @@ describe("/api/admin/check route", () => {
     const response = await GET(request);
 
     expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
     await expect(response.json()).resolves.toEqual({ hasAccess: true });
     expect(requireAdminMock).toHaveBeenCalledWith(request);
   });
@@ -38,6 +39,7 @@ describe("/api/admin/check route", () => {
     const response = await GET(request);
 
     expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
     await expect(response.json()).resolves.toEqual({ hasAccess: false });
   });
 });

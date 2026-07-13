@@ -61,6 +61,8 @@ describe("server auth adapter", () => {
     process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATORS = "true";
     process.env.NEXT_PUBLIC_FIREBASE_API_KEY = "";
     process.env.ADMIN_EMAIL_ALLOWLIST = "";
+    delete process.env.ADMIN_UID_ALLOWLIST;
+    delete process.env.NEXT_PUBLIC_ADMIN_UIDS;
     process.env.TRR_CORE_SUPABASE_URL = "https://example.supabase.co";
     process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY = "service-role";
     process.env.ADMIN_APP_HOSTS = "localhost,127.0.0.1";
@@ -674,6 +676,24 @@ describe("server auth adapter", () => {
       uid: "MyoUFNjl9VP5iVGBi7tVqxUb8np2",
       provider: "firebase",
     });
+  });
+
+  it("does not authorize a uid configured only in client-visible environment", async () => {
+    delete process.env.ADMIN_APP_HOSTS;
+    process.env.NEXT_PUBLIC_ADMIN_UIDS = "public-only-admin";
+    verifyIdTokenMock.mockResolvedValue({
+      uid: "public-only-admin",
+      email: "unverified@example.com",
+      email_verified: false,
+    });
+
+    const auth = await import("@/lib/server/auth");
+
+    await expect(
+      auth.requireAdmin(
+        requestWithBearerAt("https://trr-app.vercel.app/api/test", "token-public-uid"),
+      ),
+    ).rejects.toThrow("forbidden");
   });
 
   it("never honors the dev admin bypass on production deployments (VERCEL_ENV=production)", async () => {

@@ -3,8 +3,8 @@ import type { AdminApiReferenceInventory } from "@/lib/admin/api-references/type
 export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
   "inventorySchemaVersion": "1.0.0",
   "generatorVersion": "1.0.0",
-  "generatedAt": "2026-07-13T21:29:30.120Z",
-  "sourceCommitSha": "3e649da9d5af986171f929adef6947875004073f",
+  "generatedAt": "2026-07-13T21:45:30.476Z",
+  "sourceCommitSha": "2ad56aefd4f0f9f1f7bc1a6e67ed620ccef51886",
   "overrideDigest": "cd85a76fd2fc977cbc691ccab80ce844f9ea783e118af35eb3d9766e5d61fd36",
   "nodes": [
     {
@@ -7199,7 +7199,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/check/route.ts",
       "sourceLocator": {
-        "line": 7,
+        "line": 11,
         "symbol": "GET"
       },
       "provenance": "static_scan",
