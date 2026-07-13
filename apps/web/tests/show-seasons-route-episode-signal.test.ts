@@ -95,6 +95,25 @@ describe("/api/admin/trr-api/shows/[showId]/seasons include episode signal", () 
     );
   });
 
+  it("preserves 500-season requests used by the image scrape drawer", async () => {
+    fetchAdminBackendJsonMock.mockResolvedValue({
+      status: 200,
+      data: { seasons: [], pagination: { limit: 500, offset: 0, count: 0 } },
+      durationMs: 2,
+    });
+
+    const response = await GET(
+      new NextRequest("http://localhost/api/admin/trr-api/shows/show-1/seasons?limit=500"),
+      { params: Promise.resolve({ showId: "show-1" }) },
+    );
+
+    expect(response.status).toBe(200);
+    expect(fetchAdminBackendJsonMock).toHaveBeenCalledWith(
+      "/admin/trr-api/shows/show-1/seasons?limit=500&offset=0",
+      expect.objectContaining({ routeName: "show-seasons" }),
+    );
+  });
+
   it("falls back to the local seasons repository when the backend read times out", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     fetchAdminBackendJsonMock.mockRejectedValue(new Error("Admin read request timed out after 12s"));

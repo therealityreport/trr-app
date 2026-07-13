@@ -62,11 +62,19 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     const offset = offsetResult.value;
     const includeArchiveOnly = (searchParams.get("include_archive_only") ?? "").toLowerCase() === "true";
     const photoFallbackMode = parsePhotoFallbackMode(searchParams.get("photo_fallback"));
+    const upstreamParams = new URLSearchParams({
+      limit: String(limit),
+      offset: String(offset),
+      photo_fallback: photoFallbackMode,
+    });
+    if (includeArchiveOnly) {
+      upstreamParams.set("include_archive_only", "true");
+    }
 
     const cacheKey = buildUserScopedRouteCacheKey(
       user.uid,
       `season-cast:${showId}:${seasonNum}`,
-      request.nextUrl.searchParams,
+      upstreamParams,
     );
     const cached = getRouteResponseCache<Record<string, unknown>>(TRR_SEASON_CAST_CACHE_NAMESPACE, cacheKey);
     if (cached) {
@@ -77,14 +85,6 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       TRR_SEASON_CAST_CACHE_NAMESPACE,
       cacheKey,
       async () => {
-        const upstreamParams = new URLSearchParams({
-          limit: String(limit),
-          offset: String(offset),
-          photo_fallback: photoFallbackMode,
-        });
-        if (includeArchiveOnly) {
-          upstreamParams.set("include_archive_only", "true");
-        }
         const upstream = await fetchAdminBackendJson(
           `/admin/trr-api/shows/${showId}/seasons/${seasonNum}/cast?${upstreamParams.toString()}`,
           {

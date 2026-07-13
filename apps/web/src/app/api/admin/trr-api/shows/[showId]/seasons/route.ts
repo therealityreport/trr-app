@@ -57,7 +57,7 @@ const buildLocalSeasonsPayload = async (
  * Ordered by season_number DESC (newest first).
  *
  * Query params:
- * - limit: max results (default 20, max 100)
+ * - limit: max results (default 20, max 500)
  * - offset: pagination offset (default 0)
  */
 export async function GET(request: NextRequest, { params }: RouteParams) {
@@ -78,7 +78,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       name: "limit",
       defaultValue: 20,
       min: 1,
-      max: 100,
+      max: 500,
     });
     if (!limitResult.ok) {
       return NextResponse.json({ error: limitResult.error }, { status: 400 });
@@ -94,11 +94,18 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     const limit = limitResult.value;
     const offset = offsetResult.value;
     const includeEpisodeSignal = parseBoolean(searchParams.get("include_episode_signal"));
+    const upstreamParams = new URLSearchParams({
+      limit: String(limit),
+      offset: String(offset),
+    });
+    if (includeEpisodeSignal) {
+      upstreamParams.set("include_episode_signal", "true");
+    }
 
     const cacheKey = buildUserScopedRouteCacheKey(
       user.uid,
       `${showId}:list`,
-      request.nextUrl.searchParams,
+      upstreamParams,
     );
     const cached = getRouteResponseCache<Record<string, unknown>>(TRR_SHOW_SEASONS_CACHE_NAMESPACE, cacheKey);
     if (cached) {
@@ -109,13 +116,6 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       TRR_SHOW_SEASONS_CACHE_NAMESPACE,
       cacheKey,
       async () => {
-        const upstreamParams = new URLSearchParams({
-          limit: String(limit),
-          offset: String(offset),
-        });
-        if (includeEpisodeSignal) {
-          upstreamParams.set("include_episode_signal", "true");
-        }
         try {
           const upstream = await fetchAdminBackendJson(
             `/admin/trr-api/shows/${showId}/seasons?${upstreamParams.toString()}`,

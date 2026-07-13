@@ -52,10 +52,14 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     }
     const limit = limitResult.value;
     const offset = offsetResult.value;
+    const upstreamParams = new URLSearchParams({
+      limit: String(limit),
+      offset: String(offset),
+    });
     const cacheKey = buildUserScopedRouteCacheKey(
       user.uid,
       `season-episodes:${seasonId}`,
-      request.nextUrl.searchParams,
+      upstreamParams,
     );
     const cached = getRouteResponseCache<Record<string, unknown>>(TRR_SEASON_EPISODES_CACHE_NAMESPACE, cacheKey);
     if (cached) {
@@ -67,10 +71,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       cacheKey,
       async () => {
         const upstream = await fetchAdminBackendJson(
-          `/admin/trr-api/seasons/${seasonId}/episodes?${new URLSearchParams({
-            limit: String(limit),
-            offset: String(offset),
-          }).toString()}`,
+          `/admin/trr-api/seasons/${seasonId}/episodes?${upstreamParams.toString()}`,
           {
             timeoutMs: ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
             routeName: "season-episodes",

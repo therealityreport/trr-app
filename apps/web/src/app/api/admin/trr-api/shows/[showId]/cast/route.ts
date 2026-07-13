@@ -42,12 +42,6 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     }
 
     const { searchParams } = new URL(request.url);
-    const cacheKey = buildUserScopedRouteCacheKey(user.uid, `${showId}:cast`, request.nextUrl.searchParams);
-    const cached = getRouteResponseCache<Record<string, unknown>>(TRR_SHOW_CAST_CACHE_NAMESPACE, cacheKey);
-    if (cached) {
-      return NextResponse.json(cached, { headers: { "x-trr-cache": "hit" } });
-    }
-
     const limitResult = parseBoundedIntegerParam(searchParams.get("limit"), {
       name: "limit",
       defaultValue: 20,
@@ -83,25 +77,30 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     const photoFallbackMode = parsePhotoFallbackMode(searchParams.get("photo_fallback"));
     const eligibilityModeRaw = String(searchParams.get("eligibility_mode") ?? "").trim().toLowerCase();
     const eligibilityMode: CastEligibilityMode = eligibilityModeRaw === "links" ? "links" : "default";
+    const upstreamParams = new URLSearchParams({
+      limit: String(limit),
+      offset: String(offset),
+      roster_mode: rosterMode,
+      photo_fallback: photoFallbackMode,
+    });
+    if (typeof minEpisodes === "string" && minEpisodes.trim().length > 0) {
+      upstreamParams.set("minEpisodes", minEpisodes.trim());
+    }
+    if (excludeZeroEpisodeMembers) upstreamParams.set("exclude_zero_episode_members", "true");
+    if (requireImage === "true" || requireImage === "1") upstreamParams.set("requireImage", "true");
+    if (!includePhotos) upstreamParams.set("include_photos", "false");
+    if (eligibilityMode === "links") upstreamParams.set("eligibility_mode", "links");
+
+    const cacheKey = buildUserScopedRouteCacheKey(user.uid, `${showId}:cast`, upstreamParams);
+    const cached = getRouteResponseCache<Record<string, unknown>>(TRR_SHOW_CAST_CACHE_NAMESPACE, cacheKey);
+    if (cached) {
+      return NextResponse.json(cached, { headers: { "x-trr-cache": "hit" } });
+    }
 
     const payload = await getOrCreateRouteResponsePromise(
       TRR_SHOW_CAST_CACHE_NAMESPACE,
       cacheKey,
       async () => {
-        const upstreamParams = new URLSearchParams({
-          limit: String(limit),
-          offset: String(offset),
-          roster_mode: rosterMode,
-          photo_fallback: photoFallbackMode,
-        });
-        if (typeof minEpisodes === "string" && minEpisodes.trim().length > 0) {
-          upstreamParams.set("minEpisodes", minEpisodes.trim());
-        }
-        if (excludeZeroEpisodeMembers) upstreamParams.set("exclude_zero_episode_members", "true");
-        if (requireImage === "true" || requireImage === "1") upstreamParams.set("requireImage", "true");
-        if (!includePhotos) upstreamParams.set("include_photos", "false");
-        if (eligibilityMode === "links") upstreamParams.set("eligibility_mode", "links");
-
         const upstream = await fetchAdminBackendJson(
           `/admin/trr-api/shows/${showId}/cast?${upstreamParams.toString()}`,
           {

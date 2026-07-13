@@ -62,7 +62,12 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const cacheKey = buildUserScopedRouteCacheKey(user.uid, "shows", searchParams);
+    const upstreamParams = new URLSearchParams({
+      q: query,
+      limit: String(limit),
+      offset: String(offset),
+    });
+    const cacheKey = buildUserScopedRouteCacheKey(user.uid, "shows", upstreamParams);
     const cached = getRouteResponseCache<Record<string, unknown>>(TRR_SHOWS_CACHE_NAMESPACE, cacheKey);
     if (cached) {
       return NextResponse.json(cached, { headers: { "x-trr-cache": "hit" } });
@@ -73,11 +78,7 @@ export async function GET(request: NextRequest) {
       cacheKey,
       async () => {
         const upstream = await fetchAdminBackendJson(
-          `/admin/trr-api/shows?${new URLSearchParams({
-            q: query,
-            limit: String(limit),
-            offset: String(offset),
-          }).toString()}`,
+          `/admin/trr-api/shows?${upstreamParams.toString()}`,
           {
             timeoutMs: ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
             routeName: "admin-shows",

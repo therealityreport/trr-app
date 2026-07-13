@@ -1,12 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest, NextResponse } from "next/server";
 
-process.env.TRR_ADMIN_ROUTE_CACHE_DISABLED = "1";
-
-const { requireAdminMock, fetchAdminBackendJsonMock } = vi.hoisted(() => ({
-  requireAdminMock: vi.fn(),
-  fetchAdminBackendJsonMock: vi.fn(),
-}));
+const { requireAdminMock, fetchAdminBackendJsonMock } = vi.hoisted(() => {
+  process.env.TRR_ADMIN_ROUTE_CACHE_DISABLED = "1";
+  return {
+    requireAdminMock: vi.fn(),
+    fetchAdminBackendJsonMock: vi.fn(),
+  };
+});
 
 vi.mock("@/lib/server/auth", () => ({
   requireAdmin: requireAdminMock,

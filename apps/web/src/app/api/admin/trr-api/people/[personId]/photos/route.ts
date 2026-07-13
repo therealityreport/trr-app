@@ -82,13 +82,23 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     const requestRole =
       requestRoleRaw === "primary" || requestRoleRaw === "polling" ? requestRoleRaw : "secondary";
 
-    const requestedLimit = limit;
-    const cacheSearchParams = new URLSearchParams(searchParams);
-    cacheSearchParams.delete("request_role");
+    const backendParams = new URLSearchParams({
+      limit: String(limit),
+      offset: String(offset),
+    });
+    if (sources.length > 0) {
+      backendParams.set("sources", sources.join(","));
+    }
+    if (includeBroken) {
+      backendParams.set("include_broken", "true");
+    }
+    if (!includeTotalCount) {
+      backendParams.set("include_total_count", "false");
+    }
     const cacheKey = buildUserScopedRouteCacheKey(
       user.uid,
       `${personId}:photos`,
-      cacheSearchParams,
+      backendParams,
     );
     const cachedPayload = getRouteResponseCache<{
       photos: Array<Record<string, unknown>>;
@@ -110,19 +120,6 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       PERSON_PHOTOS_CACHE_NAMESPACE,
       cacheKey,
       async () => {
-        const backendParams = new URLSearchParams({
-          limit: String(requestedLimit),
-          offset: String(offset),
-        });
-        if (sources.length > 0) {
-          backendParams.set("sources", sources.join(","));
-        }
-        if (includeBroken) {
-          backendParams.set("include_broken", "true");
-        }
-        if (!includeTotalCount) {
-          backendParams.set("include_total_count", "false");
-        }
         const upstream = await fetchAdminBackendJson(
           `/admin/people/${personId}/gallery?${backendParams.toString()}`,
           {
@@ -170,7 +167,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         const nextPayload = {
           photos: pagePhotos,
           pagination: {
-            limit: requestedLimit,
+            limit,
             offset,
             count: pagePhotos.length,
             total_count:

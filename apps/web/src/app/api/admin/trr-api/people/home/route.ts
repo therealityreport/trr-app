@@ -35,7 +35,8 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: limitResult.error }, { status: 400 });
     }
     const limit = limitResult.value;
-    const cacheKey = buildUserScopedRouteCacheKey(user.uid, "people-home", request.nextUrl.searchParams);
+    const upstreamParams = new URLSearchParams({ limit: String(limit) });
+    const cacheKey = buildUserScopedRouteCacheKey(user.uid, "people-home", upstreamParams);
     const cached = getRouteResponseCache<Record<string, unknown>>(TRR_PEOPLE_HOME_CACHE_NAMESPACE, cacheKey);
     if (cached) {
       return NextResponse.json(cached, { headers: { "x-trr-cache": "hit" } });
@@ -46,9 +47,7 @@ export async function GET(request: NextRequest) {
       cacheKey,
       async () => {
         const upstream = await fetchAdminBackendJson(
-          `/admin/trr-api/people/home?${new URLSearchParams({
-            limit: String(limit),
-          }).toString()}`,
+          `/admin/trr-api/people/home?${upstreamParams.toString()}`,
           {
             headers: {
               "X-TRR-Admin-User-Uid": user.uid,
