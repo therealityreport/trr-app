@@ -71,7 +71,7 @@ export default function SkillsAndAgentsPage() {
           { label: "Skills & Agents", href: "/dev-dashboard/skills-and-agents" },
         ]}
         title="Skills & Agents"
-        description="Inventory Codex, Claude, workspace, and repo-local skills plus agent interfaces and plugins."
+        description="Inventory Codex and Claude user-level skills plus agent interfaces and plugins."
         generatedAt={data?.generatedAt}
       >
         {error ? (

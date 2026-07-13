@@ -20,7 +20,7 @@ describe("getDevDashboardSkillsAgentsData", () => {
     );
   });
 
-  it("groups skills by source and keeps duplicate skill names in separate groups", async () => {
+  it("inventories only system and user-level skills", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "skills-agents-dashboard-"));
     tempDirs.push(root);
 
@@ -74,72 +74,16 @@ description: User-installed Claude skill.
     );
 
     await writeTextFile(
-      path.join(workspaceRoot, ".agents/skills/workspace-duplicate/SKILL.md"),
-      `---
-name: Duplicate Skill
-description: Shared workspace skill.
----
-`,
-    );
-    await writeTextFile(
-      path.join(workspaceRoot, ".agents/skills/workspace-duplicate/agents/openai.yaml"),
+      path.join(homeDir, ".codex/skills/user-skill/agents/openai.yaml"),
       `interface:
-  display_name: "Duplicate Workspace Interface"
-  short_description: "Workspace agent interface"
-  default_prompt: "Use the workspace duplicate skill."
+  display_name: "User Skill Interface"
+  short_description: "User-level agent interface"
+  default_prompt: "Use the user skill."
 dependencies:
   tools:
     - type: "mcp"
       value: "chrome-devtools"
       description: "Browser verification"
-`,
-    );
-    await writeTextFile(
-      path.join(workspaceRoot, ".codex/skills/project-codex-skill/SKILL.md"),
-      `---
-name: Project Codex Skill
-description: Workspace Codex project skill.
----
-`,
-    );
-    await writeTextFile(
-      path.join(workspaceRoot, ".claude/skills/project-claude-skill/SKILL.md"),
-      `---
-name: Project Claude Skill
-description: Workspace Claude project skill.
----
-`,
-    );
-    await writeTextFile(
-      path.join(workspaceRoot, "TRR-APP/.agents/skills/repo-duplicate/SKILL.md"),
-      `---
-name: Duplicate Skill
-description: Repo-local TRR-APP skill.
----
-`,
-    );
-    await writeTextFile(
-      path.join(workspaceRoot, "TRR-APP/.agents/skills/repo-duplicate/agents/openai.yaml"),
-      `interface:
-  display_name: "Duplicate App Interface"
-  short_description: "TRR-APP interface"
-  default_prompt: "Use the repo duplicate skill."
-`,
-    );
-    await writeTextFile(
-      path.join(workspaceRoot, "TRR-APP/.claude/skills/repo-claude-skill/SKILL.md"),
-      `---
-name: Repo Claude Skill
-description: TRR-APP Claude skill.
----
-`,
-    );
-    await writeTextFile(
-      path.join(workspaceRoot, "TRR-Backend/.agents/skills/backend-skill/SKILL.md"),
-      `---
-name: Backend Skill
-description: TRR-Backend skill.
----
 `,
     );
     await writeTextFile(
@@ -170,18 +114,8 @@ enabled = true
     expect(data.skills.map((group) => group.label)).toEqual([
       "Codex System",
       "Codex User",
-      "Workspace Shared",
-      "Workspace Codex Project",
-      "Workspace Claude Project",
-      "TRR-APP Repo",
-      "TRR-Backend Repo",
       "Claude User",
     ]);
-
-    const workspaceShared = data.skills.find((group) => group.key === "workspace-shared");
-    const trrAppRepo = data.skills.find((group) => group.key === "trr-app-repo");
-    expect(workspaceShared?.items.map((item) => item.name)).toEqual(["Duplicate Skill"]);
-    expect(trrAppRepo?.items.map((item) => item.name)).toContain("Duplicate Skill");
 
     const codexUser = data.skills.find((group) => group.key === "codex-user");
     expect(codexUser?.items.map((item) => item.path)).toEqual(["~/.codex/skills/user-skill/SKILL.md"]);
@@ -201,13 +135,9 @@ enabled = true
     expect(data.agents.skillAgentInterfaces).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          displayName: "Duplicate Workspace Interface",
-          owningSkillName: "Duplicate Skill",
+          displayName: "User Skill Interface",
+          owningSkillName: "User Skill",
           toolDependencies: [{ label: "mcp: chrome-devtools", description: "Browser verification" }],
-        }),
-        expect.objectContaining({
-          displayName: "Duplicate App Interface",
-          repoLabel: "TRR-APP",
         }),
       ]),
     );
