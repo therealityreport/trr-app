@@ -76,6 +76,7 @@ import SocialAccountProfilePage, {
   __resetSocialProfileRequestInflightForTests,
   buildCatalogProgressDiagnosticRows,
   getCatalogRepairAuthEndpointSegment,
+  waitForCatalogRetry,
 } from "@/components/admin/SocialAccountProfilePage";
 import { __resetSharedLiveResourceRegistryForTests } from "@/lib/admin/shared-live-resource";
 import * as devAdminBypass from "@/lib/admin/dev-admin-bypass";
@@ -363,6 +364,64 @@ describe("SocialAccountProfilePage", () => {
       value: "10 max · 4 active · 6 remaining",
       detail: "This combined limit covers Instagram detail, shared-post, comments, and recovery workers.",
     });
+  });
+
+  it("settles and clears a cancelled catalog retry wait", async () => {
+    vi.useFakeTimers();
+    const abortController = new AbortController();
+    const retryWait = waitForCatalogRetry(60_000, abortController.signal);
+
+    abortController.abort();
+
+    await expect(retryWait).resolves.toBe("cancelled");
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("does not leave catalog loading stuck when a retry is cancelled by a filter change", async () => {
+    const catalogRequests: string[] = [];
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse({
+          ...baseSummary,
+          catalog_recent_runs: [],
+        });
+      }
+      if (url.includes("/catalog/posts")) {
+        catalogRequests.push(url);
+        if (url.includes("assignment_status=assigned")) {
+          return jsonResponse({
+            items: [],
+            pagination: { page: 1, page_size: 25, total: 0, total_pages: 1 },
+          });
+        }
+        return jsonResponse(
+          {
+            error: "TRR-Backend request timed out.",
+            code: "UPSTREAM_TIMEOUT",
+            retryable: true,
+            retry_after_seconds: 60,
+            upstream_status: 504,
+          },
+          504,
+        );
+      }
+      if (url.includes("/catalog/review-queue")) return jsonResponse({ items: [] });
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
+
+    await waitFor(() => expect(catalogRequests).toHaveLength(1));
+    expect(screen.getByText("Loading catalog posts…")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /^assigned$/i }));
+
+    await waitFor(() => {
+      expect(catalogRequests.some((url) => url.includes("assignment_status=assigned"))).toBe(true);
+      expect(screen.getByText("No catalog posts found for this filter.")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("Loading catalog posts…")).not.toBeInTheDocument();
   });
 
   it("refreshes Instagram capacity when the dialog opens and immediately before Start", async () => {

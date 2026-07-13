@@ -2211,6 +2211,29 @@ const resolveCatalogRequestBackoffMs = (
   return Math.max(error?.retryAfterMs ?? 0, exponentialDelayMs);
 };
 
+export const waitForCatalogRetry = (
+  delayMs: number,
+  signal: AbortSignal,
+): Promise<"elapsed" | "cancelled"> => {
+  if (signal.aborted) return Promise.resolve("cancelled");
+
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (result: "elapsed" | "cancelled") => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener("abort", handleAbort);
+      resolve(result);
+    };
+    const timeoutId = window.setTimeout(() => finish("elapsed"), Math.max(0, delayMs));
+    const handleAbort = () => {
+      window.clearTimeout(timeoutId);
+      finish("cancelled");
+    };
+    signal.addEventListener("abort", handleAbort, { once: true });
+  });
+};
+
 const getPostMatchBadge = (post: Pick<SocialAccountProfilePost, "match_mode" | "source_surface">): {
   label: string;
   tone: string;
@@ -5241,17 +5264,11 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       !hasCurrentSummary ||
       summaryUninitialized
     ) {
+      setCatalogPostsLoading(false);
       return;
     }
     let cancelled = false;
-    let retryTimeoutId: number | null = null;
-
-    const clearPendingRetry = () => {
-      if (retryTimeoutId !== null) {
-        window.clearTimeout(retryTimeoutId);
-        retryTimeoutId = null;
-      }
-    };
+    const retryAbortController = new AbortController();
 
     const loadCatalogPosts = async () => {
       const maxClientRetries = 1;
@@ -5300,12 +5317,8 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                 setCatalogPostsStaleNotice("Catalog refresh is retrying. Showing last saved catalog cards.");
               }
               const retryDelayMs = resolveCatalogRequestBackoffMs(requestError, retryAttempt);
-              await new Promise<void>((resolve) => {
-                retryTimeoutId = window.setTimeout(() => {
-                  retryTimeoutId = null;
-                  resolve();
-                }, retryDelayMs);
-              });
+              const retryWaitResult = await waitForCatalogRetry(retryDelayMs, retryAbortController.signal);
+              if (retryWaitResult === "cancelled") return;
               continue;
             }
             if (canRenderStaleCards) {
@@ -5317,7 +5330,6 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
           }
         }
       } finally {
-        clearPendingRetry();
         if (!cancelled) setCatalogPostsLoading(false);
       }
     };
@@ -5325,7 +5337,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     void loadCatalogPosts();
     return () => {
       cancelled = true;
-      clearPendingRetry();
+      retryAbortController.abort();
     };
   }, [
     activeCatalogPostsRequestKey,
