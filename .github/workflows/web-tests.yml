@@ -63,16 +63,14 @@ jobs:
         if: matrix.lane == 'full'
         continue-on-error: true
         run: pnpm run typecheck
-      - name: Install Playwright Chromium (non-blocking)
+      - name: Install Playwright Chromium
         if: matrix.lane == 'full'
-        continue-on-error: true
         run: pnpm exec playwright install --with-deps chromium
       - name: Run unit tests (Node 24 full lane)
         if: matrix.lane == 'full'
         run: pnpm run test:ci
-      - name: Run Playwright e2e smoke (non-blocking)
+      - name: Run Playwright e2e smoke
         if: matrix.lane == 'full'
-        continue-on-error: true
         run: pnpm run test:e2e
         env:
           DATABASE_URL: ""

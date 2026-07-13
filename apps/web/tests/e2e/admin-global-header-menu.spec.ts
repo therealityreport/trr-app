@@ -10,8 +10,20 @@ const waitForRecentShow = async (page: Page, slug: string) => {
         ([storageKey, expectedSlug]) => {
           const raw = window.localStorage.getItem(storageKey);
           if (!raw) return false;
-          const entries = JSON.parse(raw) as Array<{ slug?: unknown }>;
-          return entries.some((entry) => entry.slug === expectedSlug);
+          try {
+            const entries = JSON.parse(raw) as unknown;
+            return (
+              Array.isArray(entries) &&
+              entries.some(
+                (entry) =>
+                  Boolean(entry) &&
+                  typeof entry === "object" &&
+                  (entry as { slug?: unknown }).slug === expectedSlug,
+              )
+            );
+          } catch {
+            return false;
+          }
         },
         [ADMIN_RECENT_SHOWS_STORAGE_KEY, slug] as const,
       );
@@ -20,6 +32,21 @@ const waitForRecentShow = async (page: Page, slug: string) => {
 };
 
 test.describe("admin global header menu", () => {
+  test("recent-show polling tolerates malformed storage until a valid entry arrives", async ({ page }) => {
+    await page.goto("/");
+    await page.evaluate(([storageKey]) => {
+      window.localStorage.setItem(storageKey, "{not-json");
+      window.setTimeout(() => {
+        window.localStorage.setItem(
+          storageKey,
+          JSON.stringify([{ slug: "recovered-show" }]),
+        );
+      }, 50);
+    }, [ADMIN_RECENT_SHOWS_STORAGE_KEY]);
+
+    await waitForRecentShow(page, "recovered-show");
+  });
+
   test("renders hamburger + logo and shows expected top-level menu content", async ({ page }) => {
     await page.goto("/");
     await waitForAdminReady(page);
