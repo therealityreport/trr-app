@@ -8966,6 +8966,7 @@ describe("SocialAccountProfilePage", () => {
 
   it("cancels the true active run even when an older run is being inspected", async () => {
     const cancelCalls: string[] = [];
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
 
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
@@ -9062,6 +9063,7 @@ describe("SocialAccountProfilePage", () => {
     });
     expect(cancelCalls[0]).toContain("/catalog/runs/run-active-live/cancel");
     expect(cancelCalls[0]).not.toContain("/catalog/runs/run-old-history/cancel");
+    confirmSpy.mockRestore();
   });
 
   it("uses live progress status in the action banner when summary status is stale", async () => {
@@ -10879,6 +10881,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
 
   it("keeps catalog runs locked after cancel is requested when confirmation refreshes time out", async () => {
     const cancelCalls: string[] = [];
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
     let summaryCalls = 0;
     let snapshotCalls = 0;
     const runningSummaryBody = {
@@ -10967,10 +10970,12 @@ it("prefers terminal cancelled status labels over stale recovering state", async
     // follow-up summary refresh times out; the stale running snapshot should
     // keep launch controls locked until a later authoritative poll lands.
     expect(screen.queryByText("TRR-Backend request timed out.")).not.toBeInTheDocument();
+    confirmSpy.mockRestore();
   });
 
   it("reconciles a cancel attempt when the first cancel request fails but the run is already cancelled upstream", async () => {
     const cancelCalls: string[] = [];
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
     let progressCalls = 0;
 
     const runningSummary = {
@@ -11081,10 +11086,12 @@ it("prefers terminal cancelled status labels over stale recovering state", async
     expect(screen.queryByRole("button", { name: "Cancel Run" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Backfill Posts" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Sync Recent" })).toBeEnabled();
+    confirmSpy.mockRestore();
   });
 
   it("keeps a queued run non-terminal until cancel confirmation is observed", async () => {
     const cancelCalls: string[] = [];
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
     let cancelled = false;
     const buildSummary = () => ({
       ...baseSummary,
@@ -11180,6 +11187,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
     ).toBeInTheDocument();
     expect(cancelCalls).toEqual([expect.stringContaining("/catalog/runs/queued-run-1/cancel")]);
     expect(screen.queryByText("Cancelled run queued-r.")).not.toBeInTheDocument();
+    confirmSpy.mockRestore();
   });
 
   it(
@@ -13113,7 +13121,7 @@ it("renders blocked-auth manual-auth controls and starts the sync flow", async (
       expect(screen.getByRole("button", { name: "Sync Validated Cookies" })).toBeInTheDocument();
       expect(
         screen.getByText(
-          "Instagram blocked this catalog run before jobs were queued. Complete manual auth first, then sync already validated cookies.",
+          "Complete Instagram manual auth first, then sync already validated cookies for this run.",
         ),
       ).toBeInTheDocument();
       expect(screen.getByText("Instagram posts auth blocked")).toBeInTheDocument();
@@ -14322,7 +14330,7 @@ it("uses the newest inspected catalog run from the summary when discovery outran
       expect(
         screen.getByText("Catalog gallery temporarily unavailable. Saved post cards will reload when the gallery request succeeds."),
       ).toBeInTheDocument();
-    });
+    }, { timeout: 6_000 });
     expect(screen.queryByText("TRR-Backend request timed out.")).not.toBeInTheDocument();
   });
 

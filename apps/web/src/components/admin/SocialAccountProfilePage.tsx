@@ -3630,9 +3630,14 @@ const getCatalogDispatchStatusMessage = (progress?: SocialAccountCatalogRunProgr
 
 const getCatalogLaunchGuardMessage = (
   progress?: SocialAccountCatalogRunProgressSnapshot | null,
+  cookieHealth?: SocialProfileCookieHealth | null,
 ): string | null => {
   const operationalState = normalizeCatalogRunState(progress?.operational_state);
-  if (operationalState === "blocked_auth") {
+  const runStatus = normalizeCatalogRunStatus(progress?.run_status);
+  const staleBlockedAuthIsRepaired =
+    TERMINAL_CATALOG_RUN_STATUSES.has(runStatus) &&
+    isInstagramPostsAuthVerified(cookieHealth);
+  if (operationalState === "blocked_auth" && !staleBlockedAuthIsRepaired) {
     return "Catalog launch is blocked until the existing run's auth repair is completed or cancelled.";
   }
   const dispatchMessage = getCatalogDispatchStatusMessage(progress);
@@ -6780,8 +6785,8 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   }, [activeCommentsSummarySnapshot.data, applyProfileSnapshotSummary]);
 
   const catalogLaunchGuardMessage = useMemo(() => {
-    return getCatalogLaunchGuardMessage(catalogRunProgress);
-  }, [catalogRunProgress]);
+    return getCatalogLaunchGuardMessage(catalogRunProgress, cookieHealth);
+  }, [catalogRunProgress, cookieHealth]);
   const instagramCommentsModalAuthActive = useMemo(() => {
     if (platform !== "instagram") return false;
     const activeCommentsStatus = String(activeCommentsRunProgressData?.run_status || "").trim().toLowerCase();
@@ -9114,18 +9119,11 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
           action === "backfill" &&
           platform === "instagram" &&
           (Boolean(data.comments_reused_existing_run) || attachedComments?.source === "reused_run");
-        if (commentsReusedExistingRun) {
-          throw buildSocialAccountRequestError(
-            {
-              code: "SOCIAL_ACCOUNT_COMMENTS_RUN_REUSED",
-              error: commentsRunId
-                ? `Backfill reused existing comments run ${shortRunId(commentsRunId)}. Cancel the active run and launch fresh.`
-                : "Backfill reused an existing comments run. Cancel the active run and launch fresh.",
-              retryable: true,
-            },
-            "Backfill reused an existing comments run.",
-          );
-        }
+        const commentsReuseWarning = commentsReusedExistingRun
+          ? commentsRunId
+            ? ` Warning: reused existing comments run ${shortRunId(commentsRunId)}.`
+            : " Warning: reused existing comments run."
+          : "";
         const commentsDeferredUntilCatalogComplete =
           action === "backfill" &&
           platform === "instagram" &&
@@ -9218,7 +9216,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
               launchParts.length > 0
                 ? `Instagram 2025 backfill reserved. Confirm Live APPLY to enqueue catalog jobs at the configured comments cap. ${launchParts.join(" · ")}.`
                 : "Instagram 2025 backfill reserved. Confirm Live APPLY to enqueue catalog jobs at the configured comments cap.";
-            setCatalogActionMessage(`${authRepairPrefix}${message}`);
+            setCatalogActionMessage(`${authRepairPrefix}${message}${commentsReuseWarning}`);
           } else if (launchTaskResolutionPending) {
             const currentPhase = liveApplyRequest
               ? "Current phase: finalizing task lanes in the background. "
@@ -9233,7 +9231,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                 ? `Instagram backfill accepted. ${phaseMessage} ${launchParts.join(" · ")}.`
                 : `Instagram backfill accepted. ${phaseMessage}`;
             setCatalogActionMessage(
-              `${authRepairPrefix}${message}`,
+              `${authRepairPrefix}${message}${commentsReuseWarning}`,
             );
           } else {
             const message =
@@ -9241,7 +9239,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                 ? `Instagram backfill queued for ${selectedTaskLabels || "Post Details"}.${skippedPostDetailsMessage} ${launchParts.join(" · ")}.`
                 : `Instagram backfill queued for ${selectedTaskLabels || "Post Details"}.${skippedPostDetailsMessage}`;
             setCatalogActionMessage(
-              `${authRepairPrefix}${message}`,
+              `${authRepairPrefix}${message}${commentsReuseWarning}`,
             );
           }
         } else if (action === "backfill") {
