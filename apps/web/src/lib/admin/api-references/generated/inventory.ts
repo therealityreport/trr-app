@@ -3,8 +3,8 @@ import type { AdminApiReferenceInventory } from "@/lib/admin/api-references/type
 export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
   "inventorySchemaVersion": "1.0.0",
   "generatorVersion": "1.0.0",
-  "generatedAt": "2026-07-13T21:51:22.814Z",
-  "sourceCommitSha": "8cb8ada50ff8b01db41d596ff10a22cbb90bf52b",
+  "generatedAt": "2026-07-13T21:52:10.426Z",
+  "sourceCommitSha": "33a9d40cd3eaa0d4f179ebe01d7cbd1b9ed816e3",
   "overrideDigest": "cd85a76fd2fc977cbc691ccab80ce844f9ea783e118af35eb3d9766e5d61fd36",
   "nodes": [
     {
@@ -10255,7 +10255,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/trr-api/people/route.ts",
       "sourceLocator": {
-        "line": 20,
+        "line": 21,
         "symbol": "GET"
       },
       "provenance": "static_scan",
@@ -10358,7 +10358,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/trr-api/people/[personId]/credits/route.ts",
       "sourceLocator": {
-        "line": 329,
+        "line": 330,
         "symbol": "GET"
       },
       "provenance": "static_scan",
@@ -10460,7 +10460,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/trr-api/people/[personId]/photos/route.ts",
       "sourceLocator": {
-        "line": 39,
+        "line": 40,
         "symbol": "GET"
       },
       "provenance": "static_scan",
@@ -10529,7 +10529,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/trr-api/people/home/route.ts",
       "sourceLocator": {
-        "line": 29,
+        "line": 25,
         "symbol": "GET"
       },
       "provenance": "static_scan",
@@ -10597,7 +10597,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/trr-api/search/route.ts",
       "sourceLocator": {
-        "line": 30,
+        "line": 26,
         "symbol": "GET"
       },
       "provenance": "static_scan",
@@ -10631,7 +10631,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/trr-api/seasons/[seasonId]/episodes/route.ts",
       "sourceLocator": {
-        "line": 25,
+        "line": 26,
         "symbol": "GET"
       },
       "provenance": "static_scan",
@@ -10698,7 +10698,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/trr-api/shows/route.ts",
       "sourceLocator": {
-        "line": 31,
+        "line": 32,
         "symbol": "GET"
       },
       "provenance": "static_scan",
@@ -10766,7 +10766,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/trr-api/shows/[showId]/assets/route.ts",
       "sourceLocator": {
-        "line": 34,
+        "line": 35,
         "symbol": "GET"
       },
       "provenance": "static_scan",
@@ -10870,7 +10870,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/trr-api/shows/[showId]/cast/route.ts",
       "sourceLocator": {
-        "line": 32,
+        "line": 33,
         "symbol": "GET"
       },
       "provenance": "static_scan",
@@ -11109,7 +11109,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/trr-api/shows/[showId]/seasons/route.ts",
       "sourceLocator": {
-        "line": 62,
+        "line": 63,
         "symbol": "GET"
       },
       "provenance": "static_scan",
@@ -11143,7 +11143,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/assets/route.ts",
       "sourceLocator": {
-        "line": 34,
+        "line": 35,
         "symbol": "GET"
       },
       "provenance": "static_scan",
@@ -11178,7 +11178,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/cast/route.ts",
       "sourceLocator": {
-        "line": 28,
+        "line": 29,
         "symbol": "GET"
       },
       "provenance": "static_scan",

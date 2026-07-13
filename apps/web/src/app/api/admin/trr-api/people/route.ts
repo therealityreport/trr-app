@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
+import { parseBoundedIntegerParam } from "@/lib/server/trr-api/query-integer-params";
 import { searchPeople } from "@/lib/server/trr-api/trr-shows-repository";
 
 export const dynamic = "force-dynamic";
@@ -23,8 +24,23 @@ export async function GET(request: NextRequest) {
 
     const { searchParams } = new URL(request.url);
     const query = searchParams.get("q")?.trim() ?? "";
-    const rawLimit = parseInt(searchParams.get("limit") ?? "10", 10);
-    const offset = parseInt(searchParams.get("offset") ?? "0", 10);
+    const limitResult = parseBoundedIntegerParam(searchParams.get("limit"), {
+      name: "limit",
+      defaultValue: 10,
+      min: 1,
+      max: MAX_LIMIT,
+    });
+    if (!limitResult.ok) {
+      return NextResponse.json({ error: limitResult.error }, { status: 400 });
+    }
+    const offsetResult = parseBoundedIntegerParam(searchParams.get("offset"), {
+      name: "offset",
+      defaultValue: 0,
+      min: 0,
+    });
+    if (!offsetResult.ok) {
+      return NextResponse.json({ error: offsetResult.error }, { status: 400 });
+    }
 
     // Enforce min query length to avoid full table scans
     if (query.length < MIN_QUERY_LENGTH) {
@@ -34,8 +50,8 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Cap limit to prevent abuse
-    const limit = Math.min(Math.max(1, rawLimit), MAX_LIMIT);
+    const limit = limitResult.value;
+    const offset = offsetResult.value;
 
     const people = await searchPeople(query, { limit, offset });
 

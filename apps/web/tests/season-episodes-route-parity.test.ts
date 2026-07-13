@@ -49,4 +49,16 @@ describe("season episodes route parity", () => {
     );
     expect(payload.episodes[0]).toMatchObject({ episode_number: 1, title: "Pilot" });
   });
+
+  it("rejects malformed explicit offsets before proxying", async () => {
+    const request = new NextRequest(
+      "http://localhost/api/admin/trr-api/seasons/season-1/episodes?offset=abc",
+    );
+    const response = await GET(request, { params: Promise.resolve({ seasonId: "season-1" }) });
+    const payload = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(payload.error).toBe("offset must be an integer");
+    expect(fetchAdminBackendJsonMock).not.toHaveBeenCalled();
+  });
 });

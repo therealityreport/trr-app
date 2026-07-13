@@ -15,22 +15,28 @@ import {
   TRR_PEOPLE_HOME_CACHE_NAMESPACE,
   TRR_PEOPLE_HOME_CACHE_TTL_MS,
 } from "@/lib/server/trr-api/trr-show-read-route-cache";
+import { parseBoundedIntegerParam } from "@/lib/server/trr-api/query-integer-params";
 
 export const dynamic = "force-dynamic";
 
 const DEFAULT_SECTION_LIMIT = 12;
 const MAX_SECTION_LIMIT = 24;
-const parseLimit = (raw: string | null): number => {
-  const parsed = Number.parseInt(raw ?? String(DEFAULT_SECTION_LIMIT), 10);
-  if (!Number.isFinite(parsed)) return DEFAULT_SECTION_LIMIT;
-  return Math.min(Math.max(parsed, 1), MAX_SECTION_LIMIT);
-};
 
 export async function GET(request: NextRequest) {
   try {
     const user = await requireAdmin(request);
-    const limit = parseLimit(request.nextUrl.searchParams.get("limit"));
-    const cacheKey = buildUserScopedRouteCacheKey(user.uid, "people-home", request.nextUrl.searchParams);
+    const limitResult = parseBoundedIntegerParam(request.nextUrl.searchParams.get("limit"), {
+      name: "limit",
+      defaultValue: DEFAULT_SECTION_LIMIT,
+      min: 1,
+      max: MAX_SECTION_LIMIT,
+    });
+    if (!limitResult.ok) {
+      return NextResponse.json({ error: limitResult.error }, { status: 400 });
+    }
+    const limit = limitResult.value;
+    const upstreamParams = new URLSearchParams({ limit: String(limit) });
+    const cacheKey = buildUserScopedRouteCacheKey(user.uid, "people-home", upstreamParams);
     const cached = getRouteResponseCache<Record<string, unknown>>(TRR_PEOPLE_HOME_CACHE_NAMESPACE, cacheKey);
     if (cached) {
       return NextResponse.json(cached, { headers: { "x-trr-cache": "hit" } });
@@ -41,9 +47,7 @@ export async function GET(request: NextRequest) {
       cacheKey,
       async () => {
         const upstream = await fetchAdminBackendJson(
-          `/admin/trr-api/people/home?${new URLSearchParams({
-            limit: String(limit),
-          }).toString()}`,
+          `/admin/trr-api/people/home?${upstreamParams.toString()}`,
           {
             headers: {
               "X-TRR-Admin-User-Uid": user.uid,

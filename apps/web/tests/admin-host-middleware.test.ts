@@ -331,34 +331,122 @@ describe("admin host proxy", () => {
   });
 
   it.each([
-    ["/screenalytics", "http://admin.localhost:3000/admin/cast-screentime"],
-    ["/screenlaytics", "http://admin.localhost:3000/admin/cast-screentime"],
-    ["/admin/screenalytics", "http://admin.localhost:3000/admin/cast-screentime"],
-    ["/admin/screenlaytics", "http://admin.localhost:3000/admin/cast-screentime"],
-  ])("redirects retired Screenalytics alias %s to Cast Screen-Time", (pathname, expectedLocation) => {
-    process.env.ADMIN_APP_ORIGIN = "http://admin.localhost:3000";
+    ["/screenlaytics", "https://admin.trr.localhost/screenalytics"],
+    ["/admin/screenalytics", "https://admin.trr.localhost/screenalytics"],
+    ["/admin/screenlaytics", "https://admin.trr.localhost/screenalytics"],
+    ["/admin/cast-screentime", "https://admin.trr.localhost/screenalytics"],
+  ])("redirects legacy Screenalytics path %s to the canonical Screenalytics path", (pathname, expectedLocation) => {
+    process.env.ADMIN_APP_ORIGIN = "https://admin.trr.localhost";
+    process.env.ADMIN_APP_HOSTS = "admin.trr.localhost,trr.localhost,admin.localhost,localhost,127.0.0.1,[::1]";
     process.env.ADMIN_ENFORCE_HOST = "true";
     process.env.ADMIN_STRICT_HOST_ROUTING = "false";
 
-    const request = new NextRequest(`http://admin.localhost:3000${pathname}`);
+    const request = new NextRequest(`https://admin.trr.localhost${pathname}`);
     const response = proxy(request);
 
     expect(response.status).toBe(307);
     expect(response.headers.get("location")).toBe(expectedLocation);
   });
 
-  it("redirects retired Screenalytics aliases from the public host directly to the admin Cast Screen-Time route", () => {
-    process.env.ADMIN_APP_ORIGIN = "http://admin.localhost:3000";
+  it.each([
+    "http://localhost:3000/screenalytics?run=demo",
+    "http://localhost:3000/admin/cast-screentime?run=demo",
+  ])("canonicalizes %s to the Portless Screenalytics run URL", (url) => {
+    process.env.ADMIN_APP_ORIGIN = "https://admin.trr.localhost";
+    process.env.ADMIN_APP_HOSTS = "admin.trr.localhost,trr.localhost,admin.localhost,localhost,127.0.0.1,[::1]";
     process.env.ADMIN_ENFORCE_HOST = "true";
     process.env.ADMIN_STRICT_HOST_ROUTING = "false";
 
-    const request = new NextRequest("http://localhost:3000/screenalytics?run=demo");
+    const request = new NextRequest(url);
+    const response = proxy(request);
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe("https://admin.trr.localhost/screenalytics/runs/demo");
+  });
+
+  it("canonicalizes the RHOBH S5 E16 test extra setup query to the clean episode URL", () => {
+    process.env.ADMIN_APP_ORIGIN = "https://admin.trr.localhost";
+    process.env.ADMIN_APP_HOSTS = "admin.trr.localhost,trr.localhost,admin.localhost,localhost,127.0.0.1,[::1]";
+    process.env.ADMIN_ENFORCE_HOST = "true";
+    process.env.ADMIN_STRICT_HOST_ROUTING = "false";
+
+    const query = new URLSearchParams({
+      owner_scope: "season",
+      owner_id: "98ac397a-3928-4583-92bc-25ea84c42d89",
+      media_type: "extras",
+      media_kind: "screenalytics_test",
+      media_type_filter: "extras",
+      show_id: "909ddc36-ca4d-4b09-8aa5-dd5dd34f987e",
+    });
+    const request = new NextRequest(`http://localhost:3000/admin/cast-screentime?${query.toString()}`);
     const response = proxy(request);
 
     expect(response.status).toBe(307);
     expect(response.headers.get("location")).toBe(
-      "http://admin.localhost:3000/admin/cast-screentime?run=demo",
+      "https://admin.trr.localhost/screenalytics/rhobh/s5/e16/extras/screenalytics-test?media_type_filter=extras",
     );
+  });
+
+  it("rewrites canonical Screenalytics run URLs to the internal implementation while keeping the clean URL visible", () => {
+    process.env.NODE_ENV = "development";
+    process.env.ADMIN_APP_ORIGIN = "https://admin.trr.localhost";
+    process.env.ADMIN_APP_HOSTS = "admin.trr.localhost,trr.localhost,admin.localhost,localhost,127.0.0.1,[::1]";
+    process.env.ADMIN_ENFORCE_HOST = "true";
+    process.env.ADMIN_STRICT_HOST_ROUTING = "false";
+
+    const request = new NextRequest("https://localhost:3002/screenalytics/runs/demo?tab=review", {
+      headers: {
+        "x-forwarded-host": "admin.trr.localhost",
+      },
+    });
+    const response = proxy(request);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-middleware-rewrite")).toBe(
+      "http://localhost:3002/admin/cast-screentime?tab=review&run_id=demo",
+    );
+  });
+
+  it("rewrites the canonical Screenalytics RHOBH test-extra setup URL with its default context", () => {
+    process.env.NODE_ENV = "development";
+    process.env.ADMIN_APP_ORIGIN = "https://admin.trr.localhost";
+    process.env.ADMIN_APP_HOSTS = "admin.trr.localhost,trr.localhost,admin.localhost,localhost,127.0.0.1,[::1]";
+    process.env.ADMIN_ENFORCE_HOST = "true";
+    process.env.ADMIN_STRICT_HOST_ROUTING = "false";
+
+    const request = new NextRequest("https://localhost:3002/screenalytics/rhobh/s5/e16/extras/screenalytics-test", {
+      headers: {
+        "x-forwarded-host": "admin.trr.localhost",
+      },
+    });
+    const response = proxy(request);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-middleware-rewrite")).toBe(
+      "http://localhost:3002/admin/cast-screentime?owner_scope=episode&owner_id=4eb4ceb4-c13d-4c29-bd0f-8bcde94b6591&show_id=909ddc36-ca4d-4b09-8aa5-dd5dd34f987e&media_type=extras&media_kind=screenalytics_test&prefill_context=screenalytics_test_extra",
+    );
+  });
+
+  it("does not re-canonicalize the hidden Screenalytics implementation URL during an internal rewrite", () => {
+    process.env.NODE_ENV = "development";
+    process.env.ADMIN_APP_ORIGIN = "https://admin.trr.localhost";
+    process.env.ADMIN_APP_HOSTS = "admin.trr.localhost,trr.localhost,admin.localhost,localhost,127.0.0.1,[::1]";
+    process.env.ADMIN_ENFORCE_HOST = "true";
+    process.env.ADMIN_STRICT_HOST_ROUTING = "false";
+
+    const request = new NextRequest(
+      "http://localhost:3002/admin/cast-screentime?owner_scope=episode&owner_id=4eb4ceb4-c13d-4c29-bd0f-8bcde94b6591&show_id=909ddc36-ca4d-4b09-8aa5-dd5dd34f987e&media_type=extras&media_kind=screenalytics_test&prefill_context=screenalytics_test_extra",
+      {
+        headers: {
+          "x-forwarded-host": "admin.trr.localhost",
+          "x-trr-admin-rewrite": "1",
+        },
+      },
+    );
+    const response = proxy(request);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("location")).toBeNull();
   });
 
   it.each([

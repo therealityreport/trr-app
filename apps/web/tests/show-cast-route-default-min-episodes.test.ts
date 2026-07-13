@@ -143,6 +143,18 @@ describe("show cast route proxy parity", () => {
     );
   });
 
+  it("rejects malformed pagination values before proxying", async () => {
+    const request = new NextRequest(
+      "http://localhost/api/admin/trr-api/shows/show-1/cast?limit=abc",
+    );
+    const response = await GET(request, { params: Promise.resolve({ showId: "show-1" }) });
+    const payload = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(payload.error).toBe("limit must be an integer");
+    expect(fetchAdminBackendJsonMock).not.toHaveBeenCalled();
+  });
+
   it("returns 404 when show slug or id cannot be resolved", async () => {
     resolveAdminShowIdMock.mockResolvedValue(null);
 

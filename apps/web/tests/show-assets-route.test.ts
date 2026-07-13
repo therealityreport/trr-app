@@ -187,6 +187,37 @@ describe("show assets route", () => {
     );
   });
 
+  it("rejects malformed explicit gallery offsets before proxying", async () => {
+    const response = await GET(
+      new NextRequest("http://localhost/api/admin/trr-api/shows/show-1/assets?offset=abc"),
+      { params: Promise.resolve({ showId: "show-1" }) },
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toBe("offset must be an integer");
+    expect(fetchAdminBackendJsonMock).not.toHaveBeenCalled();
+  });
+
+  it("clamps oversized gallery limits before proxying", async () => {
+    fetchAdminBackendJsonMock.mockResolvedValue({
+      status: 200,
+      data: { assets: [], pagination: { limit: 5000, offset: 0, count: 0, has_more: false, next_cursor: null, cursor: null, truncated: false, full: false } },
+      durationMs: 3,
+    });
+
+    const response = await GET(
+      new NextRequest("http://localhost/api/admin/trr-api/shows/show-1/assets?limit=999999"),
+      { params: Promise.resolve({ showId: "show-1" }) },
+    );
+
+    expect(response.status).toBe(200);
+    expect(fetchAdminBackendJsonMock).toHaveBeenCalledWith(
+      "/admin/trr-api/shows/show-1/assets?limit=5000&offset=0",
+      expect.objectContaining({ routeName: "show-assets" }),
+    );
+  });
+
   it("supports full fetch mode with truthful truncation metadata", async () => {
     fetchAdminBackendJsonMock.mockResolvedValue({
       status: 200,

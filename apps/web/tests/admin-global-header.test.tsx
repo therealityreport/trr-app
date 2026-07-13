@@ -75,6 +75,17 @@ describe("AdminGlobalHeader", () => {
     expect(screen.getByRole("link", { name: "View All Shows" })).toHaveAttribute("href", "/admin/shows");
   });
 
+  it("marks Screenalytics active for the hidden cast screen-time implementation route", async () => {
+    usePathnameMock.mockReturnValue("/admin/cast-screentime");
+
+    render(<AdminGlobalHeader />);
+    fireEvent.click(screen.getByRole("button", { name: "Open admin navigation menu" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("link", { name: "Screenalytics" })).toHaveAttribute("aria-current", "page");
+    });
+  });
+
   it("renders recent shows from storage and limits to five", async () => {
     window.localStorage.setItem(
       ADMIN_RECENT_SHOWS_STORAGE_KEY,

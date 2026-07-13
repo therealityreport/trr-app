@@ -15,6 +15,7 @@ import {
   TRR_SHOWS_CACHE_NAMESPACE,
   TRR_SHOWS_CACHE_TTL_MS,
 } from "@/lib/server/trr-api/trr-show-read-route-cache";
+import { parseBoundedIntegerParam } from "@/lib/server/trr-api/query-integer-params";
 
 export const dynamic = "force-dynamic";
 
@@ -34,8 +35,25 @@ export async function GET(request: NextRequest) {
 
     const { searchParams } = new URL(request.url);
     const query = searchParams.get("q") ?? "";
-    const limit = parseInt(searchParams.get("limit") ?? "20", 10);
-    const offset = parseInt(searchParams.get("offset") ?? "0", 10);
+    const limitResult = parseBoundedIntegerParam(searchParams.get("limit"), {
+      name: "limit",
+      defaultValue: 20,
+      min: 1,
+      max: 100,
+    });
+    if (!limitResult.ok) {
+      return NextResponse.json({ error: limitResult.error }, { status: 400 });
+    }
+    const offsetResult = parseBoundedIntegerParam(searchParams.get("offset"), {
+      name: "offset",
+      defaultValue: 0,
+      min: 0,
+    });
+    if (!offsetResult.ok) {
+      return NextResponse.json({ error: offsetResult.error }, { status: 400 });
+    }
+    const limit = limitResult.value;
+    const offset = offsetResult.value;
 
     if (!query.trim()) {
       return NextResponse.json(
@@ -44,7 +62,12 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const cacheKey = buildUserScopedRouteCacheKey(user.uid, "shows", searchParams);
+    const upstreamParams = new URLSearchParams({
+      q: query,
+      limit: String(limit),
+      offset: String(offset),
+    });
+    const cacheKey = buildUserScopedRouteCacheKey(user.uid, "shows", upstreamParams);
     const cached = getRouteResponseCache<Record<string, unknown>>(TRR_SHOWS_CACHE_NAMESPACE, cacheKey);
     if (cached) {
       return NextResponse.json(cached, { headers: { "x-trr-cache": "hit" } });
@@ -55,11 +78,7 @@ export async function GET(request: NextRequest) {
       cacheKey,
       async () => {
         const upstream = await fetchAdminBackendJson(
-          `/admin/trr-api/shows?${new URLSearchParams({
-            q: query,
-            limit: String(limit),
-            offset: String(offset),
-          }).toString()}`,
+          `/admin/trr-api/shows?${upstreamParams.toString()}`,
           {
             timeoutMs: ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
             routeName: "admin-shows",

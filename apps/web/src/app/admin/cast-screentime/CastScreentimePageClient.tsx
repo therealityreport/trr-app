@@ -2,12 +2,29 @@
 
 import Image from "next/image";
 import type { ReactNode } from "react";
-import { useSearchParams } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
 import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { buildAdminSectionBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
-import { fetchAdminWithAuth } from "@/lib/admin/client-auth";
+import { fetchAdminWithAuth as fetchAdminWithAuthBase } from "@/lib/admin/client-auth";
+import {
+  buildScreenalyticsRunPath,
+  buildScreenalyticsRunUrl,
+  isScreenalyticsRhobhS5E16TestPath,
+  SCREENALYTICS_CANONICAL_PATH,
+  SCREENALYTICS_RHOBH_S5_E16_TEST_DEFAULTS,
+  SCREENALYTICS_RHOBH_S5_E16_TEST_SEASON_ID,
+} from "@/lib/admin/screenalytics-routes";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 import { getAllowedReviewTransitions, getExecutionStatusLabel, getRunOverviewMessage } from "./run-state";
 
@@ -17,8 +34,14 @@ type MediaKind = string;
 type ImportMode = "youtube_url" | "external_url" | "social_youtube_row";
 type VideoClassFilter = "all" | VideoClass;
 
+const fetchAdminWithAuth: typeof fetchAdminWithAuthBase = (input, init, options) =>
+  fetchAdminWithAuthBase(input, init, { allowDevAdminBypass: true, ...options });
+
 type UploadSessionPayload = {
   upload_session_id: string;
+  status?: string;
+  error_text?: string | null;
+  promoted_video_asset_id?: string | null;
   put_url?: string;
   temp_object_key?: string;
   expires_at?: string;
@@ -28,6 +51,17 @@ type UploadSessionPayload = {
   media_kind?: string | null;
   video_class?: VideoClass;
   promo_subtype?: string | null;
+};
+
+type UploadSessionStatusPayload = UploadSessionPayload & {
+  video_asset?: VideoAssetPayload | null;
+};
+
+type ImportVideoAssetResponsePayload = {
+  upload_session_id: string;
+  queued?: boolean;
+  status?: string;
+  video_asset?: VideoAssetPayload | null;
 };
 
 type VideoAssetPayload = {
@@ -49,6 +83,76 @@ type VideoAssetPayload = {
   publication_mode?: string | null;
   is_canonical_publication?: boolean;
   supports_reference_publication?: boolean;
+  subtitle_summary?: SubtitleSummaryPayload | null;
+};
+
+type SubtitleExtractionStatus =
+  | "not_requested"
+  | "queued"
+  | "running"
+  | "complete"
+  | "partial"
+  | "unavailable"
+  | "failed";
+
+type SubtitleTrackPayload = {
+  id: string;
+  stream_index: number;
+  codec_name: string;
+  language?: string | null;
+  language_normalized?: string | null;
+  language_raw?: string | null;
+  title?: string | null;
+  is_default: boolean;
+  is_forced: boolean;
+  is_primary: boolean;
+  selection_status: string;
+  extraction_status: string;
+  cue_count?: number | null;
+  first_cue_start_ms?: number | null;
+  last_cue_end_ms?: number | null;
+  srt_size_bytes?: number | null;
+  srt_sha256?: string | null;
+  error?: string | null;
+};
+
+type SubtitleSummaryPayload = {
+  video_asset_id?: string;
+  status: SubtitleExtractionStatus;
+  error?: string | null;
+  attempts?: number;
+  requested_at?: string | null;
+  started_at?: string | null;
+  completed_at?: string | null;
+  discovered_track_count?: number;
+  eligible_track_count?: number;
+  completed_track_count?: number;
+  failed_track_count?: number;
+  primary_track_id?: string | null;
+  tracks?: SubtitleTrackPayload[];
+};
+
+type SubtitleCuePayload = {
+  ordinal: number;
+  start_ms: number;
+  end_ms: number;
+  text: string;
+  plain_text: string;
+};
+
+type SubtitleCuePagePayload = {
+  video_asset_id: string;
+  track_id: string;
+  offset: number;
+  limit: number;
+  total_cues: number;
+  matched_cues?: number;
+  items: SubtitleCuePayload[];
+};
+
+type SubtitleDownloadPayload = {
+  filename: string;
+  download_url: string;
 };
 
 type RunPayload = {
@@ -89,6 +193,7 @@ type CandidateScopePolicyPayload = {
   scope_order?: string[];
   fallback_scopes_used?: string[];
   preferred_facebank_coverage?: boolean;
+  strict_credit_scope?: boolean;
 };
 
 type CastCoverageSummaryPayload = {
@@ -197,7 +302,7 @@ type ShotEntry = {
   end_ms: number;
   duration_ms: number;
   observation_count: number;
-  assigned_person_ids: string[];
+  assigned_person_ids?: string[];
 };
 
 type SceneEntry = {
@@ -207,7 +312,7 @@ type SceneEntry = {
   duration_ms: number;
   shot_count: number;
   composition_type: string;
-  dominant_person_ids: string[];
+  dominant_person_ids?: string[];
   dominant_display_names?: Record<string, string>;
   unknown_segment_count: number;
   title_card_shot_count: number;
@@ -318,11 +423,47 @@ type ReviewSummaryPayload = {
   current_publish_version?: PublishVersionEntry | null;
 };
 
-const breadcrumbs = buildAdminSectionBreadcrumb("Cast Screen Time", "/admin/cast-screentime");
-const ownerScopeOptions: OwnerScope[] = ["season", "show", "episode"];
+const breadcrumbs = buildAdminSectionBreadcrumb("Screenalytics", SCREENALYTICS_CANONICAL_PATH);
 const videoClassFilters: VideoClassFilter[] = ["all", "episode", "trailer", "extras"];
 const importModes: ImportMode[] = ["youtube_url", "external_url", "social_youtube_row"];
 const decisionScopes: OwnerScope[] = ["episode", "season", "show"];
+const subtitleCuePageSize = 50;
+const subtitlePollingDelays = [2_000, 5_000, 15_000] as const;
+const subtitleAutoPollingMaxAttempts = 6;
+const screenalyticsKnownContext = {
+  show: {
+    id: SCREENALYTICS_RHOBH_S5_E16_TEST_DEFAULTS.show_id,
+    label: "Real Housewives of Beverly Hills",
+    shortLabel: "RHOBH",
+  },
+  season: {
+    id: SCREENALYTICS_RHOBH_S5_E16_TEST_SEASON_ID,
+    label: "Season 5",
+  },
+  episode: {
+    id: SCREENALYTICS_RHOBH_S5_E16_TEST_DEFAULTS.owner_id,
+    label: "Episode 16",
+  },
+} as const;
+
+const mediaKindOptions = [
+  { value: "screenalytics_test", label: "Screenalytics test" },
+  { value: "bonus_scene", label: "Bonus scene" },
+  { value: "after_show", label: "After show" },
+  { value: "clip", label: "Clip" },
+  { value: "extended_scene", label: "Extended scene" },
+] as const;
+
+function getScreenalyticsRunId(pathname: string | null, searchParams: URLSearchParams): string {
+  const segments = (pathname || "")
+    .split("/")
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+  if (segments.length === 3 && segments[0] === "screenalytics" && segments[1] === "runs") {
+    return segments[2] || "";
+  }
+  return String(searchParams.get("run_id") || searchParams.get("run") || "").trim();
+}
 
 function parseOwnerScope(value: string | null): OwnerScope | null {
   return value === "show" || value === "season" || value === "episode" ? value : null;
@@ -394,10 +535,87 @@ function formatMediaFilterLabel(value: VideoClassFilter): string {
   return "Extras";
 }
 
+function formatMediaKindLabel(value?: string | null): string {
+  const normalized = String(value || "").trim();
+  if (!normalized) return "No extra type";
+  return mediaKindOptions.find((option) => option.value === normalized)?.label ?? normalized.replaceAll("_", " ");
+}
+
+function normalizeSubtitleSummary(
+  payload: Partial<SubtitleSummaryPayload> | null | undefined,
+  videoAssetId: string,
+): SubtitleSummaryPayload {
+  const supportedStatuses: SubtitleExtractionStatus[] = [
+    "not_requested",
+    "queued",
+    "running",
+    "complete",
+    "partial",
+    "unavailable",
+    "failed",
+  ];
+  const status = supportedStatuses.includes(payload?.status as SubtitleExtractionStatus)
+    ? (payload?.status as SubtitleExtractionStatus)
+    : "not_requested";
+  return {
+    ...payload,
+    video_asset_id: payload?.video_asset_id || videoAssetId,
+    status,
+    tracks: Array.isArray(payload?.tracks) ? payload.tracks : [],
+  };
+}
+
+function formatSubtitleStatus(status?: SubtitleExtractionStatus | null): string {
+  if (status === "queued") return "Queued";
+  if (status === "running") return "Extracting";
+  if (status === "complete") return "Ready";
+  if (status === "partial") return "Partially extracted";
+  if (status === "unavailable") return "No English embedded subtitles";
+  if (status === "failed") return "Extraction failed";
+  return "Not extracted";
+}
+
+function formatSubtitleTimestamp(milliseconds?: number | null): string {
+  if (milliseconds == null || !Number.isFinite(milliseconds)) return "n/a";
+  const safeMilliseconds = Math.max(0, Math.floor(milliseconds));
+  const hours = Math.floor(safeMilliseconds / 3_600_000);
+  const minutes = Math.floor((safeMilliseconds % 3_600_000) / 60_000);
+  const seconds = Math.floor((safeMilliseconds % 60_000) / 1_000);
+  const millis = safeMilliseconds % 1_000;
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}.${String(millis).padStart(3, "0")}`;
+}
+
+function formatSubtitleBytes(bytes?: number | null): string {
+  if (bytes == null || !Number.isFinite(bytes)) return "n/a";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
+}
+
+function formatOwnerSelectionLabel(
+  ownerScope?: string | null,
+  ownerId?: string | null,
+  seasonId?: string | null,
+  episodeId?: string | null,
+): string {
+  const resolvedOwnerId = String(ownerId || episodeId || seasonId || "").trim();
+  if (!resolvedOwnerId) return "Not selected";
+  if (resolvedOwnerId === screenalyticsKnownContext.episode.id || episodeId === screenalyticsKnownContext.episode.id) {
+    return `${screenalyticsKnownContext.show.shortLabel} ${screenalyticsKnownContext.season.label} ${screenalyticsKnownContext.episode.label}`;
+  }
+  if (resolvedOwnerId === screenalyticsKnownContext.season.id || seasonId === screenalyticsKnownContext.season.id) {
+    return `${screenalyticsKnownContext.show.shortLabel} ${screenalyticsKnownContext.season.label}`;
+  }
+  if (resolvedOwnerId === screenalyticsKnownContext.show.id) {
+    return screenalyticsKnownContext.show.label;
+  }
+  return ownerScope ? `${ownerScope} selected` : "Selected";
+}
+
 function formatCoverageWarning(value: string): string {
   if (value === "no_candidate_cast_rows_found") return "No candidate cast rows were found for this asset scope.";
   if (value === "no_approved_facebank_coverage") return "None of the current candidates have approved facebank coverage yet.";
-  if (value === "episode_scope_required_fallback") return "Episode cast was too sparse, so season or show fallback candidates were added.";
+  if (value === "episode_scope_required_fallback") return "Legacy run widened episode scope; rerun to use strict credits.";
   if (value === "sparse_candidate_cast") return "Candidate cast is still sparse for this run.";
   return value.replaceAll("_", " ");
 }
@@ -422,6 +640,8 @@ async function parseResponse<T>(response: Response): Promise<T> {
   return data;
 }
 
+const wait = (ms: number): Promise<void> => new Promise((resolve) => window.setTimeout(resolve, ms));
+
 function Badge({
   children,
   tone = "neutral",
@@ -440,18 +660,59 @@ function Badge({
   return <span className={`inline-flex rounded-full border px-2 py-1 text-[11px] font-medium ${toneClass}`}>{children}</span>;
 }
 
+function DebugJsonBlock({ title, value }: { title: string; value: unknown }) {
+  if (value == null) return null;
+  return (
+    <section className="space-y-2">
+      <h3 className="text-sm font-semibold text-neutral-900">{title}</h3>
+      <pre className="max-h-80 overflow-auto rounded-lg bg-neutral-950 p-3 text-xs text-neutral-100">
+        {JSON.stringify(value, null, 2)}
+      </pre>
+    </section>
+  );
+}
+
 export default function CastScreentimePageClient() {
   const searchParams = useSearchParams();
+  const pathname = usePathname();
+  const router = useRouter();
+  const isTestExtraPath = isScreenalyticsRhobhS5E16TestPath(pathname);
+  const routeRunId = getScreenalyticsRunId(pathname, searchParams);
   const prefillContext = String(searchParams.get("prefill_context") || "").trim();
   const { checking, hasAccess } = useAdminGuard();
-  const [showId, setShowId] = useState(() => String(searchParams.get("show_id") || "").trim());
-  const [ownerScope, setOwnerScope] = useState<OwnerScope>(() => parseOwnerScope(searchParams.get("owner_scope")) ?? "season");
-  const [ownerId, setOwnerId] = useState(() => String(searchParams.get("owner_id") || "").trim());
+  const [showId, setShowId] = useState(() =>
+    String(
+      searchParams.get("show_id") ||
+        (isTestExtraPath ? SCREENALYTICS_RHOBH_S5_E16_TEST_DEFAULTS.show_id : ""),
+    ).trim(),
+  );
+  const [ownerScope, setOwnerScope] = useState<OwnerScope>(
+    () =>
+      parseOwnerScope(searchParams.get("owner_scope")) ??
+      (isTestExtraPath ? (SCREENALYTICS_RHOBH_S5_E16_TEST_DEFAULTS.owner_scope as OwnerScope) : "season"),
+  );
+  const [ownerId, setOwnerId] = useState(() =>
+    String(
+      searchParams.get("owner_id") ||
+        (isTestExtraPath ? SCREENALYTICS_RHOBH_S5_E16_TEST_DEFAULTS.owner_id : ""),
+    ).trim(),
+  );
+  const [selectedSeasonId, setSelectedSeasonId] = useState(() =>
+    String(
+      searchParams.get("season_id") ||
+        (parseOwnerScope(searchParams.get("owner_scope")) === "season" ? searchParams.get("owner_id") : "") ||
+        (isTestExtraPath ? screenalyticsKnownContext.season.id : ""),
+    ).trim(),
+  );
   const [videoClass, setVideoClass] = useState<VideoClass>(
-    () => parseVideoClass(searchParams.get("media_type") || searchParams.get("video_class")) ?? "trailer",
+    () =>
+      parseVideoClass(searchParams.get("media_type") || searchParams.get("video_class")) ??
+      (isTestExtraPath ? (SCREENALYTICS_RHOBH_S5_E16_TEST_DEFAULTS.media_type as VideoClass) : "trailer"),
   );
   const [promoSubtype, setPromoSubtype] = useState<MediaKind>(
-    () => parsePromoSubtype(searchParams.get("media_kind") || searchParams.get("promo_subtype")) ?? "",
+    () =>
+      parsePromoSubtype(searchParams.get("media_kind") || searchParams.get("promo_subtype")) ??
+      (isTestExtraPath ? SCREENALYTICS_RHOBH_S5_E16_TEST_DEFAULTS.media_kind : ""),
   );
   const [videoClassFilter, setVideoClassFilter] = useState<VideoClassFilter>(
     () => parseVideoClassFilter(searchParams.get("media_type_filter") || searchParams.get("video_class_filter")) ?? "all",
@@ -464,6 +725,7 @@ export default function CastScreentimePageClient() {
   );
   const [uploading, setUploading] = useState(false);
   const [importingAsset, setImportingAsset] = useState(false);
+  const [importStatus, setImportStatus] = useState<string | null>(null);
   const [launchingRun, setLaunchingRun] = useState(false);
   const [refreshingRun, setRefreshingRun] = useState(false);
   const [refreshingRuns, setRefreshingRuns] = useState(false);
@@ -502,8 +764,222 @@ export default function CastScreentimePageClient() {
   const [actingUnknownQueueKey, setActingUnknownQueueKey] = useState<string | null>(null);
   const [decisionRerunRequired, setDecisionRerunRequired] = useState(false);
   const [decisionEffectSummary, setDecisionEffectSummary] = useState<string | null>(null);
+  const [autoLoadedRunId, setAutoLoadedRunId] = useState<string | null>(null);
+  const [copiedRunLinkId, setCopiedRunLinkId] = useState<string | null>(null);
+  const [subtitleSummary, setSubtitleSummary] = useState<SubtitleSummaryPayload | null>(null);
+  const [subtitleLoading, setSubtitleLoading] = useState(false);
+  const [subtitleActionPending, setSubtitleActionPending] = useState(false);
+  const [subtitleError, setSubtitleError] = useState<string | null>(null);
+  const [selectedSubtitleTrackId, setSelectedSubtitleTrackId] = useState("");
+  const [subtitleCuePage, setSubtitleCuePage] = useState<SubtitleCuePagePayload | null>(null);
+  const [subtitleCueOffset, setSubtitleCueOffset] = useState(0);
+  const [subtitleSearchInput, setSubtitleSearchInput] = useState("");
+  const [subtitleSearchQuery, setSubtitleSearchQuery] = useState("");
+  const [subtitleCueLoading, setSubtitleCueLoading] = useState(false);
+  const [subtitleDownloadPending, setSubtitleDownloadPending] = useState(false);
+  const [subtitlePollVersion, setSubtitlePollVersion] = useState(0);
+  const [subtitleAutoPollingStopped, setSubtitleAutoPollingStopped] = useState(false);
+  const subtitleAutoPollingStoppedRef = useRef(false);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   const effectivePromoSubtype = videoClass === "episode" ? null : promoSubtype.trim() || null;
+  const selectedEpisodeId = ownerScope === "episode" ? ownerId.trim() : "";
+  const submissionOwnerScope: OwnerScope =
+    videoClass === "episode" || selectedEpisodeId ? "episode" : "season";
+  const submissionOwnerId = submissionOwnerScope === "episode" ? selectedEpisodeId : selectedSeasonId.trim();
+  const selectedScopeLabel = formatOwnerSelectionLabel(
+    submissionOwnerScope,
+    submissionOwnerId,
+    selectedSeasonId,
+    selectedEpisodeId,
+  );
+  const selectedMediaLabel =
+    videoClass === "episode" ? "Canonical episode" : formatMediaKindLabel(effectivePromoSubtype);
+  const visibleMediaKindOptions = mediaKindOptions.some((option) => option.value === promoSubtype)
+    ? mediaKindOptions
+    : promoSubtype.trim()
+      ? [...mediaKindOptions, { value: promoSubtype.trim(), label: formatMediaKindLabel(promoSubtype) }]
+      : mediaKindOptions;
+  const activeVideoAssetId = String(videoAsset?.id || run?.video_asset_id || "").trim();
+
+  useEffect(() => {
+    subtitleAutoPollingStoppedRef.current = false;
+    setSubtitleAutoPollingStopped(false);
+  }, [activeVideoAssetId]);
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      setSubtitleSearchQuery(subtitleSearchInput.trim());
+      setSubtitleCueOffset(0);
+    }, 300);
+    return () => window.clearTimeout(timeoutId);
+  }, [subtitleSearchInput]);
+
+  useEffect(() => {
+    let cancelled = false;
+    let timerId: number | undefined;
+
+    setSubtitleSummary(null);
+    setSelectedSubtitleTrackId("");
+    setSubtitleCuePage(null);
+    setSubtitleCueOffset(0);
+    setSubtitleSearchInput("");
+    setSubtitleSearchQuery("");
+    setSubtitleError(null);
+
+    if (!activeVideoAssetId || checking || !hasAccess) return undefined;
+
+    const loadSummary = async (pollAttempt: number) => {
+      setSubtitleLoading(true);
+      try {
+        const payload = await parseResponse<SubtitleSummaryPayload>(
+          await fetchAdminWithAuth(
+            `/api/admin/trr-api/cast-screentime/video-assets/${activeVideoAssetId}/subtitles`,
+          ),
+        );
+        if (cancelled) return;
+        const normalized = normalizeSubtitleSummary(payload, activeVideoAssetId);
+        setSubtitleSummary(normalized);
+        setSubtitleError(null);
+        const completedTracks = (normalized.tracks ?? []).filter(
+          (track) => track.extraction_status === "complete",
+        );
+        setSelectedSubtitleTrackId((current) => {
+          if (completedTracks.some((track) => track.id === current)) return current;
+          return (
+            completedTracks.find((track) => track.id === normalized.primary_track_id)?.id ||
+            completedTracks.find((track) => track.is_primary)?.id ||
+            completedTracks[0]?.id ||
+            ""
+          );
+        });
+        if (normalized.status === "queued" || normalized.status === "running") {
+          if (subtitleAutoPollingStoppedRef.current) return;
+          if (pollAttempt + 1 >= subtitleAutoPollingMaxAttempts) {
+            subtitleAutoPollingStoppedRef.current = true;
+            setSubtitleAutoPollingStopped(true);
+            return;
+          }
+          const delay = subtitlePollingDelays[Math.min(pollAttempt, subtitlePollingDelays.length - 1)];
+          timerId = window.setTimeout(() => void loadSummary(pollAttempt + 1), delay);
+        } else if (subtitleAutoPollingStoppedRef.current) {
+          subtitleAutoPollingStoppedRef.current = false;
+          setSubtitleAutoPollingStopped(false);
+        }
+      } catch (summaryError) {
+        if (!cancelled) {
+          setSubtitleError(
+            summaryError instanceof Error ? summaryError.message : "Subtitle status could not be loaded",
+          );
+        }
+      } finally {
+        if (!cancelled) setSubtitleLoading(false);
+      }
+    };
+
+    void loadSummary(0);
+    return () => {
+      cancelled = true;
+      if (timerId != null) window.clearTimeout(timerId);
+    };
+  }, [activeVideoAssetId, checking, hasAccess, subtitlePollVersion]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!activeVideoAssetId || !selectedSubtitleTrackId) {
+      setSubtitleCuePage(null);
+      return undefined;
+    }
+
+    const loadCues = async () => {
+      setSubtitleCueLoading(true);
+      try {
+        const query = new URLSearchParams({
+          offset: String(subtitleCueOffset),
+          limit: String(subtitleCuePageSize),
+        });
+        if (subtitleSearchQuery) query.set("q", subtitleSearchQuery);
+        const payload = await parseResponse<SubtitleCuePagePayload>(
+          await fetchAdminWithAuth(
+            `/api/admin/trr-api/cast-screentime/video-assets/${activeVideoAssetId}/subtitles/${selectedSubtitleTrackId}/cues?${query.toString()}`,
+          ),
+        );
+        if (!cancelled) {
+          setSubtitleCuePage({ ...payload, items: Array.isArray(payload.items) ? payload.items : [] });
+          setSubtitleError(null);
+        }
+      } catch (cueError) {
+        if (!cancelled) {
+          setSubtitleCuePage(null);
+          setSubtitleError(cueError instanceof Error ? cueError.message : "Subtitle cues could not be loaded");
+        }
+      } finally {
+        if (!cancelled) setSubtitleCueLoading(false);
+      }
+    };
+
+    void loadCues();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeVideoAssetId, selectedSubtitleTrackId, subtitleCueOffset, subtitleSearchQuery]);
+
+  const handleShowChange = (nextShowId: string) => {
+    setShowId(nextShowId);
+    if (nextShowId === screenalyticsKnownContext.show.id && !selectedSeasonId.trim()) {
+      setSelectedSeasonId(screenalyticsKnownContext.season.id);
+    }
+    if (!nextShowId.trim()) {
+      setSelectedSeasonId("");
+      setOwnerScope("season");
+      setOwnerId("");
+    }
+  };
+
+  const handleSeasonChange = (nextSeasonId: string) => {
+    setSelectedSeasonId(nextSeasonId);
+    if (!selectedEpisodeId) {
+      setOwnerScope("season");
+      setOwnerId(nextSeasonId);
+    }
+  };
+
+  const handleEpisodeChange = (nextEpisodeId: string) => {
+    if (nextEpisodeId) {
+      setOwnerScope("episode");
+      setOwnerId(nextEpisodeId);
+      return;
+    }
+    setOwnerScope("season");
+    setOwnerId(selectedSeasonId.trim());
+  };
+
+  const handleVideoClassChange = (nextVideoClass: VideoClass) => {
+    setVideoClass(nextVideoClass);
+    if (nextVideoClass === "episode") {
+      setPromoSubtype("");
+      setOwnerScope("episode");
+      setOwnerId(selectedEpisodeId || screenalyticsKnownContext.episode.id);
+      if (!selectedSeasonId.trim()) {
+        setSelectedSeasonId(screenalyticsKnownContext.season.id);
+      }
+      return;
+    }
+    if (!submissionOwnerId && selectedSeasonId.trim()) {
+      setOwnerScope("season");
+      setOwnerId(selectedSeasonId.trim());
+    }
+    if (!promoSubtype.trim() && nextVideoClass === "extras") {
+      setPromoSubtype(isTestExtraPath ? SCREENALYTICS_RHOBH_S5_E16_TEST_DEFAULTS.media_kind : "bonus_scene");
+    }
+  };
 
   const resetRunOutputs = () => {
     setRun(null);
@@ -537,6 +1013,16 @@ export default function CastScreentimePageClient() {
     if (resolvedShowId) {
       setShowId(resolvedShowId);
     }
+    const resolvedSeasonId = String(asset?.season_id || nextRun?.season_id || "").trim();
+    if (resolvedSeasonId) {
+      setSelectedSeasonId(resolvedSeasonId);
+    }
+    const resolvedOwnerScope = parseOwnerScope(String(asset?.owner_scope || nextRun?.owner_scope || "").trim());
+    const resolvedOwnerId = String(asset?.owner_id || nextRun?.owner_id || "").trim();
+    if (resolvedOwnerScope && resolvedOwnerId) {
+      setOwnerScope(resolvedOwnerScope);
+      setOwnerId(resolvedOwnerId);
+    }
   };
 
   const refreshRecentRuns = async (forcedShowId?: string) => {
@@ -557,9 +1043,51 @@ export default function CastScreentimePageClient() {
     }
   };
 
+  const applyImportedVideoAsset = async (asset: VideoAssetPayload) => {
+    setVideoAsset(asset);
+    syncShowContext(asset, null);
+    resetRunOutputs();
+    await refreshRecentRuns(asset.show_id || undefined);
+  };
+
+  const pollImportedUploadSession = async (uploadSessionId: string): Promise<VideoAssetPayload> => {
+    for (let attempt = 0; attempt < 60; attempt += 1) {
+      if (!mountedRef.current) {
+        throw new Error("Import polling stopped");
+      }
+      const payload = await parseResponse<UploadSessionStatusPayload>(
+        await fetchAdminWithAuth(`/api/admin/trr-api/cast-screentime/upload-sessions/${uploadSessionId}`),
+      );
+      if (!mountedRef.current) {
+        throw new Error("Import polling stopped");
+      }
+      setLatestUpload((current) => ({ ...(current || { upload_session_id: uploadSessionId }), ...payload }));
+      if (payload.status === "failed") {
+        throw new Error(payload.error_text || "Import failed");
+      }
+      if (payload.status === "promoted") {
+        if (payload.video_asset) {
+          return payload.video_asset;
+        }
+        throw new Error("Import finished without a video asset");
+      }
+      setImportStatus("Importing remote video...");
+      await wait(2000);
+    }
+    throw new Error("Import timed out");
+  };
+
   const uploadVideo = async () => {
-    if (!ownerId.trim()) {
-      setError("Owner ID is required");
+    if (!showId.trim()) {
+      setError("Choose a show first");
+      return;
+    }
+    if (!selectedSeasonId.trim()) {
+      setError("Choose a season first");
+      return;
+    }
+    if (!submissionOwnerId) {
+      setError(videoClass === "episode" ? "Choose an episode first" : "Choose a season or episode first");
       return;
     }
     if (!selectedFile) {
@@ -575,8 +1103,8 @@ export default function CastScreentimePageClient() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            owner_scope: videoClass === "episode" ? "episode" : ownerScope,
-            owner_id: ownerId.trim(),
+            owner_scope: submissionOwnerScope,
+            owner_id: submissionOwnerId,
             filename: selectedFile.name,
             content_type: selectedFile.type || "video/mp4",
             expected_size_bytes: selectedFile.size,
@@ -618,8 +1146,16 @@ export default function CastScreentimePageClient() {
   };
 
   const importVideoAsset = async () => {
-    if (!ownerId.trim()) {
-      setError("Owner ID is required");
+    if (!showId.trim()) {
+      setError("Choose a show first");
+      return;
+    }
+    if (!selectedSeasonId.trim()) {
+      setError("Choose a season first");
+      return;
+    }
+    if (!submissionOwnerId) {
+      setError(videoClass === "episode" ? "Choose an episode first" : "Choose a season or episode first");
       return;
     }
     if (importMode === "social_youtube_row" && !socialYoutubeVideoId.trim()) {
@@ -633,8 +1169,9 @@ export default function CastScreentimePageClient() {
 
     setError(null);
     setImportingAsset(true);
+    setImportStatus(null);
     try {
-      const payload = await parseResponse<{ upload_session_id: string; video_asset: VideoAssetPayload }>(
+      const payload = await parseResponse<ImportVideoAssetResponsePayload>(
         await fetchAdminWithAuth("/api/admin/trr-api/cast-screentime/video-assets/import", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -642,8 +1179,8 @@ export default function CastScreentimePageClient() {
             source_mode: importMode,
             source_url: importMode === "social_youtube_row" ? undefined : remoteSource.trim(),
             social_youtube_video_id: importMode === "social_youtube_row" ? socialYoutubeVideoId.trim() : undefined,
-            owner_scope: videoClass === "episode" ? "episode" : ownerScope,
-            owner_id: ownerId.trim(),
+            owner_scope: submissionOwnerScope,
+            owner_id: submissionOwnerId,
             media_type: videoClass,
             media_kind: effectivePromoSubtype,
           }),
@@ -651,19 +1188,80 @@ export default function CastScreentimePageClient() {
       );
       setLatestUpload({
         upload_session_id: payload.upload_session_id,
-        owner_scope: videoClass === "episode" ? "episode" : ownerScope,
-        owner_id: ownerId.trim(),
+        status: payload.status,
+        owner_scope: submissionOwnerScope,
+        owner_id: submissionOwnerId,
         media_type: videoClass,
         media_kind: effectivePromoSubtype,
       });
-      setVideoAsset(payload.video_asset);
-      syncShowContext(payload.video_asset, null);
-      resetRunOutputs();
-      await refreshRecentRuns(payload.video_asset.show_id || undefined);
+      if (payload.video_asset) {
+        await applyImportedVideoAsset(payload.video_asset);
+        setImportStatus(null);
+        return;
+      }
+      setImportStatus(payload.queued ? "Import queued..." : "Importing remote video...");
+      const promotedAsset = await pollImportedUploadSession(payload.upload_session_id);
+      await applyImportedVideoAsset(promotedAsset);
+      setImportStatus(null);
     } catch (importError) {
       setError(importError instanceof Error ? importError.message : "Import failed");
     } finally {
       setImportingAsset(false);
+    }
+  };
+
+  const requestSubtitleExtraction = async (force: boolean) => {
+    if (!activeVideoAssetId) return;
+    if (force && !window.confirm("Re-extract source subtitles and replace the active revision when it succeeds?")) {
+      return;
+    }
+    setSubtitleActionPending(true);
+    setSubtitleError(null);
+    try {
+      const payload = await parseResponse<Partial<SubtitleSummaryPayload>>(
+        await fetchAdminWithAuth(
+          `/api/admin/trr-api/cast-screentime/video-assets/${activeVideoAssetId}/subtitles/extract`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ force }),
+          },
+        ),
+      );
+      setSubtitleSummary((current) =>
+        normalizeSubtitleSummary({ ...(current ?? {}), ...payload }, activeVideoAssetId),
+      );
+      subtitleAutoPollingStoppedRef.current = false;
+      setSubtitleAutoPollingStopped(false);
+      setSubtitlePollVersion((current) => current + 1);
+    } catch (actionError) {
+      setSubtitleError(actionError instanceof Error ? actionError.message : "Subtitle extraction could not be queued");
+    } finally {
+      setSubtitleActionPending(false);
+    }
+  };
+
+  const downloadSubtitleTrack = async () => {
+    if (!activeVideoAssetId || !selectedSubtitleTrackId) return;
+    setSubtitleDownloadPending(true);
+    setSubtitleError(null);
+    try {
+      const payload = await parseResponse<SubtitleDownloadPayload>(
+        await fetchAdminWithAuth(
+          `/api/admin/trr-api/cast-screentime/video-assets/${activeVideoAssetId}/subtitles/${selectedSubtitleTrackId}/download-url`,
+        ),
+      );
+      const anchor = document.createElement("a");
+      anchor.href = payload.download_url;
+      anchor.download = payload.filename;
+      anchor.rel = "noopener noreferrer";
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+    } catch (downloadError) {
+      setSubtitleError(downloadError instanceof Error ? downloadError.message : "Subtitle download could not start");
+    } finally {
+      setSubtitleDownloadPending(false);
     }
   };
 
@@ -688,6 +1286,7 @@ export default function CastScreentimePageClient() {
       setRun(response.run);
       syncShowContext(videoAsset, response.run);
       await refreshRun(response.run.id, response.run.show_id || videoAsset.show_id || undefined);
+      router.push(buildScreenalyticsRunPath(response.run.id));
       if (response.dispatch_state === "dispatch_failed") {
         setError(response.run.error_message || "Run dispatch failed");
       }
@@ -732,6 +1331,7 @@ export default function CastScreentimePageClient() {
       const excludedPayload = await parseResponse<{ excluded_sections: ExcludedSectionEntry[] }>(excludedResponse);
       const reviewSummaryPayload = await parseResponse<ReviewSummaryPayload>(reviewSummaryResponse);
       setRun(runPayload);
+      syncShowContext(null, runPayload);
       if (runPayload.owner_scope) {
         setDecisionScope(runPayload.owner_scope);
       }
@@ -943,7 +1543,7 @@ export default function CastScreentimePageClient() {
 
   const reconcileStaleRuns = async () => {
     if (!showId.trim()) {
-      setError("Show ID is required to reconcile stale runs");
+      setError("Choose a show to reconcile stale runs");
       return;
     }
     setError(null);
@@ -970,8 +1570,36 @@ export default function CastScreentimePageClient() {
   };
 
   const loadRecentRun = async (runId: string) => {
+    const canonicalPath = buildScreenalyticsRunPath(runId);
+    if (pathname !== canonicalPath) {
+      router.push(canonicalPath);
+    }
     await refreshRun(runId);
   };
+
+  const copyRunLink = async (runId: string) => {
+    try {
+      const clipboard = navigator.clipboard;
+      if (!clipboard || typeof clipboard.writeText !== "function") {
+        throw new Error("Clipboard access is not available in this browser.");
+      }
+      await clipboard.writeText(buildScreenalyticsRunUrl(runId));
+      if (!mountedRef.current) return;
+      setCopiedRunLinkId(runId);
+      window.setTimeout(() => {
+        if (!mountedRef.current) return;
+        setCopiedRunLinkId((current) => (current === runId ? null : current));
+      }, 1800);
+    } catch (copyError) {
+      setError(copyError instanceof Error ? copyError.message : "Failed to copy run link.");
+    }
+  };
+
+  useEffect(() => {
+    if (!routeRunId || checking || !hasAccess || autoLoadedRunId === routeRunId) return;
+    setAutoLoadedRunId(routeRunId);
+    void refreshRun(routeRunId);
+  }, [autoLoadedRunId, checking, hasAccess, routeRunId]);
 
   if (checking) {
     return (
@@ -1016,90 +1644,207 @@ export default function CastScreentimePageClient() {
       latestUnknownDecisionByGroup.set(key, entry);
     }
   });
+  const debugDetailsAvailable = Boolean(latestUpload || videoAsset || run);
+  const hasRunReviewArtifacts = Boolean(
+    progress ||
+      cacheMetrics ||
+      flashbackMatches.length > 0 ||
+      titleCardMatches.length > 0 ||
+      shots.length > 0 ||
+      scenes.length > 0 ||
+      titleCardCandidates.length > 0 ||
+      titleCardReferences.length > 0 ||
+      confessionalCandidates.length > 0,
+  );
+  const hasFrameOrFaceArtifacts = Boolean(
+    shots.length > 0 ||
+      scenes.length > 0 ||
+      titleCardCandidates.length > 0 ||
+      titleCardReferences.length > 0 ||
+      confessionalCandidates.length > 0,
+  );
+  const candidateScopePolicy = run?.candidate_scope_policy_json ?? null;
+  const candidateScopeLabel =
+    candidateScopePolicy?.primary_scope || candidateScopePolicy?.owner_scope || run?.owner_scope || "selected";
+  const strictCandidateScope = candidateScopePolicy?.strict_credit_scope === true;
+  const fallbackScopesUsed = run?.cast_coverage_summary_json?.fallback_scopes_used ?? [];
+  const completedSubtitleTracks = (subtitleSummary?.tracks ?? []).filter(
+    (track) => track.extraction_status === "complete",
+  );
+  const selectedSubtitleTrack =
+    completedSubtitleTracks.find((track) => track.id === selectedSubtitleTrackId) ?? null;
+  const subtitleResultCount = subtitleCuePage
+    ? subtitleSearchQuery
+      ? (subtitleCuePage.matched_cues ?? subtitleCuePage.items.length)
+      : subtitleCuePage.total_cues
+    : 0;
+  const subtitleHasPreviousPage = subtitleCueOffset > 0;
+  const subtitleHasNextPage = subtitleCueOffset + subtitleCuePageSize < subtitleResultCount;
 
   return (
     <AdminGlobalHeader bodyClassName="px-6 py-6">
       <div className="mx-auto flex max-w-6xl flex-col gap-6">
         <div>
           <AdminBreadcrumbs items={breadcrumbs} className="mb-2" />
-          <h1 className="text-2xl font-semibold text-neutral-900">Cast Screen-Time</h1>
+          <h1 className="text-2xl font-semibold text-neutral-900">Screenalytics Workspace</h1>
           <p className="mt-1 text-sm text-neutral-600">
-            Admin workflow for episode, trailer, and extras screen-time analysis, including official YouTube trailers, external mirrors, and existing social YouTube rows.
+            Prepare a video asset, run cast screen-time analysis, then review frames, faces, exclusions, and publishable totals from one admin surface.
           </p>
           {prefillContext === "social_week_youtube" ? (
             <p className="mt-2 inline-flex rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-medium text-amber-900">
               Prefilled from a social-week YouTube post. Review owner and source URL, then import the trailer into cast screentime.
             </p>
           ) : null}
+          {isTestExtraPath || prefillContext === "screenalytics_test_extra" ? (
+            <p className="mt-2 inline-flex rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-xs font-medium text-sky-900">
+              Prefilled for RHOBH S5 E16 extras screenalytics test.
+            </p>
+          ) : null}
         </div>
 
         <section className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm">
-          <div className="grid gap-4 lg:grid-cols-[1.4fr,1fr]">
-            <div className="grid gap-4 md:grid-cols-3">
-              <label className="flex flex-col gap-2 text-sm font-medium text-neutral-700">
-                Owner Scope
-                <select
-                  value={ownerScope}
-                  onChange={(event) => setOwnerScope(event.target.value as OwnerScope)}
-                  className="rounded-xl border border-neutral-300 px-3 py-2 text-sm text-neutral-900"
-                >
-                  {ownerScopeOptions.map((option) => (
-                    <option key={option} value={option}>
-                      {option}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="flex flex-col gap-2 text-sm font-medium text-neutral-700 md:col-span-2">
-                Owner ID
-                <input
-                  value={ownerId}
-                  onChange={(event) => setOwnerId(event.target.value)}
-                  placeholder={`UUID for core.${ownerScope}s.id`}
-                  className="rounded-xl border border-neutral-300 px-3 py-2 text-sm text-neutral-900"
-                />
-              </label>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="text-base font-semibold text-neutral-900">Analysis Setup</h2>
+              <p className="mt-1 text-sm text-neutral-600">
+                Choose the show and season first. Add an episode when the video belongs to one episode; leave it season-level for trailers or extras that span multiple episodes.
+              </p>
             </div>
-            <div className="grid gap-4 md:grid-cols-2">
-              <label className="flex flex-col gap-2 text-sm font-medium text-neutral-700">
-                Asset Type
-                <select
-                  value={videoClass}
-                  onChange={(event) => setVideoClass(event.target.value as VideoClass)}
-                  className="rounded-xl border border-neutral-300 px-3 py-2 text-sm text-neutral-900"
-                >
-                  <option value="episode">Episode</option>
-                  <option value="trailer">Trailer</option>
-                  <option value="extras">Extras</option>
-                </select>
-              </label>
-              <label className="flex flex-col gap-2 text-sm font-medium text-neutral-700">
-                Media Kind
-                <input
-                  value={promoSubtype}
-                  onChange={(event) => setPromoSubtype(event.target.value)}
-                  disabled={videoClass === "episode"}
-                  placeholder={videoClass === "extras" ? "after_show, clip, bonus_scene..." : "optional"}
-                  className="rounded-xl border border-neutral-300 px-3 py-2 text-sm text-neutral-900 disabled:bg-neutral-100"
-                />
-              </label>
+            <div className="flex flex-wrap gap-2">
+              <Badge tone={videoClass === "episode" ? "sky" : "amber"}>
+                {formatVideoClass(videoClass, effectivePromoSubtype)}
+              </Badge>
+              {videoClass === "episode" ? <Badge tone="emerald">Canonical episode</Badge> : <Badge tone="amber">Internal reference</Badge>}
             </div>
           </div>
-          <div className="mt-4 flex flex-wrap gap-2">
-            <Badge tone={videoClass === "episode" ? "sky" : "amber"}>
-              {formatVideoClass(videoClass, effectivePromoSubtype)}
-            </Badge>
-            <Badge tone="neutral">
-              Default owner linkage: {videoClass === "episode" ? "episode required" : ownerScope}
-            </Badge>
-            {videoClass === "episode" ? <Badge tone="emerald">Publishable lane</Badge> : <Badge tone="amber">Internal-reference lane</Badge>}
+
+          <div className="mt-5 grid gap-4 lg:grid-cols-[1fr,1fr,0.95fr]">
+            <label className="flex flex-col gap-2 text-sm font-medium text-neutral-700">
+              Show
+              <select
+                aria-label="Show"
+                value={showId}
+                onChange={(event) => handleShowChange(event.target.value)}
+                className="rounded-xl border border-neutral-300 px-3 py-2 text-sm text-neutral-900"
+              >
+                <option value="">Choose show</option>
+                <option value={screenalyticsKnownContext.show.id}>{screenalyticsKnownContext.show.label}</option>
+                {showId && showId !== screenalyticsKnownContext.show.id ? <option value={showId}>Current show</option> : null}
+              </select>
+            </label>
+
+            <label className="flex flex-col gap-2 text-sm font-medium text-neutral-700">
+              Season
+              <select
+                aria-label="Season"
+                value={selectedSeasonId}
+                onChange={(event) => handleSeasonChange(event.target.value)}
+                className="rounded-xl border border-neutral-300 px-3 py-2 text-sm text-neutral-900"
+              >
+                <option value="">Choose season</option>
+                <option value={screenalyticsKnownContext.season.id}>{screenalyticsKnownContext.season.label}</option>
+                {selectedSeasonId && selectedSeasonId !== screenalyticsKnownContext.season.id ? (
+                  <option value={selectedSeasonId}>Current season</option>
+                ) : null}
+              </select>
+            </label>
+
+            <label className="flex flex-col gap-2 text-sm font-medium text-neutral-700">
+              Episode
+              <select
+                aria-label="Episode"
+                value={selectedEpisodeId}
+                onChange={(event) => handleEpisodeChange(event.target.value)}
+                className="rounded-xl border border-neutral-300 px-3 py-2 text-sm text-neutral-900"
+              >
+                <option value="">Season-level or multiple episodes</option>
+                <option value={screenalyticsKnownContext.episode.id}>{screenalyticsKnownContext.episode.label}</option>
+                {selectedEpisodeId && selectedEpisodeId !== screenalyticsKnownContext.episode.id ? (
+                  <option value={selectedEpisodeId}>Current episode</option>
+                ) : null}
+              </select>
+              <span className="text-xs font-normal text-neutral-500">
+                Optional for trailers and extras. Required only for canonical episode assets.
+              </span>
+            </label>
           </div>
+
+          <div className="mt-5 grid gap-4 md:grid-cols-2">
+            <label className="flex flex-col gap-2 text-sm font-medium text-neutral-700">
+              Asset Type
+              <select
+                aria-label="Asset Type"
+                value={videoClass}
+                onChange={(event) => handleVideoClassChange(event.target.value as VideoClass)}
+                className="rounded-xl border border-neutral-300 px-3 py-2 text-sm text-neutral-900"
+              >
+                <option value="episode">Episode</option>
+                <option value="trailer">Trailer</option>
+                <option value="extras">Extras</option>
+              </select>
+            </label>
+
+            <label className="flex flex-col gap-2 text-sm font-medium text-neutral-700">
+              {videoClass === "extras" ? "Extra Type" : videoClass === "trailer" ? "Trailer Type" : "Media Type"}
+              <select
+                aria-label="Content Type"
+                value={videoClass === "episode" ? "" : promoSubtype}
+                onChange={(event) => setPromoSubtype(event.target.value)}
+                disabled={videoClass === "episode"}
+                className="rounded-xl border border-neutral-300 px-3 py-2 text-sm text-neutral-900 disabled:bg-neutral-100"
+              >
+                <option value="">No subtype</option>
+                {visibleMediaKindOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          <div className="mt-4 grid gap-3 rounded-xl bg-neutral-50 p-3 sm:grid-cols-3">
+            <div>
+              <p className="text-[11px] uppercase tracking-wide text-neutral-500">Context</p>
+              <p className="mt-1 text-sm font-medium text-neutral-900">{selectedScopeLabel}</p>
+            </div>
+            <div>
+              <p className="text-[11px] uppercase tracking-wide text-neutral-500">Video class</p>
+              <p className="mt-1 text-sm font-medium text-neutral-900">{formatVideoClass(videoClass, effectivePromoSubtype)}</p>
+            </div>
+            <div>
+              <p className="text-[11px] uppercase tracking-wide text-neutral-500">Label</p>
+              <p className="mt-1 text-sm font-medium text-neutral-900">{selectedMediaLabel}</p>
+            </div>
+          </div>
+
+          <details className="mt-3 rounded-xl border border-neutral-200 px-3 py-2 text-sm text-neutral-600">
+            <summary className="cursor-pointer font-medium text-neutral-800">Technical routing</summary>
+            <div className="mt-2 grid gap-2 text-xs sm:grid-cols-3">
+              <div>
+                <span className="text-neutral-500">Owner scope</span>
+                <div className="font-mono text-neutral-900">{submissionOwnerScope}</div>
+              </div>
+              <div>
+                <span className="text-neutral-500">Owner ID</span>
+                <div className="truncate font-mono text-neutral-900">{submissionOwnerId || "not selected"}</div>
+              </div>
+              <div>
+                <span className="text-neutral-500">Media key</span>
+                <div className="font-mono text-neutral-900">{effectivePromoSubtype || "none"}</div>
+              </div>
+            </div>
+          </details>
+
           {error ? <p className="mt-4 text-sm text-red-600">{error}</p> : null}
         </section>
 
         <section className="grid gap-6 xl:grid-cols-2">
           <div className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm">
-            <h2 className="text-base font-semibold text-neutral-900">Direct Upload</h2>
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="text-base font-semibold text-neutral-900">Direct Upload</h2>
+              <Badge tone="neutral">Source video</Badge>
+            </div>
             <p className="mt-1 text-sm text-neutral-600">
               Upload a local video directly to R2, verify it, and promote it into a cast-screentime video asset.
             </p>
@@ -1130,7 +1875,10 @@ export default function CastScreentimePageClient() {
           </div>
 
           <div className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm">
-            <h2 className="text-base font-semibold text-neutral-900">Remote Import</h2>
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="text-base font-semibold text-neutral-900">Remote Import</h2>
+              <Badge tone="neutral">Source video</Badge>
+            </div>
             <p className="mt-1 text-sm text-neutral-600">
               Mirror an official YouTube trailer, another explicit external video URL, or an existing social YouTube row into TRR storage first.
             </p>
@@ -1190,6 +1938,7 @@ export default function CastScreentimePageClient() {
               </button>
               <Badge tone="amber">YouTube imports must match an official configured channel</Badge>
             </div>
+            {importStatus ? <p className="mt-3 text-sm text-neutral-600">{importStatus}</p> : null}
           </div>
         </section>
 
@@ -1203,14 +1952,31 @@ export default function CastScreentimePageClient() {
                 </Badge>
               ) : null}
             </div>
-            <pre className="mt-3 overflow-x-auto rounded-xl bg-neutral-950 p-4 text-xs text-neutral-100">
-              {JSON.stringify(latestUpload, null, 2)}
-            </pre>
+            {latestUpload ? (
+              <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                <div className="rounded-xl bg-neutral-50 px-3 py-2">
+                  <p className="text-[11px] uppercase tracking-wide text-neutral-500">Session</p>
+                  <p className="mt-1 truncate font-mono text-xs font-medium text-neutral-900">{latestUpload.upload_session_id}</p>
+                </div>
+                <div className="rounded-xl bg-neutral-50 px-3 py-2">
+                  <p className="text-[11px] uppercase tracking-wide text-neutral-500">Context</p>
+                  <p className="mt-1 text-sm font-medium text-neutral-900">
+                    {formatOwnerSelectionLabel(latestUpload.owner_scope, latestUpload.owner_id)}
+                  </p>
+                </div>
+                <div className="rounded-xl bg-neutral-50 px-3 py-2">
+                  <p className="text-[11px] uppercase tracking-wide text-neutral-500">Expires</p>
+                  <p className="mt-1 text-sm font-medium text-neutral-900">{latestUpload.expires_at || "n/a"}</p>
+                </div>
+              </div>
+            ) : (
+              <p className="mt-3 text-sm text-neutral-500">No upload session has been created in this browser session.</p>
+            )}
           </div>
 
           <div className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm">
             <div className="flex flex-wrap items-center gap-2">
-              <h2 className="text-base font-semibold text-neutral-900">Current Video Asset</h2>
+              <h2 className="text-base font-semibold text-neutral-900">Run Control</h2>
               {videoAsset ? (
                 <>
                   <Badge tone={resolveMediaType(videoAsset) === "episode" ? "sky" : "amber"}>
@@ -1224,24 +1990,27 @@ export default function CastScreentimePageClient() {
             {videoAsset ? (
               <div className="mt-4 grid gap-3 sm:grid-cols-3">
                 <div className="rounded-xl bg-neutral-50 px-3 py-2">
-                  <p className="text-[11px] uppercase tracking-wide text-neutral-500">Owner</p>
+                  <p className="text-[11px] uppercase tracking-wide text-neutral-500">Context</p>
                   <p className="mt-1 text-sm font-medium text-neutral-900">
-                    {videoAsset.owner_scope || "n/a"} {videoAsset.owner_id || ""}
+                    {formatOwnerSelectionLabel(videoAsset.owner_scope, videoAsset.owner_id, videoAsset.season_id, videoAsset.episode_id)}
                   </p>
                 </div>
                 <div className="rounded-xl bg-neutral-50 px-3 py-2">
                   <p className="text-[11px] uppercase tracking-wide text-neutral-500">Show</p>
-                  <p className="mt-1 text-sm font-medium text-neutral-900">{videoAsset.show_id || "n/a"}</p>
+                  <p className="mt-1 text-sm font-medium text-neutral-900">
+                    {videoAsset.show_id === screenalyticsKnownContext.show.id ? screenalyticsKnownContext.show.label : videoAsset.show_id || "n/a"}
+                  </p>
                 </div>
                 <div className="rounded-xl bg-neutral-50 px-3 py-2">
                   <p className="text-[11px] uppercase tracking-wide text-neutral-500">Import Type</p>
                   <p className="mt-1 text-sm font-medium text-neutral-900">{formatImportType(videoAsset.source_import_type)}</p>
                 </div>
               </div>
-            ) : null}
-            <pre className="mt-3 overflow-x-auto rounded-xl bg-neutral-950 p-4 text-xs text-neutral-100">
-              {JSON.stringify(videoAsset, null, 2)}
-            </pre>
+            ) : importStatus ? (
+              <p className="mt-3 text-sm text-neutral-500">{importStatus}</p>
+            ) : (
+              <p className="mt-3 text-sm text-neutral-500">Create or import a video asset before launching a run.</p>
+            )}
             <div className="mt-4 flex flex-wrap gap-3">
               <button
                 type="button"
@@ -1263,6 +2032,288 @@ export default function CastScreentimePageClient() {
           </div>
         </section>
 
+        <section className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm" aria-labelledby="source-subtitles-heading">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 id="source-subtitles-heading" className="text-base font-semibold text-neutral-900">
+                  Source Subtitles
+                </h2>
+                {activeVideoAssetId ? (
+                  <Badge
+                    tone={
+                      subtitleSummary?.status === "complete"
+                        ? "sky"
+                        : subtitleSummary?.status === "failed" || subtitleSummary?.status === "partial"
+                          ? "amber"
+                          : "neutral"
+                    }
+                  >
+                    {subtitleLoading && !subtitleSummary
+                      ? "Loading"
+                      : formatSubtitleStatus(subtitleSummary?.status)}
+                  </Badge>
+                ) : null}
+              </div>
+              <p className="mt-1 text-sm text-neutral-600">
+                Preserve embedded English captions as the source reference for transcript review.
+              </p>
+            </div>
+            {activeVideoAssetId ? (
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSubtitlePollVersion((current) => current + 1)}
+                  disabled={subtitleLoading}
+                  className="rounded-xl border border-neutral-300 px-3 py-2 text-sm font-medium text-neutral-900 disabled:opacity-60"
+                >
+                  {subtitleLoading ? "Refreshing…" : "Refresh"}
+                </button>
+                {subtitleSummary?.status === "not_requested" || !subtitleSummary ? (
+                  <button
+                    type="button"
+                    onClick={() => void requestSubtitleExtraction(false)}
+                    disabled={subtitleActionPending}
+                    className="rounded-xl bg-neutral-900 px-3 py-2 text-sm font-medium text-white disabled:opacity-60"
+                  >
+                    {subtitleActionPending ? "Queuing…" : "Extract Subtitles"}
+                  </button>
+                ) : subtitleSummary.status === "failed" ||
+                  subtitleSummary.status === "partial" ||
+                  subtitleSummary.status === "unavailable" ? (
+                  <button
+                    type="button"
+                    onClick={() => void requestSubtitleExtraction(false)}
+                    disabled={subtitleActionPending}
+                    className="rounded-xl bg-neutral-900 px-3 py-2 text-sm font-medium text-white disabled:opacity-60"
+                  >
+                    {subtitleActionPending ? "Queuing…" : "Retry Extraction"}
+                  </button>
+                ) : subtitleSummary.status === "complete" ? (
+                  <button
+                    type="button"
+                    onClick={() => void requestSubtitleExtraction(true)}
+                    disabled={subtitleActionPending}
+                    className="rounded-xl border border-neutral-300 px-3 py-2 text-sm font-medium text-neutral-900 disabled:opacity-60"
+                  >
+                    {subtitleActionPending ? "Queuing…" : "Re-extract"}
+                  </button>
+                ) : subtitleSummary.status === "queued" || subtitleSummary.status === "running" ? (
+                  <button
+                    type="button"
+                    onClick={() => void requestSubtitleExtraction(true)}
+                    disabled={subtitleActionPending}
+                    className="rounded-xl border border-amber-300 px-3 py-2 text-sm font-medium text-amber-900 disabled:opacity-60"
+                  >
+                    {subtitleActionPending ? "Queuing…" : "Restart extraction"}
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+
+          {!activeVideoAssetId ? (
+            <p className="mt-4 text-sm text-neutral-500">
+              Create, import, or load a video asset to inspect its embedded subtitle tracks.
+            </p>
+          ) : null}
+
+          {activeVideoAssetId && subtitleSummary ? (
+            <div className="mt-4 grid gap-3 sm:grid-cols-4">
+              <div className="rounded-xl bg-neutral-50 px-3 py-2">
+                <p className="text-[11px] uppercase tracking-wide text-neutral-500">Discovered</p>
+                <p className="mt-1 text-sm font-medium text-neutral-900">
+                  {subtitleSummary.discovered_track_count ?? subtitleSummary.tracks?.length ?? 0} tracks
+                </p>
+              </div>
+              <div className="rounded-xl bg-neutral-50 px-3 py-2">
+                <p className="text-[11px] uppercase tracking-wide text-neutral-500">English</p>
+                <p className="mt-1 text-sm font-medium text-neutral-900">
+                  {subtitleSummary.eligible_track_count ?? 0} eligible
+                </p>
+              </div>
+              <div className="rounded-xl bg-neutral-50 px-3 py-2">
+                <p className="text-[11px] uppercase tracking-wide text-neutral-500">Extracted</p>
+                <p className="mt-1 text-sm font-medium text-neutral-900">
+                  {subtitleSummary.completed_track_count ?? completedSubtitleTracks.length} complete
+                </p>
+              </div>
+              <div className="rounded-xl bg-neutral-50 px-3 py-2">
+                <p className="text-[11px] uppercase tracking-wide text-neutral-500">Attempts</p>
+                <p className="mt-1 text-sm font-medium text-neutral-900">{subtitleSummary.attempts ?? 0}</p>
+              </div>
+            </div>
+          ) : null}
+
+          {subtitleSummary?.status === "queued" || subtitleSummary?.status === "running" ? (
+            <p className="mt-4 text-sm text-neutral-600" role="status">
+              {subtitleAutoPollingStopped
+                ? `Subtitle extraction is still running. Automatic refresh paused after ${subtitleAutoPollingMaxAttempts} checks; use Refresh to check again.`
+                : "Subtitle extraction is running in the background. This video remains available for analysis."}
+            </p>
+          ) : null}
+          {subtitleSummary?.status === "unavailable" ? (
+            <p className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              This asset has no supported English embedded subtitle track.
+            </p>
+          ) : null}
+          {subtitleSummary?.status === "failed" || subtitleSummary?.status === "partial" ? (
+            <p className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              {subtitleSummary.error ||
+                (subtitleSummary.status === "partial"
+                  ? "Some English subtitle tracks could not be extracted."
+                  : "Subtitle extraction failed. The video upload is still available.")}
+            </p>
+          ) : null}
+          {subtitleError ? (
+            <p className="mt-4 text-sm text-red-600" role="alert">
+              {subtitleError}
+            </p>
+          ) : null}
+
+          {completedSubtitleTracks.length > 0 ? (
+            <div className="mt-5 border-t border-neutral-200 pt-5">
+              <div className="flex flex-wrap items-end justify-between gap-3">
+                <label className="flex min-w-64 flex-col gap-2 text-sm font-medium text-neutral-700">
+                  English subtitle track
+                  <select
+                    aria-label="English subtitle track"
+                    value={selectedSubtitleTrackId}
+                    onChange={(event) => {
+                      setSelectedSubtitleTrackId(event.target.value);
+                      setSubtitleCueOffset(0);
+                    }}
+                    className="rounded-xl border border-neutral-300 px-3 py-2 text-sm text-neutral-900"
+                  >
+                    {completedSubtitleTracks.map((track) => (
+                      <option key={track.id} value={track.id}>
+                        Stream {track.stream_index} · {track.language || track.language_normalized || track.language_raw || "English"} · {track.codec_name}
+                        {track.is_primary ? " · primary" : ""}
+                        {track.is_forced ? " · forced" : ""}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => void downloadSubtitleTrack()}
+                  disabled={!selectedSubtitleTrack || subtitleDownloadPending}
+                  className="rounded-xl bg-neutral-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
+                >
+                  {subtitleDownloadPending ? "Preparing SRT…" : "Download SRT"}
+                </button>
+              </div>
+
+              {selectedSubtitleTrack ? (
+                <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  <div className="rounded-xl bg-neutral-50 px-3 py-2">
+                    <p className="text-[11px] uppercase tracking-wide text-neutral-500">Track</p>
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      <span className="text-sm font-medium text-neutral-900">Stream {selectedSubtitleTrack.stream_index}</span>
+                      {selectedSubtitleTrack.is_primary ? <Badge tone="sky">Primary</Badge> : null}
+                      {selectedSubtitleTrack.is_default ? <Badge tone="neutral">Default</Badge> : null}
+                      {selectedSubtitleTrack.is_forced ? <Badge tone="amber">Forced</Badge> : null}
+                    </div>
+                  </div>
+                  <div className="rounded-xl bg-neutral-50 px-3 py-2">
+                    <p className="text-[11px] uppercase tracking-wide text-neutral-500">Cues</p>
+                    <p className="mt-1 text-sm font-medium text-neutral-900">
+                      {(selectedSubtitleTrack.cue_count ?? 0).toLocaleString()}
+                    </p>
+                  </div>
+                  <div className="rounded-xl bg-neutral-50 px-3 py-2">
+                    <p className="text-[11px] uppercase tracking-wide text-neutral-500">Timing</p>
+                    <p className="mt-1 text-xs font-medium text-neutral-900">
+                      {formatSubtitleTimestamp(selectedSubtitleTrack.first_cue_start_ms)} –{" "}
+                      {formatSubtitleTimestamp(selectedSubtitleTrack.last_cue_end_ms)}
+                    </p>
+                  </div>
+                  <div className="rounded-xl bg-neutral-50 px-3 py-2">
+                    <p className="text-[11px] uppercase tracking-wide text-neutral-500">SRT</p>
+                    <p className="mt-1 text-xs font-medium text-neutral-900">
+                      {formatSubtitleBytes(selectedSubtitleTrack.srt_size_bytes)}
+                      {selectedSubtitleTrack.srt_sha256
+                        ? ` · ${selectedSubtitleTrack.srt_sha256.slice(0, 10)}…`
+                        : ""}
+                    </p>
+                  </div>
+                </div>
+              ) : null}
+
+              <div className="mt-5">
+                <div className="flex flex-wrap items-end justify-between gap-3">
+                  <label className="flex min-w-64 flex-1 flex-col gap-2 text-sm font-medium text-neutral-700">
+                    Search subtitle cues
+                    <input
+                      type="search"
+                      value={subtitleSearchInput}
+                      onChange={(event) => setSubtitleSearchInput(event.target.value)}
+                      placeholder="Search spoken dialogue, speaker labels, or SDH cues"
+                      className="rounded-xl border border-neutral-300 px-3 py-2 text-sm text-neutral-900"
+                    />
+                  </label>
+                  <p className="pb-2 text-xs text-neutral-500" aria-live="polite">
+                    {subtitleCueLoading
+                      ? "Loading cues…"
+                      : `${subtitleResultCount.toLocaleString()} ${subtitleSearchQuery ? "matches" : "cues"}`}
+                  </p>
+                </div>
+
+                {!subtitleCueLoading && subtitleCuePage?.items.length === 0 ? (
+                  <p className="mt-4 text-sm text-neutral-500">No subtitle cues match this search.</p>
+                ) : null}
+                {subtitleCuePage?.items.length ? (
+                  <ol className="mt-4 divide-y divide-neutral-200 rounded-xl border border-neutral-200">
+                    {subtitleCuePage.items.map((cue) => (
+                      <li key={`${cue.ordinal}-${cue.start_ms}`} className="grid gap-2 px-3 py-3 md:grid-cols-[10rem,1fr]">
+                        <div className="font-mono text-xs text-neutral-500">
+                          {formatSubtitleTimestamp(cue.start_ms)}
+                          <span className="mx-1">–</span>
+                          {formatSubtitleTimestamp(cue.end_ms)}
+                        </div>
+                        <div>
+                          <p className="whitespace-pre-wrap text-sm text-neutral-900">{cue.plain_text}</p>
+                          {cue.text !== cue.plain_text ? (
+                            <details className="mt-2 text-xs text-neutral-500">
+                              <summary className="cursor-pointer">Raw subtitle text</summary>
+                              <pre className="mt-1 whitespace-pre-wrap break-words font-mono">{cue.text}</pre>
+                            </details>
+                          ) : null}
+                        </div>
+                      </li>
+                    ))}
+                  </ol>
+                ) : null}
+
+                {subtitleCuePage && subtitleResultCount > subtitleCuePageSize ? (
+                  <div className="mt-3 flex items-center justify-between gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setSubtitleCueOffset((current) => Math.max(0, current - subtitleCuePageSize))}
+                      disabled={!subtitleHasPreviousPage || subtitleCueLoading}
+                      className="rounded-xl border border-neutral-300 px-3 py-2 text-sm font-medium text-neutral-900 disabled:opacity-50"
+                    >
+                      Previous cues
+                    </button>
+                    <span className="text-xs text-neutral-500">
+                      {subtitleCueOffset + 1}–{Math.min(subtitleCueOffset + subtitleCuePage.items.length, subtitleResultCount)} of{" "}
+                      {subtitleResultCount.toLocaleString()}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setSubtitleCueOffset((current) => current + subtitleCuePageSize)}
+                      disabled={!subtitleHasNextPage || subtitleCueLoading}
+                      className="rounded-xl border border-neutral-300 px-3 py-2 text-sm font-medium text-neutral-900 disabled:opacity-50"
+                    >
+                      Next cues
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+        </section>
+
         <section className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div>
@@ -1273,13 +2324,17 @@ export default function CastScreentimePageClient() {
             </div>
             <div className="flex flex-wrap items-center gap-3">
               <label className="flex flex-col gap-2 text-sm font-medium text-neutral-700">
-                Show ID
-                <input
+                Show filter
+                <select
+                  aria-label="Run History Show"
                   value={showId}
-                  onChange={(event) => setShowId(event.target.value)}
-                  placeholder="UUID for core.shows.id"
+                  onChange={(event) => handleShowChange(event.target.value)}
                   className="rounded-xl border border-neutral-300 px-3 py-2 text-sm text-neutral-900"
-                />
+                >
+                  <option value="">Choose show</option>
+                  <option value={screenalyticsKnownContext.show.id}>{screenalyticsKnownContext.show.label}</option>
+                  {showId && showId !== screenalyticsKnownContext.show.id ? <option value={showId}>Current show</option> : null}
+                </select>
               </label>
               <div className="flex flex-wrap gap-2 pt-6">
                 {videoClassFilters.map((option) => (
@@ -1318,28 +2373,63 @@ export default function CastScreentimePageClient() {
         </section>
 
         <section className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm">
-          <div className="flex flex-wrap items-center gap-2">
-            <h2 className="text-base font-semibold text-neutral-900">Current Run</h2>
-            {run ? (
-              <>
-                <Badge tone={resolveMediaType(run) === "episode" ? "sky" : "amber"}>
-                  {formatVideoClass(run.media_type, run.media_kind, run.video_class, run.promo_subtype)}
-                </Badge>
-                <Badge tone="neutral">{formatImportType(run.source_import_type)}</Badge>
-                {run.is_publishable === false ? <Badge tone="amber">Non-publishable</Badge> : null}
-              </>
-            ) : null}
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="text-base font-semibold text-neutral-900">Current Run</h2>
+              {run ? (
+                <>
+                  <Badge tone={resolveMediaType(run) === "episode" ? "sky" : "amber"}>
+                    {formatVideoClass(run.media_type, run.media_kind, run.video_class, run.promo_subtype)}
+                  </Badge>
+                  <Badge tone="neutral">{formatImportType(run.source_import_type)}</Badge>
+                  {run.is_publishable === false ? <Badge tone="amber">Non-publishable</Badge> : null}
+                </>
+              ) : null}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {run?.id ? (
+                <Button variant="outline" size="sm" onClick={() => void copyRunLink(run.id)}>
+                  {copiedRunLinkId === run.id ? "Copied link" : "Copy run link"}
+                </Button>
+              ) : null}
+              {debugDetailsAvailable ? (
+                <Dialog>
+                  <DialogTrigger asChild>
+                    <Button variant="outline" size="sm">Debug details</Button>
+                  </DialogTrigger>
+                  <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-4xl">
+                    <DialogHeader>
+                      <DialogTitle>Screenalytics debug details</DialogTitle>
+                      <DialogDescription>
+                        Raw payloads for troubleshooting. These are hidden from the normal review view.
+                      </DialogDescription>
+                    </DialogHeader>
+                    <div className="grid gap-4">
+                      <DebugJsonBlock title="Current run" value={run} />
+                      <DebugJsonBlock title="Current video asset" value={videoAsset} />
+                      <DebugJsonBlock title="Latest upload session" value={latestUpload} />
+                    </div>
+                  </DialogContent>
+                </Dialog>
+              ) : null}
+            </div>
           </div>
-          <pre className="mt-3 overflow-x-auto rounded-xl bg-neutral-950 p-4 text-xs text-neutral-100">
-            {JSON.stringify(run, null, 2)}
-          </pre>
+          {!run ? (
+            <p className="mt-3 text-sm text-neutral-500">
+              Load a recent run or launch a new one to review screen-time output.
+            </p>
+          ) : null}
           {run ? (
             <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
               {getRunOverviewMessage(run, currentPublishVersion)}
             </div>
           ) : null}
           {run ? (
-            <div className="mt-4 grid gap-3 sm:grid-cols-4">
+            <div className="mt-4 grid gap-3 sm:grid-cols-3 xl:grid-cols-6">
+              <div className="rounded-xl bg-neutral-50 px-3 py-2">
+                <p className="text-[11px] uppercase tracking-wide text-neutral-500">Run</p>
+                <p className="mt-1 truncate font-mono text-xs font-medium text-neutral-900">{run.id}</p>
+              </div>
               <div className="rounded-xl bg-neutral-50 px-3 py-2">
                 <p className="text-[11px] uppercase tracking-wide text-neutral-500">Execution</p>
                 <p className="mt-1 text-sm font-medium text-neutral-900">{getExecutionStatusLabel(run)}</p>
@@ -1353,8 +2443,10 @@ export default function CastScreentimePageClient() {
                 <p className="mt-1 text-sm font-medium text-neutral-900">{run.review_status || "draft"}</p>
               </div>
               <div className="rounded-xl bg-neutral-50 px-3 py-2">
-                <p className="text-[11px] uppercase tracking-wide text-neutral-500">Owner</p>
-                <p className="mt-1 text-sm font-medium text-neutral-900">{run.owner_scope || "n/a"}</p>
+                <p className="text-[11px] uppercase tracking-wide text-neutral-500">Context</p>
+                <p className="mt-1 truncate text-sm font-medium text-neutral-900">
+                  {formatOwnerSelectionLabel(run.owner_scope, run.owner_id, run.season_id, run.episode_id)}
+                </p>
               </div>
               <div className="rounded-xl bg-neutral-50 px-3 py-2">
                 <p className="text-[11px] uppercase tracking-wide text-neutral-500">Effective Runtime</p>
@@ -1370,10 +2462,17 @@ export default function CastScreentimePageClient() {
                 Candidate cast preflight: {run.cast_coverage_summary_json.candidate_count ?? 0} candidates,{" "}
                 {run.cast_coverage_summary_json.approved_facebank_coverage_count ?? 0} with approved facebank coverage.
               </div>
-              {Array.isArray(run.cast_coverage_summary_json.fallback_scopes_used) &&
-              run.cast_coverage_summary_json.fallback_scopes_used.length > 0 ? (
+              {candidateScopePolicy ? (
                 <div className="mt-1 text-xs text-sky-800">
-                  Fallback scopes used: {run.cast_coverage_summary_json.fallback_scopes_used.join(", ")}
+                  {strictCandidateScope
+                    ? `Strict ${candidateScopeLabel} credits only. Broader fallback cast is not included.`
+                    : `Candidate scope: ${candidateScopePolicy.scope_order?.join(", ") || candidateScopeLabel}.`}
+                </div>
+              ) : null}
+              {Array.isArray(fallbackScopesUsed) && fallbackScopesUsed.length > 0 ? (
+                <div className="mt-1 text-xs text-sky-800">
+                  {strictCandidateScope ? "Legacy fallback scopes recorded" : "Fallback scopes used"}:{" "}
+                  {fallbackScopesUsed.join(", ")}
                 </div>
               ) : null}
               {Array.isArray(run.cast_coverage_summary_json.warnings) && run.cast_coverage_summary_json.warnings.length > 0 ? (
@@ -1434,6 +2533,40 @@ export default function CastScreentimePageClient() {
                   </button>
                 ))
               : null}
+          </div>
+        </section>
+
+        <section className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="text-base font-semibold text-neutral-900">Review Workspace</h2>
+              <p className="mt-1 text-sm text-neutral-600">
+                Use this as the handoff point after a run starts: metrics, frame artifacts, identity suggestions, and exclusions populate as retained artifacts arrive.
+              </p>
+            </div>
+            {run ? <Badge tone="sky">{getExecutionStatusLabel(run)}</Badge> : <Badge tone="neutral">No active run</Badge>}
+          </div>
+          <div className="mt-4 grid gap-3 md:grid-cols-4">
+            <div className="rounded-xl bg-neutral-50 px-3 py-3">
+              <p className="text-[11px] uppercase tracking-wide text-neutral-500">Metrics</p>
+              <p className="mt-1 text-lg font-semibold text-neutral-900">{leaderboard.length}</p>
+              <p className="text-xs text-neutral-500">leaderboard rows</p>
+            </div>
+            <div className="rounded-xl bg-neutral-50 px-3 py-3">
+              <p className="text-[11px] uppercase tracking-wide text-neutral-500">Frames and faces</p>
+              <p className="mt-1 text-lg font-semibold text-neutral-900">{shots.length + scenes.length}</p>
+              <p className="text-xs text-neutral-500">shots and scenes</p>
+            </div>
+            <div className="rounded-xl bg-neutral-50 px-3 py-3">
+              <p className="text-[11px] uppercase tracking-wide text-neutral-500">Identity review</p>
+              <p className="mt-1 text-lg font-semibold text-neutral-900">{castSuggestions.length + unknownReviewQueues.length}</p>
+              <p className="text-xs text-neutral-500">suggestions and queues</p>
+            </div>
+            <div className="rounded-xl bg-neutral-50 px-3 py-3">
+              <p className="text-[11px] uppercase tracking-wide text-neutral-500">Exclusions</p>
+              <p className="mt-1 text-lg font-semibold text-neutral-900">{excludedSections.length}</p>
+              <p className="text-xs text-neutral-500">sections marked out</p>
+            </div>
           </div>
         </section>
 
@@ -1675,7 +2808,7 @@ export default function CastScreentimePageClient() {
                           <th className="pb-2 pr-4">Run</th>
                           <th className="pb-2 pr-4">Status</th>
                           <th className="pb-2 pr-4">Review</th>
-                          <th className="pb-2">Load</th>
+                          <th className="pb-2">Actions</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -1693,13 +2826,22 @@ export default function CastScreentimePageClient() {
                             <td className="py-2 pr-4">{showRun.status}</td>
                             <td className="py-2 pr-4">{showRun.review_status || "draft"}</td>
                             <td className="py-2">
-                              <button
-                                type="button"
-                                onClick={() => void loadRecentRun(showRun.id)}
-                                className="rounded-lg border border-neutral-300 px-2 py-1 text-xs font-medium text-neutral-900"
-                              >
-                                Load
-                              </button>
+                              <div className="flex flex-wrap gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => void loadRecentRun(showRun.id)}
+                                  className="rounded-lg border border-neutral-300 px-2 py-1 text-xs font-medium text-neutral-900"
+                                >
+                                  Load
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => void copyRunLink(showRun.id)}
+                                  className="rounded-lg border border-neutral-300 px-2 py-1 text-xs font-medium text-neutral-900"
+                                >
+                                  {copiedRunLinkId === showRun.id ? "Copied" : "Copy link"}
+                                </button>
+                              </div>
                             </td>
                           </tr>
                         ))}
@@ -1723,7 +2865,7 @@ export default function CastScreentimePageClient() {
                           <th className="pb-2 pr-4">Run</th>
                           <th className="pb-2 pr-4">Status</th>
                           <th className="pb-2 pr-4">Review</th>
-                          <th className="pb-2">Load</th>
+                          <th className="pb-2">Actions</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -1741,13 +2883,22 @@ export default function CastScreentimePageClient() {
                             <td className="py-2 pr-4">{showRun.status}</td>
                             <td className="py-2 pr-4">{showRun.review_status || "draft"}</td>
                             <td className="py-2">
-                              <button
-                                type="button"
-                                onClick={() => void loadRecentRun(showRun.id)}
-                                className="rounded-lg border border-neutral-300 px-2 py-1 text-xs font-medium text-neutral-900"
-                              >
-                                Load
-                              </button>
+                              <div className="flex flex-wrap gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => void loadRecentRun(showRun.id)}
+                                  className="rounded-lg border border-neutral-300 px-2 py-1 text-xs font-medium text-neutral-900"
+                                >
+                                  Load
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => void copyRunLink(showRun.id)}
+                                  className="rounded-lg border border-neutral-300 px-2 py-1 text-xs font-medium text-neutral-900"
+                                >
+                                  {copiedRunLinkId === showRun.id ? "Copied" : "Copy link"}
+                                </button>
+                              </div>
                             </td>
                           </tr>
                         ))}
@@ -1918,6 +3069,7 @@ export default function CastScreentimePageClient() {
           </div>
         </section>
 
+        {hasFrameOrFaceArtifacts ? (
         <section className="grid gap-6 lg:grid-cols-4">
           <div className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm">
             <h2 className="text-base font-semibold text-neutral-900">Shots</h2>
@@ -1932,7 +3084,7 @@ export default function CastScreentimePageClient() {
                       {formatDurationMs(shot.start_ms)} to {formatDurationMs(shot.end_ms)}
                     </div>
                     <div className="mt-1 text-xs text-neutral-500">
-                      {shot.observation_count} observations, {shot.assigned_person_ids.length} assigned people
+                      {shot.observation_count} observations, {shot.assigned_person_ids?.length ?? 0} assigned people
                     </div>
                   </div>
                 ))}
@@ -1956,9 +3108,9 @@ export default function CastScreentimePageClient() {
                       {scene.composition_type}, {scene.shot_count} shots, {scene.unknown_segment_count} unknown segments
                     </div>
                     <div className="mt-1 text-xs text-neutral-500">
-                      {scene.dominant_person_ids.length === 0
+                      {(scene.dominant_person_ids?.length ?? 0) === 0
                         ? "No named cast present"
-                        : scene.dominant_person_ids
+                        : (scene.dominant_person_ids ?? [])
                             .map((personId) => scene.dominant_display_names?.[personId] || personId)
                             .join(", ")}
                     </div>
@@ -2013,6 +3165,24 @@ export default function CastScreentimePageClient() {
             )}
           </div>
         </section>
+        ) : (
+          <section className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="text-base font-semibold text-neutral-900">Frame and face artifacts</h2>
+                <p className="mt-1 text-sm text-neutral-600">
+                  Detailed frame, scene, title-card, and confessional sections appear here when artifacts are present.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Badge tone={hasRunReviewArtifacts ? "sky" : "neutral"}>shots {shots.length}</Badge>
+                <Badge tone={hasRunReviewArtifacts ? "sky" : "neutral"}>scenes {scenes.length}</Badge>
+                <Badge tone={hasRunReviewArtifacts ? "sky" : "neutral"}>title cards {titleCardCandidates.length}</Badge>
+                <Badge tone={hasRunReviewArtifacts ? "sky" : "neutral"}>confessionals {confessionalCandidates.length}</Badge>
+              </div>
+            </div>
+          </section>
+        )}
 
         <section className="grid gap-6 lg:grid-cols-2">
           <div className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm">

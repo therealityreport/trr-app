@@ -40,7 +40,14 @@ export const ADMIN_NAV_ITEMS: readonly AdminNavItem[] = [
     description:
       "Canonical TRR-APP admin entry for screen-time workflows. Pick a show here, then continue into its /<show> workspace.",
     badge: "Screen",
-    activeMatchPrefixes: ["/screenalytics", "/screenlaytics", "/admin/screenalytics", "/admin/screenlaytics", "/admin/trr-shows"],
+    activeMatchPrefixes: [
+      "/screenalytics",
+      "/screenlaytics",
+      "/admin/screenalytics",
+      "/admin/screenlaytics",
+      "/admin/cast-screentime",
+      "/admin/trr-shows",
+    ],
   },
   {
     key: "cast-reference-review",
