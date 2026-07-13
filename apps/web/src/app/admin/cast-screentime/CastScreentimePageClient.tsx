@@ -429,6 +429,7 @@ const importModes: ImportMode[] = ["youtube_url", "external_url", "social_youtub
 const decisionScopes: OwnerScope[] = ["episode", "season", "show"];
 const subtitleCuePageSize = 50;
 const subtitlePollingDelays = [2_000, 5_000, 15_000] as const;
+const subtitleAutoPollingMaxAttempts = 6;
 const screenalyticsKnownContext = {
   show: {
     id: SCREENALYTICS_RHOBH_S5_E16_TEST_DEFAULTS.show_id,
@@ -777,9 +778,12 @@ export default function CastScreentimePageClient() {
   const [subtitleCueLoading, setSubtitleCueLoading] = useState(false);
   const [subtitleDownloadPending, setSubtitleDownloadPending] = useState(false);
   const [subtitlePollVersion, setSubtitlePollVersion] = useState(0);
+  const [subtitleAutoPollingStopped, setSubtitleAutoPollingStopped] = useState(false);
+  const subtitleAutoPollingStoppedRef = useRef(false);
   const mountedRef = useRef(true);
 
   useEffect(() => {
+    mountedRef.current = true;
     return () => {
       mountedRef.current = false;
     };
@@ -804,6 +808,11 @@ export default function CastScreentimePageClient() {
       ? [...mediaKindOptions, { value: promoSubtype.trim(), label: formatMediaKindLabel(promoSubtype) }]
       : mediaKindOptions;
   const activeVideoAssetId = String(videoAsset?.id || run?.video_asset_id || "").trim();
+
+  useEffect(() => {
+    subtitleAutoPollingStoppedRef.current = false;
+    setSubtitleAutoPollingStopped(false);
+  }, [activeVideoAssetId]);
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
@@ -852,8 +861,17 @@ export default function CastScreentimePageClient() {
           );
         });
         if (normalized.status === "queued" || normalized.status === "running") {
+          if (subtitleAutoPollingStoppedRef.current) return;
+          if (pollAttempt + 1 >= subtitleAutoPollingMaxAttempts) {
+            subtitleAutoPollingStoppedRef.current = true;
+            setSubtitleAutoPollingStopped(true);
+            return;
+          }
           const delay = subtitlePollingDelays[Math.min(pollAttempt, subtitlePollingDelays.length - 1)];
           timerId = window.setTimeout(() => void loadSummary(pollAttempt + 1), delay);
+        } else if (subtitleAutoPollingStoppedRef.current) {
+          subtitleAutoPollingStoppedRef.current = false;
+          setSubtitleAutoPollingStopped(false);
         }
       } catch (summaryError) {
         if (!cancelled) {
@@ -1040,6 +1058,9 @@ export default function CastScreentimePageClient() {
       const payload = await parseResponse<UploadSessionStatusPayload>(
         await fetchAdminWithAuth(`/api/admin/trr-api/cast-screentime/upload-sessions/${uploadSessionId}`),
       );
+      if (!mountedRef.current) {
+        throw new Error("Import polling stopped");
+      }
       setLatestUpload((current) => ({ ...(current || { upload_session_id: uploadSessionId }), ...payload }));
       if (payload.status === "failed") {
         throw new Error(payload.error_text || "Import failed");
@@ -1210,6 +1231,8 @@ export default function CastScreentimePageClient() {
       setSubtitleSummary((current) =>
         normalizeSubtitleSummary({ ...(current ?? {}), ...payload }, activeVideoAssetId),
       );
+      subtitleAutoPollingStoppedRef.current = false;
+      setSubtitleAutoPollingStopped(false);
       setSubtitlePollVersion((current) => current + 1);
     } catch (actionError) {
       setSubtitleError(actionError instanceof Error ? actionError.message : "Subtitle extraction could not be queued");
@@ -1561,8 +1584,10 @@ export default function CastScreentimePageClient() {
         throw new Error("Clipboard access is not available in this browser.");
       }
       await clipboard.writeText(buildScreenalyticsRunUrl(runId));
+      if (!mountedRef.current) return;
       setCopiedRunLinkId(runId);
       window.setTimeout(() => {
+        if (!mountedRef.current) return;
         setCopiedRunLinkId((current) => (current === runId ? null : current));
       }, 1800);
     } catch (copyError) {
@@ -2122,7 +2147,9 @@ export default function CastScreentimePageClient() {
 
           {subtitleSummary?.status === "queued" || subtitleSummary?.status === "running" ? (
             <p className="mt-4 text-sm text-neutral-600" role="status">
-              Subtitle extraction is running in the background. This video remains available for analysis.
+              {subtitleAutoPollingStopped
+                ? `Subtitle extraction is still running. Automatic refresh paused after ${subtitleAutoPollingMaxAttempts} checks; use Refresh to check again.`
+                : "Subtitle extraction is running in the background. This video remains available for analysis."}
             </p>
           ) : null}
           {subtitleSummary?.status === "unavailable" ? (

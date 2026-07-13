@@ -1,4 +1,5 @@
-export const SCREENALYTICS_ADMIN_ORIGIN = "https://admin.trr.localhost";
+import { PORTLESS_ADMIN_ORIGIN } from "@/lib/admin/admin-url-defaults";
+
 export const SCREENALYTICS_CANONICAL_PATH = "/screenalytics";
 export const SCREENALYTICS_INTERNAL_CAST_SCREENTIME_PATH = "/admin/cast-screentime";
 export const SCREENALYTICS_RHOBH_S5_E16_TEST_PATH =
@@ -33,7 +34,7 @@ export function buildScreenalyticsRunPath(runId: string): string {
 }
 
 export function buildScreenalyticsRunUrl(runId: string): string {
-  return new URL(buildScreenalyticsRunPath(runId), SCREENALYTICS_ADMIN_ORIGIN).toString();
+  return new URL(buildScreenalyticsRunPath(runId), PORTLESS_ADMIN_ORIGIN).toString();
 }
 
 export function isScreenalyticsRhobhS5E16TestPath(pathname: string | null): boolean {

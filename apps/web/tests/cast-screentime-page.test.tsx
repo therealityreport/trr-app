@@ -1,6 +1,6 @@
 import React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import CastScreentimePageClient from "@/app/admin/cast-screentime/CastScreentimePageClient";
 
@@ -53,6 +53,7 @@ const jsonResponse = (body: unknown, status = 200): Response =>
 
 describe("CastScreentimePageClient", () => {
   beforeEach(() => {
+    vi.useRealTimers();
     mocks.fetchAdminWithAuth.mockReset();
     mocks.clipboardWriteText.mockReset();
     Object.defineProperty(navigator, "clipboard", {
@@ -569,5 +570,59 @@ describe("CastScreentimePageClient", () => {
     expect(screen.getByText("ffprobe could not inspect subtitle streams")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Retry Extraction" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Launch Run" })).toBeEnabled();
+  });
+
+  it("caps automatic subtitle polling and leaves manual refresh available", async () => {
+    vi.useFakeTimers();
+    let subtitlePollCount = 0;
+    navigationState.pathname = "/screenalytics/runs/run-1";
+    const defaultFetchImplementation = mocks.fetchAdminWithAuth.getMockImplementation();
+    if (!defaultFetchImplementation) throw new Error("Expected default Screenalytics fetch mock");
+    mocks.fetchAdminWithAuth.mockImplementation((input: unknown, ...args: unknown[]) => {
+      const url = String(input);
+      if (url.endsWith("/video-assets/asset-1/subtitles")) {
+        subtitlePollCount += 1;
+        return Promise.resolve(
+          jsonResponse({
+            video_asset_id: "asset-1",
+            status: "running",
+            tracks: [],
+          }),
+        );
+      }
+      return defaultFetchImplementation(input, ...args);
+    });
+
+    render(<CastScreentimePageClient />);
+
+    await act(async () => {
+      for (let flushAttempt = 0; flushAttempt < 10; flushAttempt += 1) {
+        await Promise.resolve();
+      }
+    });
+    for (let timerStep = 0; timerStep < 10 && subtitlePollCount < 6; timerStep += 1) {
+      await act(async () => {
+        await vi.advanceTimersToNextTimerAsync();
+        await Promise.resolve();
+      });
+    }
+
+    expect(subtitlePollCount).toBe(6);
+    expect(
+      screen.getByText(
+        "Subtitle extraction is still running. Automatic refresh paused after 6 checks; use Refresh to check again.",
+      ),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(subtitlePollCount).toBe(7);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+    expect(subtitlePollCount).toBe(7);
   });
 });
