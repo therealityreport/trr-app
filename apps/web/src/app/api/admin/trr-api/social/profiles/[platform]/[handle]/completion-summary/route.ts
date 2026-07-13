@@ -51,7 +51,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
     const adminContext = toVerifiedAdminContext(user);
     const { platform, handle } = await context.params;
     const normalizedPlatform = platform.trim().toLowerCase();
-    const normalizedHandle = handle.trim().toLowerCase().replace(/^@/, "");
+    const normalizedHandle = handle.trim().toLowerCase().replace(/^@+/, "");
     if (normalizedPlatform !== "instagram" || !normalizedHandle) {
       cacheStatus = "bypass";
       return attachAdminRouteTiming(

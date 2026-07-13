@@ -88,7 +88,7 @@ describe("social account profile completion summary route", () => {
 
     const response = await requestCompletionSummary(
       "http://localhost/api/admin/trr-api/social/profiles/Instagram/%40BravoTV/completion-summary",
-      { platform: " Instagram ", handle: " @BravoTV " },
+      { platform: " Instagram ", handle: " @@BravoTV " },
     );
 
     expect(response.status).toBe(200);
