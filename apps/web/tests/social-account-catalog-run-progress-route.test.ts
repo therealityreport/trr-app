@@ -67,6 +67,7 @@ describe("social account catalog run progress proxy route", () => {
         timeoutMs: 30_000,
       }),
     );
+    expect((await response.clone().json()).progress_authoritative).toBe(true);
   });
 
   it("uses the progress timeout and degraded fallback for fast polling", async () => {

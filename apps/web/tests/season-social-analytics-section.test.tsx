@@ -624,7 +624,15 @@ const syncSessionStreamResponse = (body: unknown): Response =>
 const buildSnapshotEnvelope = (
   analytics: AnalyticsPayload | null,
   overrides?: {
-    targets?: Array<{ platform: string; accounts?: string[]; hashtags?: string[]; keywords?: string[]; is_active?: boolean }>;
+    targets?: Array<{
+      platform: string;
+      accounts?: string[];
+      hashtags?: string[];
+      keywords?: string[];
+      timezone?: string;
+      is_active?: boolean;
+      config?: Record<string, unknown>;
+    }>;
     runs?: Array<Record<string, unknown>>;
     run_summaries?: Array<Record<string, unknown>>;
     worker_health?: Record<string, unknown> | null;
@@ -962,6 +970,120 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     expect(screen.getByText("Matched posts")).toBeInTheDocument();
     expect(screen.getByText("Review queue")).toBeInTheDocument();
     expect(screen.getByText("Retained unassigned")).toBeInTheDocument();
+  });
+
+  it("renders official season windows from analytics data", async () => {
+    const payload: AnalyticsPayload = {
+      ...analyticsBase,
+      weekly: [
+        {
+          week_index: 0,
+          label: "Pre-Season",
+          start: "2026-01-02T01:00:00Z",
+          end: "2026-01-09T01:00:00Z",
+          week_type: "preseason",
+          episode_number: null,
+          post_volume: 1,
+          comment_volume: 1,
+          engagement: 10,
+          sentiment: { positive: 1, neutral: 0, negative: 0 },
+        },
+        ...analyticsBase.weekly,
+        {
+          week_index: 3,
+          label: "Post-Season",
+          start: "2026-01-21T01:00:00Z",
+          end: "2026-01-24T01:00:00Z",
+          week_type: "postseason",
+          episode_number: null,
+          post_volume: 0,
+          comment_volume: 0,
+          engagement: 0,
+          sentiment: { positive: 0, neutral: 0, negative: 0 },
+        },
+      ],
+    };
+    mockSeasonSocialFetch(payload);
+
+    render(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+      />,
+    );
+
+    const panel = await screen.findByTestId("season-window-settings");
+    expect(within(panel).getByText("Season Windows")).toBeInTheDocument();
+    expect(within(panel).getByText("Trailer to premiere")).toBeInTheDocument();
+    expect(within(panel).getByText("After finale")).toBeInTheDocument();
+    expect(within(panel).getAllByText("Pre-Season").length).toBeGreaterThan(0);
+    expect(within(panel).getAllByText("Post-Season").length).toBeGreaterThan(0);
+  });
+
+  it("saves trailer drop and postseason overrides through the targets endpoint", async () => {
+    const fetchMock = mockSeasonSocialFetch(analyticsBase, {
+      targets: [
+        {
+          platform: "instagram",
+          accounts: ["bravotv"],
+          hashtags: ["rhoslc"],
+          keywords: [],
+          timezone: "America/New_York",
+          is_active: true,
+          config: {
+            trailer_drop_at: "2026-01-02T01:00:00+00:00",
+            preseason_start: "2026-01-02T01:00:00+00:00",
+            preseason_start_at: "2026-01-02T01:00:00+00:00",
+            week_zero_start: "2026-01-02T01:00:00+00:00",
+          },
+        },
+      ],
+    });
+
+    render(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+      />,
+    );
+
+    const trailerInput = await screen.findByLabelText("Trailer Drop");
+    await waitFor(() => {
+      expect(trailerInput).toHaveValue("2026-01-01T20:00");
+    });
+
+    fireEvent.change(trailerInput, { target: { value: "2026-01-02T21:30" } });
+    const postseasonInput = screen.getByLabelText("Post-Season End Override");
+    fireEvent.change(postseasonInput, { target: { value: "2026-02-09T20:00" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Windows" }));
+
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.some(
+          ([input, init]) => String(input).includes("/social/targets?") && init?.method === "PUT",
+        ),
+      ).toBe(true);
+    });
+
+    const putCall = fetchMock.mock.calls.find(
+      ([input, init]) => String(input).includes("/social/targets?") && init?.method === "PUT",
+    );
+    expect(putCall).toBeDefined();
+    const body = JSON.parse(String((putCall?.[1] as RequestInit | undefined)?.body ?? "{}")) as {
+      source_scope?: string;
+      targets?: Array<{ config?: Record<string, unknown>; timezone?: string }>;
+    };
+    expect(body.source_scope).toBe("network");
+    expect(body.targets?.[0]?.timezone).toBe("America/New_York");
+    expect(body.targets?.[0]?.config?.trailer_drop_at).toBe("2026-01-02T21:30");
+    expect(body.targets?.[0]?.config?.preseason_start).toBe("2026-01-02T21:30");
+    expect(body.targets?.[0]?.config?.preseason_start_at).toBe("2026-01-02T21:30");
+    expect(body.targets?.[0]?.config?.week_zero_start).toBe("2026-01-02T21:30");
+    expect(body.targets?.[0]?.config?.postseason_end_at).toBe("2026-02-09T20:00");
   });
 
   it("formats summary count cards with compact number notation", async () => {

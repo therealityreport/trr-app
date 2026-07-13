@@ -74,6 +74,7 @@ vi.mock("@/lib/admin/show-admin-routes", async () => {
 
 import SocialAccountProfilePage, {
   __resetSocialProfileRequestInflightForTests,
+  buildCatalogProgressDiagnosticRows,
   getCatalogRepairAuthEndpointSegment,
 } from "@/components/admin/SocialAccountProfilePage";
 import { __resetSharedLiveResourceRegistryForTests } from "@/lib/admin/shared-live-resource";
@@ -346,6 +347,80 @@ describe("SocialAccountProfilePage", () => {
     vi.useRealTimers();
   });
 
+  it("shows the combined Instagram DB worker budget in catalog diagnostics", () => {
+    const progress = {
+      db_session_capacity: {
+        safe_combined_worker_limit: 10,
+        active_workers: 4,
+        remaining_workers: 6,
+      },
+    } as Parameters<typeof buildCatalogProgressDiagnosticRows>[0];
+    const rows = buildCatalogProgressDiagnosticRows(progress);
+
+    expect(rows).toContainEqual({
+      key: "db-session-worker-capacity",
+      label: "DB-safe Combined Workers",
+      value: "10 max · 4 active · 6 remaining",
+      detail: "This combined limit covers Instagram detail, shared-post, comments, and recovery workers.",
+    });
+  });
+
+  it("refreshes Instagram capacity when the dialog opens and immediately before Start", async () => {
+    let capacityCalls = 0;
+    let backfillCalls = 0;
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/catalog/capacity")) {
+        capacityCalls += 1;
+        return jsonResponse({
+          available: true,
+          blocked: false,
+          safe_combined_worker_limit: 10,
+          remaining_workers: 6,
+          raw_requested_workers: 16,
+          backend_effective_requested_workers: 4,
+          effective_details_worker_count: 2,
+          effective_comments_worker_count: 2,
+          active_db_jobs: 0,
+          dispatched_unclaimed_jobs: 0,
+          nonterminal_remote_call_ids: [],
+        });
+      }
+      if (url.includes("/catalog/backfill")) {
+        backfillCalls += 1;
+        return jsonResponse({ run_id: "catalog-capacity-run", status: "queued" });
+      }
+      if (url.includes("/cookies/health")) return jsonResponse(healthyCookieHealth("instagram"));
+      if (url.includes("/snapshot")) {
+        return jsonResponse({
+          summary: baseSummary,
+          catalog_run_progress: null,
+          generated_at: "2026-07-10T12:00:00.000Z",
+        });
+      }
+      if (url.includes("/summary")) return jsonResponse(baseSummary);
+      if (url.includes("/catalog/posts")) {
+        return jsonResponse({ items: [], pagination: { page: 1, page_size: 25, total: 0, total_pages: 1 } });
+      }
+      if (url.includes("/catalog/review-queue")) return jsonResponse({ items: [] });
+      return jsonResponse({});
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Backfill Posts" }));
+
+    await waitFor(() => {
+      expect(screen.getAllByText(/2 backend-effective · 8 requested/).length).toBeGreaterThan(0);
+      expect(capacityCalls).toBeGreaterThanOrEqual(1);
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Start Backfill" }));
+
+    await waitFor(() => {
+      expect(capacityCalls).toBeGreaterThanOrEqual(2);
+      expect(backfillCalls).toBe(1);
+    });
+  });
+
   it("renders the catalog page without a backgroundCatalogRunId initialization error", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
@@ -485,6 +560,10 @@ describe("SocialAccountProfilePage", () => {
         retrieved_comment_posts: 437,
         saved_comment_media_files: 7,
       },
+      comments_coverage: {
+        ...baseSummary.comments_coverage,
+        active_run_id: "comments-run-active-full-1234567890",
+      },
       catalog_recent_runs: [
         {
           job_id: "job-progress-only",
@@ -548,6 +627,12 @@ describe("SocialAccountProfilePage", () => {
     await waitFor(() => {
       expect(requestUrls.some((url) => url.includes(`/catalog/runs/${runId}/progress`))).toBe(true);
     });
+
+    const browserRunIds = await screen.findByLabelText("Active catalog run ids");
+    expect(within(browserRunIds).getByText("Active catalog run")).toBeInTheDocument();
+    expect(within(browserRunIds).getByText(runId)).toBeInTheDocument();
+    expect(within(browserRunIds).getByText("Active comments run")).toBeInTheDocument();
+    expect(within(browserRunIds).getByText("comments-run-active-full-1234567890")).toBeInTheDocument();
 
     expect(screen.getByText("Saved Posts", { selector: "p" }).parentElement?.textContent?.replace(/\s+/g, " ").trim()).toContain(
       "437 / 438",
@@ -4460,6 +4545,70 @@ describe("SocialAccountProfilePage", () => {
     });
   });
 
+  it("uses browser input events for the bounded month picker and warns on reused comments runs", async () => {
+    let backfillBody: Record<string, unknown> | null = null;
+
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse(baseSummary);
+      }
+      if (url.includes("/cookies/health")) {
+        return jsonResponse(healthyCookieHealth("instagram"));
+      }
+      if (url.includes("/snapshot")) {
+        return jsonResponse({
+          summary: baseSummary,
+          catalog_run_progress: null,
+          generated_at: "2026-07-08T12:00:00.000Z",
+        });
+      }
+      if (url.includes("/catalog/backfill")) {
+        expect(init?.method).toBe("POST");
+        backfillBody = typeof init?.body === "string" ? JSON.parse(init.body) : {};
+        return jsonResponse({
+          run_id: "catalog-run-reused-comments",
+          status: "queued",
+          catalog_run_id: "catalog-run-reused-comments",
+          comments_run_id: "comments-run-existing",
+          comments_reused_existing_run: true,
+          attached_followups: {
+            comments: {
+              run_id: "comments-run-existing",
+              status: "running",
+              state: "running",
+              source: "reused_run",
+            },
+          },
+        });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Backfill Posts" })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Backfill Posts" }));
+    expect(await screen.findByText("Choose what this backfill should run")).toBeInTheDocument();
+
+    fireEvent.input(screen.getByLabelText("Instagram backfill start month"), { target: { value: "2026-05" } });
+    fireEvent.input(screen.getByLabelText("Instagram backfill end month"), { target: { value: "2026-07" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Start Backfill" }));
+
+    await waitFor(() => {
+      expect(backfillBody).toMatchObject({
+        backfill_scope: "bounded_window",
+        date_start: "2026-05-01T00:00:00.000Z",
+        date_end: "2026-07-31T23:59:59.999Z",
+      });
+    });
+    expect(await screen.findByText(/Warning: reused existing comments run/i)).toBeInTheDocument();
+  });
+
   it("requires explicit Live APPLY before a 2025 Instagram backfill is finalized", async () => {
     const runId = "11111111-1111-4111-8111-111111111111";
     const requiredConfirmation = `APPLY INSTAGRAM 2025 BACKFILL ${runId}`;
@@ -5716,6 +5865,106 @@ describe("SocialAccountProfilePage", () => {
     expect(await screen.findByText("Posts waiting in the streaming comments lane")).toBeInTheDocument();
     expect(screen.getByText("DVstream1")).toBeInTheDocument();
     expect(screen.getByText("Public-first")).toBeInTheDocument();
+  });
+
+  it("shows the attached comments run when catalog streaming is superseded", async () => {
+    const expectedYear = new Date().getUTCFullYear();
+    const progressPayload = {
+      run_id: "catalog-direct-run-1",
+      run_status: "running",
+      source_scope: "network",
+      selected_tasks: ["post_details", "comments"],
+      effective_selected_tasks: ["post_details", "comments"],
+      comments_run_id: "comments-direct-run-1",
+      comments_streaming: {
+        enabled: false,
+        state: "superseded_by_direct_comments_run",
+        source: "catalog_batch_persist",
+        comments_run_id: "comments-direct-run-1",
+        next_action: {
+          label: "Watch direct comments run",
+          detail: "The comments run is processing the saved post set.",
+        },
+      },
+      stages: {},
+      per_handle: [],
+      recent_log: [],
+      alerts: [],
+      summary: {
+        total_jobs: 1,
+        completed_jobs: 0,
+        failed_jobs: 0,
+        active_jobs: 1,
+      },
+    };
+
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse({
+          ...baseSummary,
+          catalog_recent_runs: [
+            {
+              run_id: "catalog-direct-run-1",
+              status: "running",
+              created_at: "2026-06-12T12:00:00Z",
+              selected_tasks: ["post_details", "comments"],
+              effective_selected_tasks: ["post_details", "comments"],
+              comments_run_id: "comments-direct-run-1",
+            },
+          ],
+        });
+      }
+      if (url.includes("/snapshot")) {
+        return jsonResponse({
+          summary: {
+            ...baseSummary,
+            catalog_recent_runs: [
+              {
+                run_id: "catalog-direct-run-1",
+                status: "running",
+                created_at: "2026-06-12T12:00:00Z",
+                selected_tasks: ["post_details", "comments"],
+                effective_selected_tasks: ["post_details", "comments"],
+                comments_run_id: "comments-direct-run-1",
+              },
+            ],
+          },
+          catalog_run_progress: progressPayload,
+        });
+      }
+      if (url.includes("/catalog/runs/catalog-direct-run-1/progress")) {
+        return jsonResponse(progressPayload);
+      }
+      if (url.includes(`/completion-summary?year=${expectedYear}`)) {
+        return jsonResponse({
+          year: expectedYear,
+          total_posts: 437,
+          total_reported_comments: 1820,
+          saved_comments: 1764,
+          missing_comments: 56,
+          accounted_comments: 1820,
+          lanes: {
+            comments: { finished: 320, in_progress: 18, not_started: 99 },
+            details: { finished: 401, in_progress: 11, not_started: 25 },
+            media: { finished: 288, in_progress: 44, not_started: 105 },
+          },
+        });
+      }
+      if (url.includes("/cookies/health")) {
+        return jsonResponse(healthyCookieHealth("instagram"));
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
+
+    const banner = await screen.findByTestId("instagram-comments-streaming-banner");
+    const streaming = within(banner);
+    expect(streaming.getByText("Comments Moved To A Direct Run")).toBeInTheDocument();
+    expect(streaming.getByText("Superseded By Direct Comments Run")).toBeInTheDocument();
+    expect(streaming.getByText("run comments")).toBeInTheDocument();
+    expect(streaming.getByText("Next: Watch the attached comments run")).toBeInTheDocument();
   });
 
   it("uses resolved attached follow-up status over stale stage graph lanes", async () => {
@@ -7622,6 +7871,7 @@ describe("SocialAccountProfilePage", () => {
   });
 
   it("renders Twitter catalog actions with the shared profile UI", async () => {
+    let receivedBackfillBody: Record<string, unknown> | null = null;
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.includes("/summary")) {
@@ -7644,17 +7894,7 @@ describe("SocialAccountProfilePage", () => {
         return jsonResponse({ items: [] });
       }
       if (url.includes("/catalog/backfill")) {
-        expect(init?.method).toBe("POST");
-        const requestBody = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
-        expect(requestBody).toMatchObject({
-          source_scope: "network",
-          backfill_scope: "bounded_window",
-        });
-        const dateStart = Date.parse(String(requestBody.date_start));
-        const dateEnd = Date.parse(String(requestBody.date_end));
-        expect(Number.isNaN(dateStart)).toBe(false);
-        expect(Number.isNaN(dateEnd)).toBe(false);
-        expect(dateEnd - dateStart).toBe(365 * 24 * 60 * 60 * 1000);
+        receivedBackfillBody = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
         return jsonResponse({
           run_id: "catalog-run-twitter-12345678",
           status: "queued",
@@ -7686,6 +7926,15 @@ describe("SocialAccountProfilePage", () => {
     await waitFor(() => {
       expect(screen.getByText("Twitter / X backfill queued for Post Details, Comments, Media. Catalog catalog-.")).toBeInTheDocument();
     });
+    expect(receivedBackfillBody).toMatchObject({
+      source_scope: "network",
+      backfill_scope: "bounded_window",
+    });
+    const dateStart = Date.parse(String(receivedBackfillBody?.date_start));
+    const dateEnd = Date.parse(String(receivedBackfillBody?.date_end));
+    expect(Number.isNaN(dateStart)).toBe(false);
+    expect(Number.isNaN(dateEnd)).toBe(false);
+    expect(dateEnd - dateStart).toBe(365 * 24 * 60 * 60 * 1000);
   });
 
   it("expands caption search without switching tabs and shows backend search results", async () => {

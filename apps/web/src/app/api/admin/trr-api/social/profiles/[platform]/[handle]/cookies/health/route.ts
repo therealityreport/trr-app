@@ -5,6 +5,7 @@ import {
   SocialProxyError,
   socialProxyErrorResponse,
 } from "@/lib/server/trr-api/social-admin-proxy";
+import { normalizeSocialBladeCookieHealth } from "@/lib/admin/socialblade-cookie-health";
 
 export const dynamic = "force-dynamic";
 
@@ -53,7 +54,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
         timeoutMs: includePostsAuth || includeCommentsAuth ? 60_000 : 15_000,
       },
     );
-    return NextResponse.json(data);
+    return NextResponse.json(normalizeSocialBladeCookieHealth(data));
   } catch (error) {
     const { platform, handle } = await context.params;
     if (
@@ -61,7 +62,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
       request.nextUrl.searchParams.get("comments_auth") !== "true" &&
       isDegradableCookieHealthError(error)
     ) {
-      return NextResponse.json(buildDegradedCookieHealthPayload(platform, handle), {
+      return NextResponse.json(normalizeSocialBladeCookieHealth(buildDegradedCookieHealthPayload(platform, handle)), {
         headers: { "x-trr-cookie-health-source": "backend-timeout-degraded" },
       });
     }
