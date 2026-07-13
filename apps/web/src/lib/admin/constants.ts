@@ -8,6 +8,3 @@ export const DEFAULT_ADMIN_DISPLAY_NAMES = [
 ] as const;
 
 export type DefaultAdminDisplayName = (typeof DEFAULT_ADMIN_DISPLAY_NAMES)[number];
-
-export const DEFAULT_ADMIN_UIDS = ["MyoUFNjl9VP5iVGBi7tVqxUb8np2"] as const;
-export type DefaultAdminUid = (typeof DEFAULT_ADMIN_UIDS)[number];

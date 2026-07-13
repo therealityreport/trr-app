@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getTypographyState } from "@/lib/server/admin/typography-repository";
+import { buildTypographyStateSnapshot } from "@/lib/server/admin/typography-seed";
 import {
   getOrCreateRouteResponsePromise,
   getRouteResponseCache,
@@ -9,6 +10,7 @@ import {
   TYPOGRAPHY_PUBLIC_CACHE_NAMESPACE,
   TYPOGRAPHY_PUBLIC_CACHE_TTL_MS,
 } from "@/lib/server/admin/typography-route-cache";
+import { resolvePostgresConnectionCandidates } from "@/lib/server/postgres";
 
 export const dynamic = "force-dynamic";
 const TYPOGRAPHY_CACHE_KEY = "state";
@@ -21,6 +23,12 @@ export async function GET() {
     );
     if (cached) {
       return NextResponse.json(cached, { headers: { "x-trr-cache": "hit" } });
+    }
+
+    if (resolvePostgresConnectionCandidates(process.env).length === 0) {
+      const state = buildTypographyStateSnapshot();
+      setRouteResponseCache(TYPOGRAPHY_PUBLIC_CACHE_NAMESPACE, TYPOGRAPHY_CACHE_KEY, state, TYPOGRAPHY_PUBLIC_CACHE_TTL_MS);
+      return NextResponse.json(state);
     }
 
     const payload = await getOrCreateRouteResponsePromise(

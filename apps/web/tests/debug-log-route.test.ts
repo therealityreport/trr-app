@@ -162,4 +162,48 @@ describe("/api/debug-log route", () => {
 
     logSpy.mockRestore();
   });
+
+  it("rejects an invalid same-length shared secret and falls back to admin auth", async () => {
+    process.env.TRR_INTERNAL_ADMIN_SHARED_SECRET = "shared-secret-value";
+    process.env.TRR_DEBUG_LOG_SHARED_SECRET_ENABLED = "true";
+    requireAdminMock.mockRejectedValue(new Error("forbidden"));
+
+    const request = new NextRequest("http://localhost/api/debug-log", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-trr-internal-admin-secret": "shared-secret-wrong",
+      },
+      body: JSON.stringify({ message: "wrong shared secret" }),
+    });
+
+    const response = await POST(request);
+    const payload = await response.json();
+
+    expect(response.status).toBe(403);
+    expect(payload).toEqual({ error: "forbidden" });
+    expect(requireAdminMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects oversized bodies before auth or JSON parsing", async () => {
+    process.env.TRR_INTERNAL_ADMIN_SHARED_SECRET = "shared-secret-value";
+    process.env.TRR_DEBUG_LOG_SHARED_SECRET_ENABLED = "true";
+
+    const request = new NextRequest("http://localhost/api/debug-log", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "content-length": String(70 * 1024),
+        "x-trr-internal-admin-secret": "shared-secret-value",
+      },
+      body: JSON.stringify({ message: "oversized debug payload" }),
+    });
+
+    const response = await POST(request);
+    const payload = await response.json();
+
+    expect(response.status).toBe(413);
+    expect(payload).toEqual({ error: "payload_too_large" });
+    expect(requireAdminMock).not.toHaveBeenCalled();
+  });
 });

@@ -8,6 +8,14 @@ const DEFAULT_GETTY_LOCAL_URL = "http://127.0.0.1:3456";
 const SCRAPE_TIMEOUT_MS = 600_000;
 const SUBPROCESS_MAX_BUFFER = 100 * 1024 * 1024;
 const GETTY_PREFETCH_TMP_DIR = path.join(os.tmpdir(), "trr-getty-prefetch");
+// Prefetch tokens are always randomUUID() values. Reject anything else so a
+// request-supplied token can never traverse out of GETTY_PREFETCH_TMP_DIR.
+const GETTY_PREFETCH_TOKEN_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+const normalizeGettyPrefetchToken = (token: string): string | null => {
+  const trimmed = token.trim();
+  return GETTY_PREFETCH_TOKEN_RE.test(trimmed) ? trimmed : null;
+};
 
 export type GettyLocalScrapePayload = {
   person_name?: string;
@@ -708,7 +716,7 @@ export const storeGettyPrefetchPayload = async (
 export const readGettyPrefetchPayload = async (
   token: string
 ): Promise<GettyPrefetchState | null> => {
-  const normalizedToken = token.trim();
+  const normalizedToken = normalizeGettyPrefetchToken(token);
   if (!normalizedToken) return null;
   try {
     const raw = await readFile(path.join(GETTY_PREFETCH_TMP_DIR, `${normalizedToken}.json`), "utf8");
@@ -722,7 +730,7 @@ export const updateGettyPrefetchPayload = async (
   token: string,
   payload: GettyLocalScrapePayload
 ): Promise<GettyPrefetchState | null> => {
-  const normalizedToken = token.trim();
+  const normalizedToken = normalizeGettyPrefetchToken(token);
   if (!normalizedToken) return null;
   const existing = await readGettyPrefetchPayload(normalizedToken);
   if (!existing) return null;
@@ -766,9 +774,7 @@ export const createGettyPrefetchJob = async (
   await mkdir(GETTY_PREFETCH_TMP_DIR, { recursive: true });
   const mode = options?.mode === "full" ? "full" : "discovery";
   const requestedToken =
-    typeof options?.prefetchToken === "string" && options.prefetchToken.trim().length > 0
-      ? options.prefetchToken.trim()
-      : "";
+    typeof options?.prefetchToken === "string" ? normalizeGettyPrefetchToken(options.prefetchToken) : null;
   const token = requestedToken || randomUUID();
   const state = createGettyPrefetchJobState(token, personName.trim(), showName, mode);
   if (typeof options?.transportMode === "string" && options.transportMode.trim().length > 0) {
@@ -788,7 +794,7 @@ export const startGettyPrefetchJob = async (
   showName?: string | null,
   options?: { mode?: "discovery" | "full"; transportMode?: string | null }
 ): Promise<GettyPrefetchState> => {
-  const normalizedToken = token.trim();
+  const normalizedToken = normalizeGettyPrefetchToken(token);
   if (!normalizedToken) {
     throw new Error("Getty prefetch token is required.");
   }
@@ -923,7 +929,7 @@ export const getGettyRemoteReadiness = async (): Promise<GettyRemoteReadiness> =
 };
 
 export const deleteGettyPrefetchPayload = async (token: string): Promise<void> => {
-  const normalizedToken = token.trim();
+  const normalizedToken = normalizeGettyPrefetchToken(token);
   if (!normalizedToken) return;
   try {
     await rm(path.join(GETTY_PREFETCH_TMP_DIR, `${normalizedToken}.json`), { force: true });
@@ -946,8 +952,8 @@ export const hydrateGettyPrefetchPayload = async (
   const parsed = JSON.parse(rawBody) as Record<string, unknown>;
   const prefetchToken =
     typeof parsed.getty_prefetch_token === "string"
-      ? parsed.getty_prefetch_token.trim()
-      : "";
+      ? normalizeGettyPrefetchToken(parsed.getty_prefetch_token)
+      : null;
   if (!prefetchToken) {
     return rawBody;
   }

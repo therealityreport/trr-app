@@ -1,8 +1,10 @@
+import { timingSafeEqual } from "node:crypto";
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdmin } from "@/lib/server/auth";
 
 const REDACTED = "[REDACTED]";
 const MAX_DEPTH = 6;
+const MAX_DEBUG_LOG_BODY_BYTES = 64 * 1024;
 const SENSITIVE_KEY_RE =
   /(token|secret|password|cookie|authorization|api[_-]?key|session|credential|jwt|bearer|email|uid|user[_-]?id)/i;
 
@@ -29,6 +31,38 @@ function remoteDebugLoggingEnabled(request: NextRequest): boolean {
   return envFlag("TRR_REMOTE_DEBUG_LOG_ENABLED");
 }
 
+function timingSafeStringEqual(left: string, right: string): boolean {
+  const leftBytes = Buffer.from(left);
+  const rightBytes = Buffer.from(right);
+  if (leftBytes.length !== rightBytes.length) {
+    const paddedLeft = Buffer.alloc(rightBytes.length);
+    leftBytes.copy(paddedLeft, 0, 0, Math.min(leftBytes.length, rightBytes.length));
+    timingSafeEqual(paddedLeft, rightBytes);
+    return false;
+  }
+  return timingSafeEqual(leftBytes, rightBytes);
+}
+
+function parseContentLength(request: NextRequest): number | null {
+  const rawContentLength = request.headers.get("content-length")?.trim();
+  if (!rawContentLength) return null;
+  const parsed = Number.parseInt(rawContentLength, 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+}
+
+async function readJsonBodyWithLimit(request: NextRequest): Promise<unknown | "too_large"> {
+  const contentLength = parseContentLength(request);
+  if (contentLength !== null && contentLength > MAX_DEBUG_LOG_BODY_BYTES) {
+    return "too_large";
+  }
+
+  const rawBody = await request.text();
+  if (Buffer.byteLength(rawBody, "utf8") > MAX_DEBUG_LOG_BODY_BYTES) {
+    return "too_large";
+  }
+  return JSON.parse(rawBody) as unknown;
+}
+
 function redactPayload(value: unknown, depth = 0): unknown {
   if (depth > MAX_DEPTH) return "[TRUNCATED]";
   if (value === null || value === undefined) return value;
@@ -49,7 +83,7 @@ async function isAuthorized(request: NextRequest): Promise<boolean> {
     request.headers.get("x-trr-internal-admin-secret")?.trim() ||
     request.headers.get("x-internal-admin-secret")?.trim() ||
     "";
-  if (sharedSecretAuthEnabled && sharedSecret && providedSecret && providedSecret === sharedSecret) {
+  if (sharedSecretAuthEnabled && sharedSecret && providedSecret && timingSafeStringEqual(providedSecret, sharedSecret)) {
     return true;
   }
   try {
@@ -66,11 +100,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "remote_debug_logging_disabled" }, { status: 404 });
     }
 
+    const logEntry = await readJsonBodyWithLimit(request);
+    if (logEntry === "too_large") {
+      return NextResponse.json({ error: "payload_too_large" }, { status: 413 });
+    }
+
     if (!(await isAuthorized(request))) {
       return NextResponse.json({ error: "forbidden" }, { status: 403 });
     }
 
-    const logEntry = await request.json();
     const redacted = redactPayload(logEntry);
 
     console.log('[PRODUCTION DEBUG]', JSON.stringify(redacted, null, 2));

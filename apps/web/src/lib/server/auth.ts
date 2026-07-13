@@ -15,7 +15,7 @@ import { dirname, resolve } from "node:path";
 import type { NextRequest } from "next/server";
 import type { DecodedIdToken } from "firebase-admin/auth";
 import { adminAuth } from "@/lib/firebaseAdmin";
-import { DEFAULT_ADMIN_DISPLAY_NAMES, DEFAULT_ADMIN_UIDS } from "@/lib/admin/constants";
+import { DEFAULT_ADMIN_DISPLAY_NAMES } from "@/lib/admin/constants";
 import { normalizeDisplayNameKey } from "@/lib/admin/display-names";
 import {
   isLoopbackAdminHost,
@@ -67,6 +67,7 @@ type SupabaseVerificationClient = {
 
 const DEV_ADMIN_BYPASS_UID = "dev-admin-bypass";
 const DEV_ADMIN_BYPASS_EMAIL = "codex@thereality.report";
+const DEFAULT_SERVER_ADMIN_UIDS = ["MyoUFNjl9VP5iVGBi7tVqxUb8np2"] as const;
 const DEFAULT_DEV_ADMIN_ALLOWED_HOSTS = ["admin.localhost", "localhost", "127.0.0.1", "[::1]", "::1"];
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
 const FIREBASE_AUTH_PROVIDER: AuthProvider = "firebase";
@@ -654,7 +655,7 @@ const allowedEmails = new Set<string>([
 ]);
 
 const allowedUids = new Set<string>([
-  ...DEFAULT_ADMIN_UIDS,
+  ...DEFAULT_SERVER_ADMIN_UIDS,
   ...parseAllowlist(process.env.ADMIN_UID_ALLOWLIST, false),
   ...parseAllowlist(process.env.NEXT_PUBLIC_ADMIN_UIDS, false),
 ]);

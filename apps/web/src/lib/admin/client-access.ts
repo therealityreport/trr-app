@@ -1,35 +1,55 @@
 import type { User } from "firebase/auth";
-import { DEFAULT_ADMIN_UIDS } from "./constants";
 
-const parseAllowlist = (raw?: string | null, lowercase = false): string[] => {
-  const entries = (raw ?? "")
-    .split(",")
-    .map((entry) => (lowercase ? entry.trim().toLowerCase() : entry.trim()))
-    .filter(Boolean);
-  return entries;
+type AdminCheckResponse = {
+  hasAccess?: unknown;
 };
 
-const allowedAdminEmails = new Set(
-  parseAllowlist(process.env.NEXT_PUBLIC_ADMIN_EMAILS, true),
-);
-
-const allowedAdminUids = new Set<string>([
-  ...DEFAULT_ADMIN_UIDS,
-  ...parseAllowlist(process.env.NEXT_PUBLIC_ADMIN_UIDS, false),
-]);
+const ADMIN_CHECK_TIMEOUT_MS = 5000;
 
 export function isClientAdmin(user: User | null): boolean {
+  void user;
+  return false;
+}
+
+export async function checkServerAdminAccess(user: User | null): Promise<boolean> {
   if (!user) return false;
-  const email = user.email?.toLowerCase();
-  const emailAllowed = Boolean(email && user.emailVerified && allowedAdminEmails.has(email));
-  const uidAllowed = user.uid ? allowedAdminUids.has(user.uid) : false;
-  return emailAllowed || uidAllowed;
+
+  let token: string | null = null;
+  try {
+    token = await user.getIdToken();
+  } catch {
+    token = null;
+  }
+
+  const headers = new Headers({ accept: "application/json" });
+  if (token) {
+    headers.set("authorization", `Bearer ${token}`);
+  }
+
+  const abortController = new AbortController();
+  const timeoutId = window.setTimeout(() => abortController.abort(), ADMIN_CHECK_TIMEOUT_MS);
+  try {
+    const response = await fetch("/api/admin/check", {
+      method: "GET",
+      headers,
+      credentials: "same-origin",
+      cache: "no-store",
+      signal: abortController.signal,
+    });
+    if (!response.ok) return false;
+    const payload = (await response.json()) as AdminCheckResponse;
+    return payload.hasAccess === true;
+  } catch {
+    return false;
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
 }
 
 export function getAllowedAdminEmails(): string[] {
-  return Array.from(allowedAdminEmails);
+  return [];
 }
 
 export function getAllowedAdminUids(): string[] {
-  return Array.from(allowedAdminUids);
+  return [];
 }

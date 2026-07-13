@@ -3,8 +3,8 @@ import type { AdminApiReferenceInventory } from "@/lib/admin/api-references/type
 export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
   "inventorySchemaVersion": "1.0.0",
   "generatorVersion": "1.0.0",
-  "generatedAt": "2026-07-05T23:35:29.612Z",
-  "sourceCommitSha": "b4198ec471d55204af3f5bbeca194ac0a9706ab7",
+  "generatedAt": "2026-07-13T21:29:30.120Z",
+  "sourceCommitSha": "3e649da9d5af986171f929adef6947875004073f",
   "overrideDigest": "cd85a76fd2fc977cbc691ccab80ce844f9ea783e118af35eb3d9766e5d61fd36",
   "nodes": [
     {
@@ -7189,6 +7189,37 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       ],
       "staticOnly": false,
       "payloadRisk": "high",
+      "fanoutRisk": "low"
+    },
+    {
+      "id": "route:GET:/api/admin/check",
+      "kind": "api_route",
+      "title": "GET /api/admin/check",
+      "pathPattern": "/api/admin/check",
+      "symbol": "GET",
+      "sourceFile": "src/app/api/admin/check/route.ts",
+      "sourceLocator": {
+        "line": 7,
+        "symbol": "GET"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:app_api_route"
+      ],
+      "usageTier": "manual",
+      "polls": false,
+      "pollCadenceMs": null,
+      "automatic": false,
+      "loadsLargeDatasets": false,
+      "usesPagination": false,
+      "returnsWideRowsOrBlobsOrRawJson": false,
+      "fansOutQueries": false,
+      "postgresAccess": "none",
+      "viewKinds": [],
+      "staticOnly": false,
+      "payloadRisk": "low",
       "fanoutRisk": "low"
     },
     {
@@ -23521,6 +23552,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
         "route:GET:/api/admin/auth/status",
         "route:GET:/api/admin/auth/status/drill-report",
         "route:GET:/api/admin/brands/profile",
+        "route:GET:/api/admin/check",
         "route:GET:/api/admin/colors/image-proxy",
         "route:GET:/api/admin/covered-shows",
         "route:GET:/api/admin/covered-shows/[showId]",
@@ -24245,11 +24277,11 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "renders_view": []
     },
     "summary": {
-      "totalNodes": 584,
+      "totalNodes": 585,
       "totalEdges": 204,
       "nodesByKind": {
         "ui_surface": 57,
-        "api_route": 400,
+        "api_route": 401,
         "backend_endpoint": 121,
         "repository_surface": 2,
         "polling_loop": 4
