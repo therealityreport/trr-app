@@ -17,7 +17,7 @@ import { GET } from "@/app/api/admin/design-docs/nyt-homepage-preview/route";
 import { NYT_HOMEPAGE_SOURCE_BUNDLE } from "@/lib/admin/nyt-homepage-source-bundle";
 
 // The preview route reads the NYT source bundle committed to the trr-workspace
-// repo at `.agents/skills/design-docs-agent/source-bundles/nyt-homepage-2026-04-21/`.
+// repo at `artifacts/design-docs/source-bundles/nyt-homepage-2026-04-21/`.
 // Locally the app is checked out inside that workspace so the bundle is reachable
 // via `WORKSPACE_ROOT = process.cwd()/../../..`, but CI clones trr-app standalone
 // and the bundle isn't present. Gate these fixture-dependent tests on bundle

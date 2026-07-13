@@ -430,8 +430,18 @@ async function buildSkillGroup(
 async function collectSkillAgentInterfaces(
   roots: string[],
   context: InventoryContext,
+  excludedRoots: string[] = [],
 ): Promise<SkillAgentInterfaceItem[]> {
-  const interfaceFiles = (await Promise.all(roots.map((root) => listFilesRecursive(root, "openai.yaml")))).flat();
+  const interfaceFiles = (
+    await Promise.all(roots.map((root) => listFilesRecursive(root, "openai.yaml")))
+  )
+    .flat()
+    .filter(
+      (interfaceFile) =>
+        !excludedRoots.some(
+          (excludedRoot) => interfaceFile === excludedRoot || interfaceFile.startsWith(`${excludedRoot}/`),
+        ),
+    );
 
   const interfaces = await Promise.all(
     interfaceFiles.map(async (interfaceFile) => {
@@ -608,37 +618,10 @@ export async function getDevDashboardSkillsAgentsData(
       roots: [join(context.homeDir, ".codex", "skills")],
     },
     {
-      key: "workspace-shared",
-      label: "Workspace Shared",
+      key: "agents-user",
+      label: "Agent User",
       repoLabel: null,
-      roots: [join(context.workspaceRoot, ".agents", "skills")],
-    },
-    {
-      key: "workspace-codex-project",
-      label: "Workspace Codex Project",
-      repoLabel: null,
-      roots: [join(context.workspaceRoot, ".codex", "skills")],
-    },
-    {
-      key: "workspace-claude-project",
-      label: "Workspace Claude Project",
-      repoLabel: null,
-      roots: [join(context.workspaceRoot, ".claude", "skills")],
-    },
-    {
-      key: "trr-app-repo",
-      label: "TRR-APP Repo",
-      repoLabel: "TRR-APP",
-      roots: [
-        join(context.workspaceRoot, "TRR-APP", ".agents", "skills"),
-        join(context.workspaceRoot, "TRR-APP", ".claude", "skills"),
-      ],
-    },
-    {
-      key: "trr-backend-repo",
-      label: "TRR-Backend Repo",
-      repoLabel: "TRR-Backend",
-      roots: [join(context.workspaceRoot, "TRR-Backend", ".agents", "skills")],
+      roots: [join(context.homeDir, ".agents", "skills")],
     },
     {
       key: "claude-user",
@@ -660,11 +643,12 @@ export async function getDevDashboardSkillsAgentsData(
 
   const skillAgentInterfaces = await collectSkillAgentInterfaces(
     [
-      join(context.workspaceRoot, ".agents", "skills"),
-      join(context.workspaceRoot, "TRR-APP", ".agents", "skills"),
-      join(context.workspaceRoot, "TRR-Backend", ".agents", "skills"),
+      join(context.homeDir, ".codex", "skills"),
+      join(context.homeDir, ".agents", "skills"),
+      join(context.homeDir, ".claude", "skills"),
     ],
     context,
+    [join(context.homeDir, ".codex", "skills", ".system")],
   );
 
   return {
