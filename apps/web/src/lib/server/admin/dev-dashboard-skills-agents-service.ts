@@ -608,6 +608,12 @@ export async function getDevDashboardSkillsAgentsData(
       roots: [join(context.homeDir, ".codex", "skills")],
     },
     {
+      key: "agents-user",
+      label: "Agent User",
+      repoLabel: null,
+      roots: [join(context.homeDir, ".agents", "skills")],
+    },
+    {
       key: "claude-user",
       label: "Claude User",
       repoLabel: null,
@@ -628,6 +634,7 @@ export async function getDevDashboardSkillsAgentsData(
   const skillAgentInterfaces = await collectSkillAgentInterfaces(
     [
       join(context.homeDir, ".codex", "skills"),
+      join(context.homeDir, ".agents", "skills"),
       join(context.homeDir, ".claude", "skills"),
     ],
     context,

@@ -44,6 +44,14 @@ description: User-installed Codex skill.
 `,
     );
     await writeTextFile(
+      path.join(homeDir, ".agents/skills/agent-user-skill/SKILL.md"),
+      `---
+name: Agent User Skill
+description: User-installed agent skill.
+---
+`,
+    );
+    await writeTextFile(
       path.join(homeDir, ".claude/skills/claude-user-skill/SKILL.md"),
       `---
 name: Claude User Skill
@@ -87,6 +95,14 @@ dependencies:
 `,
     );
     await writeTextFile(
+      path.join(homeDir, ".agents/skills/agent-user-skill/agents/openai.yaml"),
+      `interface:
+  display_name: "Agent User Skill Interface"
+  short_description: "Agent user-level interface"
+  default_prompt: "Use the agent user skill."
+`,
+    );
+    await writeTextFile(
       path.join(workspaceRoot, ".codex/config.toml"),
       `[agents]
 max_threads = 6
@@ -114,11 +130,17 @@ enabled = true
     expect(data.skills.map((group) => group.label)).toEqual([
       "Codex System",
       "Codex User",
+      "Agent User",
       "Claude User",
     ]);
 
     const codexUser = data.skills.find((group) => group.key === "codex-user");
     expect(codexUser?.items.map((item) => item.path)).toEqual(["~/.codex/skills/user-skill/SKILL.md"]);
+
+    const agentUser = data.skills.find((group) => group.key === "agents-user");
+    expect(agentUser?.items.map((item) => item.path)).toEqual([
+      "~/.agents/skills/agent-user-skill/SKILL.md",
+    ]);
 
     expect(data.agents.codexProjectAgents).toEqual([
       expect.objectContaining({
@@ -138,6 +160,10 @@ enabled = true
           displayName: "User Skill Interface",
           owningSkillName: "User Skill",
           toolDependencies: [{ label: "mcp: chrome-devtools", description: "Browser verification" }],
+        }),
+        expect.objectContaining({
+          displayName: "Agent User Skill Interface",
+          owningSkillName: "Agent User Skill",
         }),
       ]),
     );
