@@ -46,7 +46,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
           {
             queryString,
             fallbackError: "Failed to fetch social account catalog posts",
-            retries: 0,
+            retries: 1,
             timeoutMs: 30_000,
           },
         ),

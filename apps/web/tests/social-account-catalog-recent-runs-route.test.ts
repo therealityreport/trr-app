@@ -87,6 +87,18 @@ describe("social account catalog recent runs route", () => {
     ]);
   });
 
+  it("rejects malformed explicit limits before querying recent runs", async () => {
+    const response = await GET(
+      new NextRequest("http://localhost/api/admin/trr-api/social/profiles/instagram/@bravotv/catalog/runs/recent?limit=abc"),
+      { params: Promise.resolve({ platform: "instagram", handle: "@bravotv" }) },
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toBe("limit must be an integer");
+    expect(queryMock).not.toHaveBeenCalled();
+  });
+
   it("mutes pending attached lanes when the parent run is cancelled", async () => {
     queryMock.mockResolvedValue({
       rows: [

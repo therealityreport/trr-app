@@ -9,6 +9,7 @@ import {
   setRouteResponseCache,
 } from "@/lib/server/admin/route-response-cache";
 import { query } from "@/lib/server/postgres";
+import { parseBoundedIntegerParam } from "@/lib/server/trr-api/query-integer-params";
 import { socialProxyErrorResponse } from "@/lib/server/trr-api/social-admin-proxy";
 import type { SocialAccountCatalogRun } from "@/lib/admin/social-account-profile";
 
@@ -55,10 +56,13 @@ const TERMINAL_PARENT_STATUSES = new Set(["cancelled", "failed"]);
 const normalizeHandle = (value: string): string =>
   value.trim().toLowerCase().replace(/^@+/, "");
 
-const readLimit = (request: NextRequest): number => {
-  const parsed = Number(request.nextUrl.searchParams.get("limit") ?? "10");
-  return Number.isInteger(parsed) ? Math.max(1, Math.min(parsed, 25)) : 10;
-};
+const readLimit = (request: NextRequest) =>
+  parseBoundedIntegerParam(request.nextUrl.searchParams.get("limit"), {
+    name: "limit",
+    defaultValue: 10,
+    min: 1,
+    max: 25,
+  });
 
 const readRecord = (value: unknown): Record<string, unknown> =>
   value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
@@ -311,7 +315,11 @@ export async function GET(request: NextRequest, context: RouteContext) {
     if (normalizedPlatform !== "instagram" || !normalizedHandle) {
       return NextResponse.json({ error: "unsupported_profile" }, { status: 400 });
     }
-    const limit = readLimit(request);
+    const limitResult = readLimit(request);
+    if (!limitResult.ok) {
+      return NextResponse.json({ error: limitResult.error }, { status: 400 });
+    }
+    const limit = limitResult.value;
     const cacheKey = buildUserScopedRouteCacheKey(
       String(user?.uid ?? "admin"),
       `${normalizedPlatform}:${normalizedHandle}:catalog-runs-recent`,

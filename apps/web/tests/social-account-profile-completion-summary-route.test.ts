@@ -1,33 +1,78 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
-const { requireAdminMock, queryMock, socialProxyErrorResponseMock } = vi.hoisted(() => ({
+const {
+  fetchSocialBackendJsonMock,
+  requireAdminMock,
+  socialProxyErrorResponseMock,
+  toVerifiedAdminContextMock,
+} = vi.hoisted(() => ({
+  fetchSocialBackendJsonMock: vi.fn(),
   requireAdminMock: vi.fn(),
-  queryMock: vi.fn(),
   socialProxyErrorResponseMock: vi.fn(),
+  toVerifiedAdminContextMock: vi.fn(),
 }));
 
 vi.mock("@/lib/server/auth", () => ({
   requireAdmin: requireAdminMock,
-}));
-
-vi.mock("@/lib/server/postgres", () => ({
-  query: queryMock,
+  toVerifiedAdminContext: toVerifiedAdminContextMock,
 }));
 
 vi.mock("@/lib/server/trr-api/social-admin-proxy", () => ({
+  fetchSocialBackendJson: fetchSocialBackendJsonMock,
   socialProxyErrorResponse: socialProxyErrorResponseMock,
 }));
 
 import { GET } from "@/app/api/admin/trr-api/social/profiles/[platform]/[handle]/completion-summary/route";
+import { invalidateRouteResponseCache } from "@/lib/server/admin/route-response-cache";
+
+const CACHE_NAMESPACE = "social-account-profile-completion-summary";
+
+const completionPayload = {
+  platform: "instagram",
+  handle: "bravotv",
+  year: 2026,
+  total_posts: 3,
+  total_reported_comments: 1200,
+  saved_comments: 780,
+  missing_comments: 420,
+  accounted_comments: 1200,
+  lanes: {
+    comments: { finished: 1, in_progress: 2, not_started: 0 },
+    details: { finished: 2, in_progress: 0, not_started: 1 },
+    media: { finished: 1, in_progress: 1, not_started: 1 },
+  },
+};
+
+const requestCompletionSummary = (
+  url = "http://localhost/api/admin/trr-api/social/profiles/instagram/bravotv/completion-summary",
+  params = { platform: "instagram", handle: "bravotv" },
+) => GET(new NextRequest(url), { params: Promise.resolve(params) });
+
+const expectTimingHeaders = (response: Response) => {
+  expect(response.headers.get("server-timing")).toContain("trr_admin_route;dur=");
+  expect(response.headers.get("x-trr-admin-route-ms")).toMatch(/^\d+$/);
+};
 
 describe("social account profile completion summary route", () => {
   beforeEach(() => {
+    invalidateRouteResponseCache(CACHE_NAMESPACE);
     requireAdminMock.mockReset();
-    queryMock.mockReset();
+    toVerifiedAdminContextMock.mockReset();
+    fetchSocialBackendJsonMock.mockReset();
     socialProxyErrorResponseMock.mockReset();
 
-    requireAdminMock.mockResolvedValue({ uid: "admin-1", provider: "firebase" });
+    requireAdminMock.mockResolvedValue({
+      uid: "admin-1",
+      email: "admin@example.com",
+      provider: "firebase",
+    });
+    toVerifiedAdminContextMock.mockReturnValue({
+      uid: "admin-1",
+      email: "admin@example.com",
+      verifiedAt: 1_750_000_000_000,
+    });
+    fetchSocialBackendJsonMock.mockResolvedValue(completionPayload);
     socialProxyErrorResponseMock.mockImplementation((error: unknown) =>
       Response.json({ error: String(error), code: "BACKEND_UNREACHABLE" }, { status: 502 }),
     );
@@ -37,116 +82,130 @@ describe("social account profile completion summary route", () => {
     vi.useRealTimers();
   });
 
-  it("defaults to the current year and counts collab comment gaps from health-aware matches", async () => {
+  it("normalizes the profile, defaults to the current year, and proxies the exact payload", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-06-29T12:00:00Z"));
 
-    queryMock.mockResolvedValue({
-      rows: [
-        {
-          total_posts: "3",
-          total_reported_comments: "1200",
-          saved_comments: "780",
-          missing_comments: "420",
-          accounted_comments: "1200",
-          comments_finished: "1",
-          comments_in_progress: "2",
-          comments_not_started: "0",
-          details_finished: "2",
-          details_not_started: "1",
-          media_finished: "1",
-          media_in_progress: "1",
-          media_not_started: "1",
-        },
-      ],
-    });
-
-    const response = await GET(
-      new NextRequest("http://localhost/api/admin/trr-api/social/profiles/instagram/bravotv/completion-summary"),
-      { params: Promise.resolve({ platform: "instagram", handle: "bravotv" }) },
+    const response = await requestCompletionSummary(
+      "http://localhost/api/admin/trr-api/social/profiles/Instagram/%40BravoTV/completion-summary",
+      { platform: " Instagram ", handle: " @@BravoTV " },
     );
-    const body = (await response.json()) as {
-      year: number;
-      total_posts: number;
-      total_reported_comments: number;
-      saved_comments: number;
-      missing_comments: number;
-      lanes: {
-        comments: { finished: number; in_progress: number; not_started: number };
-      };
-    };
 
     expect(response.status).toBe(200);
-    expect(body.year).toBe(2026);
-    expect(body.total_posts).toBe(3);
-    expect(body.total_reported_comments).toBe(1200);
-    expect(body.saved_comments).toBe(780);
-    expect(body.missing_comments).toBe(420);
-    expect(body.lanes.comments).toEqual({
-      finished: 1,
-      in_progress: 2,
-      not_started: 0,
-    });
-
-    expect(queryMock).toHaveBeenCalledWith(expect.any(String), ["bravotv", 2026]);
-    const sql = String(queryMock.mock.calls[0]?.[0] ?? "");
-    expect(sql).toContain("social.comment_capture_health");
-    expect(sql).toContain("cp.owner_username");
-    expect(sql).toContain("p.owner_username");
-    expect(sql).toContain("p.username");
-    expect(sql).toContain("cp.collaborators");
-    expect(sql).toContain("p.collaborators");
-    expect(sql).toContain("source_account");
-    expect(sql).toContain("p.raw_data");
-    expect(sql).not.toMatch(/\bp\.comments_count\b/);
+    expect(await response.json()).toEqual(completionPayload);
+    expect(response.headers.get("x-trr-cache")).toBe("miss");
+    expect(response.headers.get("x-trr-admin-backend-ms")).toMatch(/^\d+$/);
+    expectTimingHeaders(response);
+    expect(fetchSocialBackendJsonMock).toHaveBeenCalledWith(
+      "/profiles/instagram/bravotv/completion-summary",
+      expect.objectContaining({
+        adminContext: expect.objectContaining({ uid: "admin-1" }),
+        queryString: "year=2026",
+        fallbackError: "Failed to load social completion summary",
+        retries: 0,
+        timeoutMs: 30_000,
+      }),
+    );
   });
 
   it("falls back to the current year when the year query param is invalid", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-01T12:00:00Z"));
-    queryMock.mockResolvedValue({ rows: [] });
 
-    const response = await GET(
-      new NextRequest("http://localhost/api/admin/trr-api/social/profiles/instagram/bravotv/completion-summary?year=nope"),
-      { params: Promise.resolve({ platform: "instagram", handle: "@bravotv" }) },
+    const response = await requestCompletionSummary(
+      "http://localhost/api/admin/trr-api/social/profiles/instagram/bravotv/completion-summary?year=nope",
+      { platform: "instagram", handle: "@bravotv" },
     );
-    const body = (await response.json()) as { year: number; handle: string; total_posts: number };
 
     expect(response.status).toBe(200);
-    expect(body.year).toBe(2026);
-    expect(body.handle).toBe("bravotv");
-    expect(body.total_posts).toBe(0);
-    expect(queryMock).toHaveBeenCalledWith(expect.any(String), ["bravotv", 2026]);
+    expect(fetchSocialBackendJsonMock).toHaveBeenCalledWith(
+      "/profiles/instagram/bravotv/completion-summary",
+      expect.objectContaining({ queryString: "year=2026" }),
+    );
   });
 
-  it("rejects unsupported platforms before querying completion data", async () => {
-    const response = await GET(
-      new NextRequest("http://localhost/api/admin/trr-api/social/profiles/tiktok/bravotv/completion-summary"),
-      { params: Promise.resolve({ platform: "tiktok", handle: "bravotv" }) },
+  it("preserves user-scoped cache miss and hit behavior", async () => {
+    const miss = await requestCompletionSummary(
+      "http://localhost/api/admin/trr-api/social/profiles/instagram/bravotv/completion-summary?year=2026",
     );
-    const body = (await response.json()) as { error: string };
+    const hit = await requestCompletionSummary(
+      "http://localhost/api/admin/trr-api/social/profiles/instagram/bravotv/completion-summary?year=2026",
+    );
+
+    requireAdminMock.mockResolvedValueOnce({
+      uid: "admin-2",
+      email: "other@example.com",
+      provider: "firebase",
+    });
+    toVerifiedAdminContextMock.mockReturnValueOnce({
+      uid: "admin-2",
+      email: "other@example.com",
+      verifiedAt: 1_750_000_000_001,
+    });
+    const otherUserMiss = await requestCompletionSummary(
+      "http://localhost/api/admin/trr-api/social/profiles/instagram/bravotv/completion-summary?year=2026",
+    );
+
+    expect(miss.headers.get("x-trr-cache")).toBe("miss");
+    expect(hit.headers.get("x-trr-cache")).toBe("hit");
+    expect(otherUserMiss.headers.get("x-trr-cache")).toBe("miss");
+    expect(fetchSocialBackendJsonMock).toHaveBeenCalledTimes(2);
+    expectTimingHeaders(hit);
+  });
+
+  it("serves stale cached data when the bounded backend request times out", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-13T12:00:00Z"));
+    await requestCompletionSummary(
+      "http://localhost/api/admin/trr-api/social/profiles/instagram/bravotv/completion-summary?year=2026",
+    );
+    vi.advanceTimersByTime(5 * 60_000 + 1);
+    fetchSocialBackendJsonMock.mockRejectedValueOnce(new Error("upstream request timed out"));
+
+    const response = await requestCompletionSummary(
+      "http://localhost/api/admin/trr-api/social/profiles/instagram/bravotv/completion-summary?year=2026",
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual(completionPayload);
+    expect(response.headers.get("x-trr-cache")).toBe("stale");
+    expect(response.headers.get("x-trr-cacheable")).toBe("0");
+    expect(fetchSocialBackendJsonMock).toHaveBeenLastCalledWith(
+      "/profiles/instagram/bravotv/completion-summary",
+      expect.objectContaining({ timeoutMs: 30_000 }),
+    );
+    expectTimingHeaders(response);
+  });
+
+  it("rejects unsupported platforms before requesting completion data", async () => {
+    const response = await requestCompletionSummary(
+      "http://localhost/api/admin/trr-api/social/profiles/tiktok/bravotv/completion-summary",
+      { platform: "tiktok", handle: "bravotv" },
+    );
 
     expect(response.status).toBe(400);
-    expect(body.error).toBe("unsupported_profile");
-    expect(queryMock).not.toHaveBeenCalled();
+    expect(await response.json()).toEqual({ error: "unsupported_profile" });
+    expect(fetchSocialBackendJsonMock).not.toHaveBeenCalled();
+    expectTimingHeaders(response);
   });
 
-  it("returns the shared proxy error response when the completion query fails", async () => {
-    const error = new Error("column p.comments_count does not exist");
-    queryMock.mockRejectedValue(error);
+  it("preserves the shared upstream error envelope when no stale value exists", async () => {
+    const error = new Error("backend unavailable");
+    fetchSocialBackendJsonMock.mockRejectedValue(error);
 
-    const response = await GET(
-      new NextRequest("http://localhost/api/admin/trr-api/social/profiles/instagram/bravotv/completion-summary?year=2026"),
-      { params: Promise.resolve({ platform: "instagram", handle: "bravotv" }) },
+    const response = await requestCompletionSummary(
+      "http://localhost/api/admin/trr-api/social/profiles/instagram/bravotv/completion-summary?year=2026",
     );
-    const body = (await response.json()) as { error: string; code: string };
 
     expect(response.status).toBe(502);
-    expect(body.code).toBe("BACKEND_UNREACHABLE");
-    expect(body.error).toContain("column p.comments_count does not exist");
+    expect(await response.json()).toEqual({
+      error: "Error: backend unavailable",
+      code: "BACKEND_UNREACHABLE",
+    });
     expect(socialProxyErrorResponseMock).toHaveBeenCalledWith(
       error,
       "[api] Failed to load social completion summary",
     );
+    expectTimingHeaders(response);
   });
 });

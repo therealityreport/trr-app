@@ -60,6 +60,17 @@ const buildDegradedProgressPayload = (runId: string, reason: string): Record<str
   progress_authoritative: false,
 });
 
+const markProgressAuthoritative = (value: unknown): unknown => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return value;
+  }
+  const progress = value as Record<string, unknown>;
+  return {
+    ...progress,
+    progress_authoritative: progress.progress_authoritative !== false,
+  };
+};
+
 const isFastProgressRequest = (request: NextRequest): boolean => {
   const fast = request.nextUrl.searchParams.get("fast");
   return fast === "true" || fast === "1";
@@ -109,7 +120,9 @@ export async function GET(request: NextRequest, context: RouteContext) {
           retries: 0,
           timeoutMs,
         });
-      data = await getOrCreateRouteResponsePromise(PROGRESS_CACHE_NAMESPACE, cacheKey, fetchProgress);
+      data = markProgressAuthoritative(
+        await getOrCreateRouteResponsePromise(PROGRESS_CACHE_NAMESPACE, cacheKey, fetchProgress),
+      );
       setRouteResponseCache(
         PROGRESS_CACHE_NAMESPACE,
         cacheKey,

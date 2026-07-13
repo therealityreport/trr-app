@@ -19,6 +19,43 @@ const json = async (route: Route, body: unknown, status = 200) => {
   });
 };
 
+export const buildMockGettyLocalScrapeResponse = (
+  method: string,
+  requestedToken: string | null,
+): { body: Record<string, unknown>; status: number } => {
+  const prefetchToken = requestedToken?.trim() || "mock-getty-prefetch-token";
+  const statusUrl = `/api/admin/getty-local/scrape?prefetch_token=${encodeURIComponent(prefetchToken)}`;
+  if (method.toUpperCase() === "POST") {
+    return {
+      status: 202,
+      body: {
+        prefetch_token: prefetchToken,
+        status: "running",
+        stage: "starting",
+        poll_after_ms: 1000,
+        status_url: statusUrl,
+        prefetch_mode: "discovery",
+      },
+    };
+  }
+  return {
+    status: 200,
+    body: {
+      prefetch_token: prefetchToken,
+      status: "completed",
+      poll_after_ms: 0,
+      status_url: statusUrl,
+      prefetch_mode: "discovery",
+      discovery_ready: true,
+      enrichment_pending: false,
+      merged_total: 0,
+      merged_events_total: 0,
+      candidate_manifest_total: 0,
+      detail_enrichment_total: 0,
+    },
+  };
+};
+
 const sleep = async (ms: number) => {
   if (!ms || ms <= 0) return;
   await new Promise((resolve) => setTimeout(resolve, ms));
@@ -220,7 +257,15 @@ export async function mockAdminApi(page: Page, options: MockAdminApiOptions = {}
     const requestUrl = new URL(route.request().url());
     const path = requestUrl.pathname;
 
-    if (path === `/api/admin/trr-api/shows/${SHOW_ID}`) {
+    if (path === "/api/admin/getty-local/scrape") {
+      const response = buildMockGettyLocalScrapeResponse(
+        route.request().method(),
+        requestUrl.searchParams.get("prefetch_token"),
+      );
+      return json(route, response.body, response.status);
+    }
+
+    if (path === `/api/admin/trr-api/shows/${SHOW_ID}` || path === `/api/admin/trr-api/shows/${SHOW_SLUG}`) {
       return json(route, {
         show: {
           id: SHOW_ID,

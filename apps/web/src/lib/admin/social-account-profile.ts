@@ -1033,6 +1033,7 @@ export type SocialAccountCatalogRun = {
   selected_tasks?: CatalogBackfillSelectedTask[];
   effective_selected_tasks?: CatalogBackfillSelectedTask[];
   comments_run_id?: string | null;
+  comments_reused_existing_run?: boolean | null;
   attached_followups?: SocialAccountCatalogAttachedFollowups | null;
 };
 
@@ -1351,6 +1352,7 @@ export type SocialAccountCatalogRunProgressSnapshot = {
   selected_tasks?: CatalogBackfillSelectedTask[];
   effective_selected_tasks?: CatalogBackfillSelectedTask[];
   budget_decision?: Record<string, unknown> | null;
+  db_session_capacity?: Record<string, unknown> | null;
   adaptive_worker_plan?: Record<string, unknown> | null;
   runbook_state?: Record<string, unknown> | null;
   requires_apply_confirmation?: boolean | null;
@@ -1417,6 +1419,8 @@ export type SocialAccountCatalogRunProgressSnapshot = {
   progress_degraded?: boolean;
   progress_degraded_reason?: string | null;
   progress_degraded_at?: string | null;
+  /** True only when this response came from the live backend progress read. */
+  progress_authoritative?: boolean;
   // Legacy compatibility: preserved while backend rolls out details_refresh_policy / force_network_detail_fetch.
   details_refresh_force_detail_fetch?: boolean;
   details_refresh_policy?: "smart" | "force_metrics" | "force_network_detail" | string | null;
@@ -1440,6 +1444,7 @@ export type SocialAccountCatalogRunProgressSnapshot = {
     | "fetching"
     | "recovering"
     | "classifying"
+    | "degraded"
     | "completed"
     | "failed"
     | "cancelled";
@@ -1639,7 +1644,7 @@ export type CatalogBackfillLaunchResponse = {
   run_id?: string | null;
   status?: string | null;
   launch_group_id?: string | null;
-  launch_state?: "pending" | "pending_apply_confirmation" | "finalizing" | "ready" | "failed" | null;
+  launch_state?: "pending" | "pending_apply_confirmation" | "finalizing" | "ready" | "failed" | "blocked_auth" | null;
   launch_task_resolution_pending?: boolean | null;
   requires_apply_confirmation?: boolean | null;
   apply_required?: boolean | null;
@@ -1647,6 +1652,7 @@ export type CatalogBackfillLaunchResponse = {
   required_confirmation?: string | null;
   runbook_state?: Record<string, unknown> | null;
   budget_decision?: Record<string, unknown> | null;
+  db_session_capacity?: Record<string, unknown> | null;
   adaptive_worker_plan?: Record<string, unknown> | null;
   enable_cap4_canary?: boolean | null;
   selected_tasks?: CatalogBackfillSelectedTask[];
@@ -1654,6 +1660,7 @@ export type CatalogBackfillLaunchResponse = {
   post_details_skipped_reason?: "already_materialized" | null;
   catalog_run_id?: string | null;
   comments_run_id?: string | null;
+  comments_reused_existing_run?: boolean | null;
   attached_followups?: SocialAccountCatalogAttachedFollowups | null;
   catalog_bootstrap_required?: boolean;
   comments_deferred_until_catalog_complete?: boolean;

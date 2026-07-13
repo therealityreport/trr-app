@@ -45,7 +45,6 @@ import {
   type CoveredShow,
 } from "@/lib/server/admin/covered-shows-repository";
 import { loadSharedAccountSourcesFromLocalDb } from "@/lib/server/admin/shared-account-sources";
-import { query, queryWithStatementTimeout } from "@/lib/server/postgres";
 import {
   ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
   fetchAdminBackendJson,
@@ -106,10 +105,6 @@ type SocialBladeRowsPayload = {
   rows?: SocialBladeSummaryRow[];
 };
 
-type SocialBladeProgressCountsPayload = {
-  rows?: SocialBladeProgressCountRow[];
-};
-
 type SocialProgressRollupPayload = {
   rows?: SocialProgressRow[];
   cache_status?: string | null;
@@ -133,14 +128,6 @@ const EMPTY_SCRAPE_JOB_HEALTH: ScrapeJobHealthSummary = {
   failure_signal_jobs: 0,
   in_failed_sql_transaction_hits: 0,
   latest_failure_at: null,
-};
-
-type SocialBladeProgressCountRow = {
-  platform: string | null;
-  account_handle: string | null;
-  socialblade_scraped_count: number | string | null;
-  socialblade_saved_count: number | string | null;
-  socialblade_supported?: boolean | null;
 };
 
 type SocialProgressRow = {
@@ -345,38 +332,10 @@ const CAST_SOCIALBLADE_PLATFORMS =
   );
 
 const SOCIAL_LANDING_PROGRESS_MAX_TARGETS = 96;
-const SOCIAL_LANDING_PROGRESS_STATEMENT_TIMEOUT_MS = 1_200;
 const SOCIAL_LANDING_OPTIONAL_ENRICHMENT_TIMEOUT_MS = parseCacheTtlMs(
   process.env.TRR_ADMIN_SOCIAL_LANDING_OPTIONAL_ENRICHMENT_TIMEOUT_MS,
   2_500,
 );
-
-const sqlJsonTextNonNegativeInt = (expr: string): string =>
-  `coalesce(nullif(regexp_replace(coalesce(${expr}, ''), '[^0-9]', '', 'g'), '')::bigint, 0)`;
-
-const instagramReportedCommentsSql = (alias: string): string => {
-  const safeAlias = alias.trim() || "p";
-  const raw = `coalesce(${safeAlias}.raw_data, '{}'::jsonb)`;
-  const rawCandidates = [
-    `${raw} ->> 'comments_count'`,
-    `${raw} ->> 'comments'`,
-    `${raw} ->> 'comment_count'`,
-    `${raw} ->> 'commentsCount'`,
-    `${raw} -> 'edge_media_to_comment' ->> 'count'`,
-    `${raw} -> 'edge_media_to_parent_comment' ->> 'count'`,
-    `${raw} -> 'edge_media_preview_comment' ->> 'count'`,
-    `${raw} -> 'media' ->> 'comments_count'`,
-    `${raw} -> 'media' ->> 'comments'`,
-    `${raw} -> 'media' ->> 'comment_count'`,
-    `${raw} -> 'media' ->> 'commentsCount'`,
-    `${raw} -> 'metrics' ->> 'comments_count'`,
-    `${raw} -> 'metrics' ->> 'comments'`,
-  ];
-
-  return `greatest(coalesce(${safeAlias}.comments_count, 0), ${rawCandidates
-    .map(sqlJsonTextNonNegativeInt)
-    .join(", ")}, 0)`;
-};
 
 const SHOW_EXTERNAL_ID_KEYS: Record<
   SupportedPersonSocialSource,
@@ -716,8 +675,8 @@ const buildProgressLanes = (
           : "No following-list snapshot",
     ),
     buildLane("posts", "Posts", row.saved_count, row.scraped_count),
-    buildLane("comments", "Comments", row.comments_saved_count, row.comments_saved_count, row.comments_total_count),
-    buildLane("media", "Media", row.media_saved_count, row.media_saved_count, row.media_total_count),
+    buildLane("comments", "Comments", row.comments_saved_count, row.comments_total_count, row.comments_total_count),
+    buildLane("media", "Media", row.media_saved_count, row.media_total_count, row.media_total_count),
   ];
 };
 
@@ -777,47 +736,6 @@ const collectSocialProgressTargets = ({
     .slice(0, SOCIAL_LANDING_PROGRESS_MAX_TARGETS);
 };
 
-const safeLoadSocialBladeProgressCounts = async (
-  targets: readonly SocialProgressTarget[],
-  adminContext?: VerifiedAdminContext,
-): Promise<CacheableValue<ReadonlyMap<string, Partial<SocialProgressRow>>>> => {
-  if (targets.length === 0) return cacheableValue(new Map());
-
-  try {
-    const payload = (await fetchSocialBackendJson("/landing-socialblade-progress-counts", {
-      adminContext,
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        platforms: targets.map((target) => target.platform),
-        account_handles: targets.map((target) => target.handle),
-      }),
-      fallbackError: "Failed to fetch social landing SocialBlade progress counts",
-      retries: 0,
-      timeoutMs: ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
-    })) as SocialBladeProgressCountsPayload;
-    const rows = Array.isArray(payload.rows) ? payload.rows : [];
-    const countsByKey = new Map<string, Partial<SocialProgressRow>>();
-    for (const row of rows) {
-      const platform = normalizePlatform(row.platform ?? "");
-      const handle =
-        typeof row.account_handle === "string"
-          ? row.account_handle.trim().replace(/^@+/, "")
-          : "";
-      if (!platform || !handle) continue;
-      countsByKey.set(buildSocialProgressKey(platform, handle), {
-        socialblade_scraped_count: row.socialblade_scraped_count,
-        socialblade_saved_count: row.socialblade_saved_count,
-        socialblade_supported: row.socialblade_supported,
-      });
-    }
-    return cacheableValue(countsByKey);
-  } catch (error) {
-    console.warn("[social-landing] Failed to load SocialBlade progress counts", error);
-    return uncacheableValue(new Map());
-  }
-};
-
 const buildSocialProgressMap = (
   rows: readonly SocialProgressRow[],
   overridesByKey: ReadonlyMap<string, Partial<SocialProgressRow>> = new Map(),
@@ -843,7 +761,7 @@ const buildSocialProgressMap = (
 
 const safeLoadBackendSocialProgressRollup = async (
   targets: readonly SocialProgressTarget[],
-  adminContext: VerifiedAdminContext,
+  adminContext?: VerifiedAdminContext,
   timingCollector?: SocialLandingTimingCollector,
 ): Promise<SocialProgressSummaryResult> => {
   try {
@@ -919,267 +837,7 @@ const safeLoadSocialProgressSummaries = async (
     };
   }
 
-  if (adminContext) {
-    return safeLoadBackendSocialProgressRollup(targets, adminContext, timingCollector);
-  }
-
-  const platforms = targets.map((target) => target.platform);
-  const handles = targets.map((target) => target.handle);
-  const instagramMaterializedReportedCommentsSql =
-    instagramReportedCommentsSql("p");
-  const instagramCatalogReportedCommentsSql = instagramReportedCommentsSql("p");
-
-  try {
-    const [socialBladeCountsResult, result] = await Promise.all([
-      safeLoadSocialBladeProgressCounts(targets, adminContext),
-      queryWithStatementTimeout<SocialProgressRow>(
-        `
-        /* landing_social_progress */
-        WITH targets AS (
-          SELECT DISTINCT
-            lower(input.platform) AS platform,
-            lower(regexp_replace(input.account_handle, '^@+', '')) AS account_handle
-          FROM unnest($1::text[], $2::text[]) AS input(platform, account_handle)
-          WHERE input.platform IN ('instagram', 'tiktok', 'twitter', 'youtube', 'facebook', 'threads')
-            AND nullif(trim(input.account_handle), '') IS NOT NULL
-        ),
-        materialized_rows AS (
-          SELECT
-            'instagram'::text AS platform,
-            lower(regexp_replace(coalesce(source_account, ''), '^@+', '')) AS account_handle,
-            id,
-            nullif(shortcode, '') AS source_id,
-            (${instagramMaterializedReportedCommentsSql})::bigint AS reported_comments,
-            jsonb_array_length(coalesce(media_urls, '[]'::jsonb))::bigint AS source_media_files,
-            (
-              jsonb_array_length(coalesce(hosted_media_urls, '[]'::jsonb)) +
-              case when nullif(hosted_thumbnail_url, '') is not null then 1 else 0 end
-            )::bigint AS hosted_media_files
-          FROM social.instagram_posts p
-          UNION ALL
-          SELECT
-            'tiktok'::text AS platform,
-            lower(regexp_replace(coalesce(source_account, ''), '^@+', '')) AS account_handle,
-            id,
-            nullif(video_id, '') AS source_id,
-            greatest(coalesce(comments_count, 0), 0)::bigint AS reported_comments,
-            jsonb_array_length(coalesce(media_urls, '[]'::jsonb))::bigint AS source_media_files,
-            (
-              jsonb_array_length(coalesce(hosted_media_urls, '[]'::jsonb)) +
-              case when nullif(hosted_thumbnail_url, '') is not null then 1 else 0 end
-            )::bigint AS hosted_media_files
-          FROM social.tiktok_posts
-          UNION ALL
-          SELECT
-            'twitter'::text AS platform,
-            lower(regexp_replace(coalesce(source_account, ''), '^@+', '')) AS account_handle,
-            id,
-            nullif(tweet_id, '') AS source_id,
-            0::bigint AS reported_comments,
-            jsonb_array_length(coalesce(media_urls, '[]'::jsonb))::bigint AS source_media_files,
-            (
-              jsonb_array_length(coalesce(hosted_media_urls, '[]'::jsonb)) +
-              case when nullif(hosted_thumbnail_url, '') is not null then 1 else 0 end
-            )::bigint AS hosted_media_files
-          FROM social.twitter_tweets
-          UNION ALL
-          SELECT
-            'youtube'::text AS platform,
-            lower(regexp_replace(coalesce(source_account, ''), '^@+', '')) AS account_handle,
-            id,
-            nullif(video_id, '') AS source_id,
-            greatest(coalesce(comments_count, 0), 0)::bigint AS reported_comments,
-            0::bigint AS source_media_files,
-            case when nullif(hosted_thumbnail_url, '') is not null then 1 else 0 end::bigint AS hosted_media_files
-          FROM social.youtube_videos
-          UNION ALL
-          SELECT
-            'facebook'::text AS platform,
-            lower(regexp_replace(coalesce(source_account, ''), '^@+', '')) AS account_handle,
-            id,
-            nullif(post_id, '') AS source_id,
-            greatest(coalesce(comments_count, 0), 0)::bigint AS reported_comments,
-            jsonb_array_length(coalesce(media_urls, '[]'::jsonb))::bigint AS source_media_files,
-            (
-              jsonb_array_length(coalesce(hosted_media_urls, '[]'::jsonb)) +
-              case when nullif(hosted_thumbnail_url, '') is not null then 1 else 0 end
-            )::bigint AS hosted_media_files
-          FROM social.facebook_posts
-          UNION ALL
-          SELECT
-            'threads'::text AS platform,
-            lower(regexp_replace(coalesce(source_account, ''), '^@+', '')) AS account_handle,
-            id,
-            nullif(post_id, '') AS source_id,
-            0::bigint AS reported_comments,
-            jsonb_array_length(coalesce(media_urls, '[]'::jsonb))::bigint AS source_media_files,
-            (
-              jsonb_array_length(coalesce(hosted_media_urls, '[]'::jsonb)) +
-              case when nullif(hosted_thumbnail_url, '') is not null then 1 else 0 end
-            )::bigint AS hosted_media_files
-          FROM social.meta_threads_posts
-        ),
-        catalog_rows AS (
-          SELECT
-            'instagram'::text AS platform,
-            lower(regexp_replace(coalesce(source_account, ''), '^@+', '')) AS account_handle,
-            nullif(source_id, '') AS source_id,
-            (${instagramCatalogReportedCommentsSql})::bigint AS reported_comments,
-            jsonb_array_length(coalesce(media_urls, '[]'::jsonb))::bigint AS source_media_files
-          FROM social.instagram_account_catalog_posts p
-          UNION ALL
-          SELECT
-            'tiktok'::text AS platform,
-            lower(regexp_replace(coalesce(source_account, ''), '^@+', '')) AS account_handle,
-            nullif(source_id, '') AS source_id,
-            greatest(coalesce(comments_count, 0), 0)::bigint AS reported_comments,
-            jsonb_array_length(coalesce(media_urls, '[]'::jsonb))::bigint AS source_media_files
-          FROM social.tiktok_account_catalog_posts
-          UNION ALL
-          SELECT
-            'twitter'::text AS platform,
-            lower(regexp_replace(coalesce(source_account, ''), '^@+', '')) AS account_handle,
-            nullif(source_id, '') AS source_id,
-            greatest(coalesce(comments_count, 0), 0)::bigint + greatest(coalesce(quotes, 0), 0)::bigint AS reported_comments,
-            jsonb_array_length(coalesce(media_urls, '[]'::jsonb))::bigint AS source_media_files
-          FROM social.twitter_account_catalog_posts
-          UNION ALL
-          SELECT
-            'youtube'::text AS platform,
-            lower(regexp_replace(coalesce(source_account, ''), '^@+', '')) AS account_handle,
-            nullif(source_id, '') AS source_id,
-            greatest(coalesce(comments_count, 0), 0)::bigint AS reported_comments,
-            jsonb_array_length(coalesce(media_urls, '[]'::jsonb))::bigint AS source_media_files
-          FROM social.youtube_account_catalog_posts
-          UNION ALL
-          SELECT
-            'facebook'::text AS platform,
-            lower(regexp_replace(coalesce(source_account, ''), '^@+', '')) AS account_handle,
-            nullif(source_id, '') AS source_id,
-            greatest(coalesce(comments_count, 0), 0)::bigint AS reported_comments,
-            jsonb_array_length(coalesce(media_urls, '[]'::jsonb))::bigint AS source_media_files
-          FROM social.facebook_account_catalog_posts
-          UNION ALL
-          SELECT
-            'threads'::text AS platform,
-            lower(regexp_replace(coalesce(source_account, ''), '^@+', '')) AS account_handle,
-            nullif(source_id, '') AS source_id,
-            greatest(coalesce(comments_count, 0), 0)::bigint AS reported_comments,
-            jsonb_array_length(coalesce(media_urls, '[]'::jsonb))::bigint AS source_media_files
-          FROM social.threads_account_catalog_posts
-        ),
-        materialized_counts AS (
-          SELECT
-            rows.platform,
-            rows.account_handle,
-            count(*)::int AS saved_count,
-            sum(rows.reported_comments)::int AS comments_total_count,
-            sum(rows.hosted_media_files)::int AS media_saved_count
-          FROM materialized_rows rows
-          INNER JOIN targets
-            ON targets.platform = rows.platform
-           AND targets.account_handle = rows.account_handle
-          WHERE rows.account_handle <> ''
-          GROUP BY rows.platform, rows.account_handle
-        ),
-        catalog_counts AS (
-          SELECT
-            rows.platform,
-            rows.account_handle,
-            count(*)::int AS scraped_count,
-            sum(rows.reported_comments)::int AS comments_total_count,
-            sum(rows.source_media_files)::int AS media_total_count
-          FROM catalog_rows rows
-          INNER JOIN targets
-            ON targets.platform = rows.platform
-           AND targets.account_handle = rows.account_handle
-          WHERE rows.account_handle <> ''
-          GROUP BY rows.platform, rows.account_handle
-        ),
-        instagram_profile_targets AS (
-          SELECT DISTINCT ON (targets.account_handle)
-            targets.account_handle,
-            profiles.id AS profile_id,
-            greatest(coalesce(profiles.follows_count, 0), 0)::int AS following_total_count
-          FROM targets
-          INNER JOIN social.instagram_profiles profiles
-            ON targets.platform = 'instagram'
-           AND lower(regexp_replace(coalesce(profiles.normalized_username, profiles.username, profiles.source_account, ''), '^@+', '')) = targets.account_handle
-          ORDER BY
-            targets.account_handle,
-            profiles.last_scraped_at DESC NULLS LAST,
-            profiles.updated_at DESC NULLS LAST,
-            profiles.id
-        ),
-        following_counts AS (
-          SELECT
-            'instagram'::text AS platform,
-            profile_targets.account_handle,
-            count(relationships.id) FILTER (WHERE coalesce(relationships.is_missing, false) = false)::int AS following_saved_count,
-            max(profile_targets.following_total_count)::int AS following_total_count
-          FROM instagram_profile_targets profile_targets
-          LEFT JOIN social.instagram_profile_relationships relationships
-            ON relationships.owner_profile_id = profile_targets.profile_id
-           AND relationships.relationship_type = 'following'
-          GROUP BY profile_targets.account_handle
-        )
-        SELECT
-          targets.platform,
-          targets.account_handle,
-          coalesce(materialized_counts.saved_count, 0)::int AS saved_count,
-          coalesce(catalog_counts.scraped_count, 0)::int AS scraped_count,
-          (targets.platform IN ('instagram', 'youtube', 'tiktok'))::boolean AS socialblade_supported,
-          0::int AS socialblade_scraped_count,
-          0::int AS socialblade_saved_count,
-          coalesce(following_counts.following_saved_count, 0)::int AS following_saved_count,
-          coalesce(following_counts.following_total_count, 0)::int AS following_total_count,
-          0::int AS comments_saved_count,
-          greatest(
-            coalesce(materialized_counts.comments_total_count, 0),
-            coalesce(catalog_counts.comments_total_count, 0)
-          )::int AS comments_total_count,
-          coalesce(materialized_counts.media_saved_count, 0)::int AS media_saved_count,
-          greatest(coalesce(catalog_counts.media_total_count, 0), coalesce(materialized_counts.media_saved_count, 0))::int AS media_total_count
-        FROM targets
-        LEFT JOIN materialized_counts
-          ON materialized_counts.platform = targets.platform
-         AND materialized_counts.account_handle = targets.account_handle
-        LEFT JOIN catalog_counts
-          ON catalog_counts.platform = targets.platform
-         AND catalog_counts.account_handle = targets.account_handle
-        LEFT JOIN following_counts
-          ON following_counts.platform = targets.platform
-         AND following_counts.account_handle = targets.account_handle
-        `,
-        [platforms, handles],
-        SOCIAL_LANDING_PROGRESS_STATEMENT_TIMEOUT_MS,
-      ),
-    ]);
-
-    const socialBladeCountsByKey = socialBladeCountsResult.value;
-    return {
-      value: buildSocialProgressMap(result.rows, socialBladeCountsByKey),
-      cacheable: socialBladeCountsResult.cacheable,
-      status: {
-        source: "fallback",
-        cache_status: null,
-        generated_at: null,
-        stale: !socialBladeCountsResult.cacheable,
-      },
-    };
-  } catch (error) {
-    console.warn("[social-landing] Failed to load social progress summaries", error);
-    return {
-      ...uncacheableValue(new Map()),
-      status: {
-        source: "fallback",
-        cache_status: null,
-        generated_at: null,
-        stale: true,
-        warning: error instanceof Error ? error.message : "Failed to load social progress summaries",
-      },
-    };
-  }
+  return safeLoadBackendSocialProgressRollup(targets, adminContext, timingCollector);
 };
 
 const hydrateHandleProgress = (
@@ -1364,62 +1022,16 @@ const coerceCount = (value: number | string | null | undefined): number => {
   return Number.isFinite(parsed) ? Math.max(0, Math.trunc(parsed)) : 0;
 };
 
-const safeLoadScrapeJobHealth = async (): Promise<ScrapeJobHealthSummary> => {
+const safeLoadScrapeJobHealth = async (
+  adminContext?: VerifiedAdminContext,
+): Promise<ScrapeJobHealthSummary> => {
   try {
-    const result = await query<ScrapeJobHealthRow>(
-      `
-        /* landing_social_scrape_job_health */
-        WITH recent_jobs AS (
-          SELECT
-            status,
-            error_message,
-            last_error_code,
-            metadata,
-            created_at
-          FROM social.scrape_jobs
-          WHERE platform = ANY($2::text[])
-            AND created_at >= now() - ($1::int * interval '1 hour')
-        ),
-        job_signals AS (
-          SELECT
-            status,
-            created_at,
-            coalesce(error_message, '') || ' ' ||
-              coalesce(last_error_code, '') AS error_signal,
-            coalesce(error_message, '') || ' ' ||
-              coalesce(last_error_code, '') || ' ' ||
-              coalesce(metadata::text, '') AS diagnostic_text
-          FROM recent_jobs
-        )
-        SELECT
-          now() AS generated_at,
-          now() - ($1::int * interval '1 hour') AS window_started_at,
-          count(*)::bigint AS total_jobs,
-          count(*) FILTER (
-            WHERE status IN ('queued', 'pending', 'running', 'retrying', 'cancelling')
-          )::bigint AS active_jobs,
-          count(*) FILTER (
-            WHERE status IN ('failed', 'error')
-          )::bigint AS failed_jobs,
-          count(*) FILTER (
-            WHERE status IN ('failed', 'error')
-              OR nullif(trim(error_signal), '') IS NOT NULL
-          )::bigint AS failure_signal_jobs,
-          count(*) FILTER (
-            WHERE diagnostic_text ILIKE '%InFailedSqlTransaction%'
-          )::bigint AS in_failed_sql_transaction_hits,
-          max(created_at) FILTER (
-            WHERE status IN ('failed', 'error')
-              OR nullif(trim(error_signal), '') IS NOT NULL
-          ) AS latest_failure_at
-        FROM job_signals
-      `,
-      [
-        SCRAPE_JOB_HEALTH_WINDOW_HOURS,
-        ["instagram", "tiktok", "twitter", "youtube"],
-      ],
-    );
-    const row = result.rows[0] ?? {};
+    const row = (await fetchSocialBackendJson("/landing-scrape-job-health", {
+      adminContext,
+      fallbackError: "Failed to load social landing scrape-job health",
+      retries: 1,
+      timeoutMs: SOCIAL_PROXY_DEFAULT_TIMEOUT_MS,
+    })) as ScrapeJobHealthRow;
     return {
       window_hours: SCRAPE_JOB_HEALTH_WINDOW_HOURS,
       window_started_at: toIsoStringOrNull(row.window_started_at),
@@ -2660,7 +2272,7 @@ export async function getSocialLandingPayloadResult(
     );
   const scrapeJobHealthPromise = withSocialLandingTiming(
     "scrape job health",
-    safeLoadScrapeJobHealth(),
+    safeLoadScrapeJobHealth(adminContext),
   );
   const coveredShowIds = coveredShows.map((show) => show.trr_show_id);
   const [
@@ -2731,7 +2343,7 @@ export async function getSocialLandingPayloadResult(
     "people profiles",
     buildPeopleProfiles(coveredShows, castByShowId),
   );
-  const castSocialBladeShowsResult = await withOptionalLandingTimeout(
+  const castSocialBladeShowsPromise = withOptionalLandingTimeout(
     "cast SocialBlade",
     buildCastSocialBladeShows(
       coveredShows,
@@ -2749,7 +2361,7 @@ export async function getSocialLandingPayloadResult(
     networkSharedSources,
   );
   const sharedSourceSets = buildSharedSourceSets(sourcesByScope);
-  const progressResult = await withOptionalLandingTimeout(
+  const progressPromise = withOptionalLandingTimeout(
     "social progress",
     safeLoadSocialProgressSummaries(
       collectSocialProgressTargets({
@@ -2761,7 +2373,11 @@ export async function getSocialLandingPayloadResult(
       timingCollector,
     ),
     new Map(),
-  ) as SocialProgressSummaryResult;
+  ) as Promise<SocialProgressSummaryResult>;
+  const [castSocialBladeShowsResult, progressResult] = await Promise.all([
+    castSocialBladeShowsPromise,
+    progressPromise,
+  ]);
   const progressByKey = progressResult.value;
   const hydratedNetworkSets = networkSets.map((set) =>
     hydrateNetworkSetProgress(set, progressByKey),

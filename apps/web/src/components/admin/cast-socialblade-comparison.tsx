@@ -8,6 +8,10 @@ import {
   type CastComparisonWindow,
   type DailyFollowerPoint,
 } from "@/lib/admin/cast-socialblade-charting";
+import {
+  normalizeSocialBladeCookieHealth,
+  type SocialBladeCookieHealth,
+} from "@/lib/admin/socialblade-cookie-health";
 
 // ============================================================================
 // Types
@@ -131,26 +135,6 @@ interface SocialBladeHistoryItem {
   forced: boolean;
   reason: string | null;
   error: string | null;
-}
-
-interface SocialBladeCookieHealth {
-  healthy: boolean;
-  status: string;
-  reason: string | null;
-  retryable: boolean;
-  cookieNames: string[];
-  cookieFile: {
-    path: string;
-    exists: boolean;
-    modifiedAt: string | null;
-  };
-  validation: {
-    checked: boolean;
-    healthy: boolean | null;
-    reason: string | null;
-    url: string | null;
-  };
-  checkedAt: string;
 }
 
 // ============================================================================
@@ -1301,11 +1285,13 @@ export default function CastSocialBladeComparison({
         { cache: "no-store" },
         { allowDevAdminBypass: true },
       );
-      const payload = (await response.json().catch(() => ({}))) as SocialBladeCookieHealth & { error?: string };
+      const payload = (await response.json().catch(() => ({}))) as Partial<SocialBladeCookieHealth> & {
+        error?: string;
+      };
       if (!response.ok) {
         throw new Error(payload.error ?? `HTTP ${response.status}`);
       }
-      setCookieHealth(payload);
+      setCookieHealth(normalizeSocialBladeCookieHealth(payload));
       setCookieHealthError(null);
     } catch (error) {
       setCookieHealthError(error instanceof Error ? error.message : "Failed to load SocialBlade cookie health");
@@ -1718,10 +1704,20 @@ export default function CastSocialBladeComparison({
     return map;
   }, [entries, historyItems]);
   const recentHistoryItems = useMemo(() => historyItems.slice(0, 8), [historyItems]);
+  const cookieHealthReady = cookieHealth ? cookieHealth.healthy : false;
+  const cookieHealthMessage =
+    cookieHealthError ??
+    (cookieHealth
+      ? cookieHealth.reason ??
+        (cookieHealthReady ? "Authenticated SocialBlade session is usable" : "Not checked yet")
+      : "Not checked yet");
+  const cookieFileModifiedAt = cookieHealth ? cookieHealth.cookieFile.modifiedAt : null;
+  const cookieValidationReason =
+    cookieHealth && cookieHealth.validation.checked ? cookieHealth.validation.reason : null;
   const cookieHealthPanel = (
     <div
       className={`rounded-xl border px-4 py-3 text-xs shadow-sm ${
-        cookieHealth?.healthy
+        cookieHealthReady
           ? "border-emerald-200 bg-emerald-50 text-emerald-800"
           : "border-amber-200 bg-amber-50 text-amber-800"
       }`}
@@ -1731,21 +1727,15 @@ export default function CastSocialBladeComparison({
           <p className="text-[10px] font-bold uppercase tracking-[0.2em] opacity-70">Cookie Health</p>
           <div className="mt-1 flex flex-wrap items-center gap-2">
             <span className="rounded-full border border-current/20 bg-white/60 px-2 py-0.5 font-semibold">
-              {cookieHealthLoading ? "Checking" : cookieHealth?.healthy ? "Ready" : "Needs login"}
+              {cookieHealthLoading ? "Checking" : cookieHealthReady ? "Ready" : "Needs login"}
             </span>
-            <span className="min-w-0 truncate">
-              {cookieHealthError ??
-                cookieHealth?.reason ??
-                (cookieHealth?.healthy ? "Authenticated SocialBlade session is usable" : "Not checked yet")}
-            </span>
+            <span className="min-w-0 truncate">{cookieHealthMessage}</span>
           </div>
           <p className="mt-1 text-[11px] opacity-70">
-            {cookieHealth?.cookieFile.modifiedAt
-              ? `Cookie file: ${formatDateTimeLabel(cookieHealth.cookieFile.modifiedAt)}`
+            {cookieFileModifiedAt
+              ? `Cookie file: ${formatDateTimeLabel(cookieFileModifiedAt)}`
               : "Cookie file not written"}
-            {cookieHealth?.validation.checked && cookieHealth.validation.reason
-              ? ` · Validation: ${cookieHealth.validation.reason}`
-              : ""}
+            {cookieValidationReason ? ` · Validation: ${cookieValidationReason}` : ""}
           </p>
         </div>
         <button
