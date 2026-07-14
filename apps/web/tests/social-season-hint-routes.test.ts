@@ -34,7 +34,10 @@ vi.mock("@/lib/server/trr-api/social-admin-proxy", () => ({
 import { GET as getJobs } from "@/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/jobs/route";
 import { GET as getRuns } from "@/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/runs/route";
 import { GET as getRunsSummary } from "@/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/runs/summary/route";
-import { GET as getTargets } from "@/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/targets/route";
+import {
+  GET as getTargets,
+  PUT as putTargets,
+} from "@/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/targets/route";
 import { GET as getAnalytics } from "@/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/route";
 import { GET as getWeek } from "@/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/week/[weekIndex]/route";
 import { GET as getWeekSummary } from "@/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/week/[weekIndex]/summary/route";
@@ -108,6 +111,76 @@ describe("social routes season_id hint forwarding", () => {
     );
     const options = fetchSeasonBackendJsonMock.mock.calls[0]?.[3] as { queryString?: string };
     expect(String(options.queryString ?? "")).not.toContain("season_id=");
+  });
+
+  it("accepts season-window config objects on targets PUT", async () => {
+    const request = new NextRequest(
+      `http://localhost/api/admin/trr-api/shows/${showId}/seasons/6/social/targets?season_id=${seasonId}`,
+      {
+        method: "PUT",
+        body: JSON.stringify({
+          source_scope: "network",
+          targets: [
+            {
+              platform: "instagram",
+              accounts: ["bravotv"],
+              hashtags: ["rhoslc"],
+              keywords: [],
+              timezone: "America/New_York",
+              is_active: true,
+              config: {
+                trailer_drop_at: "2026-01-02T21:30",
+                postseason_end_at: "2026-02-09T20:00",
+              },
+            },
+          ],
+        }),
+      },
+    );
+
+    const response = await putTargets(request, { params: Promise.resolve({ showId, seasonNumber: "6" }) });
+
+    expect(response.status).toBe(200);
+    expect(fetchSeasonBackendJsonMock).toHaveBeenCalledWith(
+      showId,
+      "6",
+      "/targets",
+      expect.objectContaining({
+        method: "PUT",
+        seasonIdHint: seasonId,
+        timeoutMs: 30_000,
+      }),
+    );
+    const options = fetchSeasonBackendJsonMock.mock.calls[0]?.[3] as { body?: string };
+    const forwardedBody = JSON.parse(String(options.body ?? "{}")) as {
+      targets?: Array<{ config?: Record<string, unknown> }>;
+    };
+    expect(forwardedBody.targets?.[0]?.config?.trailer_drop_at).toBe("2026-01-02T21:30");
+    expect(forwardedBody.targets?.[0]?.config?.postseason_end_at).toBe("2026-02-09T20:00");
+  });
+
+  it("rejects invalid target config shapes on targets PUT", async () => {
+    const request = new NextRequest(
+      `http://localhost/api/admin/trr-api/shows/${showId}/seasons/6/social/targets?season_id=${seasonId}`,
+      {
+        method: "PUT",
+        body: JSON.stringify({
+          targets: [
+            {
+              platform: "instagram",
+              config: ["not", "an", "object"],
+            },
+          ],
+        }),
+      },
+    );
+
+    const response = await putTargets(request, { params: Promise.resolve({ showId, seasonNumber: "6" }) });
+    const payload = (await response.json()) as { error?: string; code?: string };
+
+    expect(response.status).toBe(400);
+    expect(payload.code).toBe("BAD_REQUEST");
+    expect(fetchSeasonBackendJsonMock).not.toHaveBeenCalled();
   });
 
   it("returns 400 for invalid season_id on jobs route", async () => {

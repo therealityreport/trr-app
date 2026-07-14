@@ -95,7 +95,7 @@ test.describe("cast + season tabs smoke (mocked)", () => {
       personRefreshStreamDelayMs: 15_000,
     });
 
-    await page.goto(`/admin/trr-shows/${SHOW_ID}/seasons/${SEASON_NUMBER}?tab=cast`);
+    await page.goto(`/${SHOW_ID}/s${SEASON_NUMBER}/credits`);
     await waitForAdminReady(page);
 
     const firstRefreshButton = page.getByRole("button", { name: "Refresh Person" }).first();
@@ -125,10 +125,10 @@ test.describe("cast + season tabs smoke (mocked)", () => {
       showRefreshStreamDelayMs: 15_000,
     });
 
-    await page.goto(`/admin/trr-shows/${SHOW_ID}/seasons/${SEASON_NUMBER}?tab=cast`);
+    await page.goto(`/${SHOW_ID}/s${SEASON_NUMBER}/credits`);
     await waitForAdminReady(page);
 
-    const cancelButton = await startAndWaitForCancel(page, "Sync Cast");
+    const cancelButton = await startAndWaitForCancel(page, "Refresh Credits");
     await cancelButton.click();
     await expect(page.getByText("Season cast refresh canceled.").first()).toBeVisible({
       timeout: 10_000,
@@ -144,7 +144,7 @@ test.describe("cast + season tabs smoke (mocked)", () => {
       personReprocessStreamDelayMs: 15_000,
     });
 
-    await page.goto(`/admin/trr-shows/${SHOW_ID}/seasons/${SEASON_NUMBER}?tab=cast`);
+    await page.goto(`/${SHOW_ID}/s${SEASON_NUMBER}/credits`);
     await waitForAdminReady(page);
 
     const cancelButton = await startAndWaitForCancel(page, "Enrich Cast & Crew Media");
@@ -166,7 +166,7 @@ test.describe("cast + season tabs smoke (mocked)", () => {
       showRoles,
     });
 
-    await page.goto(`/admin/trr-shows/${SHOW_ID}/seasons/${SEASON_NUMBER}?tab=cast`);
+    await page.goto(`/${SHOW_ID}/s${SEASON_NUMBER}/credits`);
     await waitForAdminReady(page);
 
     await expect(

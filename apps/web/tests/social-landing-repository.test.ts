@@ -173,6 +173,20 @@ describe("social landing repository", () => {
     ]);
 
     fetchSocialBackendJsonMock.mockImplementation(async (path: string) => {
+      if (path === "/landing-scrape-job-health") {
+        return {
+          window_hours: 8,
+          window_started_at: null,
+          generated_at: null,
+          total_jobs: 0,
+          active_jobs: 0,
+          failed_jobs: 0,
+          failure_signal_jobs: 0,
+          in_failed_sql_transaction_hits: 0,
+          latest_failure_at: null,
+        };
+      }
+
       if (path === "/landing-progress-rollup") {
         return { rows: [] };
       }
@@ -669,82 +683,65 @@ describe("social landing repository", () => {
       show_count: expect.any(Number),
     });
   });
-
-  it("sums Instagram landing comments from post-detail reported counts", async () => {
-    await getSocialLandingPayload();
-
-    const landingCall = queryMock.mock.calls.find(([sql]) =>
-      String(sql).includes("landing_social_progress"),
-    );
-    const sql = String(landingCall?.[0] ?? "");
-
-    expect(sql).toContain("FROM social.instagram_posts p");
-    expect(sql).toContain("FROM social.instagram_account_catalog_posts p");
-    expect(sql).toContain("greatest(coalesce(p.comments_count, 0),");
-    expect(sql).toContain("p.raw_data");
-    expect(sql).toContain("-> 'metrics' ->> 'comments_count'");
-    expect(sql).toContain(
-      "sum(rows.reported_comments)::int AS comments_total_count",
-    );
-    expect(sql).toContain("coalesce(materialized_counts.comments_total_count, 0)");
-  });
-
-  it("loads SocialBlade progress counts through the backend instead of direct app SQL", async () => {
+  it("loads unauthenticated social progress through the backend rollup without direct SQL", async () => {
     const defaultSocialBackend = fetchSocialBackendJsonMock.getMockImplementation();
     if (!defaultSocialBackend) throw new Error("Missing default social backend mock");
     fetchSocialBackendJsonMock.mockImplementation(async (path: string, options?: unknown) => {
-      if (path === "/landing-socialblade-progress-counts") {
+      if (path === "/landing-progress-rollup") {
         return {
           rows: [
             {
               platform: "instagram",
               account_handle: "bravotv",
+              saved_count: 7,
+              scraped_count: 9,
               socialblade_supported: true,
               socialblade_scraped_count: 1,
               socialblade_saved_count: 1,
+              following_saved_count: 25,
+              following_total_count: 30,
+              comments_saved_count: 100,
+              comments_total_count: 120,
+              media_saved_count: 4,
+              media_total_count: 6,
             },
           ],
+          cache_status: "miss",
+          generated_at: "2026-07-13T12:00:00.000Z",
+          stale: false,
         };
       }
       return defaultSocialBackend(path, options);
     });
-    queryMock.mockImplementation(async (sql: string) => {
-      if (String(sql).includes("landing_social_progress")) {
-        return {
-          rows: [
-            {
-              platform: "instagram",
-              account_handle: "bravotv",
-              saved_count: 0,
-              scraped_count: 0,
-              socialblade_supported: true,
-            },
-          ],
-        };
-      }
-      return { rows: [] };
-    });
 
-    const payload = await getSocialLandingPayload();
+    const result = await getSocialLandingPayloadResult();
 
-    const landingCall = queryMock.mock.calls.find(([sql]) =>
-      String(sql).includes("landing_social_progress"),
-    );
-    const sql = String(landingCall?.[0] ?? "");
     const progressCall = fetchSocialBackendJsonMock.mock.calls.find(
-      ([path]) => path === "/landing-socialblade-progress-counts",
+      ([path]) => path === "/landing-progress-rollup",
     );
-    const progressOptions = progressCall?.[1] as { body?: string; method?: string } | undefined;
+    const progressOptions = progressCall?.[1] as
+      | { body?: string; method?: string; adminContext?: unknown }
+      | undefined;
     const progressBody = JSON.parse(progressOptions?.body ?? "{}") as {
       platforms?: string[];
       account_handles?: string[];
     };
 
-    expect(sql).not.toContain("pipeline.socialblade_growth_data");
     expect(progressOptions?.method).toBe("POST");
+    expect(progressOptions?.adminContext).toBeUndefined();
     expect(progressBody.platforms?.length).toBe(progressBody.account_handles?.length);
     expect(progressBody.account_handles).toEqual(expect.arrayContaining(["bravotv"]));
-    expect(payload.network_sets[0]?.handles).toEqual(
+    expect(
+      queryMock.mock.calls.some(([sql]) => String(sql).includes("landing_social_progress")),
+    ).toBe(false);
+    expect(result.cacheable).toBe(true);
+    expect(result.payload.social_progress_status).toEqual({
+      source: "backend",
+      cache_status: "miss",
+      generated_at: "2026-07-13T12:00:00.000Z",
+      stale: false,
+    });
+    expect(result.payload.network_sets[0]?.handles).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           platform: "instagram",
@@ -752,10 +749,17 @@ describe("social landing repository", () => {
           progress: expect.objectContaining({
             lanes: expect.arrayContaining([
               expect.objectContaining({
+                key: "comments",
+                saved_count: 100,
+                scraped_count: 120,
+                total_count: 120,
+              }),
+              expect.objectContaining({
                 key: "socialblade",
                 status: "ready",
-                saved_count: 1,
-                scraped_count: 1,
+                saved_count: 26,
+                scraped_count: 26,
+                total_count: 31,
               }),
             ]),
           }),
@@ -825,6 +829,45 @@ describe("social landing repository", () => {
     expect(rollupOptions?.method).toBe("POST");
     expect(rollupBody.platforms?.length).toBe(rollupBody.account_handles?.length);
     expect(rollupBody.account_handles).toEqual(expect.arrayContaining(["bravotv"]));
+    const bravotvHandle = result.payload.network_sets[0]?.handles.find(
+      (handle) => handle.platform === "instagram" && handle.handle === "bravotv",
+    );
+    if (!bravotvHandle?.progress) {
+      throw new Error("Expected bravotv progress from the backend rollup");
+    }
+    const postsLane = bravotvHandle.progress.lanes.find((lane) => lane.key === "posts");
+    const commentsLane = bravotvHandle.progress.lanes.find((lane) => lane.key === "comments");
+    const mediaLane = bravotvHandle.progress.lanes.find((lane) => lane.key === "media");
+    if (!postsLane || !commentsLane || !mediaLane) {
+      throw new Error("Expected posts, comments, and media progress lanes");
+    }
+
+    expect(postsLane).toEqual(
+      expect.objectContaining({
+        key: "posts",
+        saved_count: 7,
+        scraped_count: 9,
+        total_count: 9,
+      }),
+    );
+    expect(commentsLane).toEqual(
+      expect.objectContaining({
+        key: "comments",
+        saved_count: 100,
+        scraped_count: 120,
+        total_count: 120,
+      }),
+    );
+    expect(commentsLane.scraped_percent).toBeGreaterThan(0);
+    expect(mediaLane).toEqual(
+      expect.objectContaining({
+        key: "media",
+        saved_count: 4,
+        scraped_count: 6,
+        total_count: 6,
+      }),
+    );
+    expect(mediaLane.saved_percent).toBeLessThan(mediaLane.scraped_percent);
     expect(result.payload.network_sets[0]?.handles).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -847,24 +890,22 @@ describe("social landing repository", () => {
   });
 
   it("includes recent scrape job health for the social landing badge", async () => {
-    queryMock.mockImplementation(async (sql: string) => {
-      if (String(sql).includes("landing_social_scrape_job_health")) {
+    const defaultSocialBackend = fetchSocialBackendJsonMock.getMockImplementation();
+    if (!defaultSocialBackend) throw new Error("Missing default social backend mock");
+    fetchSocialBackendJsonMock.mockImplementation(async (path: string, options?: unknown) => {
+      if (path === "/landing-scrape-job-health") {
         return {
-          rows: [
-            {
-              generated_at: "2026-05-18T12:00:00.000Z",
-              window_started_at: "2026-05-18T04:00:00.000Z",
-              total_jobs: "9",
-              active_jobs: "1",
-              failed_jobs: "2",
-              failure_signal_jobs: "3",
-              in_failed_sql_transaction_hits: "1",
-              latest_failure_at: "2026-05-18T11:45:00.000Z",
-            },
-          ],
+          generated_at: "2026-05-18T12:00:00.000Z",
+          window_started_at: "2026-05-18T04:00:00.000Z",
+          total_jobs: "9",
+          active_jobs: "1",
+          failed_jobs: "2",
+          failure_signal_jobs: "3",
+          in_failed_sql_transaction_hits: "1",
+          latest_failure_at: "2026-05-18T11:45:00.000Z",
         };
       }
-      return { rows: [] };
+      return defaultSocialBackend(path, options);
     });
 
     const payload = await getSocialLandingPayload();
@@ -880,6 +921,48 @@ describe("social landing repository", () => {
       in_failed_sql_transaction_hits: 1,
       latest_failure_at: "2026-05-18T11:45:00.000Z",
     });
+    expect(fetchSocialBackendJsonMock).toHaveBeenCalledWith(
+      "/landing-scrape-job-health",
+      expect.objectContaining({
+        fallbackError: "Failed to load social landing scrape-job health",
+        retries: 1,
+        timeoutMs: 25_000,
+      }),
+    );
+    expect(
+      queryMock.mock.calls.some(([sql]) =>
+        String(sql).includes("landing_social_scrape_job_health"),
+      ),
+    ).toBe(false);
+  });
+
+  it("degrades scrape job health to the empty summary when the backend read fails", async () => {
+    const expectedWarn = captureExpectedConsoleWarn(
+      /^\[social-landing\] Failed to load scrape job health /,
+    );
+    const defaultSocialBackend = fetchSocialBackendJsonMock.getMockImplementation();
+    if (!defaultSocialBackend) throw new Error("Missing default social backend mock");
+    fetchSocialBackendJsonMock.mockImplementation(async (path: string, options?: unknown) => {
+      if (path === "/landing-scrape-job-health") {
+        throw new Error("health backend unavailable");
+      }
+      return defaultSocialBackend(path, options);
+    });
+
+    const payload = await getSocialLandingPayload();
+
+    expect(payload.scrape_job_health).toEqual({
+      window_hours: 8,
+      window_started_at: null,
+      generated_at: null,
+      total_jobs: 0,
+      active_jobs: 0,
+      failed_jobs: 0,
+      failure_signal_jobs: 0,
+      in_failed_sql_transaction_hits: 0,
+      latest_failure_at: null,
+    });
+    expectedWarn.restore();
   });
 
   it("labels assigned YouTube playlist show handles with playlist metadata", async () => {
@@ -1004,6 +1087,44 @@ describe("social landing repository", () => {
       }),
     ]);
     expect(result.cacheable).toBe(true);
+  });
+
+  it("starts social progress before cast SocialBlade rows resolve", async () => {
+    const events: string[] = [];
+    let resolveCastSocialBladeRows!: () => void;
+    const castSocialBladeRowsPromise = new Promise<{ rows: [] }>((resolve) => {
+      resolveCastSocialBladeRows = () => resolve({ rows: [] });
+    });
+    const defaultSocialBackend = fetchSocialBackendJsonMock.getMockImplementation();
+    if (!defaultSocialBackend) throw new Error("Missing default social backend mock");
+
+    fetchSocialBackendJsonMock.mockImplementation(async (path: string, options?: unknown) => {
+      if (path === "/landing-socialblade-rows") {
+        events.push("cast-socialblade-started");
+        return castSocialBladeRowsPromise;
+      }
+      if (path === "/landing-progress-rollup") {
+        events.push("social-progress-started");
+        return { rows: [] };
+      }
+      return defaultSocialBackend(path, options);
+    });
+
+    const resultPromise = getSocialLandingPayloadResult();
+    while (!events.includes("cast-socialblade-started")) {
+      await delay(0);
+    }
+    await delay(0);
+
+    expect(events).toContain("social-progress-started");
+    expect(events.indexOf("social-progress-started")).toBeGreaterThan(
+      events.indexOf("cast-socialblade-started"),
+    );
+
+    resolveCastSocialBladeRows();
+    const result = await resultPromise;
+
+    expect(result.payload.cast_socialblade_shows).toEqual([]);
   });
 
   it("falls back to local shared-source rows when backend shared-source reads fail", async () => {
@@ -1135,7 +1256,49 @@ describe("social landing repository", () => {
       }
       if (path.startsWith("/shared/ingest/runs")) return [];
       if (path.startsWith("/shared/review-queue")) return { items: [] };
-      if (path === "/landing-socialblade-progress-counts") return { rows: [] };
+      if (path === "/landing-scrape-job-health") {
+        return {
+          window_hours: 8,
+          window_started_at: null,
+          generated_at: null,
+          total_jobs: 0,
+          active_jobs: 0,
+          failed_jobs: 0,
+          failure_signal_jobs: 0,
+          in_failed_sql_transaction_hits: 0,
+          latest_failure_at: null,
+        };
+      }
+      if (path === "/landing-progress-rollup") {
+        return {
+          rows: [
+            {
+              platform: "instagram",
+              account_handle: "bravotv",
+              saved_count: 90,
+              scraped_count: 75,
+            },
+            {
+              platform: "instagram",
+              account_handle: "thetraitorsus",
+              saved_count: 442,
+              scraped_count: 442,
+            },
+            {
+              platform: "tiktok",
+              account_handle: "thetraitorsus",
+              saved_count: 275,
+              scraped_count: 275,
+            },
+            {
+              platform: "twitter",
+              account_handle: "thetraitorsus",
+              saved_count: 5227,
+              scraped_count: 285,
+            },
+          ],
+        };
+      }
       if (path.startsWith("/profiles/") && path.endsWith("/summary")) {
         const [platform, rawHandle] = path
           .replace(/^\/profiles\//, "")
@@ -1176,40 +1339,6 @@ describe("social landing repository", () => {
         ],
       ]),
     );
-    queryMock.mockImplementation(async (sql: string) => {
-      if (String(sql).includes("landing_social_progress")) {
-        return {
-          rows: [
-            {
-              platform: "instagram",
-              account_handle: "bravotv",
-              saved_count: 90,
-              scraped_count: 75,
-            },
-            {
-              platform: "instagram",
-              account_handle: "thetraitorsus",
-              saved_count: 442,
-              scraped_count: 442,
-            },
-            {
-              platform: "tiktok",
-              account_handle: "thetraitorsus",
-              saved_count: 275,
-              scraped_count: 275,
-            },
-            {
-              platform: "twitter",
-              account_handle: "thetraitorsus",
-              saved_count: 5227,
-              scraped_count: 285,
-            },
-          ],
-        };
-      }
-      return { rows: [] };
-    });
-
     const result = await getSocialLandingPayloadResult();
     const networkSet = result.payload.network_sets[0];
     const traitors = result.payload.show_sets.find(

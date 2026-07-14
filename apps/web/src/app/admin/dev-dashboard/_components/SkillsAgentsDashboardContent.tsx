@@ -287,8 +287,8 @@ function AgentSections({ data }: { data: SkillsAgentsDashboardData }) {
       },
       {
         key: "skill-agent-interfaces",
-        title: "Workspace/Repo Agent Interfaces",
-        description: "Agent interfaces declared beside workspace and repo-local skills.",
+        title: "User-Level Agent Interfaces",
+        description: "Agent interfaces declared beside user-level skills.",
         count: data.agents.skillAgentInterfaces.length,
         content:
           data.agents.skillAgentInterfaces.length > 0 ? (

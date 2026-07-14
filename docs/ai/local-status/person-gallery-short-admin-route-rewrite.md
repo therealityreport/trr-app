@@ -15,4 +15,4 @@ handoff:
 
 - Fixed the admin-host short route `/people/:personId/gallery` so it rewrites to the admin person workspace even when `showId` is absent.
 - Added middleware regression coverage for the no-`showId` gallery case.
-- Verified in managed Chrome that `http://admin.localhost:3000/people/lisa-barlow/gallery` now loads the real admin gallery UI rather than the public-safe fallback page.
+- Verified in managed Chrome that `https://admin.trr.localhost/people/lisa-barlow/gallery` now loads the real admin gallery UI rather than the public-safe fallback page.

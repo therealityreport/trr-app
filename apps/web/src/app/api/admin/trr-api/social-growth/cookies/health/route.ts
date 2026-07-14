@@ -10,6 +10,7 @@ import {
   buildSocialBladeBackendErrorPayload,
   buildSocialBladeTimeoutResponse,
 } from "@/lib/server/trr-api/socialblade-proxy";
+import { normalizeSocialBladeCookieHealth } from "@/lib/admin/socialblade-cookie-health";
 
 export const dynamic = "force-dynamic";
 
@@ -49,7 +50,7 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    return NextResponse.json(data);
+    return NextResponse.json(normalizeSocialBladeCookieHealth(data));
   } catch (error) {
     if (isTimeoutSafeFetchTimeoutError(error)) {
       return buildSocialBladeTimeoutResponse(error, SOCIALBLADE_COOKIE_HEALTH_TIMEOUT_MS);

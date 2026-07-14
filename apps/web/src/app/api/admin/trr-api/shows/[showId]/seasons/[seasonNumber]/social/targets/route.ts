@@ -16,19 +16,24 @@ interface RouteParams {
 const isStringArray = (value: unknown): value is string[] =>
   Array.isArray(value) && value.every((entry) => typeof entry === "string");
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value) && typeof value === "object" && !Array.isArray(value);
+
 const isValidTargetsPayload = (value: unknown): value is Record<string, unknown> => {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  if (!isRecord(value)) return false;
   const payload = value as Record<string, unknown>;
   if (payload.targets === undefined) return true;
   if (!Array.isArray(payload.targets)) return false;
   return payload.targets.every((entry) => {
-    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return false;
+    if (!isRecord(entry)) return false;
     const target = entry as Record<string, unknown>;
     if (typeof target.platform !== "string" || target.platform.trim().length === 0) return false;
     if (target.accounts !== undefined && !isStringArray(target.accounts)) return false;
     if (target.hashtags !== undefined && !isStringArray(target.hashtags)) return false;
     if (target.keywords !== undefined && !isStringArray(target.keywords)) return false;
+    if (target.timezone !== undefined && typeof target.timezone !== "string") return false;
     if (target.is_active !== undefined && typeof target.is_active !== "boolean") return false;
+    if (target.config !== undefined && !isRecord(target.config)) return false;
     return true;
   });
 };

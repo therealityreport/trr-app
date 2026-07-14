@@ -3263,6 +3263,9 @@ export default function SeasonDetailPage() {
           throw new Error(`${message} Getty/NBCUMV refresh was not started.`);
         }
       }
+      if (externalSignal?.aborted) {
+        throw new Error("Season cast refresh canceled.");
+      }
       const streamController = new AbortController();
       const forwardExternalAbort = () => streamController.abort();
       if (externalSignal) {
@@ -3680,6 +3683,8 @@ export default function SeasonDetailPage() {
     castRefreshAbortControllerRef.current?.abort();
     castEnrichAbortControllerRef.current?.abort();
     abortInFlightPersonRefreshRuns();
+    setRefreshingPersonIds({});
+    setRefreshingPersonProgress({});
   }, [abortInFlightPersonRefreshRuns]);
 
   const handleRefreshSeasonCastMember = useCallback(
@@ -3723,17 +3728,17 @@ export default function SeasonDetailPage() {
       } finally {
         if (personRefreshAbortControllersRef.current[personId] === runController) {
           delete personRefreshAbortControllersRef.current[personId];
+          setRefreshingPersonIds((prev) => {
+            const next = { ...prev };
+            delete next[personId];
+            return next;
+          });
+          setRefreshingPersonProgress((prev) => {
+            const next = { ...prev };
+            delete next[personId];
+            return next;
+          });
         }
-        setRefreshingPersonIds((prev) => {
-          const next = { ...prev };
-          delete next[personId];
-          return next;
-        });
-        setRefreshingPersonProgress((prev) => {
-          const next = { ...prev };
-          delete next[personId];
-          return next;
-        });
       }
     },
     [enrichingCast, fetchCastRoleMembers, fetchShowCastForBrand, refreshingCast, refreshSeasonPersonImages]

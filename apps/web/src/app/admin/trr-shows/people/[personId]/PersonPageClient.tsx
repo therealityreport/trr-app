@@ -4824,6 +4824,10 @@ export default function PersonProfilePage() {
       `${message} [bootstrap=${personBootstrapPhase} tab=${activeTab} person=${personId || personRouteParam || "missing"} show=${showIdForApi ?? showIdParam ?? "none"}]`,
     [activeTab, personBootstrapPhase, personId, personRouteParam, showIdForApi, showIdParam],
   );
+  const buildPersonPageReadDiagnosticMessageRef = useRef(buildPersonPageReadDiagnosticMessage);
+  useEffect(() => {
+    buildPersonPageReadDiagnosticMessageRef.current = buildPersonPageReadDiagnosticMessage;
+  }, [buildPersonPageReadDiagnosticMessage]);
 
   const fetchBestActivePersonPipelineOperation = useCallback(
     async (operationTypes?: readonly PersonPipelineOperationType[]) => {
@@ -9426,7 +9430,7 @@ export default function PersonProfilePage() {
           resource: "bootstrap-gallery",
           requestRole: "primary",
           phase: "error",
-          message: buildPersonPageReadDiagnosticMessage(
+          message: buildPersonPageReadDiagnosticMessageRef.current(
             err instanceof Error ? err.message : "Failed to load person gallery bootstrap",
           ),
         });
@@ -9444,7 +9448,14 @@ export default function PersonProfilePage() {
       controller.abort();
       secondaryReadQueueRef.current = [];
     };
-  }, [buildPersonPageReadDiagnosticMessage, hasAccess, fetchCoverPhoto, fetchPhotos, person, personId, runSecondaryRead]);
+  }, [
+    hasAccess,
+    fetchCoverPhoto,
+    fetchPhotos,
+    person?.id,
+    personId,
+    runSecondaryRead,
+  ]);
 
   useEffect(() => {
     if (activeTab !== "credits") return;

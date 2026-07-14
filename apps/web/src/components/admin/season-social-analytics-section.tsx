@@ -157,7 +157,9 @@ export type SocialTarget = {
   accounts?: string[];
   hashtags?: string[];
   keywords?: string[];
+  timezone?: string;
   is_active?: boolean;
+  config?: Record<string, unknown>;
 };
 
 type LinkedAccountProfileSummary = {
@@ -1007,6 +1009,95 @@ const formatDateShort = (value: string | null | undefined): string => {
     year: "2-digit",
     timeZone: SOCIAL_TIME_ZONE,
   });
+};
+
+const SEASON_WINDOW_PRESEASON_CONFIG_KEYS = [
+  "trailer_drop_at",
+  "preseason_start",
+  "preseason_start_at",
+  "week_zero_start",
+] as const;
+const SEASON_WINDOW_POSTSEASON_END_CONFIG_KEYS = [
+  "postseason_end_at",
+  "postseason_end",
+  "postseason_end_date",
+] as const;
+
+type SeasonWindowDraft = {
+  trailerDropAt: string;
+  postseasonEndAt: string;
+};
+
+type SeasonWindowRow = {
+  week_index: number;
+  label: string;
+  start: string;
+  end: string;
+  week_type?: "preseason" | "episode" | "bye" | "postseason";
+  episode_number?: number | null;
+};
+
+const isRecordValue = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value) && typeof value === "object" && !Array.isArray(value);
+
+const seasonWindowDateInputFormatter = new Intl.DateTimeFormat("en-CA", {
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
+  timeZone: SOCIAL_TIME_ZONE,
+});
+
+const formatDateTimeLocalInput = (value: string | null | undefined): string => {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const parts = Object.fromEntries(
+    seasonWindowDateInputFormatter
+      .formatToParts(date)
+      .filter((part) => part.type !== "literal")
+      .map((part) => [part.type, part.value]),
+  );
+  if (!parts.year || !parts.month || !parts.day || !parts.hour || !parts.minute) return "";
+  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
+};
+
+const readSeasonWindowConfigValue = (
+  targets: SocialTarget[],
+  keys: readonly string[],
+): string | null => {
+  for (const target of targets) {
+    const config = isRecordValue(target.config) ? target.config : null;
+    if (!config) continue;
+    for (const key of keys) {
+      const value = config[key];
+      if (typeof value === "string" && value.trim()) {
+        return value.trim();
+      }
+    }
+  }
+  return null;
+};
+
+const deriveSeasonWindowDraft = (targets: SocialTarget[]): SeasonWindowDraft => ({
+  trailerDropAt: formatDateTimeLocalInput(readSeasonWindowConfigValue(targets, SEASON_WINDOW_PRESEASON_CONFIG_KEYS)),
+  postseasonEndAt: formatDateTimeLocalInput(readSeasonWindowConfigValue(targets, SEASON_WINDOW_POSTSEASON_END_CONFIG_KEYS)),
+});
+
+const seasonWindowTypeLabel = (windowType: SeasonWindowRow["week_type"]): string => {
+  if (windowType === "preseason") return "Pre-Season";
+  if (windowType === "postseason") return "Post-Season";
+  if (windowType === "bye") return "Bye Week";
+  return "Episode";
+};
+
+const seasonWindowEpisodeLabel = (window: SeasonWindowRow): string => {
+  if (window.week_type === "preseason") return "Trailer to premiere";
+  if (window.week_type === "postseason") return "After finale";
+  if (window.week_type === "bye") return window.label || "Bye Week";
+  return typeof window.episode_number === "number" ? `Episode ${window.episode_number}` : window.label;
 };
 
 const formatDayScopeLabel = (value: string): string => {
@@ -2214,6 +2305,13 @@ export default function SeasonSocialAnalyticsSection({
   const [dailyRunPlatform, setDailyRunPlatform] = useState<"all" | Platform>("all");
   const [analytics, setAnalytics] = useState<AnalyticsResponse | null>(null);
   const [targets, setTargets] = useState<SocialTarget[]>([]);
+  const [seasonWindowDraft, setSeasonWindowDraft] = useState<SeasonWindowDraft>({
+    trailerDropAt: "",
+    postseasonEndAt: "",
+  });
+  const [seasonWindowSaving, setSeasonWindowSaving] = useState(false);
+  const [seasonWindowMessage, setSeasonWindowMessage] = useState<string | null>(null);
+  const [seasonWindowError, setSeasonWindowError] = useState<string | null>(null);
   const [linkedAccountSummaries, setLinkedAccountSummaries] = useState<Record<string, LinkedAccountProfileSummary>>({});
   const [runs, setRuns] = useState<SocialRun[]>([]);
   const [runSummaries, setRunSummaries] = useState<SocialRunSummary[]>([]);
@@ -2754,6 +2852,13 @@ export default function SeasonSocialAnalyticsSection({
   useEffect(() => {
     onTargetsChange?.(targets);
   }, [onTargetsChange, targets]);
+
+  const savedSeasonWindowDraft = useMemo(() => deriveSeasonWindowDraft(targets), [targets]);
+
+  useEffect(() => {
+    if (seasonWindowSaving) return;
+    setSeasonWindowDraft(savedSeasonWindowDraft);
+  }, [savedSeasonWindowDraft, seasonWindowSaving]);
 
   const fetchAnalytics = useCallback(async () => {
     const existingRequest = inFlightRef.current.analyticsByKey.get(analyticsRequestKey);
@@ -3574,6 +3679,95 @@ export default function SeasonSocialAnalyticsSection({
       // Best-effort only.
     }
   }, [seasonNumber, showId]);
+
+  const seasonWindowDraftChanged =
+    seasonWindowDraft.trailerDropAt !== savedSeasonWindowDraft.trailerDropAt ||
+    seasonWindowDraft.postseasonEndAt !== savedSeasonWindowDraft.postseasonEndAt;
+
+  const saveSeasonWindowSettings = useCallback(async () => {
+    if (targets.length === 0) {
+      setSeasonWindowError("Add at least one social target before saving season windows.");
+      setSeasonWindowMessage(null);
+      return;
+    }
+
+    setSeasonWindowSaving(true);
+    setSeasonWindowError(null);
+    setSeasonWindowMessage(null);
+    try {
+      const trailerDropAt = seasonWindowDraft.trailerDropAt.trim();
+      const postseasonEndAt = seasonWindowDraft.postseasonEndAt.trim();
+      const nextTargets = targets.map((target) => {
+        const nextConfig = isRecordValue(target.config) ? { ...target.config } : {};
+        for (const key of SEASON_WINDOW_PRESEASON_CONFIG_KEYS) {
+          delete nextConfig[key];
+        }
+        for (const key of SEASON_WINDOW_POSTSEASON_END_CONFIG_KEYS) {
+          delete nextConfig[key];
+        }
+        if (trailerDropAt) {
+          for (const key of SEASON_WINDOW_PRESEASON_CONFIG_KEYS) {
+            nextConfig[key] = trailerDropAt;
+          }
+        }
+        if (postseasonEndAt) {
+          nextConfig.postseason_end_at = postseasonEndAt;
+        }
+        return {
+          ...target,
+          timezone: target.timezone || SOCIAL_TIME_ZONE,
+          config: nextConfig,
+        };
+      });
+
+      const authHeaders = await getAuthHeaders();
+      const requestHeaders = new Headers(authHeaders);
+      requestHeaders.set("content-type", "application/json");
+      const response = await fetchAdminWithAuth(
+        `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/social/targets?season_id=${seasonId}`,
+        {
+          method: "PUT",
+          headers: requestHeaders,
+          cache: "no-store",
+          body: JSON.stringify({
+            source_scope: scope,
+            targets: nextTargets,
+          }),
+        },
+        { allowDevAdminBypass: true },
+      );
+      if (!response.ok) {
+        throw new Error(await readErrorMessage(response, "Failed to save season windows"));
+      }
+      const payload = await parseResponseJson<{ targets?: SocialTarget[] }>(response, "Failed to save season windows");
+      if (Array.isArray(payload.targets)) {
+        setTargets(payload.targets);
+      }
+      if (typeof window !== "undefined") {
+        window.localStorage.removeItem(cacheKey);
+      }
+      await invalidateSeasonSnapshotFamily();
+      await refreshAll({ forceRefresh: true });
+      setSeasonWindowMessage("Season windows saved.");
+    } catch (error) {
+      setSeasonWindowError(error instanceof Error ? error.message : "Failed to save season windows");
+    } finally {
+      setSeasonWindowSaving(false);
+    }
+  }, [
+    cacheKey,
+    getAuthHeaders,
+    invalidateSeasonSnapshotFamily,
+    readErrorMessage,
+    refreshAll,
+    scope,
+    seasonId,
+    seasonNumber,
+    seasonWindowDraft.postseasonEndAt,
+    seasonWindowDraft.trailerDropAt,
+    showId,
+    targets,
+  ]);
 
   useEffect(() => {
     void refreshAll();
@@ -5069,6 +5263,27 @@ export default function SeasonSocialAnalyticsSection({
     () => [...(analytics?.weekly_platform_posts ?? [])].sort((a, b) => a.week_index - b.week_index),
     [analytics],
   );
+  const officialSeasonWindows = useMemo<SeasonWindowRow[]>(() => {
+    const rows = analytics?.weekly && analytics.weekly.length > 0 ? analytics.weekly : (analytics?.weekly_platform_posts ?? []);
+    const seen = new Set<string>();
+    return rows
+      .filter((row) => typeof row.week_index === "number" && row.start && row.end)
+      .map((row) => ({
+        week_index: row.week_index,
+        label: row.label,
+        start: row.start,
+        end: row.end,
+        week_type: row.week_type,
+        episode_number: row.episode_number,
+      }))
+      .filter((row) => {
+        const key = `${row.week_index}:${row.start}:${row.end}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .sort((a, b) => a.week_index - b.week_index);
+  }, [analytics?.weekly, analytics?.weekly_platform_posts]);
   const weeklyPlatformEngagementByWeek = useMemo(() => {
     const map = new Map<number, NonNullable<AnalyticsResponse["weekly_platform_engagement"]>[number]>();
     for (const row of analytics?.weekly_platform_engagement ?? []) {
@@ -6119,6 +6334,102 @@ export default function SeasonSocialAnalyticsSection({
       )}
     </div>
   );
+  const seasonWindowTargetsAvailable = targets.length > 0;
+  const seasonWindowSettingsPanel = (
+    <div className="rounded-2xl border border-zinc-200 bg-white p-5 text-xs text-zinc-600 shadow-sm" data-testid="season-window-settings">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="font-semibold text-zinc-700">Season Windows</p>
+        <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-600">
+          {officialSeasonWindows.length} official
+        </span>
+      </div>
+      <div className="mt-3 grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+        <label className="space-y-1">
+          <span className="block text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500">Trailer Drop</span>
+          <input
+            type="datetime-local"
+            value={seasonWindowDraft.trailerDropAt}
+            onChange={(event) => {
+              setSeasonWindowDraft((current) => ({ ...current, trailerDropAt: event.target.value }));
+              setSeasonWindowError(null);
+              setSeasonWindowMessage(null);
+            }}
+            className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-900 shadow-sm focus:border-zinc-500 focus:outline-none focus:ring-2 focus:ring-zinc-200"
+          />
+        </label>
+        <label className="space-y-1">
+          <span className="block text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500">
+            Post-Season End Override
+          </span>
+          <input
+            type="datetime-local"
+            value={seasonWindowDraft.postseasonEndAt}
+            onChange={(event) => {
+              setSeasonWindowDraft((current) => ({ ...current, postseasonEndAt: event.target.value }));
+              setSeasonWindowError(null);
+              setSeasonWindowMessage(null);
+            }}
+            className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-900 shadow-sm focus:border-zinc-500 focus:outline-none focus:ring-2 focus:ring-zinc-200"
+          />
+        </label>
+        <div className="flex items-end">
+          <button
+            type="button"
+            onClick={() => {
+              void saveSeasonWindowSettings();
+            }}
+            disabled={!seasonWindowTargetsAvailable || !seasonWindowDraftChanged || seasonWindowSaving}
+            className="w-full rounded-lg border border-zinc-900 bg-zinc-900 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-zinc-700 disabled:cursor-not-allowed disabled:border-zinc-200 disabled:bg-zinc-100 disabled:text-zinc-400 md:w-auto"
+          >
+            {seasonWindowSaving ? "Saving..." : "Save Windows"}
+          </button>
+        </div>
+      </div>
+      {seasonWindowError && (
+        <p className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-medium text-red-700">
+          {seasonWindowError}
+        </p>
+      )}
+      {seasonWindowMessage && !seasonWindowError && (
+        <p className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-700">
+          {seasonWindowMessage}
+        </p>
+      )}
+      <div className="mt-4 overflow-x-auto">
+        <table className="min-w-full border-collapse text-left text-xs">
+          <thead>
+            <tr className="border-b border-zinc-200 text-[10px] uppercase tracking-[0.14em] text-zinc-500">
+              <th className="py-2 pr-4 font-semibold">Window</th>
+              <th className="py-2 pr-4 font-semibold">Type</th>
+              <th className="py-2 pr-4 font-semibold">Dates</th>
+            </tr>
+          </thead>
+          <tbody>
+            {officialSeasonWindows.map((window) => (
+              <tr key={`season-window-${window.week_index}-${window.start}`} className="border-b border-zinc-100 last:border-0">
+                <td className="py-2 pr-4 align-top font-semibold text-zinc-800">
+                  {seasonWindowEpisodeLabel(window)}
+                </td>
+                <td className="py-2 pr-4 align-top text-zinc-600">
+                  {seasonWindowTypeLabel(window.week_type)}
+                </td>
+                <td className="py-2 pr-4 align-top text-zinc-600">
+                  {formatDateTime(window.start)} to {formatDateTime(window.end)}
+                </td>
+              </tr>
+            ))}
+            {officialSeasonWindows.length === 0 && (
+              <tr>
+                <td className="py-3 pr-4 text-zinc-500" colSpan={3}>
+                  No official season windows yet.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
   const classificationRulesPanel = (
     <div className="rounded-2xl border border-zinc-200 bg-white p-5 text-xs text-zinc-600 shadow-sm">
       <p className="font-semibold text-zinc-700">
@@ -6233,9 +6544,12 @@ export default function SeasonSocialAnalyticsSection({
       </div>
     ) : null;
   const socialRulePanels = (
-    <div className={`grid gap-4 ${sharedAsyncPipelinePanel ? "xl:grid-cols-2" : ""}`}>
-      {classificationRulesPanel}
-      {sharedAsyncPipelinePanel}
+    <div className="space-y-4">
+      {seasonWindowSettingsPanel}
+      <div className={`grid gap-4 ${sharedAsyncPipelinePanel ? "xl:grid-cols-2" : ""}`}>
+        {classificationRulesPanel}
+        {sharedAsyncPipelinePanel}
+      </div>
     </div>
   );
   const socialControlsRail = (
