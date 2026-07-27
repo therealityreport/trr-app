@@ -2,10 +2,19 @@
 # ============================================================================
 # collect-and-upload-monotype-fonts.sh
 #
+# SUPERSEDED by ~/Desktop/FONTS/collect-monotype.sh
+#
+# This script only reads ~/Library/Fonts, which holds fonts installed by hand.
+# Fonts activated through the Monotype Fonts app live in its own profile cache
+# (~/Library/Application Support/Monotype Fonts/Monotype Fonts_<uuid>/.Fonts)
+# and are invisible here — so anything activated from a Monotype list is missed
+# entirely. The <uuid> also changes when the app re-provisions its profile.
+# Use collect-monotype.sh, which scans every profile plus ~/Library/Fonts.
+#
 # Step 1: Collects all Monotype subscription fonts from ~/Library/Fonts
 #         into ~/Desktop/FONTS/ organized by family name.
 # Step 2: Uploads the collected fonts to S3-compatible object storage
-#         (trr-backend bucket, fonts/ prefix)
+#         (trr-media-prod bucket, fonts/trr prefix)
 #         using the existing upload-fonts-to-s3.py script.
 #
 # Usage:
@@ -21,7 +30,8 @@ FONT_SOURCE="$HOME/Library/Fonts"
 DEST_BASE="$HOME/Desktop/FONTS"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 UPLOAD_SCRIPT="$SCRIPT_DIR/upload-fonts-to-s3.py"
-S3_BUCKET="trr-backend"
+OBJECT_BUCKET="${OBJECT_STORAGE_BUCKET:-trr-media-prod}"
+PUBLIC_BASE_URL="${OBJECT_STORAGE_PUBLIC_BASE_URL:-https://media.thereality.report}"
 
 # Find a python3 that has boto3 installed
 PYTHON3=""
@@ -103,8 +113,8 @@ collect_fonts() {
   echo "============================================="
   echo ""
 
-  # ------- Already on CDN (will be skipped by upload) -------
-  echo "  — Already on CDN (verifying) —"
+  # ------- Already hosted (will be skipped by upload) -------
+  echo "  — Already hosted (verifying) —"
   copy_family "Hamburg Serial"       "^HamburgSerial"
   copy_family "Plymouth Serial"      "^PlymouthSerial"
   copy_family "Rude Slab Condensed"  "^RudeSlab"
@@ -112,8 +122,8 @@ collect_fonts() {
   copy_family "Goodall"              "^Goodall"
   echo ""
 
-  # ------- Not yet on CDN — need uploading -------
-  echo "  — Need CDN upload —"
+  # ------- Not yet hosted — need uploading -------
+  echo "  — Need object-storage upload —"
   copy_family "Bernhard Modern"         "^Bernhard"
   copy_family "Beton"                   "^Beton"
   copy_family "Biotif Pro"              "^Biotif"
@@ -172,9 +182,14 @@ collect_fonts() {
 # ============================================================================
 upload_fonts() {
   echo "============================================="
-  echo "  STEP 2: Uploading to object storage ($S3_BUCKET)"
+  echo "  STEP 2: Uploading to object storage ($OBJECT_BUCKET)"
   echo "============================================="
   echo ""
+
+  if [ "$OBJECT_BUCKET" != "trr-media-prod" ]; then
+    echo "ERROR: Production font uploads must target trr-media-prod, not $OBJECT_BUCKET."
+    exit 1
+  fi
 
   if [ ! -f "$UPLOAD_SCRIPT" ]; then
     echo "ERROR: Upload script not found: $UPLOAD_SCRIPT"
@@ -201,7 +216,7 @@ upload_fonts() {
 
   $PYTHON3 "$UPLOAD_SCRIPT" \
     --source "$DEST_BASE" \
-    --bucket "$S3_BUCKET" \
+    --bucket "$OBJECT_BUCKET" \
     --prefix "fonts/trr" \
     $DRY_RUN
 }
@@ -216,8 +231,8 @@ echo "╚═══════════════════════�
 echo ""
 echo "  Source:  $FONT_SOURCE"
 echo "  Staging: $DEST_BASE"
-echo "  Bucket:  $S3_BUCKET/fonts/trr/"
-echo "  CDN:     https://d1fmdyqfafwim3.cloudfront.net/fonts/trr/"
+echo "  Bucket:  $OBJECT_BUCKET/fonts/trr/"
+echo "  Public:  ${PUBLIC_BASE_URL%/}/fonts/trr/"
 echo ""
 
 if $DO_COLLECT; then
