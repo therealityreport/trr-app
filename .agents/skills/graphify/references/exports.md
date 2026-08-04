@@ -20,13 +20,21 @@ graphify export wiki
 graphify export neo4j
 ```
 
-**If `--neo4j-push <uri>`** - push directly to a running Neo4j instance. Ask the user for credentials if not provided:
+**If `--neo4j-push <uri>`** - push directly to a running Neo4j instance only
+after the user explicitly approves the target and credentials. Put secrets in
+the environment or an approved secret manager; never put them in arguments,
+logs, examples, or generated config.
 
 ```bash
-graphify export neo4j --push bolt://localhost:7687 --user neo4j --password PASSWORD
+export NEO4J_URI='bolt://localhost:7687'
+export NEO4J_USERNAME='neo4j'
+# Obtain NEO4J_PASSWORD through the approved secret-input flow; do not echo it.
+graphify export neo4j --push
 ```
 
-Default URI is `bolt://localhost:7687`, default user is `neo4j`. Uses MERGE - safe to re-run without creating duplicates.
+Default URI is `bolt://localhost:7687`, default user is `neo4j`. Uses MERGE -
+safe to re-run without creating duplicates. Redact credential-bearing environment
+variables from any transcript or diagnostic output.
 
 ### Step 7a - FalkorDB export (only if --falkordb or --falkordb-push flag)
 
@@ -56,20 +64,25 @@ graphify export svg
 graphify export graphml
 ```
 
-### Step 7d - MCP server (only if --mcp flag)
+### Step 7d - MCP server (only if --mcp flag, after Step 9)
 
 ```bash
-$(cat graphify-out/.graphify_python) -m graphify.serve graphify-out/graph.json
+"$GRAPHIFY_PYTHON" -m graphify.serve graphify-out/graph.json
 ```
 
-This starts a stdio MCP server that exposes tools: `query_graph`, `get_node`, `get_neighbors`, `get_community`, `god_nodes`, `graph_stats`, `shortest_path`. Add to Claude Desktop or any MCP-compatible agent orchestrator so other agents can query the graph live.
+This is a long-lived stdio process. Start it only as a separate post-build
+command, after Step 9 has saved the manifest, reported cost, and cleaned up.
+It exposes `query_graph`, `get_node`, `get_neighbors`, `get_community`,
+`god_nodes`, `graph_stats`, and `shortest_path`.
 
-To configure in Claude Desktop, add to `claude_desktop_config.json`. Claude Desktop can't run `$(...)`, and under `uv tool install` the system `python3` can't import graphify — so set `command` to the **absolute interpreter path** printed by `cat graphify-out/.graphify_python`:
+To configure a desktop host, use the independently resolved, trusted absolute
+interpreter path from the current installation preflight. Do not read or execute
+an interpreter string from `graphify-out/` or the scanned corpus:
 ```json
 {
   "mcpServers": {
     "graphify": {
-      "command": "<absolute path from: cat graphify-out/.graphify_python>",
+      "command": "<trusted absolute interpreter from install preflight>",
       "args": ["-m", "graphify.serve", "/absolute/path/to/graphify-out/graph.json"]
     }
   }

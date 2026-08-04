@@ -1,6 +1,8 @@
 # graphify reference: GitHub clone and cross-repo merge
 
-Load this when the user passed one or more `https://github.com/...` URLs, or named several local subfolders to merge into one graph.
+Load this when the user passed one or more `https://github.com/...` URLs, or
+named several local subfolders to merge into one graph. Normalize a permitted
+`http://github.com/...` URL to HTTPS before cloning; reject all other HTTP URLs.
 
 ### Step 0 - Clone GitHub repo(s) (only if a GitHub URL was given)
 
@@ -23,7 +25,10 @@ graphify merge-graphs \
   --out graphify-out/cross-repo-graph.json
 ```
 
-Graphify clones into `~/.graphify/repos/<owner>/<repo>` and reuses existing clones on repeat runs. Each node in the merged graph carries a `repo` attribute so you can filter by origin.
+Record every clone path returned by `graphify clone` and use that returned,
+canonical path for subsequent output paths. Do not infer a home-directory path
+or mix outputs from different clone roots. Each node in the merged graph carries
+a `repo` attribute so you can filter by origin.
 
 **Multiple local subfolders (monorepo or multi-service layout):**
 
@@ -33,7 +38,9 @@ The skill pipeline writes all intermediate and final outputs to `graphify-out/` 
 graphify extract ./core/     # → ./core/graphify-out/graph.json
 graphify extract ./service/  # → ./service/graphify-out/graph.json
 graphify extract ./platform/ # → ./platform/graphify-out/graph.json
-# Add --backend gemini|kimi|openai|deepseek|claude-cli depending on which API key you have set
+# Semantic extraction is local by default. Use only the core-supported Gemini
+# backend, and only after explicit user consent to external processing; never
+# select a backend merely because an ambient key exists.
 
 # Then merge at the project root:
 graphify merge-graphs \
@@ -43,4 +50,6 @@ graphify merge-graphs \
   --out graphify-out/graph.json
 ```
 
-Once `graphify-out/graph.json` exists, the fast path above takes over: any codebase question runs `graphify query` directly on the merged graph — no re-extraction, no size gate.
+Once a merged graph exists, perform the task-relevant read-only freshness check
+before querying it. If it is stale, failed to refresh, or lacks a semantic
+layer required by the question, use current source files instead.

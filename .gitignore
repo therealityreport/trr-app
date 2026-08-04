@@ -41,4 +41,5 @@ apps/vue-wordle/*.tsbuildinfo
 
 TRR App Brain/sessions/
 .loom-backup/
-/graphify-out/
+# Graphify output may be created from any selected corpus root.
+graphify-out/
