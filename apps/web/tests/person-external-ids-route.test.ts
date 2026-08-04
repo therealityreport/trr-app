@@ -31,8 +31,11 @@ vi.mock("@/lib/server/auth", () => ({
 }));
 
 vi.mock("@/lib/server/trr-api/trr-shows-repository", () => ({
-  listPersonExternalIds: listPersonExternalIdsMock,
   syncPersonExternalIds: syncPersonExternalIdsMock,
+}));
+
+vi.mock("@/lib/server/trr-api/admin-external-id-reads", () => ({
+  listPersonExternalIds: listPersonExternalIdsMock,
 }));
 
 vi.mock("@/lib/server/trr-api/admin-read-proxy", () => ({
@@ -86,6 +89,11 @@ describe("person external ids route", () => {
     expect(response.status).toBe(200);
     expect(listPersonExternalIdsMock).toHaveBeenCalledWith("person-1", {
       includeInactive: true,
+      adminContext: {
+        uid: "admin-user",
+        email: "admin@example.com",
+        verifiedAt: 1_717_800_000_000,
+      },
     });
     expect(payload.external_ids).toHaveLength(1);
     expect(payload.external_ids[0]).toMatchObject({

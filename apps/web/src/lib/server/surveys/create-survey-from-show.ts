@@ -1,6 +1,7 @@
 import "server-only";
 
 import type { AuthContext } from "@/lib/server/postgres";
+import type { VerifiedAdminContext } from "@/lib/server/trr-api/internal-admin-auth";
 import {
   getShowById,
   getSeasonByShowAndNumber,
@@ -152,6 +153,7 @@ function isBravoOrHousewivesShow(showName: string): boolean {
 export async function createSurveyFromShow(
   authContext: AuthContext,
   options: CreateSurveyFromShowOptions,
+  adminContext: VerifiedAdminContext,
 ): Promise<CreateSurveyFromShowResult> {
   const { trrShowId, seasonNumber, template, title, createInitialRun, runStartsAt, runEndsAt } = options;
 
@@ -198,9 +200,23 @@ export async function createSurveyFromShow(
 
   // 6. Create questions based on template
   if (template === "cast_ranking") {
-    await createCastRankingQuestions(authContext, survey.id, trrShowId, seasonNumber, show.name);
+    await createCastRankingQuestions(
+      authContext,
+      adminContext,
+      survey.id,
+      trrShowId,
+      seasonNumber,
+      show.name,
+    );
   } else if (template === "weekly_poll") {
-    await createWeeklyPollQuestions(authContext, survey.id, trrShowId, seasonNumber, show.name);
+    await createWeeklyPollQuestions(
+      authContext,
+      adminContext,
+      survey.id,
+      trrShowId,
+      seasonNumber,
+      show.name,
+    );
   } else if (template === "episode_rating") {
     await createEpisodeRatingQuestions(authContext, survey.id);
   }
@@ -249,11 +265,12 @@ type EligibleSeasonCastMember = {
 async function getSurveyEligibleSeasonCast(
   trrShowId: string,
   seasonNumber: number,
+  adminContext: VerifiedAdminContext,
   showName?: string,
 ): Promise<EligibleSeasonCastMember[]> {
   const [cast, selectedRoles] = await Promise.all([
     getSeasonCastWithEpisodeCounts(trrShowId, seasonNumber, { limit: 500, offset: 0 }),
-    listSeasonCastSurveyRoles(trrShowId, seasonNumber),
+    listSeasonCastSurveyRoles(trrShowId, seasonNumber, { adminContext }),
   ]);
 
   if (cast.length === 0) return [];
@@ -324,12 +341,18 @@ async function getSurveyEligibleSeasonCast(
  */
 async function createCastRankingQuestions(
   authContext: AuthContext,
+  adminContext: VerifiedAdminContext,
   surveyId: string,
   trrShowId: string,
   seasonNumber: number,
   showName: string,
 ): Promise<void> {
-  const cast = await getSurveyEligibleSeasonCast(trrShowId, seasonNumber, showName);
+  const cast = await getSurveyEligibleSeasonCast(
+    trrShowId,
+    seasonNumber,
+    adminContext,
+    showName,
+  );
 
   if (cast.length === 0) {
     console.warn(
@@ -379,6 +402,7 @@ async function createCastRankingQuestions(
  */
 async function createWeeklyPollQuestions(
   authContext: AuthContext,
+  adminContext: VerifiedAdminContext,
   surveyId: string,
   trrShowId: string,
   seasonNumber: number,
@@ -431,7 +455,12 @@ async function createWeeklyPollQuestions(
   });
 
   // Add cast options (if available)
-  const cast = await getSurveyEligibleSeasonCast(trrShowId, seasonNumber, showName);
+  const cast = await getSurveyEligibleSeasonCast(
+    trrShowId,
+    seasonNumber,
+    adminContext,
+    showName,
+  );
   for (const [index, member] of cast.entries()) {
     const optionMetadata: OptionMetadata = {
       imagePath: member.photo_url ?? undefined,

@@ -33,6 +33,7 @@ afterEach(() => {
     expect(getBackendRootBase()).toBe("http://127.0.0.1:8000");
     expect(getBackendRootUrl("/admin/health/db-pressure")).toBe("http://127.0.0.1:8000/admin/health/db-pressure");
     expect(getBackendApiBase()).toBe("http://127.0.0.1:8000/api/v1");
+    expect(getBackendApiBase("v2")).toBe("http://127.0.0.1:8000/api/v2");
     expect(getBackendApiUrl("admin/socials/ingest/queue-status")).toBe(
       "http://127.0.0.1:8000/api/v1/admin/socials/ingest/queue-status",
     );
@@ -44,6 +45,16 @@ afterEach(() => {
     expect(getBackendRootBase()).toBe("http://127.0.0.1:8000");
     expect(getBackendRootUrl("/health")).toBe("http://127.0.0.1:8000/health");
     expect(getBackendApiBase()).toBe("http://127.0.0.1:8000/api/v1");
+  });
+
+  it("normalizes v2-prefixed roots and builds explicit v2 API URLs", () => {
+    process.env.TRR_API_URL = "http://localhost:8000/api/v2/";
+
+    expect(getBackendRootBase()).toBe("http://127.0.0.1:8000");
+    expect(getBackendApiBase("v2")).toBe("http://127.0.0.1:8000/api/v2");
+    expect(getBackendApiUrl("/admin/covered-shows", "v2")).toBe(
+      "http://127.0.0.1:8000/api/v2/admin/covered-shows",
+    );
   });
 
   it("supports Portless backend aliases for root health and API routes", () => {

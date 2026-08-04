@@ -12,14 +12,25 @@ const { requireAdminMock, fetchAdminBackendJsonMock, getShowByIdMock, resolveSho
 
 vi.mock("@/lib/server/auth", () => ({
   requireAdmin: requireAdminMock,
+  toVerifiedAdminContext: (user: { uid: string; email?: string }) => ({
+    uid: user.uid,
+    email: user.email ?? null,
+    verifiedAt: 42,
+  }),
 }));
 
 vi.mock("@/lib/server/trr-api/trr-shows-repository", () => ({
   getShowById: getShowByIdMock,
-  getShowByExactSlug: vi.fn(),
-  resolveShowSlug: resolveShowSlugMock,
   updateShowById: vi.fn(),
   validateShowImageForField: vi.fn(),
+}));
+
+vi.mock("@/lib/server/trr-api/admin-show-slug-reads", () => ({
+  getAdminShowByExactSlug: vi.fn(),
+}));
+
+vi.mock("@/lib/server/trr-api/public-identities", () => ({
+  resolveShowSlug: resolveShowSlugMock,
 }));
 
 vi.mock("@/lib/server/trr-api/admin-read-proxy", () => ({

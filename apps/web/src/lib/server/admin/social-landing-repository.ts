@@ -50,15 +50,17 @@ import {
   fetchAdminBackendJson,
 } from "@/lib/server/trr-api/admin-read-proxy";
 import {
+  listPrimaryPersonExternalIdsByPersonIds,
+  listShowExternalIdsByIds,
+} from "@/lib/server/trr-api/admin-external-id-reads";
+import {
   fetchSocialBackendJson,
   SOCIAL_PROXY_DEFAULT_TIMEOUT_MS,
   SOCIAL_PROXY_PROGRESS_TIMEOUT_MS,
 } from "@/lib/server/trr-api/social-admin-proxy";
 import type { VerifiedAdminContext } from "@/lib/server/trr-api/internal-admin-auth";
 import {
-  listPrimaryPersonExternalIdsByPersonIds,
   listEffectivePersonSocialHandlesByPersonIds,
-  listShowExternalIdsByIds,
   type PersonEffectiveSocialHandles,
 } from "@/lib/server/trr-api/trr-shows-repository";
 
@@ -1082,7 +1084,7 @@ const safeLoadBackendLandingSummary = async (
   const loadLocalFallback = async (): Promise<LandingSummaryResult> => {
     try {
       const [coveredShows, redditDashboard] = await Promise.all([
-        getCoveredShows(),
+        getCoveredShows({ adminContext }),
         safeLoadRedditDashboardSummary(),
       ]);
       return { coveredShows, redditDashboard, cacheable: !adminContext };
@@ -1128,9 +1130,10 @@ const safeLoadBackendLandingSummary = async (
 
 const safeLoadShowExternalIdsMap = async (
   showIds: readonly string[],
+  adminContext?: VerifiedAdminContext,
 ): Promise<CacheableValue<ReadonlyMap<string, Record<string, unknown> | null>>> => {
   try {
-    return cacheableValue(await listShowExternalIdsByIds(showIds));
+    return cacheableValue(await listShowExternalIdsByIds(showIds, { adminContext }));
   } catch (error) {
     console.warn("[social-landing] Failed to load show external ids", { showIds, error });
     return uncacheableValue(new Map());
@@ -1186,9 +1189,10 @@ const safeLoadShowCastSummaryMap = async (
 
 const safeLoadPrimaryPersonExternalIdsMap = async (
   personIds: readonly string[],
+  adminContext?: VerifiedAdminContext,
 ): Promise<ReadonlyMap<string, PersonExternalIdRecord[]>> => {
   try {
-    return await listPrimaryPersonExternalIdsByPersonIds(personIds);
+    return await listPrimaryPersonExternalIdsByPersonIds(personIds, { adminContext });
   } catch (error) {
     console.warn("[social-landing] Failed to load person external ids", { personIds, error });
     return new Map();
@@ -1882,6 +1886,7 @@ const buildShowSets = (
 const buildPeopleProfiles = async (
   coveredShows: readonly CoveredShow[],
   castByShowId: ReadonlyMap<string, CastSummaryMember[]>,
+  adminContext?: VerifiedAdminContext,
 ): Promise<{
   peopleProfiles: PersonProfileSummary[];
   personTargets: PersonTargetSummary[];
@@ -1928,7 +1933,7 @@ const buildPeopleProfiles = async (
   const peopleList = [...people.values()];
   const personIds = peopleList.map((person) => person.person_id);
   const [externalIdsByPersonId, fallbackHandlesByPersonId] = await Promise.all([
-    safeLoadPrimaryPersonExternalIdsMap(personIds),
+    safeLoadPrimaryPersonExternalIdsMap(personIds, adminContext),
     safeLoadEffectivePersonSocialHandlesMap(personIds),
   ]);
 
@@ -2308,7 +2313,7 @@ export async function getSocialLandingPayloadResult(
     ),
     withOptionalLandingTimeout(
       "show external IDs",
-      safeLoadShowExternalIdsMap(coveredShowIds),
+      safeLoadShowExternalIdsMap(coveredShowIds, adminContext),
       new Map(),
     ),
     withOptionalLandingTimeout(
@@ -2341,7 +2346,7 @@ export async function getSocialLandingPayloadResult(
     socialBladeRawHandleCandidatesByPersonId,
   } = await withSocialLandingTiming(
     "people profiles",
-    buildPeopleProfiles(coveredShows, castByShowId),
+    buildPeopleProfiles(coveredShows, castByShowId, adminContext),
   );
   const castSocialBladeShowsPromise = withOptionalLandingTimeout(
     "cast SocialBlade",

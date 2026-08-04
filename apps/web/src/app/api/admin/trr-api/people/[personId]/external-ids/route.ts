@@ -1,9 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin, toVerifiedAdminContext } from "@/lib/server/auth";
-import {
-  listPersonExternalIds,
-  syncPersonExternalIds,
-} from "@/lib/server/trr-api/trr-shows-repository";
+import { syncPersonExternalIds } from "@/lib/server/trr-api/trr-shows-repository";
+import { listPersonExternalIds } from "@/lib/server/trr-api/admin-external-id-reads";
 import {
   isPersonExternalIdSource,
   type PersonExternalIdInput,
@@ -28,7 +26,7 @@ const readPersonId = async (params: RouteParams["params"]): Promise<string> => {
 
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
-    await requireAdmin(request);
+    const user = await requireAdmin(request);
 
     const personId = await readPersonId(params);
     if (!personId) {
@@ -37,13 +35,24 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     const includeInactive =
       request.nextUrl.searchParams.get("includeInactive")?.trim().toLowerCase() === "true";
-    const externalIds = await listPersonExternalIds(personId, { includeInactive });
+    const externalIds = await listPersonExternalIds(personId, {
+      includeInactive,
+      adminContext: toVerifiedAdminContext(user),
+    });
     return NextResponse.json({ external_ids: externalIds });
   } catch (error) {
     console.error("[api] Failed to list person external IDs", error);
     const message = error instanceof Error ? error.message : "failed";
     const status =
-      message === "unauthorized" ? 401 : message === "forbidden" ? 403 : message === "Person not found" ? 404 : 500;
+      error instanceof AdminReadProxyError
+        ? error.status
+        : message === "unauthorized"
+          ? 401
+          : message === "forbidden"
+            ? 403
+            : message === "Person not found"
+              ? 404
+              : 500;
     return NextResponse.json({ error: message }, { status });
   }
 }

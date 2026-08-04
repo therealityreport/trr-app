@@ -1,7 +1,10 @@
 import "server-only";
 
 import { NextResponse } from "next/server";
-import { getBackendApiUrl } from "@/lib/server/trr-api/backend";
+import {
+  getBackendApiUrl,
+  type BackendApiVersion,
+} from "@/lib/server/trr-api/backend";
 import {
   buildInternalAdminHeaders,
   type VerifiedAdminContext,
@@ -151,11 +154,17 @@ export async function fetchAdminBackendJson(
     queryString?: string;
     routeName?: string;
     requestRole?: AdminReadRequestRole;
+    apiVersion?: BackendApiVersion;
   },
 ): Promise<AdminBackendJsonResult> {
-  const backendBaseUrl = getBackendApiUrl(path);
+  const backendBaseUrl = options?.apiVersion
+    ? getBackendApiUrl(path, options.apiVersion)
+    : getBackendApiUrl(path);
   if (!backendBaseUrl) {
-    throw new AdminReadProxyError("Backend API not configured", 500);
+    throw new AdminReadProxyError("Backend API not configured", 503, {
+      code: "BACKEND_NOT_CONFIGURED",
+      retryable: false,
+    });
   }
   const backendUrl = options?.queryString
     ? `${backendBaseUrl}?${options.queryString}`

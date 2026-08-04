@@ -66,6 +66,19 @@ const makeTestRoute = () =>
     logMessage: "[api] test proxy failed",
   });
 
+const makeV2TestRoute = () =>
+  createAdminBackendProxyRoute<TestParams>({
+    routeName: "test-proxy-v2",
+    method: "GET",
+    apiVersion: "v2",
+    backendPath: ({ params }) => `/admin/items/${params.itemId}`,
+    timeout: "short",
+    jsonErrorFallback: "Read failed",
+    timeoutError: "Read timed out",
+    timeoutDetail: () => "Timed out waiting for read",
+    logMessage: "[api] test v2 proxy failed",
+  });
+
 describe("admin backend proxy route helper", () => {
   beforeEach(() => {
     requireAdminMock.mockReset();
@@ -129,6 +142,26 @@ describe("admin backend proxy route helper", () => {
       }),
       expect.any(Headers),
     );
+  });
+
+  it("selects the configured backend API version explicitly", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      ),
+    );
+
+    const response = await makeV2TestRoute()(
+      new NextRequest("http://localhost/api/test", { method: "GET" }),
+      { params: Promise.resolve({ itemId: "item-1" }) },
+    );
+
+    expect(response.status).toBe(200);
+    expect(getBackendApiUrlMock).toHaveBeenCalledWith("/admin/items/item-1", "v2");
   });
 
   it("preserves previously propagated admin verification time in backend headers", async () => {

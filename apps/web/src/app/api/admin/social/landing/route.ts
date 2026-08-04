@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
-  listPersonExternalIds,
   getShowById,
   syncPersonExternalIds,
   updateShowById,
 } from "@/lib/server/trr-api/trr-shows-repository";
+import { listPersonExternalIds } from "@/lib/server/trr-api/admin-external-id-reads";
 import { requireAdmin, toVerifiedAdminContext } from "@/lib/server/auth";
 import {
   buildUserScopedRouteCacheKey,
@@ -675,7 +675,10 @@ export async function POST(request: NextRequest) {
 
     if (targetType === "person") {
       const normalizedExternalId = normalizePersonExternalId(platform, rawValue);
-      const existingExternalIds = await listPersonExternalIds(targetId, { includeInactive: false });
+      const existingExternalIds = await listPersonExternalIds(targetId, {
+        includeInactive: false,
+        adminContext,
+      });
       const nextBySource = new Map(existingExternalIds.map((entry) => [entry.source_id, entry] as const));
       nextBySource.set(platform, {
         id: null,

@@ -26,9 +26,12 @@ vi.mock("@/lib/server/admin/covered-shows-repository", () => ({
 }));
 
 vi.mock("@/lib/server/trr-api/trr-shows-repository", () => ({
-  listPrimaryPersonExternalIdsByPersonIds: listPrimaryPersonExternalIdsByPersonIdsMock,
   listEffectivePersonSocialHandlesByPersonIds:
     listEffectivePersonSocialHandlesByPersonIdsMock,
+}));
+
+vi.mock("@/lib/server/trr-api/admin-external-id-reads", () => ({
+  listPrimaryPersonExternalIdsByPersonIds: listPrimaryPersonExternalIdsByPersonIdsMock,
   listShowExternalIdsByIds: listShowExternalIdsByIdsMock,
 }));
 
@@ -1059,10 +1062,10 @@ describe("social landing repository", () => {
     await sharedSourcesStartedPromise;
     await delay(0);
 
-    expect(listShowExternalIdsByIdsMock).toHaveBeenCalledWith([
-      "show-rhoslc",
-      "show-wwhl",
-    ]);
+    expect(listShowExternalIdsByIdsMock).toHaveBeenCalledWith(
+      ["show-rhoslc", "show-wwhl"],
+      { adminContext: undefined },
+    );
     expect(fetchAdminBackendJsonMock).toHaveBeenCalledWith(
       "/admin/shows/cast-summary",
       expect.objectContaining({

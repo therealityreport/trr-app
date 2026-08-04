@@ -1,22 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/server/auth";
+import { requireAdmin, toVerifiedAdminContext } from "@/lib/server/auth";
 import {
+  getCoverPhoto,
   setCoverPhoto,
   removeCoverPhoto,
 } from "@/lib/server/admin/person-cover-photos-repository";
 import {
   buildAdminProxyErrorResponse,
-  fetchAdminBackendJson,
   invalidateAdminBackendCache,
-  ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
 } from "@/lib/server/trr-api/admin-read-proxy";
 import {
+  buildEntityScopedRouteCacheNamespace,
   buildUserScopedRouteCacheKey,
   getOrCreateRouteResponsePromise,
   getRouteResponseCache,
+  getRouteResponseCacheGeneration,
   invalidateRouteResponseCache,
   parseCacheTtlMs,
-  setRouteResponseCache,
+  setRouteResponseCacheIfGeneration,
 } from "@/lib/server/admin/route-response-cache";
 
 export const dynamic = "force-dynamic";
@@ -57,9 +58,14 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       );
     }
 
-    const cacheKey = buildUserScopedRouteCacheKey(user.uid, `cover-photo:${personId}`, request.nextUrl.searchParams);
-    const cachedPayload = getRouteResponseCache<Record<string, unknown>>(
+    const cacheNamespace = buildEntityScopedRouteCacheNamespace(
       PERSON_COVER_PHOTO_CACHE_NAMESPACE,
+      personId,
+    );
+    const cacheKey = buildUserScopedRouteCacheKey(user.uid, "cover-photo", request.nextUrl.searchParams);
+    const cacheGeneration = getRouteResponseCacheGeneration(cacheNamespace);
+    const cachedPayload = getRouteResponseCache<Record<string, unknown>>(
+      cacheNamespace,
       cacheKey,
     );
     if (cachedPayload) {
@@ -67,27 +73,18 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     }
 
     const payload = await getOrCreateRouteResponsePromise(
-      PERSON_COVER_PHOTO_CACHE_NAMESPACE,
+      cacheNamespace,
       cacheKey,
       async () => {
-        const upstream = await fetchAdminBackendJson(`/admin/people/${personId}/cover-photo`, {
-          timeoutMs: ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
-          routeName: "person-cover-photo",
+        const coverPhoto = await getCoverPhoto(personId, {
+          adminContext: toVerifiedAdminContext(user),
         });
-        if (upstream.status !== 200) {
-          throw new Error(
-            typeof upstream.data.error === "string"
-              ? upstream.data.error
-              : typeof upstream.data.detail === "string"
-                ? upstream.data.detail
-                : "Failed to get cover photo",
-          );
-        }
-        const nextPayload = { coverPhoto: upstream.data.coverPhoto ?? null };
-        setRouteResponseCache(
-          PERSON_COVER_PHOTO_CACHE_NAMESPACE,
+        const nextPayload = { coverPhoto };
+        setRouteResponseCacheIfGeneration(
+          cacheNamespace,
           cacheKey,
           nextPayload,
+          cacheGeneration,
           PERSON_COVER_PHOTO_CACHE_TTL_MS,
         );
         return nextPayload;
@@ -142,13 +139,15 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       );
     }
 
-    const authContext = { firebaseUid: user.uid, isAdmin: true };
-    const coverPhoto = await setCoverPhoto(authContext, {
+    const adminContext = toVerifiedAdminContext(user);
+    const coverPhoto = await setCoverPhoto(adminContext, {
       person_id: personId,
       photo_id: normalizedPhotoId,
       photo_url: normalizedPhotoUrl,
     });
-    invalidateRouteResponseCache(PERSON_COVER_PHOTO_CACHE_NAMESPACE, `${user.uid}:cover-photo:${personId}`);
+    invalidateRouteResponseCache(
+      buildEntityScopedRouteCacheNamespace(PERSON_COVER_PHOTO_CACHE_NAMESPACE, personId),
+    );
     await invalidateAdminBackendCache(`/admin/people/${personId}/cache/invalidate`, {
       routeName: "person-cover-photo",
     });
@@ -156,10 +155,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     return NextResponse.json({ coverPhoto });
   } catch (error) {
     console.error("[api] Failed to set cover photo", error);
-    const message = error instanceof Error ? error.message : "failed";
-    const status =
-      message === "unauthorized" ? 401 : message === "forbidden" ? 403 : 500;
-    return NextResponse.json({ error: message }, { status });
+    return buildAdminProxyErrorResponse(error);
   }
 }
 
@@ -181,9 +177,10 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
       );
     }
 
-    const authContext = { firebaseUid: user.uid, isAdmin: true };
-    await removeCoverPhoto(authContext, personId);
-    invalidateRouteResponseCache(PERSON_COVER_PHOTO_CACHE_NAMESPACE, `${user.uid}:cover-photo:${personId}`);
+    await removeCoverPhoto(toVerifiedAdminContext(user), personId);
+    invalidateRouteResponseCache(
+      buildEntityScopedRouteCacheNamespace(PERSON_COVER_PHOTO_CACHE_NAMESPACE, personId),
+    );
     await invalidateAdminBackendCache(`/admin/people/${personId}/cache/invalidate`, {
       routeName: "person-cover-photo",
     });
@@ -191,9 +188,6 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error("[api] Failed to remove cover photo", error);
-    const message = error instanceof Error ? error.message : "failed";
-    const status =
-      message === "unauthorized" ? 401 : message === "forbidden" ? 403 : 500;
-    return NextResponse.json({ error: message }, { status });
+    return buildAdminProxyErrorResponse(error);
   }
 }

@@ -7,7 +7,10 @@ import {
   isTimeoutSafeFetchTimeoutError,
   timeoutSafeFetch,
 } from "@/lib/server/timeout-safe-fetch";
-import { getBackendApiUrl } from "@/lib/server/trr-api/backend";
+import {
+  getBackendApiUrl,
+  type BackendApiVersion,
+} from "@/lib/server/trr-api/backend";
 import {
   buildInternalAdminHeaders,
   type VerifiedAdminContext,
@@ -59,6 +62,7 @@ export type AdminBackendProxyHeadersFactory<TParams, TBodyValue = unknown> = (
 export type AdminBackendProxyRouteConfig<TParams extends Record<string, string | undefined>, TBodyValue = unknown> = {
   routeName: string;
   method: AdminBackendProxyMethod;
+  apiVersion?: BackendApiVersion;
   backendPath: (
     context: Omit<AdminBackendProxyContext<TParams, TBodyValue>, "bodyValue">,
   ) => string | Promise<string>;
@@ -262,7 +266,9 @@ export async function executeAdminBackendProxy<TParams extends Record<string, st
     bodyValue: bodyResult.value,
   };
   const backendPath = await config.backendPath({ request, params });
-  const backendBaseUrl = getBackendApiUrl(backendPath);
+  const backendBaseUrl = config.apiVersion
+    ? getBackendApiUrl(backendPath, config.apiVersion)
+    : getBackendApiUrl(backendPath);
   if (!backendBaseUrl) {
     return adminJsonResponse(request, { error: "Backend API not configured" }, { status: 500, title: config.routeName });
   }

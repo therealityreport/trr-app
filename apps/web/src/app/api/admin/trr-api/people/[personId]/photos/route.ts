@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
 import {
+  buildEntityScopedRouteCacheNamespace,
   buildUserScopedRouteCacheKey,
   getOrCreateRouteResponsePromise,
   getRouteResponseCache,
+  getRouteResponseCacheGeneration,
   parseCacheTtlMs,
-  setRouteResponseCache,
+  setRouteResponseCacheIfGeneration,
 } from "@/lib/server/admin/route-response-cache";
 import {
   AdminReadProxyError,
@@ -95,11 +97,16 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     if (!includeTotalCount) {
       backendParams.set("include_total_count", "false");
     }
+    const cacheNamespace = buildEntityScopedRouteCacheNamespace(
+      PERSON_PHOTOS_CACHE_NAMESPACE,
+      personId,
+    );
     const cacheKey = buildUserScopedRouteCacheKey(
       user.uid,
-      `${personId}:photos`,
+      "photos",
       backendParams,
     );
+    const cacheGeneration = getRouteResponseCacheGeneration(cacheNamespace);
     const cachedPayload = getRouteResponseCache<{
       photos: Array<Record<string, unknown>>;
       pagination: {
@@ -111,13 +118,13 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         next_offset: number;
         has_more: boolean;
       };
-    }>(PERSON_PHOTOS_CACHE_NAMESPACE, cacheKey);
+    }>(cacheNamespace, cacheKey);
     if (cachedPayload) {
       return NextResponse.json(cachedPayload, { headers: { "x-trr-cache": "hit" } });
     }
 
     const payload = await getOrCreateRouteResponsePromise(
-      PERSON_PHOTOS_CACHE_NAMESPACE,
+      cacheNamespace,
       cacheKey,
       async () => {
         const upstream = await fetchAdminBackendJson(
@@ -185,10 +192,11 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
             has_more: upstreamPagination.has_more === true,
           },
         };
-        setRouteResponseCache(
-          PERSON_PHOTOS_CACHE_NAMESPACE,
+        setRouteResponseCacheIfGeneration(
+          cacheNamespace,
           cacheKey,
           nextPayload,
+          cacheGeneration,
           PERSON_PHOTOS_CACHE_TTL_MS,
         );
         return nextPayload;

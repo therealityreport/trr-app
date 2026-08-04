@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/server/auth";
+import { requireAdmin, toVerifiedAdminContext } from "@/lib/server/auth";
 import {
   buildUserScopedRouteCacheKey,
   getOrCreateRouteResponsePromise,
@@ -7,10 +7,9 @@ import {
   setRouteResponseCache,
 } from "@/lib/server/admin/route-response-cache";
 import {
-  ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
   buildAdminProxyErrorResponse,
-  fetchAdminBackendJson,
 } from "@/lib/server/trr-api/admin-read-proxy";
+import { getNetworksStreamingSummary } from "@/lib/server/trr-api/admin-networks-streaming-reads";
 import {
   NETWORKS_STREAMING_SUMMARY_CACHE_NAMESPACE,
   NETWORKS_STREAMING_SUMMARY_CACHE_TTL_MS,
@@ -26,6 +25,7 @@ export const dynamic = "force-dynamic";
 export async function GET(request: NextRequest) {
   try {
     const user = await requireAdmin(request);
+    const adminContext = toVerifiedAdminContext(user);
     const searchParams = new URLSearchParams(request.nextUrl.searchParams);
     const forceRefresh = (searchParams.get("refresh") ?? "").trim().length > 0;
     searchParams.delete("refresh");
@@ -50,26 +50,14 @@ export async function GET(request: NextRequest) {
       NETWORKS_STREAMING_SUMMARY_CACHE_NAMESPACE,
       promiseKey,
       async () => {
-        const upstream = await fetchAdminBackendJson("/admin/shows/networks-streaming/summary", {
-          timeoutMs: ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
-          routeName: "networks-streaming-summary",
-        });
-        if (upstream.status !== 200) {
-          throw new Error(
-            typeof upstream.data.error === "string"
-              ? upstream.data.error
-              : typeof upstream.data.detail === "string"
-                ? upstream.data.detail
-                : "Failed to load networks/streaming summary",
-          );
-        }
+        const summary = await getNetworksStreamingSummary({ adminContext });
         setRouteResponseCache(
           NETWORKS_STREAMING_SUMMARY_CACHE_NAMESPACE,
           cacheKey,
-          upstream.data,
+          summary,
           NETWORKS_STREAMING_SUMMARY_CACHE_TTL_MS,
         );
-        return upstream.data;
+        return summary;
       },
     );
 

@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "backend": {
+    "repository": "therealityreport/trr-backend",
+    "commit": "cab53d1bb255673b06bdcfb5a324db9eb91c1861",
+    "contractPath": "docs/api/openapi.v2.json",
+    "sha256": "abedd04f7221bce5c55d9ff5d87f387bc00388e03b8d29ef7160b9bbaf4bacd1",
+    "exportCheckCommand": "python scripts/dev/export_v2_openapi.py --check",
+    "crossRepoValidationCommand": "node apps/web/scripts/generate-trr-v2-api-types.mjs --check --backend-openapi ../TRR-Backend/docs/api/openapi.v2.json"
+  }
+}

@@ -29,10 +29,17 @@ import {
   getNetworkStreamingDetail,
   getNetworksStreamingSummary,
   type NetworkStreamingDetail,
-} from "@/lib/server/admin/networks-streaming-repository";
+} from "@/lib/server/trr-api/admin-networks-streaming-reads";
 import { getBackendApiUrl } from "@/lib/server/trr-api/backend";
 import { getShowById, type TrrShow } from "@/lib/server/trr-api/trr-shows-repository";
-import { peekInternalAdminBearerToken } from "@/lib/server/trr-api/internal-admin-auth";
+import {
+  peekInternalAdminBearerToken,
+  type VerifiedAdminContext,
+} from "@/lib/server/trr-api/internal-admin-auth";
+
+type BrandProfileReadOptions = {
+  adminContext: VerifiedAdminContext;
+};
 
 type GenericTargetType = Extract<
   BrandProfileTargetType,
@@ -438,23 +445,14 @@ const loadFranchiseShowRows = async (): Promise<FranchiseShowRow[]> => {
     .filter(isPresent);
 };
 
-const loadFamilyContext = async (
-  targetType: NetworkTargetType,
-  targetKey: string,
-): Promise<{
+const parseFamilyContext = (
+  payload: FamilyContextPayload | null,
+): {
   family: BrandProfileFamily | null;
   familySuggestions: BrandProfileFamilySuggestion[];
   sharedLinks: BrandProfileSharedLink[];
   wikipediaShowUrls: BrandProfileWikipediaShowUrl[];
-}> => {
-  const payload = await fetchBackendJson<FamilyContextPayload>(
-    "/admin/brands/families/by-entity",
-    new URLSearchParams({
-      entity_type: targetType,
-      entity_key: targetKey,
-    }),
-  );
-
+} => {
   const familyRecord = asRecord(payload?.family);
   const family =
     familyRecord && asString(familyRecord.id) && asString(familyRecord.family_key) && asString(familyRecord.display_name)
@@ -707,6 +705,7 @@ const loadBrandStreamingServices = async (shows: readonly BrandProfileShow[]): P
 
 const buildNetworkTarget = async (
   seed: Extract<ExactMatchSeed, { kind: "network" }>,
+  options: BrandProfileReadOptions,
 ): Promise<{
   target: BrandProfileTarget;
   shows: BrandProfileShow[];
@@ -716,9 +715,9 @@ const buildNetworkTarget = async (
     entity_type: seed.target_type,
     entity_key: seed.target_key,
     show_scope: "added",
-  });
+  }, options);
 
-  const familyContext = await loadFamilyContext(seed.target_type, seed.target_key);
+  const familyContext = parseFamilyContext(detail);
   const detailHref = toDetailHref(seed.target_label, seed.entity_slug);
 
   const target: BrandProfileTarget = {
@@ -846,8 +845,11 @@ const buildGenericTarget = async (
   };
 };
 
-const loadExactMatchSeeds = async (slug: string): Promise<ExactMatchSeed[]> => {
-  const summary = await getNetworksStreamingSummary();
+const loadExactMatchSeeds = async (
+  slug: string,
+  options: BrandProfileReadOptions,
+): Promise<ExactMatchSeed[]> => {
+  const summary = await getNetworksStreamingSummary(options);
   const networkSeeds: ExactMatchSeed[] = resolveBrandProfileTargets(slug, summary.rows.map((row) => ({
     ...row,
     target_type: row.type,
@@ -889,8 +891,10 @@ const loadExactMatchSeeds = async (slug: string): Promise<ExactMatchSeed[]> => {
   return [...deduped.values()];
 };
 
-const loadSuggestionSeeds = async (): Promise<BrandProfileSuggestion[]> => {
-  const summary = await getNetworksStreamingSummary();
+const loadSuggestionSeeds = async (
+  options: BrandProfileReadOptions,
+): Promise<BrandProfileSuggestion[]> => {
+  const summary = await getNetworksStreamingSummary(options);
   const networkSuggestions = summary.rows.map((row) => ({
     slug: toFriendlyBrandSlug(row.name),
     label: row.name,
@@ -931,12 +935,13 @@ const scoreSuggestion = (requestedSlug: string, candidateSlug: string): number =
 
 export async function getBrandProfileSuggestions(
   slug: string,
+  options: BrandProfileReadOptions,
   limit = 6,
 ): Promise<BrandProfileSuggestion[]> {
   const normalizedSlug = toFriendlyBrandSlug(slug);
   if (!normalizedSlug) return [];
 
-  const suggestions = await loadSuggestionSeeds();
+  const suggestions = await loadSuggestionSeeds(options);
   return suggestions
     .map((item) => ({
       item,
@@ -953,11 +958,12 @@ export async function getBrandProfileSuggestions(
 
 export async function getBrandProfileBySlug(
   slug: string,
+  options: BrandProfileReadOptions,
 ): Promise<BrandProfilePayload | null> {
   const normalizedSlug = toFriendlyBrandSlug(slug);
   if (!normalizedSlug) return null;
 
-  const exactSeeds = await loadExactMatchSeeds(normalizedSlug);
+  const exactSeeds = await loadExactMatchSeeds(normalizedSlug, options);
   if (exactSeeds.length === 0) return null;
 
   const franchiseRows = exactSeeds.some((seed) => seed.kind === "generic" && seed.target_type === "franchise")
@@ -967,7 +973,7 @@ export async function getBrandProfileBySlug(
   const hydrated = await Promise.all(
     exactSeeds.map((seed) =>
       seed.kind === "network"
-        ? buildNetworkTarget(seed)
+        ? buildNetworkTarget(seed, options)
         : buildGenericTarget(seed, franchiseRows),
     ),
   );

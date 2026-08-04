@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/server/auth";
+import { requireAdmin, toVerifiedAdminContext } from "@/lib/server/auth";
+import { buildAdminProxyErrorResponse } from "@/lib/server/trr-api/admin-read-proxy";
 import { parseBoundedIntegerParam } from "@/lib/server/trr-api/query-integer-params";
 import { searchPeople } from "@/lib/server/trr-api/trr-shows-repository";
 
@@ -20,7 +21,7 @@ const MAX_LIMIT = 20;
  */
 export async function GET(request: NextRequest) {
   try {
-    await requireAdmin(request);
+    const user = await requireAdmin(request);
 
     const { searchParams } = new URL(request.url);
     const query = searchParams.get("q")?.trim() ?? "";
@@ -53,7 +54,11 @@ export async function GET(request: NextRequest) {
     const limit = limitResult.value;
     const offset = offsetResult.value;
 
-    const people = await searchPeople(query, { limit, offset });
+    const people = await searchPeople(query, {
+      limit,
+      offset,
+      adminContext: toVerifiedAdminContext(user),
+    });
 
     return NextResponse.json({
       people,
@@ -65,9 +70,6 @@ export async function GET(request: NextRequest) {
     });
   } catch (error) {
     console.error("[api] Failed to search TRR people", error);
-    const message = error instanceof Error ? error.message : "failed";
-    const status =
-      message === "unauthorized" ? 401 : message === "forbidden" ? 403 : 500;
-    return NextResponse.json({ error: message }, { status });
+    return buildAdminProxyErrorResponse(error);
   }
 }

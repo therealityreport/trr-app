@@ -3,18 +3,64 @@ import { NextRequest, NextResponse } from "next/server";
 import { invalidateRouteResponseCache } from "@/lib/server/admin/route-response-cache";
 import { TRR_RECENT_PEOPLE_CACHE_NAMESPACE } from "@/lib/server/trr-api/trr-show-read-route-cache";
 
-const { requireAdminMock, fetchAdminBackendJsonMock } = vi.hoisted(() => ({
-  requireAdminMock: vi.fn(),
-  fetchAdminBackendJsonMock: vi.fn(),
-}));
+const { requireAdminMock, toVerifiedAdminContextMock, fetchAdminBackendJsonMock, MockAdminReadProxyError } =
+  vi.hoisted(() => {
+    class TestAdminReadProxyError extends Error {
+      status: number;
+      code?: string;
+      retryable?: boolean;
+
+      constructor(
+        message: string,
+        status: number,
+        options?: { code?: string; retryable?: boolean } | string,
+        retryable?: boolean,
+      ) {
+        super(message);
+        this.status = status;
+        if (typeof options === "string") {
+          this.code = options;
+          this.retryable = retryable;
+        } else {
+          this.code = options?.code;
+          this.retryable = options?.retryable;
+        }
+      }
+    }
+    return {
+      requireAdminMock: vi.fn(),
+      toVerifiedAdminContextMock: vi.fn(),
+      fetchAdminBackendJsonMock: vi.fn(),
+      MockAdminReadProxyError: TestAdminReadProxyError,
+    };
+  });
 
 vi.mock("@/lib/server/auth", () => ({
   requireAdmin: requireAdminMock,
+  toVerifiedAdminContext: toVerifiedAdminContextMock,
 }));
 
 vi.mock("@/lib/server/trr-api/admin-read-proxy", () => ({
+  AdminReadProxyError: MockAdminReadProxyError,
   fetchAdminBackendJson: fetchAdminBackendJsonMock,
   ADMIN_READ_PROXY_SHORT_TIMEOUT_MS: 5_000,
+  buildAdminBackendStatusError: ({
+    status,
+    data,
+    fallbackMessage,
+  }: {
+    status: number;
+    data: Record<string, unknown>;
+    fallbackMessage: string;
+  }) => {
+    const detail = data.detail as Record<string, unknown> | undefined;
+    return new MockAdminReadProxyError(
+      typeof detail?.message === "string" ? detail.message : fallbackMessage,
+      status,
+      typeof detail?.code === "string" ? detail.code : undefined,
+      typeof detail?.retryable === "boolean" ? detail.retryable : status >= 500,
+    );
+  },
   buildAdminReadResponseHeaders: ({
     cacheStatus,
     upstreamMs,
@@ -29,19 +75,48 @@ vi.mock("@/lib/server/trr-api/admin-read-proxy", () => ({
     return headers;
   },
   buildAdminProxyErrorResponse: (error: unknown) =>
-    NextResponse.json(
-      { error: error instanceof Error ? error.message : "failed" },
-      { status: error instanceof Error && error.message === "unauthorized" ? 401 : 500 },
-    ),
+    {
+      const proxyError = error as InstanceType<typeof MockAdminReadProxyError>;
+      return NextResponse.json(
+        {
+          error: error instanceof Error ? error.message : "failed",
+          ...(proxyError.code ? { code: proxyError.code } : {}),
+          ...(typeof proxyError.retryable === "boolean" ? { retryable: proxyError.retryable } : {}),
+        },
+        {
+          status:
+            error instanceof Error && error.message === "unauthorized"
+              ? 401
+              : proxyError.status ?? 500,
+        },
+      );
+    },
 }));
 
 import { GET, POST } from "@/app/api/admin/recent-people/route";
 
 describe("/api/admin/recent-people", () => {
+  const recentPerson = {
+    person_id: "11111111-2222-3333-4444-555555555555",
+    full_name: "Alan Cumming",
+    known_for: "Reality TV",
+    photo_url: "https://cdn.example.com/person.jpg",
+    show_context: "the-traitors-us",
+    view_count: 1,
+    first_viewed_at: "2026-03-25T00:00:00Z",
+    last_viewed_at: "2026-03-26T00:00:00Z",
+  };
+
   beforeEach(() => {
     requireAdminMock.mockReset();
+    toVerifiedAdminContextMock.mockReset();
     fetchAdminBackendJsonMock.mockReset();
     requireAdminMock.mockResolvedValue({ uid: "firebase-admin-1" });
+    toVerifiedAdminContextMock.mockReturnValue({
+      uid: "firebase-admin-1",
+      email: "admin@example.com",
+      verifiedAt: 1_700_000_000_000,
+    });
     invalidateRouteResponseCache(TRR_RECENT_PEOPLE_CACHE_NAMESPACE);
   });
 
@@ -49,13 +124,8 @@ describe("/api/admin/recent-people", () => {
     fetchAdminBackendJsonMock.mockResolvedValue({
       status: 200,
       data: {
-        people: [
-          {
-            person_id: "11111111-2222-3333-4444-555555555555",
-            full_name: "Alan Cumming",
-          },
-        ],
-        pagination: { limit: 5 },
+        people: [recentPerson],
+        pagination: { limit: 5, count: 1 },
       },
       durationMs: 5,
     });
@@ -72,11 +142,10 @@ describe("/api/admin/recent-people", () => {
     expect(fetchAdminBackendJsonMock).toHaveBeenCalledWith(
       "/admin/recent-people",
       expect.objectContaining({
+        apiVersion: "v2",
+        adminContext: expect.objectContaining({ uid: "firebase-admin-1" }),
         routeName: "recent-people:list",
         queryString: "limit=5",
-        headers: {
-          "X-TRR-Admin-User-Uid": "firebase-admin-1",
-        },
       }),
     );
   });
@@ -118,23 +187,76 @@ describe("/api/admin/recent-people", () => {
     expect(fetchAdminBackendJsonMock).toHaveBeenCalledWith(
       "/admin/recent-people",
       expect.objectContaining({
+        apiVersion: "v2",
         method: "POST",
+        adminContext: expect.objectContaining({ uid: "firebase-admin-1" }),
         routeName: "recent-people:record",
         headers: {
           "Content-Type": "application/json",
-          "X-TRR-Admin-User-Uid": "firebase-admin-1",
         },
         body: JSON.stringify({ personId, showId: "the-traitors-us" }),
       }),
     );
   });
 
+  it("preserves typed backend problems for unavailable upstream reads", async () => {
+    fetchAdminBackendJsonMock.mockResolvedValue({
+      status: 503,
+      data: {
+        detail: {
+          code: "DATABASE_SERVICE_UNAVAILABLE",
+          message: "Database service unavailable.",
+          retryable: true,
+        },
+      },
+      durationMs: 4,
+    });
+
+    const response = await GET(new NextRequest("http://localhost/api/admin/recent-people?limit=5"));
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      error: "Database service unavailable.",
+      code: "DATABASE_SERVICE_UNAVAILABLE",
+      retryable: true,
+    });
+  });
+
+  it("rejects malformed backend payloads instead of accepting extra fields", async () => {
+    fetchAdminBackendJsonMock.mockResolvedValue({
+      status: 200,
+      data: {
+        people: [
+          {
+            ...recentPerson,
+            known_for: null,
+            photo_url: null,
+            show_context: null,
+            view_count: 1,
+            unexpected: true,
+          },
+        ],
+        pagination: { limit: 5, count: 1 },
+      },
+      durationMs: 5,
+    });
+
+    const response = await GET(new NextRequest("http://localhost/api/admin/recent-people?limit=5"));
+
+    expect(response.status).toBe(502);
+    await expect(response.json()).resolves.toEqual({
+      error: "TRR-Backend returned an invalid recent-people response",
+      code: "INVALID_BACKEND_RESPONSE",
+      retryable: false,
+    });
+  });
+
   it("reuses cached recent people reads for the same admin and limit", async () => {
     fetchAdminBackendJsonMock.mockResolvedValue({
       status: 200,
       data: {
-        people: [{ person_id: "11111111-2222-3333-4444-555555555555", full_name: "Alan Cumming" }],
-        pagination: { limit: 5 },
+        people: [recentPerson],
+        pagination: { limit: 5, count: 1 },
       },
       durationMs: 5,
     });
@@ -154,8 +276,8 @@ describe("/api/admin/recent-people", () => {
       .mockResolvedValueOnce({
         status: 200,
         data: {
-          people: [{ person_id: "11111111-2222-3333-4444-555555555555", full_name: "Alan Cumming" }],
-          pagination: { limit: 5 },
+          people: [recentPerson],
+          pagination: { limit: 5, count: 1 },
         },
         durationMs: 5,
       })
@@ -167,8 +289,14 @@ describe("/api/admin/recent-people", () => {
       .mockResolvedValueOnce({
         status: 200,
         data: {
-          people: [{ person_id: "99999999-2222-3333-4444-555555555555", full_name: "Phaedra Parks" }],
-          pagination: { limit: 5 },
+          people: [
+            {
+              ...recentPerson,
+              person_id: "99999999-2222-3333-4444-555555555555",
+              full_name: "Phaedra Parks",
+            },
+          ],
+          pagination: { limit: 5, count: 1 },
         },
         durationMs: 5,
       });

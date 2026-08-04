@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/server/auth";
+import { requireAdmin, toVerifiedAdminContext } from "@/lib/server/auth";
 import {
   reassignImage,
   type ImageType,
   type ReassignMode,
 } from "@/lib/server/admin/images-repository";
+import { buildAdminProxyErrorResponse } from "@/lib/server/trr-api/admin-read-proxy";
 
 export const dynamic = "force-dynamic";
 
@@ -61,15 +62,12 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       toType: toType as ImageType | undefined,
       toEntityId,
       mode: mode as ReassignMode,
-      adminUid: user.uid,
+      adminContext: toVerifiedAdminContext(user),
     });
 
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error("[api] Failed to reassign image", error);
-    const message = error instanceof Error ? error.message : "failed";
-    const status =
-      message === "unauthorized" ? 401 : message === "forbidden" ? 403 : 500;
-    return NextResponse.json({ error: message }, { status });
+    return buildAdminProxyErrorResponse(error);
   }
 }
