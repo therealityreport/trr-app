@@ -86,10 +86,10 @@ describe("hosted font helpers", () => {
     const filterTrackerCss = readFileSync(FILTER_CARD_TRACKER_CSS_PATH, "utf8");
 
     expect(filterTrackerCss).toContain('"nyt-franklin"');
-    expect(css).toMatch(/font-family:\s*['"]nyt-franklin['"]/);
+    expect(css).toMatch(/font-family:\s*nyt-franklin;/);
     expect(css).toMatch(/font-family:\s*['"]nyt-karnakcondensed['"]/);
-    expect(css).toMatch(/font-family:\s*['"]nyt-karnak['"]/);
-    expect(css).toMatch(/font-family:\s*['"]nyt-stymie['"]/);
+    expect(css).toMatch(/font-family:\s*nyt-karnak;/);
+    expect(css).toMatch(/font-family:\s*nyt-stymie;/);
   });
 
   it("extracts concrete upstream font file links from hosted stylesheet css", () => {
