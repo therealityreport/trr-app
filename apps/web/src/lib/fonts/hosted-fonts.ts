@@ -1,7 +1,7 @@
 export const NEXT_PUBLIC_HOSTED_FONT_BASE_URL = "NEXT_PUBLIC_HOSTED_FONT_BASE_URL";
 
 export const DEFAULT_HOSTED_FONT_BASE_URL =
-  "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev";
+  "https://media.thereality.report";
 
 export const LEGACY_CLOUDFRONT_FONT_BASE_URL =
   "https://d1fmdyqfafwim3.cloudfront.net";
