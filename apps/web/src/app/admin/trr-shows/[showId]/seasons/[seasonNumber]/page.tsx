@@ -1104,6 +1104,7 @@ export default function SeasonDetailPage() {
   const [castHasImageFilter, setCastHasImageFilter] = useState<"all" | "yes" | "no">("all");
   const [castSearchQuery, setCastSearchQuery] = useState("");
   const [castSearchQueryDebounced, setCastSearchQueryDebounced] = useState("");
+  const lastRouteCastSearchQueryRef = useRef<string | null>(null);
   const [castRenderLimit, setCastRenderLimit] = useState(SEASON_CAST_INCREMENTAL_INITIAL_LIMIT);
   const [crewRenderLimit, setCrewRenderLimit] = useState(SEASON_CAST_INCREMENTAL_INITIAL_LIMIT);
   const castIncrementalTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1286,6 +1287,8 @@ export default function SeasonDetailPage() {
   }, [episodes, focusEpisodeParam, seasonRouteState.tab]);
 
   useEffect(() => {
+    const previousRouteSearchQuery = lastRouteCastSearchQueryRef.current;
+    lastRouteCastSearchQueryRef.current = seasonCastRouteState.searchQuery;
     setCastSortBy(seasonCastRouteState.sortBy);
     setCastSortOrder(seasonCastRouteState.sortOrder);
     setCastHasImageFilter(seasonCastRouteState.hasImageFilter);
@@ -1299,7 +1302,12 @@ export default function SeasonDetailPage() {
         ? prev
         : seasonCastRouteState.creditFilters
     );
-    setCastSearchQuery(seasonCastRouteState.searchQuery);
+    if (
+      previousRouteSearchQuery === null ||
+      previousRouteSearchQuery !== seasonCastRouteState.searchQuery
+    ) {
+      setCastSearchQuery(seasonCastRouteState.searchQuery);
+    }
   }, [
     seasonCastRouteState.creditFilters,
     seasonCastRouteState.hasImageFilter,
