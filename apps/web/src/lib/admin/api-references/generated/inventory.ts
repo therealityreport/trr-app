@@ -3,8 +3,8 @@ import type { AdminApiReferenceInventory } from "@/lib/admin/api-references/type
 export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
   "inventorySchemaVersion": "1.0.0",
   "generatorVersion": "1.0.0",
-  "generatedAt": "2026-07-14T00:08:26.713Z",
-  "sourceCommitSha": "a7846a58a407629f6554f186ffe89fa2a4c5a870",
+  "generatedAt": "2026-08-04T18:10:37.244Z",
+  "sourceCommitSha": "fec3d1889d3d5ff14d2d04f63a6eb336c7772097",
   "overrideDigest": "cd85a76fd2fc977cbc691ccab80ce844f9ea783e118af35eb3d9766e5d61fd36",
   "nodes": [
     {
@@ -20365,7 +20365,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/components/admin/design-system/DesignSystemPageClient.tsx",
       "sourceLocator": {
-        "line": 1831,
+        "line": 1841,
         "matchedText": "\"/api/admin/design-system/typography\""
       },
       "provenance": "static_scan",
