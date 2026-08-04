@@ -895,8 +895,12 @@ esac
 if ! guard_is_bypassed_read_only_command "$@"; then
   ambient_command="$(first_vercel_command "$@" || true)"
   case "$ambient_command" in
-    rollback | promote)
-      echo "[vercel.sh] Ambient ${ambient_command} is blocked. Use rollback-trr with an exact deployment and the pinned release guard." >&2
+    rollback)
+      echo "[vercel.sh] Ambient rollback is blocked. Use rollback-trr with an exact deployment and the pinned release guard." >&2
+      exit 2
+      ;;
+    promote)
+      echo "[vercel.sh] Ambient promote is blocked. Use a fresh, explicitly approved production deployment through this guarded wrapper." >&2
       exit 2
       ;;
   esac

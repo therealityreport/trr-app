@@ -144,6 +144,14 @@ describe("guarded Vercel release operations", () => {
     expect(result.stderr).toContain("rollback-trr");
   });
 
+  it("blocks ambient promotion with production-deployment guidance", () => {
+    const result = runWrapper(["promote", "dpl_Abc123"]);
+
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("explicitly approved production deployment");
+    expect(result.stderr).not.toContain("rollback-trr");
+  });
+
   it("rejects foreign deployment metadata before collecting release evidence", () => {
     const result = runWrapper(
       [
