@@ -724,7 +724,7 @@ const parseSeasonAssetV2 = (value: unknown, routeName: string): SeasonAsset => {
   ) {
     return invalidPublicCoreResponse(routeName);
   }
-  return value as SeasonAsset;
+  return value as unknown as SeasonAsset;
 };
 
 const mapCoreShowV2ToTrrShow = (show: CoreShowV2): TrrShow =>

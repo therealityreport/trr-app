@@ -3,8 +3,8 @@ import type { AdminApiReferenceInventory } from "@/lib/admin/api-references/type
 export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
   "inventorySchemaVersion": "1.0.0",
   "generatorVersion": "1.0.0",
-  "generatedAt": "2026-07-16T18:04:00.765Z",
-  "sourceCommitSha": "78681eac73c79e6534031fe1f050966edff9b844",
+  "generatedAt": "2026-08-04T18:58:36.239Z",
+  "sourceCommitSha": "cb68197bcc797ec9fb1ff9f49bfc14963e08f060",
   "overrideDigest": "ab48dccad1d5b9faafd4ef40e8374574768e133192929e6264ff8727fbaf68e1",
   "nodes": [
     {
@@ -7001,7 +7001,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "DELETE",
       "sourceFile": "src/app/api/admin/surveys/[surveyKey]/route.ts",
       "sourceLocator": {
-        "line": 378,
+        "line": 382,
         "symbol": "DELETE"
       },
       "provenance": "static_scan",
@@ -7955,7 +7955,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/images/[imageType]/[imageId]/route.ts",
       "sourceLocator": {
-        "line": 22,
+        "line": 23,
         "symbol": "GET"
       },
       "provenance": "static_scan",
@@ -9377,7 +9377,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/surveys/[surveyKey]/route.ts",
       "sourceLocator": {
-        "line": 93,
+        "line": 96,
         "symbol": "GET"
       },
       "provenance": "static_scan",
@@ -10325,7 +10325,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/trr-api/media-links/route.ts",
       "sourceLocator": {
-        "line": 90,
+        "line": 72,
         "symbol": "GET"
       },
       "provenance": "static_scan",
@@ -10458,7 +10458,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/trr-api/people/route.ts",
       "sourceLocator": {
-        "line": 21,
+        "line": 22,
         "symbol": "GET"
       },
       "provenance": "static_scan",
@@ -14002,7 +14002,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "PATCH",
       "sourceFile": "src/app/api/admin/trr-api/media-links/[linkId]/context/route.ts",
       "sourceLocator": {
-        "line": 76,
+        "line": 77,
         "symbol": "PATCH"
       },
       "provenance": "static_scan",
@@ -19158,7 +19158,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "PUT",
       "sourceFile": "src/app/api/admin/images/[imageType]/[imageId]/archive/route.ts",
       "sourceLocator": {
-        "line": 26,
+        "line": 27,
         "symbol": "PUT"
       },
       "provenance": "static_scan",
@@ -19192,7 +19192,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "PUT",
       "sourceFile": "src/app/api/admin/images/[imageType]/[imageId]/reassign/route.ts",
       "sourceLocator": {
-        "line": 29,
+        "line": 30,
         "symbol": "PUT"
       },
       "provenance": "static_scan",
@@ -19464,7 +19464,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "PUT",
       "sourceFile": "src/app/api/admin/surveys/[surveyKey]/route.ts",
       "sourceLocator": {
-        "line": 263,
+        "line": 267,
         "symbol": "PUT"
       },
       "provenance": "static_scan",
@@ -20910,7 +20910,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/page.tsx",
       "sourceLocator": {
-        "line": 8951,
+        "line": 10536,
         "matchedText": "`/api/admin/trr-api/shows/settings/show-core-auto-refresh`"
       },
       "provenance": "static_scan",
@@ -20928,7 +20928,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/page.tsx",
       "sourceLocator": {
-        "line": 2155,
+        "line": 3704,
         "matchedText": "`/api/admin/trr-api/people/${personId}/refresh-images`"
       },
       "provenance": "static_scan",
@@ -20946,7 +20946,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/page.tsx",
       "sourceLocator": {
-        "line": 2069,
+        "line": 3618,
         "matchedText": "`/api/admin/trr-api/people/${personId}/refresh-images/stream`"
       },
       "provenance": "static_scan",
@@ -20964,7 +20964,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/page.tsx",
       "sourceLocator": {
-        "line": 1862,
+        "line": 3411,
         "matchedText": "`/api/admin/trr-api/people/${personId}/refresh-profile/stream`"
       },
       "provenance": "static_scan",
@@ -20982,7 +20982,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/page.tsx",
       "sourceLocator": {
-        "line": 2239,
+        "line": 3788,
         "matchedText": "`/api/admin/trr-api/people/${personId}/reprocess-images/stream`"
       },
       "provenance": "static_scan",
@@ -21000,7 +21000,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/page.tsx",
       "sourceLocator": {
-        "line": 8091,
+        "line": 9676,
         "matchedText": "`/api/admin/trr-api/shows/${showId}/assets/batch-jobs/stream`"
       },
       "provenance": "static_scan",
@@ -21018,7 +21018,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/page.tsx",
       "sourceLocator": {
-        "line": 5089,
+        "line": 6638,
         "matchedText": "`/api/admin/trr-api/shows/${showId}/import-bravo/preview/stream`"
       },
       "provenance": "static_scan",
@@ -21036,7 +21036,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/page.tsx",
       "sourceLocator": {
-        "line": 9160,
+        "line": 10745,
         "matchedText": "`/api/admin/trr-api/shows/${showId}/refresh/stream`"
       },
       "provenance": "static_scan",
@@ -21054,7 +21054,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/page.tsx",
       "sourceLocator": {
-        "line": 8987,
+        "line": 10572,
         "matchedText": "`/api/admin/trr-api/shows/settings/show-core-auto-refresh`"
       },
       "provenance": "static_scan",
