@@ -9,6 +9,12 @@ describe("show media gallery section visibility", () => {
       "../src/app/admin/trr-shows/[showId]/page.tsx"
     );
     const contents = fs.readFileSync(filePath, "utf8");
+    const assetsTabPath = path.resolve(
+      __dirname,
+      "../src/components/admin/show-tabs/ShowAssetsTab.tsx"
+    );
+    const assetsTabContents = fs.readFileSync(assetsTabPath, "utf8");
+    const renderedContents = `${contents}\n${assetsTabContents}`;
 
     expect(contents).toContain("const SHOW_GALLERY_ALLOWED_SECTIONS: AssetSectionKey[] = [");
     expect(contents).toContain("\"cast_photos\"");
@@ -16,9 +22,9 @@ describe("show media gallery section visibility", () => {
     expect(contents).toContain("\"banners\"");
     expect(contents).toContain("\"posters\"");
     expect(contents).toContain("\"backdrops\"");
-    expect(contents).not.toMatch(/<h4[^>]*>\s*Episode Stills\s*<\/h4>/);
-    expect(contents).not.toMatch(/<h4[^>]*>\s*Confessionals\s*<\/h4>/);
-    expect(contents).not.toMatch(/<h4[^>]*>\s*Reunion\s*<\/h4>/);
-    expect(contents).not.toMatch(/<h4[^>]*>\s*Intro Card\s*<\/h4>/);
+    expect(renderedContents).not.toMatch(/<h4[^>]*>\s*Episode Stills\s*<\/h4>/);
+    expect(renderedContents).not.toMatch(/<h4[^>]*>\s*Confessionals\s*<\/h4>/);
+    expect(renderedContents).not.toMatch(/<h4[^>]*>\s*Reunion\s*<\/h4>/);
+    expect(renderedContents).not.toMatch(/<h4[^>]*>\s*Intro Card\s*<\/h4>/);
   });
 });

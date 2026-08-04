@@ -35,7 +35,17 @@ describe("show news tab google wiring", () => {
 
   it("routes Google News configuration through the normal show-links UI", () => {
     const filePath = path.resolve(__dirname, "../src/app/admin/trr-shows/[showId]/page.tsx");
-    const contents = fs.readFileSync(filePath, "utf8");
+    const settingsPath = path.resolve(
+      __dirname,
+      "../src/components/admin/show-tabs/ShowSettingsTab.tsx",
+    );
+    const linkModelPath = path.resolve(
+      __dirname,
+      "../src/lib/admin/show-page/show-link-display-model.ts",
+    );
+    const contents = [filePath, settingsPath, linkModelPath]
+      .map((sourcePath) => fs.readFileSync(sourcePath, "utf8"))
+      .join("\n");
 
     expect(contents).toMatch(/Google News topic URLs/);
     expect(contents).toMatch(/news\.google\.com\/topics/);

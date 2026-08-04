@@ -4,15 +4,21 @@ import path from "node:path";
 
 describe("show gallery batch jobs preflight wiring", () => {
   it("reuses the same computed target plan for summary and submit", () => {
-    const filePath = path.resolve(
+    const routePath = path.resolve(
       __dirname,
       "../src/app/admin/trr-shows/[showId]/page.tsx"
     );
-    const contents = fs.readFileSync(filePath, "utf8");
+    const modalPath = path.resolve(
+      __dirname,
+      "../src/components/admin/ShowBatchRoleModals.tsx"
+    );
+    const route = fs.readFileSync(routePath, "utf8");
+    const modal = fs.readFileSync(modalPath, "utf8");
 
-    expect(contents).toContain("const showBatchTargetPlan = useMemo(() => {");
-    expect(contents).toContain("const showBatchPreflightSummary = useMemo(() => {");
-    expect(contents).toContain("const { targets } = showBatchTargetPlan;");
-    expect(contents).toContain("{showBatchPreflightSummary}");
+    expect(route).toContain("const showBatchTargetPlan = useMemo(() => {");
+    expect(route).toContain("const showBatchPreflightSummary = useMemo(() => {");
+    expect(route).toContain("const { targets } = showBatchTargetPlan;");
+    expect(route).toContain("preflightSummary: showBatchPreflightSummary");
+    expect(modal).toContain("{batchJobs.preflightSummary}");
   });
 });

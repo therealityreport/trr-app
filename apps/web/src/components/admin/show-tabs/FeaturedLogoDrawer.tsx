@@ -3,8 +3,8 @@
 import Image from "next/image";
 import AdminModal from "@/components/admin/AdminModal";
 import type { SeasonAsset } from "@/lib/server/trr-api/trr-shows-repository";
-import type { ShowLogoVariant } from "./ShowBrandLogosSection";
 import { resolveFeaturedLogoPayload } from "@/lib/admin/show-logo-featured";
+import type { ShowLogoVariant } from "./show-logo-types";
 
 interface FeaturedLogoDrawerProps {
   isOpen: boolean;

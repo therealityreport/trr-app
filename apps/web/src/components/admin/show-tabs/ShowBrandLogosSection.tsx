@@ -5,8 +5,9 @@ import Image from "next/image";
 import { canonicalizeHostedMediaUrl } from "@/lib/hosted-media";
 import type { SeasonAsset } from "@/lib/server/trr-api/trr-shows-repository";
 import { FeaturedLogoDrawer } from "./FeaturedLogoDrawer";
+import type { ShowLogoVariant } from "./show-logo-types";
 
-export type ShowLogoVariant = "color" | "black" | "white";
+export type { ShowLogoVariant } from "./show-logo-types";
 
 interface ShowBrandLogosSectionProps {
   logoAssets: SeasonAsset[];
