@@ -94,14 +94,34 @@ find_active_vercel_project_dir() {
 
 guard_is_bypassed_read_only_command() {
   local arg
+  local skip_next=0
 
   for arg in "$@"; do
+    if [[ "$skip_next" -eq 1 ]]; then
+      skip_next=0
+      continue
+    fi
+
     case "$arg" in
-      --help | -h | help | --version | -v | version)
+      --help | -h | --version | -v)
         return 0
+        ;;
+      --*=*)
+        continue
+        ;;
+      -*)
+        if option_takes_value "$arg"; then
+          skip_next=1
+        fi
         ;;
     esac
   done
+
+  case "$(first_vercel_command "$@" || true)" in
+    help | version)
+      return 0
+      ;;
+  esac
 
   return 1
 }
@@ -241,9 +261,9 @@ verify_release_deployment_binding() {
     echo "[vercel.sh] Authoritative deployment inspection failed; release operation blocked." >&2
     return 2
   fi
-  if ! VERCEL_DEPLOYMENT_METADATA="$metadata" python3 - \
+  if ! python3 - \
     "$deployment" "$deployment_key" "$TRR_VERCEL_PROJECT_NAME" \
-    "$TRR_VERCEL_PROJECT_ID" "$TRR_VERCEL_TEAM_ID" <<'PY'
+    "$TRR_VERCEL_PROJECT_ID" "$TRR_VERCEL_TEAM_ID" 3<<<"$metadata" <<'PY'
 from __future__ import annotations
 
 import json
@@ -251,7 +271,8 @@ import os
 import sys
 
 deployment, lookup_key, expected_name, expected_project_id, expected_team_id = sys.argv[1:]
-raw = os.environ.get("VERCEL_DEPLOYMENT_METADATA", "")
+with os.fdopen(3, "r", encoding="utf-8") as metadata_stream:
+    raw = metadata_stream.read()
 start = raw.find("{")
 end = raw.rfind("}")
 try:

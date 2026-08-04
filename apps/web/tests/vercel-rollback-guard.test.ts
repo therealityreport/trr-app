@@ -30,7 +30,12 @@ describe("guarded Vercel release operations", () => {
         "with open(log, 'a', encoding='utf-8') as target:",
         "    target.write(json.dumps(sys.argv[1:]) + '\\n')",
         "if sys.argv[1:2] == ['api']:",
-        "    print(os.environ.get('FAKE_VERCEL_METADATA', '{}'))",
+        "    metadata_file = os.environ.get('FAKE_VERCEL_METADATA_FILE', '')",
+        "    if metadata_file:",
+        "        with open(metadata_file, encoding='utf-8') as source:",
+        "            print(source.read())",
+        "    else:",
+        "        print(os.environ.get('FAKE_VERCEL_METADATA', '{}'))",
         "else:",
         "    print('{}')",
         "",
@@ -150,6 +155,59 @@ describe("guarded Vercel release operations", () => {
     expect(result.status).toBe(2);
     expect(result.stderr).toContain("explicitly approved production deployment");
     expect(result.stderr).not.toContain("rollback-trr");
+  });
+
+  it("does not treat option values named help or version as read-only bypasses", () => {
+    for (const optionValue of ["help", "version"]) {
+      const rollback = runWrapper(["--cwd", optionValue, "rollback", "dpl_Abc123"]);
+      expect(rollback.status).toBe(2);
+      expect(rollback.stderr).toContain("rollback-trr");
+
+      const promote = runWrapper(["--cwd", optionValue, "promote", "dpl_Abc123"]);
+      expect(promote.status).toBe(2);
+      expect(promote.stderr).toContain("explicitly approved production deployment");
+      expect(promote.stderr).not.toContain("rollback-trr");
+    }
+    expect(() => readFileSync(providerLog)).toThrow();
+  });
+
+  it("keeps actual help and version commands read-only", () => {
+    for (const args of [
+      ["--help"],
+      ["--version"],
+      ["--cwd", "help", "help"],
+      ["--cwd", "version", "version"],
+    ]) {
+      const result = runWrapper(args);
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain("guard-only: command accepted");
+    }
+    expect(() => readFileSync(providerLog)).toThrow();
+  });
+
+  it("validates provider metadata above the environment-string limit", async () => {
+    const metadataPath = join(tempDir, "oversized-provider-metadata.json");
+    const metadata = JSON.stringify({
+      id: "dpl_Abc123",
+      url: "trr-app-good.vercel.app",
+      name: "trr-app",
+      projectId: "prj_MHpStkwr26rV5kjt0f80zqhwZpAs",
+      ownerId: "team_EUsG2kN9TAvVDGOu4yZVEoCX",
+      deploymentPayload: "x".repeat(129 * 1024),
+    });
+    expect(Buffer.byteLength(metadata)).toBeGreaterThan(128 * 1024);
+    await writeFile(metadataPath, metadata, "utf-8");
+
+    const result = runWrapper(
+      ["release-evidence", "--deployment", "dpl_Abc123", "--execute"],
+      {
+        TRR_VERCEL_GUARD_ONLY: "0",
+        FAKE_VERCEL_METADATA_FILE: metadataPath,
+      },
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toContain("Verified deployment binding");
   });
 
   it("rejects foreign deployment metadata before collecting release evidence", () => {
