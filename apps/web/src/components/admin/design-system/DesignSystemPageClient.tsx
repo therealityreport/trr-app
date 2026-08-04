@@ -650,7 +650,7 @@ const CDN_FONTS: FontFamily[] = [
     usedOn: [],
   },
   {
-    name: "ITC Cheltenham",
+    name: "ITC Cheltenham Std",
     weights: [w(300, true), w(400, true), w(700, true), w(800, true), w(900, true)],
     type: "CDN Font",
     source: "CloudFront CDN",
