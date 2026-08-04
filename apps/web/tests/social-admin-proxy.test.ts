@@ -403,7 +403,23 @@ describe("social-admin-proxy", () => {
       timeoutMs: 1000,
     });
 
-    expect(fetchAdminBackendJsonMock).toHaveBeenCalledTimes(1);
+    expect(fetchAdminBackendJsonMock).toHaveBeenCalledTimes(2);
+    expect(fetchAdminBackendJsonMock).toHaveBeenNthCalledWith(
+      1,
+      "/shows/show-hint-3/seasons/9",
+      expect.objectContaining({
+        apiVersion: "v2",
+        routeName: "public-core-show-season-detail",
+      }),
+    );
+    expect(fetchAdminBackendJsonMock).toHaveBeenNthCalledWith(
+      2,
+      "/admin/trr-api/shows/show-hint-3/seasons",
+      expect.objectContaining({
+        queryString: "limit=100&offset=0",
+        routeName: "social-season-resolve",
+      }),
+    );
   });
 
   it("normalizes DNS and SSL transport detail responses to BACKEND_UNREACHABLE", async () => {
