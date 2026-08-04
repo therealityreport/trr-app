@@ -1,7 +1,7 @@
 {
   "schemaVersion": "2026-03-23.v2",
-  "inputHash": "f3f9efe57610108bc6834041e9c955fd28202c295b189c4c199119305fd2bc79",
-  "generatedAt": "2026-08-04T18:40:28.176Z",
+  "inputHash": "3d616bfb1885c4d009ee594fddb06e138bbf8495bb716b1f116782c7b30e9819",
+  "generatedAt": "2026-08-04T18:46:03.078Z",
   "scoringConfigVersion": "2026-03-23.score.v3",
   "data": [
     {
@@ -341,12 +341,13 @@
           "scoringMode": "metadata-only"
         },
         {
-          "familyName": "Bernhard Modern",
-          "score": 86,
+          "familyName": "ITC Cheltenham Pro",
+          "score": 96,
           "fitForRole": "strong",
           "matchWarnings": [],
           "rationaleChips": [
             "classification-match",
+            "family-affinity",
             "role-match",
             "width-match",
             "full-weight-coverage",
@@ -360,16 +361,16 @@
             "width": 19,
             "weightCoverage": 14,
             "styleSupport": 8,
-            "traitCompatibility": 2.8,
-            "familyName": 0,
+            "traitCompatibility": 4.9,
+            "familyName": 8,
             "visualAffinity": 0,
             "ruleBonus": 0,
             "riskPenalty": 0,
-            "structuralTotal": 85.8,
-            "identityTotal": 0,
+            "structuralTotal": 87.9,
+            "identityTotal": 8,
             "visualTotal": 0,
             "penaltyTotal": 0,
-            "total": 86
+            "total": 96
           },
           "scoringMode": "metadata-only"
         }
@@ -465,12 +466,13 @@
           "scoringMode": "metadata-only"
         },
         {
-          "familyName": "Bernhard Modern",
-          "score": 86,
+          "familyName": "ITC Cheltenham Pro",
+          "score": 96,
           "fitForRole": "strong",
           "matchWarnings": [],
           "rationaleChips": [
             "classification-match",
+            "family-affinity",
             "role-match",
             "width-match",
             "full-weight-coverage",
@@ -484,16 +486,16 @@
             "width": 19,
             "weightCoverage": 14,
             "styleSupport": 8,
-            "traitCompatibility": 2.8,
-            "familyName": 0,
+            "traitCompatibility": 4.9,
+            "familyName": 8,
             "visualAffinity": 0,
             "ruleBonus": 0,
             "riskPenalty": 0,
-            "structuralTotal": 85.8,
-            "identityTotal": 0,
+            "structuralTotal": 87.9,
+            "identityTotal": 8,
             "visualTotal": 0,
             "penaltyTotal": 0,
-            "total": 86
+            "total": 96
           },
           "scoringMode": "metadata-only"
         }
@@ -1693,8 +1695,8 @@
           "scoringMode": "metadata-only"
         },
         {
-          "familyName": "Bernhard Modern",
-          "score": 86,
+          "familyName": "ITC Cheltenham Pro",
+          "score": 92,
           "fitForRole": "strong",
           "matchWarnings": [],
           "rationaleChips": [
@@ -1712,16 +1714,16 @@
             "width": 19,
             "weightCoverage": 14,
             "styleSupport": 8,
-            "traitCompatibility": 2.8,
-            "familyName": 0,
+            "traitCompatibility": 4.9,
+            "familyName": 4,
             "visualAffinity": 0,
             "ruleBonus": 0,
             "riskPenalty": 0,
-            "structuralTotal": 85.8,
-            "identityTotal": 0,
+            "structuralTotal": 87.9,
+            "identityTotal": 4,
             "visualTotal": 0,
             "penaltyTotal": 0,
-            "total": 86
+            "total": 92
           },
           "scoringMode": "metadata-only"
         }
@@ -2926,8 +2928,8 @@
           "scoringMode": "metadata-only"
         },
         {
-          "familyName": "Bernhard Modern",
-          "score": 86,
+          "familyName": "ITC Cheltenham Pro",
+          "score": 92,
           "fitForRole": "strong",
           "matchWarnings": [],
           "rationaleChips": [
@@ -2945,16 +2947,16 @@
             "width": 19,
             "weightCoverage": 14,
             "styleSupport": 8,
-            "traitCompatibility": 2.8,
-            "familyName": 0,
+            "traitCompatibility": 4.9,
+            "familyName": 4,
             "visualAffinity": 0,
             "ruleBonus": 0,
             "riskPenalty": 0,
-            "structuralTotal": 85.8,
-            "identityTotal": 0,
+            "structuralTotal": 87.9,
+            "identityTotal": 4,
             "visualTotal": 0,
             "penaltyTotal": 0,
-            "total": 86
+            "total": 92
           },
           "scoringMode": "metadata-only"
         }
@@ -3547,11 +3549,13 @@
           "scoringMode": "metadata-only"
         },
         {
-          "familyName": "Plymouth Serial",
-          "score": 78,
-          "fitForRole": "acceptable",
+          "familyName": "ITC Cheltenham Pro",
+          "score": 96,
+          "fitForRole": "strong",
           "matchWarnings": [],
           "rationaleChips": [
+            "classification-match",
+            "family-affinity",
             "role-match",
             "width-match",
             "full-weight-coverage",
@@ -3561,21 +3565,21 @@
           "matchSource": "heuristic",
           "scoreBreakdown": {
             "profile": "metadata-only",
-            "classification": 9.4,
+            "classification": 17,
             "role": 25,
             "width": 19,
             "weightCoverage": 14,
             "styleSupport": 8,
-            "traitCompatibility": 2.8,
-            "familyName": 0,
+            "traitCompatibility": 4.9,
+            "familyName": 8,
             "visualAffinity": 0,
             "ruleBonus": 0,
             "riskPenalty": 0,
-            "structuralTotal": 78.2,
-            "identityTotal": 0,
+            "structuralTotal": 87.9,
+            "identityTotal": 8,
             "visualTotal": 0,
             "penaltyTotal": 0,
-            "total": 78
+            "total": 96
           },
           "scoringMode": "metadata-only"
         }
@@ -3671,12 +3675,13 @@
           "scoringMode": "metadata-only"
         },
         {
-          "familyName": "Bernhard Modern",
-          "score": 86,
+          "familyName": "ITC Cheltenham Pro",
+          "score": 96,
           "fitForRole": "strong",
           "matchWarnings": [],
           "rationaleChips": [
             "classification-match",
+            "family-affinity",
             "role-match",
             "width-match",
             "full-weight-coverage",
@@ -3690,16 +3695,16 @@
             "width": 19,
             "weightCoverage": 14,
             "styleSupport": 8,
-            "traitCompatibility": 2.8,
-            "familyName": 0,
+            "traitCompatibility": 4.9,
+            "familyName": 8,
             "visualAffinity": 0,
             "ruleBonus": 0,
             "riskPenalty": 0,
-            "structuralTotal": 85.8,
-            "identityTotal": 0,
+            "structuralTotal": 87.9,
+            "identityTotal": 8,
             "visualTotal": 0,
             "penaltyTotal": 0,
-            "total": 86
+            "total": 96
           },
           "scoringMode": "metadata-only"
         }
@@ -3795,8 +3800,8 @@
           "scoringMode": "metadata-only"
         },
         {
-          "familyName": "Bernhard Modern",
-          "score": 86,
+          "familyName": "ITC Cheltenham Pro",
+          "score": 88,
           "fitForRole": "strong",
           "matchWarnings": [],
           "rationaleChips": [
@@ -3815,16 +3820,16 @@
             "width": 19,
             "weightCoverage": 14,
             "styleSupport": 8,
-            "traitCompatibility": 2.8,
+            "traitCompatibility": 4.9,
             "familyName": 0,
             "visualAffinity": 0,
             "ruleBonus": 0,
             "riskPenalty": 0,
-            "structuralTotal": 85.8,
+            "structuralTotal": 87.9,
             "identityTotal": 0,
             "visualTotal": 0,
             "penaltyTotal": 0,
-            "total": 86
+            "total": 88
           },
           "scoringMode": "metadata-only"
         }
@@ -4293,12 +4298,13 @@
           "scoringMode": "metadata-only"
         },
         {
-          "familyName": "Bernhard Modern",
-          "score": 86,
+          "familyName": "ITC Cheltenham Pro",
+          "score": 96,
           "fitForRole": "strong",
           "matchWarnings": [],
           "rationaleChips": [
             "classification-match",
+            "family-affinity",
             "role-match",
             "width-match",
             "full-weight-coverage",
@@ -4313,16 +4319,16 @@
             "width": 19,
             "weightCoverage": 14,
             "styleSupport": 8,
-            "traitCompatibility": 2.8,
-            "familyName": 0,
+            "traitCompatibility": 4.9,
+            "familyName": 8,
             "visualAffinity": 0,
             "ruleBonus": 0,
             "riskPenalty": 0,
-            "structuralTotal": 85.8,
-            "identityTotal": 0,
+            "structuralTotal": 87.9,
+            "identityTotal": 8,
             "visualTotal": 0,
             "penaltyTotal": 0,
-            "total": 86
+            "total": 96
           },
           "scoringMode": "metadata-only"
         }
@@ -4418,12 +4424,13 @@
           "scoringMode": "metadata-only"
         },
         {
-          "familyName": "Bernhard Modern",
-          "score": 86,
+          "familyName": "ITC Cheltenham Pro",
+          "score": 96,
           "fitForRole": "strong",
           "matchWarnings": [],
           "rationaleChips": [
             "classification-match",
+            "family-affinity",
             "role-match",
             "width-match",
             "full-weight-coverage",
@@ -4437,16 +4444,16 @@
             "width": 19,
             "weightCoverage": 14,
             "styleSupport": 8,
-            "traitCompatibility": 2.8,
-            "familyName": 0,
+            "traitCompatibility": 4.9,
+            "familyName": 8,
             "visualAffinity": 0,
             "ruleBonus": 0,
             "riskPenalty": 0,
-            "structuralTotal": 85.8,
-            "identityTotal": 0,
+            "structuralTotal": 87.9,
+            "identityTotal": 8,
             "visualTotal": 0,
             "penaltyTotal": 0,
-            "total": 86
+            "total": 96
           },
           "scoringMode": "metadata-only"
         }
@@ -4544,12 +4551,13 @@
           "scoringMode": "metadata-only"
         },
         {
-          "familyName": "Bernhard Modern",
-          "score": 86,
+          "familyName": "ITC Cheltenham Pro",
+          "score": 96,
           "fitForRole": "strong",
           "matchWarnings": [],
           "rationaleChips": [
             "classification-match",
+            "family-affinity",
             "role-match",
             "width-match",
             "full-weight-coverage",
@@ -4564,16 +4572,16 @@
             "width": 19,
             "weightCoverage": 14,
             "styleSupport": 8,
-            "traitCompatibility": 2.8,
-            "familyName": 0,
+            "traitCompatibility": 4.9,
+            "familyName": 8,
             "visualAffinity": 0,
             "ruleBonus": 0,
             "riskPenalty": 0,
-            "structuralTotal": 85.8,
-            "identityTotal": 0,
+            "structuralTotal": 87.9,
+            "identityTotal": 8,
             "visualTotal": 0,
             "penaltyTotal": 0,
-            "total": 86
+            "total": 96
           },
           "scoringMode": "metadata-only"
         }
@@ -4915,12 +4923,13 @@
           "scoringMode": "metadata-only"
         },
         {
-          "familyName": "Bernhard Modern",
-          "score": 86,
+          "familyName": "ITC Cheltenham Pro",
+          "score": 96,
           "fitForRole": "strong",
           "matchWarnings": [],
           "rationaleChips": [
             "classification-match",
+            "family-affinity",
             "role-match",
             "width-match",
             "full-weight-coverage",
@@ -4934,16 +4943,16 @@
             "width": 19,
             "weightCoverage": 14,
             "styleSupport": 8,
-            "traitCompatibility": 2.8,
-            "familyName": 0,
+            "traitCompatibility": 4.9,
+            "familyName": 8,
             "visualAffinity": 0,
             "ruleBonus": 0,
             "riskPenalty": 0,
-            "structuralTotal": 85.8,
-            "identityTotal": 0,
+            "structuralTotal": 87.9,
+            "identityTotal": 8,
             "visualTotal": 0,
             "penaltyTotal": 0,
-            "total": 86
+            "total": 96
           },
           "scoringMode": "metadata-only"
         }
@@ -5910,12 +5919,13 @@
           "scoringMode": "metadata-only"
         },
         {
-          "familyName": "Bernhard Modern",
-          "score": 86,
+          "familyName": "ITC Cheltenham Pro",
+          "score": 96,
           "fitForRole": "strong",
           "matchWarnings": [],
           "rationaleChips": [
             "classification-match",
+            "family-affinity",
             "role-match",
             "width-match",
             "full-weight-coverage",
@@ -5929,16 +5939,16 @@
             "width": 19,
             "weightCoverage": 14,
             "styleSupport": 8,
-            "traitCompatibility": 2.8,
-            "familyName": 0,
+            "traitCompatibility": 4.9,
+            "familyName": 8,
             "visualAffinity": 0,
             "ruleBonus": 0,
             "riskPenalty": 0,
-            "structuralTotal": 85.8,
-            "identityTotal": 0,
+            "structuralTotal": 87.9,
+            "identityTotal": 8,
             "visualTotal": 0,
             "penaltyTotal": 0,
-            "total": 86
+            "total": 96
           },
           "scoringMode": "metadata-only"
         }
@@ -6036,12 +6046,13 @@
           "scoringMode": "metadata-only"
         },
         {
-          "familyName": "Bernhard Modern",
-          "score": 86,
+          "familyName": "ITC Cheltenham Pro",
+          "score": 96,
           "fitForRole": "strong",
           "matchWarnings": [],
           "rationaleChips": [
             "classification-match",
+            "family-affinity",
             "role-match",
             "width-match",
             "full-weight-coverage",
@@ -6056,16 +6067,16 @@
             "width": 19,
             "weightCoverage": 14,
             "styleSupport": 8,
-            "traitCompatibility": 2.8,
-            "familyName": 0,
+            "traitCompatibility": 4.9,
+            "familyName": 8,
             "visualAffinity": 0,
             "ruleBonus": 0,
             "riskPenalty": 0,
-            "structuralTotal": 85.8,
-            "identityTotal": 0,
+            "structuralTotal": 87.9,
+            "identityTotal": 8,
             "visualTotal": 0,
             "penaltyTotal": 0,
-            "total": 86
+            "total": 96
           },
           "scoringMode": "metadata-only"
         }
@@ -6279,12 +6290,13 @@
           "scoringMode": "metadata-only"
         },
         {
-          "familyName": "Bernhard Modern",
-          "score": 86,
+          "familyName": "ITC Cheltenham Pro",
+          "score": 96,
           "fitForRole": "strong",
           "matchWarnings": [],
           "rationaleChips": [
             "classification-match",
+            "family-affinity",
             "role-match",
             "width-match",
             "full-weight-coverage",
@@ -6298,16 +6310,16 @@
             "width": 19,
             "weightCoverage": 14,
             "styleSupport": 8,
-            "traitCompatibility": 2.8,
-            "familyName": 0,
+            "traitCompatibility": 4.9,
+            "familyName": 8,
             "visualAffinity": 0,
             "ruleBonus": 0,
             "riskPenalty": 0,
-            "structuralTotal": 85.8,
-            "identityTotal": 0,
+            "structuralTotal": 87.9,
+            "identityTotal": 8,
             "visualTotal": 0,
             "penaltyTotal": 0,
-            "total": 86
+            "total": 96
           },
           "scoringMode": "metadata-only"
         }

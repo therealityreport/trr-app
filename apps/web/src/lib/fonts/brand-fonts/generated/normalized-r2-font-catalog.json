@@ -1,7 +1,7 @@
 {
   "schemaVersion": "2026-03-23.v2",
-  "inputHash": "f3f9efe57610108bc6834041e9c955fd28202c295b189c4c199119305fd2bc79",
-  "generatedAt": "2026-08-04T18:40:28.176Z",
+  "inputHash": "3d616bfb1885c4d009ee594fddb06e138bbf8495bb716b1f116782c7b30e9819",
+  "generatedAt": "2026-08-04T18:46:03.078Z",
   "scoringConfigVersion": "2026-03-23.score.v3",
   "data": [
     {
@@ -508,7 +508,31 @@
       ],
       "displayRisk": "low",
       "bodyRisk": "medium",
-      "sourceUrl": "https://media.thereality.report/fonts/trr/ITC%20Cheltenham/CheltenhamStdLight.otf"
+      "sourceUrl": "https://media.thereality.report/fonts/trr/ITC%20Cheltenham%20Std/CheltenhamStdLight.otf"
+    },
+    {
+      "familyName": "ITC Cheltenham Pro",
+      "weightsNormalized": [
+        300,
+        400,
+        700,
+        900
+      ],
+      "styles": [
+        "normal",
+        "italic"
+      ],
+      "widthsNormalized": [
+        "normal"
+      ],
+      "classification": "serif",
+      "traitTokens": [
+        "editorial",
+        "traditional"
+      ],
+      "displayRisk": "low",
+      "bodyRisk": "medium",
+      "sourceUrl": "https://media.thereality.report/fonts/trr/ITC%20Cheltenham%20Pro/ITCCheltenhamLight-657071.otf"
     },
     {
       "familyName": "ITC Franklin Gothic LT",
