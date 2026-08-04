@@ -186,9 +186,14 @@ upload_fonts() {
   echo "============================================="
   echo ""
 
-  if [ "$OBJECT_BUCKET" != "trr-media-prod" ]; then
-    echo "ERROR: Production font uploads must target trr-media-prod, not $OBJECT_BUCKET."
+  if [ "$OBJECT_BUCKET" != "trr-media-prod" ] && [ -z "$DRY_RUN" ]; then
+    echo "ERROR: Actual font uploads must target trr-media-prod, not $OBJECT_BUCKET."
+    echo "Use --dry-run to validate a non-production bucket without uploading."
     exit 1
+  fi
+
+  if [ "$OBJECT_BUCKET" != "trr-media-prod" ]; then
+    echo "  Non-production bucket accepted for --dry-run only; no upload will be performed."
   fi
 
   if [ ! -f "$UPLOAD_SCRIPT" ]; then
@@ -203,7 +208,7 @@ upload_fonts() {
     echo "  Checked: python3, python3.11, python3.12, python3.13, python3.14"
     exit 1
   fi
-  echo "  Using: $(command -v $PYTHON3) ($($PYTHON3 --version 2>&1))"
+  echo "  Using: $(command -v "$PYTHON3") ($("$PYTHON3" --version 2>&1))"
   echo ""
 
   # Check object-storage credentials/profile configuration
@@ -214,7 +219,7 @@ upload_fonts() {
     exit 1
   fi
 
-  $PYTHON3 "$UPLOAD_SCRIPT" \
+  "$PYTHON3" "$UPLOAD_SCRIPT" \
     --source "$DEST_BASE" \
     --bucket "$OBJECT_BUCKET" \
     --prefix "fonts/trr" \

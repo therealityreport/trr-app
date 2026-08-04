@@ -30,9 +30,10 @@ afterEach(() => {
 });
 
 describe("hosted font helpers", () => {
-  it("falls back to the live R2 public host when no env override is set", () => {
+  it("falls back to the live public font host when no env override is set", () => {
     delete process.env.NEXT_PUBLIC_HOSTED_FONT_BASE_URL;
 
+    expect(DEFAULT_HOSTED_FONT_BASE_URL).toBe("https://media.thereality.report");
     expect(getHostedFontBaseUrl()).toBe(DEFAULT_HOSTED_FONT_BASE_URL);
   });
 
