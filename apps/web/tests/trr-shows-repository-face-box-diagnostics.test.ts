@@ -2,11 +2,11 @@ import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 
-describe("trr shows repository face-box diagnostics mapping", () => {
+describe("photo metadata face-box diagnostics mapping", () => {
   it("keeps match diagnostics fields when parsing face_boxes", () => {
     const filePath = path.resolve(
       __dirname,
-      "../src/lib/server/trr-api/trr-shows-repository.ts",
+      "../src/lib/photo-metadata.ts",
     );
     const contents = fs.readFileSync(filePath, "utf8");
 
