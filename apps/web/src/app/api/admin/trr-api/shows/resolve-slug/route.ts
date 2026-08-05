@@ -1,10 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
-import {
-  ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
-  buildAdminProxyErrorResponse,
-  fetchAdminBackendJson,
-} from "@/lib/server/trr-api/admin-read-proxy";
+import { buildAdminProxyErrorResponse } from "@/lib/server/trr-api/admin-read-proxy";
 import {
   buildUserScopedRouteCacheKey,
   getOrCreateRouteResponsePromise,
@@ -15,10 +11,9 @@ import {
   TRR_SHOW_RESOLVE_SLUG_CACHE_NAMESPACE,
   TRR_SHOW_RESOLVE_SLUG_CACHE_TTL_MS,
 } from "@/lib/server/trr-api/trr-show-read-route-cache";
-import { resolveShowSlug } from "@/lib/server/trr-api/trr-shows-repository";
+import { resolveShowSlug } from "@/lib/server/trr-api/public-identities";
 
 export const dynamic = "force-dynamic";
-const SHOW_RESOLVE_SLUG_TIMEOUT_MS = Math.max(15_000, ADMIN_READ_PROXY_SHORT_TIMEOUT_MS);
 
 /**
  * GET /api/admin/trr-api/shows/resolve-slug?slug=the-valley-persian-style
@@ -46,38 +41,9 @@ export async function GET(request: NextRequest) {
       TRR_SHOW_RESOLVE_SLUG_CACHE_NAMESPACE,
       cacheKey,
       async () => {
-        const localResolved = await resolveShowSlug(slug);
-        if (localResolved) {
-          const nextPayload = { resolved: localResolved };
-          setRouteResponseCache(
-            TRR_SHOW_RESOLVE_SLUG_CACHE_NAMESPACE,
-            cacheKey,
-            nextPayload,
-            TRR_SHOW_RESOLVE_SLUG_CACHE_TTL_MS,
-          );
-          return nextPayload;
-        }
-
-        const upstream = await fetchAdminBackendJson(
-          `/admin/trr-api/shows/resolve-slug?${new URLSearchParams({ slug }).toString()}`,
-          {
-            timeoutMs: SHOW_RESOLVE_SLUG_TIMEOUT_MS,
-            routeName: "show-resolve-slug",
-          },
-        );
-        if (upstream.status === 404) {
-          throw new Error("show slug not found");
-        }
-        if (upstream.status != 200) {
-          throw new Error(
-            typeof upstream.data.error === "string"
-              ? upstream.data.error
-              : typeof upstream.data.detail === "string"
-                ? upstream.data.detail
-                : "Failed to resolve show slug",
-          );
-        }
-        const nextPayload = { resolved: upstream.data.resolved ?? null };
+        const resolved = await resolveShowSlug(slug);
+        if (!resolved) throw new Error("show slug not found");
+        const nextPayload = { resolved };
         setRouteResponseCache(
           TRR_SHOW_RESOLVE_SLUG_CACHE_NAMESPACE,
           cacheKey,

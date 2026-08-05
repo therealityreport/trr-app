@@ -32,10 +32,13 @@ vi.mock("@/lib/server/trr-api/social-admin-proxy", () => ({
 }));
 
 vi.mock("@/lib/server/trr-api/trr-shows-repository", () => ({
-  listPersonExternalIds: vi.fn(),
   getShowById: vi.fn(),
   syncPersonExternalIds: vi.fn(),
   updateShowById: vi.fn(),
+}));
+
+vi.mock("@/lib/server/trr-api/admin-external-id-reads", () => ({
+  listPersonExternalIds: vi.fn(),
 }));
 
 vi.mock("@/lib/server/trr-api/admin-read-proxy", () => ({

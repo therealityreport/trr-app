@@ -4,18 +4,23 @@ import { captureExpectedConsoleError } from "./helpers/expected-console";
 
 const {
   requireAdminMock,
+  toVerifiedAdminContextMock,
   invalidateAdminBackendCacheMock,
+  invalidateRouteResponseCacheMock,
   updateCastPhotoThumbnailCropMock,
   updateMediaLinkThumbnailCropMock,
 } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
+  toVerifiedAdminContextMock: vi.fn(),
   invalidateAdminBackendCacheMock: vi.fn(),
+  invalidateRouteResponseCacheMock: vi.fn(),
   updateCastPhotoThumbnailCropMock: vi.fn(),
   updateMediaLinkThumbnailCropMock: vi.fn(),
 }));
 
 vi.mock("@/lib/server/auth", () => ({
   requireAdmin: requireAdminMock,
+  toVerifiedAdminContext: toVerifiedAdminContextMock,
 }));
 
 vi.mock("@/lib/server/admin/person-thumbnail-crops-repository", () => ({
@@ -23,11 +28,30 @@ vi.mock("@/lib/server/admin/person-thumbnail-crops-repository", () => ({
   updateMediaLinkThumbnailCrop: updateMediaLinkThumbnailCropMock,
 }));
 
+vi.mock("@/lib/server/admin/route-response-cache", () => ({
+  buildEntityScopedRouteCacheNamespace: (namespace: string, entityId: string) =>
+    `${namespace}:${entityId}`,
+  invalidateRouteResponseCache: invalidateRouteResponseCacheMock,
+}));
+
 vi.mock("@/lib/server/trr-api/admin-read-proxy", () => ({
   invalidateAdminBackendCache: invalidateAdminBackendCacheMock,
+  buildAdminProxyErrorResponse: (error: unknown) => {
+    const message = error instanceof Error ? error.message : "failed";
+    return Response.json(
+      { error: message },
+      { status: message === "unauthorized" ? 401 : message === "forbidden" ? 403 : 500 },
+    );
+  },
 }));
 
 import { PUT } from "@/app/api/admin/trr-api/people/[personId]/photos/[photoId]/thumbnail-crop/route";
+
+const ADMIN_CONTEXT = {
+  uid: "admin-user",
+  email: "admin@example.com",
+  verifiedAt: 1_721_131_200_000,
+};
 
 const makeRequest = (body: Record<string, unknown>) =>
   new NextRequest("http://localhost/api/admin/trr-api/people/person-1/photos/photo-1/thumbnail-crop", {
@@ -39,10 +63,13 @@ const makeRequest = (body: Record<string, unknown>) =>
 describe("person thumbnail crop route", () => {
   beforeEach(() => {
     requireAdminMock.mockReset();
+    toVerifiedAdminContextMock.mockReset();
     invalidateAdminBackendCacheMock.mockReset();
+    invalidateRouteResponseCacheMock.mockReset();
     updateCastPhotoThumbnailCropMock.mockReset();
     updateMediaLinkThumbnailCropMock.mockReset();
-    requireAdminMock.mockResolvedValue(undefined);
+    requireAdminMock.mockResolvedValue({ uid: "admin-user", email: "admin@example.com" });
+    toVerifiedAdminContextMock.mockReturnValue(ADMIN_CONTEXT);
     invalidateAdminBackendCacheMock.mockResolvedValue(undefined);
   });
 
@@ -72,10 +99,14 @@ describe("person thumbnail crop route", () => {
       personId: "person-1",
       photoId: "photo-1",
       crop: { x: 44, y: 26, zoom: 1.2, mode: "manual" },
+      adminContext: ADMIN_CONTEXT,
     });
     expect(invalidateAdminBackendCacheMock).toHaveBeenCalledWith(
       "/admin/people/person-1/cache/invalidate",
       { routeName: "person-gallery" },
+    );
+    expect(invalidateRouteResponseCacheMock).toHaveBeenCalledWith(
+      "admin-person-photos:person-1",
     );
     expect(payload.thumbnail_crop_mode).toBe("manual");
     expect(payload.thumbnail_focus_x).toBe(44);
@@ -106,10 +137,14 @@ describe("person thumbnail crop route", () => {
       personId: "person-1",
       linkId: "photo-1",
       crop: null,
+      adminContext: ADMIN_CONTEXT,
     });
     expect(invalidateAdminBackendCacheMock).toHaveBeenCalledWith(
       "/admin/people/person-1/cache/invalidate",
       { routeName: "person-gallery" },
+    );
+    expect(invalidateRouteResponseCacheMock).toHaveBeenCalledWith(
+      "admin-person-photos:person-1",
     );
   });
 

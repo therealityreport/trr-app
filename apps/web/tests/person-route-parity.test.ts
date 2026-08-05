@@ -4,17 +4,20 @@ import { captureExpectedConsoleError } from "./helpers/expected-console";
 
 process.env.TRR_ADMIN_ROUTE_CACHE_DISABLED = "1";
 
-const { requireAdminMock, fetchAdminBackendJsonMock } = vi.hoisted(() => ({
+const { requireAdminMock, toVerifiedAdminContextMock, updatePersonCanonicalProfileSourceOrderMock, fetchAdminBackendJsonMock } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
+  toVerifiedAdminContextMock: vi.fn(),
+  updatePersonCanonicalProfileSourceOrderMock: vi.fn(),
   fetchAdminBackendJsonMock: vi.fn(),
 }));
 
 vi.mock("@/lib/server/auth", () => ({
   requireAdmin: requireAdminMock,
+  toVerifiedAdminContext: toVerifiedAdminContextMock,
 }));
 
 vi.mock("@/lib/server/trr-api/trr-shows-repository", () => ({
-  updatePersonCanonicalProfileSourceOrder: vi.fn(),
+  updatePersonCanonicalProfileSourceOrder: updatePersonCanonicalProfileSourceOrderMock,
 }));
 
 vi.mock("@/lib/server/trr-api/admin-read-proxy", () => ({
@@ -28,13 +31,16 @@ vi.mock("@/lib/server/trr-api/admin-read-proxy", () => ({
     ),
 }));
 
-import { GET } from "@/app/api/admin/trr-api/people/[personId]/route";
+import { GET, PATCH } from "@/app/api/admin/trr-api/people/[personId]/route";
 
 describe("person route parity", () => {
   beforeEach(() => {
     requireAdminMock.mockReset();
+    toVerifiedAdminContextMock.mockReset();
+    updatePersonCanonicalProfileSourceOrderMock.mockReset();
     fetchAdminBackendJsonMock.mockReset();
     requireAdminMock.mockResolvedValue({ uid: "admin-user" });
+    toVerifiedAdminContextMock.mockReturnValue({ uid: "admin-user", verifiedAt: 42 });
   });
 
   it("returns only the batch-1 person detail contract", async () => {
@@ -93,5 +99,26 @@ describe("person route parity", () => {
     expect(response.status).toBe(404);
     await expect(response.json()).resolves.toEqual({ error: "Person not found" });
     expectedError.expectCalled();
+  });
+
+  it("forwards canonical-profile source-order writes with verified admin context", async () => {
+    const personId = "7782652f-783a-488b-8860-41b97de32e75";
+    updatePersonCanonicalProfileSourceOrderMock.mockResolvedValue({ id: personId });
+
+    const response = await PATCH(
+      new NextRequest(`http://localhost/api/admin/trr-api/people/${personId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ canonicalProfileSourceOrder: ["imdb", "tmdb", "fandom", "manual"] }),
+        headers: { "content-type": "application/json" },
+      }),
+      { params: Promise.resolve({ personId }) },
+    );
+
+    expect(response.status).toBe(200);
+    expect(updatePersonCanonicalProfileSourceOrderMock).toHaveBeenCalledWith(
+      personId,
+      ["imdb", "tmdb", "fandom", "manual"],
+      { adminContext: { uid: "admin-user", verifiedAt: 42 } },
+    );
   });
 });

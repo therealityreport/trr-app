@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/server/auth";
+import { requireAdmin, toVerifiedAdminContext } from "@/lib/server/auth";
 import type { AuthContext } from "@/lib/server/postgres";
 import { getSurveysByTrrShowId } from "@/lib/server/surveys/survey-trr-links-repository";
 import {
@@ -100,15 +100,19 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       );
     }
 
-    const result = await createSurveyFromShow(authContext, {
-      trrShowId: showId,
-      seasonNumber,
-      template,
-      title,
-      createInitialRun: createInitialRun ?? false,
-      runStartsAt,
-      runEndsAt,
-    });
+    const result = await createSurveyFromShow(
+      authContext,
+      {
+        trrShowId: showId,
+        seasonNumber,
+        template,
+        title,
+        createInitialRun: createInitialRun ?? false,
+        runStartsAt,
+        runEndsAt,
+      },
+      toVerifiedAdminContext(user),
+    );
 
     return NextResponse.json(result, { status: 201 });
   } catch (error) {

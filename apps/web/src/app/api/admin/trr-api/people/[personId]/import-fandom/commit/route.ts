@@ -5,7 +5,10 @@ import {
   normalizeFandomSyncOptions,
   normalizeFandomSyncPreviewResponse,
 } from "@/lib/admin/fandom-sync-types";
-import { invalidateRouteResponseCache } from "@/lib/server/admin/route-response-cache";
+import {
+  buildEntityScopedRouteCacheNamespace,
+  invalidateRouteResponseCache,
+} from "@/lib/server/admin/route-response-cache";
 import { invalidateAdminBackendCache } from "@/lib/server/trr-api/admin-read-proxy";
 import { getInternalAdminBearerToken } from "@/lib/server/trr-api/internal-admin-auth";
 
@@ -18,7 +21,7 @@ interface RouteParams {
 
 export async function POST(request: NextRequest, { params }: RouteParams) {
   try {
-    const user = await requireAdmin(request);
+    await requireAdmin(request);
     const { personId } = await params;
     if (!personId) {
       return NextResponse.json({ error: "personId is required" }, { status: 400 });
@@ -53,7 +56,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
             : "Fandom commit failed";
       return NextResponse.json({ error }, { status: response.status });
     }
-    invalidateRouteResponseCache(PERSON_PHOTOS_CACHE_NAMESPACE, `${user.uid}:${personId}:photos:`);
+    invalidateRouteResponseCache(
+      buildEntityScopedRouteCacheNamespace(PERSON_PHOTOS_CACHE_NAMESPACE, personId),
+    );
     await invalidateAdminBackendCache(`/admin/people/${personId}/cache/invalidate`, {
       routeName: "person-gallery",
     });

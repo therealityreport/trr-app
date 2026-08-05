@@ -30,9 +30,10 @@ afterEach(() => {
 });
 
 describe("hosted font helpers", () => {
-  it("falls back to the live R2 public host when no env override is set", () => {
+  it("falls back to the live public font host when no env override is set", () => {
     delete process.env.NEXT_PUBLIC_HOSTED_FONT_BASE_URL;
 
+    expect(DEFAULT_HOSTED_FONT_BASE_URL).toBe("https://media.thereality.report");
     expect(getHostedFontBaseUrl()).toBe(DEFAULT_HOSTED_FONT_BASE_URL);
   });
 
@@ -85,10 +86,10 @@ describe("hosted font helpers", () => {
     const filterTrackerCss = readFileSync(FILTER_CARD_TRACKER_CSS_PATH, "utf8");
 
     expect(filterTrackerCss).toContain('"nyt-franklin"');
-    expect(css).toMatch(/font-family:\s*['"]nyt-franklin['"]/);
+    expect(css).toMatch(/font-family:\s*nyt-franklin;/);
     expect(css).toMatch(/font-family:\s*['"]nyt-karnakcondensed['"]/);
-    expect(css).toMatch(/font-family:\s*['"]nyt-karnak['"]/);
-    expect(css).toMatch(/font-family:\s*['"]nyt-stymie['"]/);
+    expect(css).toMatch(/font-family:\s*nyt-karnak;/);
+    expect(css).toMatch(/font-family:\s*nyt-stymie;/);
   });
 
   it("extracts concrete upstream font file links from hosted stylesheet css", () => {

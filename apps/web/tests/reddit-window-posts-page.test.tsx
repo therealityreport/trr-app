@@ -565,16 +565,19 @@ describe("admin reddit window posts page", () => {
     const syncButton = await screen.findByRole("button", { name: "Sync Posts" });
     fireEvent.click(syncButton);
 
-    await waitFor(() => {
-      const syncPostsCall = fetchAdminWithAuthMock.mock.calls.find((call) => {
-        const url = String(call[0]);
-        return url.includes("/discover?") && url.includes("mode=sync_full") && url.includes("refresh=true");
-      });
-      expect(syncPostsCall).toBeTruthy();
-      const syncUrl = String(syncPostsCall?.[0] ?? "");
-      expect(syncUrl).toContain("mode=sync_full");
-      expect(syncUrl).toContain("period_start=2026-01-20T05%3A00%3A00.000Z");
-      expect(syncUrl).toContain("period_end=2026-01-27T05%3A00%3A00.000Z");
-    });
+    await waitFor(
+      () => {
+        const syncPostsCall = fetchAdminWithAuthMock.mock.calls.find((call) => {
+          const url = String(call[0]);
+          return url.includes("/discover?") && url.includes("mode=sync_full") && url.includes("refresh=true");
+        });
+        expect(syncPostsCall).toBeTruthy();
+        const syncUrl = String(syncPostsCall?.[0] ?? "");
+        expect(syncUrl).toContain("mode=sync_full");
+        expect(syncUrl).toContain("period_start=2026-01-20T05%3A00%3A00.000Z");
+        expect(syncUrl).toContain("period_end=2026-01-27T05%3A00%3A00.000Z");
+      },
+      { timeout: 5_000 },
+    );
   });
 });

@@ -4,15 +4,17 @@ import path from "node:path";
 
 describe("show bravo fandom integration wiring", () => {
   it("maps full preview fandom fields and renders fandom coverage section", () => {
-    const filePath = path.resolve(__dirname, "../src/app/admin/trr-shows/[showId]/page.tsx");
-    const contents = fs.readFileSync(filePath, "utf8");
+    const routePath = path.resolve(__dirname, "../src/app/admin/trr-shows/[showId]/page.tsx");
+    const previewPath = path.resolve(__dirname, "../src/components/admin/ShowBravoSyncPreviewStep.tsx");
+    const routeContents = fs.readFileSync(routePath, "utf8");
+    const contents = `${routeContents}\n${fs.readFileSync(previewPath, "utf8")}`;
 
-    expect(contents).toMatch(/fandom_people\?: BravoPreviewPerson\[]/);
-    expect(contents).toMatch(/fandom_candidate_results\?: BravoPersonCandidateResult\[]/);
-    expect(contents).toMatch(/fandom_domains_used\?: string\[]/);
+    expect(routeContents).toMatch(/fandom_people\?: BravoPreviewPerson\[]/);
+    expect(routeContents).toMatch(/fandom_candidate_results\?: BravoPersonCandidateResult\[]/);
+    expect(routeContents).toMatch(/fandom_domains_used\?: string\[]/);
     expect(contents).toMatch(/Fandom Cast Coverage/);
-    expect(contents).toMatch(/setSyncFandomPreviewPeople/);
-    expect(contents).toMatch(/setSyncFandomCandidateSummary/);
+    expect(routeContents).toMatch(/setSyncFandomPreviewPeople/);
+    expect(routeContents).toMatch(/setSyncFandomCandidateSummary/);
   });
 
   it("includes fandom sync outcomes in commit notice and log messaging", () => {

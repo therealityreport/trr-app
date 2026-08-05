@@ -1,17 +1,21 @@
 import "server-only";
 
-import { buildRedditDetailSlugBase } from "@/lib/admin/reddit-detail-slug";
 import {
   normalizeRedditFlairAssignments,
   type RedditFlairAssignment,
 } from "@/lib/admin/reddit-flair-targeting";
-import { query, type AuthContext } from "@/lib/server/postgres";
+import type { AuthContext } from "@/lib/server/postgres";
 import { sanitizeRedditFlairList } from "@/lib/server/admin/reddit-flair-normalization";
 import { sanitizeFocusTargets } from "@/lib/server/admin/reddit-community-focus";
 import {
   sanitizeEpisodeTitlePatterns,
 } from "@/lib/server/admin/reddit-episode-rules";
-import { fetchAdminBackendJson } from "@/lib/server/trr-api/admin-read-proxy";
+import {
+  ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
+  buildAdminBackendStatusError,
+  fetchAdminBackendJson,
+} from "@/lib/server/trr-api/admin-read-proxy";
+import type { VerifiedAdminContext } from "@/lib/server/trr-api/internal-admin-auth";
 
 export interface RedditCommunityRow {
   id: string;
@@ -142,7 +146,6 @@ export interface UpdateRedditThreadInput {
   notes?: string | null;
 }
 
-const THREADS_TABLE = "admin.reddit_threads";
 const REDDIT_COMMUNITIES_BACKEND_PATH = "/admin/reddit/communities";
 const REDDIT_THREADS_BACKEND_PATH = "/admin/reddit/threads";
 
@@ -214,103 +217,6 @@ const toFlairAssignmentsMap = (value: unknown): Record<string, RedditFlairAssign
 const toNumberOrZero = (value: number | null | undefined): number => {
   if (typeof value !== "number" || !Number.isFinite(value)) return 0;
   return Math.max(0, Math.floor(value));
-};
-
-const buildCanonicalRedditContainerSql = ({
-  periodKeyExpr = "m.period_key",
-  periodStartExpr = "m.period_start",
-  periodEndExpr = "m.period_end",
-  postedAtExpr = "p.posted_at",
-  seasonIdExpr = "m.season_id",
-}: {
-  periodKeyExpr?: string;
-  periodStartExpr?: string;
-  periodEndExpr?: string;
-  postedAtExpr?: string;
-  seasonIdExpr?: string;
-} = {}): string => {
-  const loweredKey = `lower(coalesce(${periodKeyExpr}, ''))`;
-  const directContainerSql = `
-    case
-      when ${loweredKey} in ('period-preseason', 'period-postseason') then ${loweredKey}
-      when ${loweredKey} ~ '^episode-[0-9]+$' then ${loweredKey}
-      when ${loweredKey} ~ '^community:[^:]+:season:[^:]+:container:[a-z0-9-]+$'
-        then substring(${loweredKey} from 'container:([a-z0-9-]+)$')
-      else null
-    end
-  `;
-  return `
-    coalesce(
-      ${directContainerSql},
-      (
-        with episode_starts as (
-          select distinct on (e.episode_number)
-                 e.episode_number,
-                 (e.air_date::timestamp at time zone 'America/New_York') as start_utc
-          from core.episodes e
-          where e.season_id = ${seasonIdExpr}
-            and e.air_date is not null
-            and e.episode_number is not null
-          order by e.episode_number asc, e.air_date asc
-        ),
-        season_windows as (
-          select
-            'period-preseason'::text as container_key,
-            (select min(start_utc) from episode_starts) - interval '45 days' as start_utc,
-            (select min(start_utc) from episode_starts) as end_utc
-          where exists (select 1 from episode_starts)
-          union all
-          select
-            'episode-' || episode_number::text as container_key,
-            start_utc,
-            coalesce(
-              lead(start_utc) over (order by episode_number asc),
-              start_utc + interval '7 days'
-            ) as end_utc
-          from episode_starts
-          union all
-          select
-            'period-postseason'::text as container_key,
-            season_end.end_utc as start_utc,
-            season_end.end_utc + interval '7 days' as end_utc
-          from (
-            select max(coalesce(lead_start_utc, start_utc + interval '7 days')) as end_utc
-            from (
-              select
-                start_utc,
-                lead(start_utc) over (order by episode_number asc) as lead_start_utc
-              from episode_starts
-            ) finals
-          ) season_end
-          where season_end.end_utc is not null
-        )
-        select sw.container_key
-        from season_windows sw
-        where (
-          ${periodStartExpr} is not null
-          and ${periodEndExpr} is not null
-          and ${periodStartExpr} >= sw.start_utc
-          and ${periodEndExpr} <= sw.end_utc
-        ) or (
-          ${postedAtExpr} is not null
-          and ${postedAtExpr} >= sw.start_utc
-          and ${postedAtExpr} < sw.end_utc
-        )
-        order by
-          case
-            when ${periodStartExpr} is not null
-             and ${periodEndExpr} is not null
-             and ${periodStartExpr} >= sw.start_utc
-             and ${periodEndExpr} <= sw.end_utc
-            then 0
-            else 1
-          end,
-          sw.start_utc asc
-        limit 1
-      ),
-      'unmapped'
-    )
-  `;
 };
 
 const toCommunityRow = (row: RedditCommunityRowRaw): RedditCommunityRow => {
@@ -710,153 +616,6 @@ export async function deleteRedditThread(
   return result.data.success === true;
 }
 
-export interface RedditPostMatchContextRow {
-  period_key: string;
-  period_start: string | null;
-  period_end: string | null;
-  is_show_match: boolean;
-  passes_flair_filter: boolean;
-  match_score: number;
-  match_type: string | null;
-  admin_approved: boolean | null;
-  flair_mode: string | null;
-  source_sorts: string[];
-  matched_terms: string[];
-  matched_cast_terms: string[];
-  cross_show_terms: string[];
-  link_flair_text: string | null;
-  canonical_flair_key: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface RedditPostCommentRow {
-  reddit_comment_id: string;
-  parent_comment_id: string | null;
-  author: string | null;
-  body: string;
-  score: number;
-  depth: number;
-  created_at_utc: string | null;
-  author_flair_text: string | null;
-  is_submitter: boolean | null;
-  controversiality: number | null;
-  ups: number | null;
-  downs: number | null;
-  gildings: Record<string, unknown> | null;
-}
-
-export interface RedditPostMediaRow {
-  id: string;
-  reddit_comment_id: string | null;
-  source_url: string;
-  media_type: string;
-  hosted_url: string | null;
-  status: string;
-  content_type: string | null;
-  size_bytes: number | null;
-  error_message: string | null;
-  created_at: string;
-}
-
-export interface RedditPostCommentSummary {
-  total_comments: number;
-  top_level_comments: number;
-  reply_comments: number;
-  earliest_comment_at: string | null;
-  latest_comment_at: string | null;
-}
-
-export interface RedditPostMediaSummary {
-  total_media: number;
-  mirrored_media: number;
-  pending_media: number;
-  failed_media: number;
-}
-
-export interface RedditPostDetails {
-  reddit_post_id: string;
-  subreddit: string;
-  title: string;
-  text: string | null;
-  url: string | null;
-  permalink: string | null;
-  author: string | null;
-  score: number;
-  num_comments: number;
-  posted_at: string | null;
-  link_flair_text: string | null;
-  canonical_flair_key: string | null;
-  upvote_ratio: number | null;
-  is_self: boolean | null;
-  post_type: string | null;
-  thumbnail: string | null;
-  content_url: string | null;
-  is_nsfw: boolean | null;
-  is_spoiler: boolean | null;
-  author_flair_text: string | null;
-  detail_scraped_at: string | null;
-  source_sorts: string[];
-  media_metadata: Record<string, unknown> | null;
-  poll_data: Record<string, unknown> | null;
-  matches: RedditPostMatchContextRow[];
-  comments: RedditPostCommentRow[];
-  comment_summary: RedditPostCommentSummary;
-  media: RedditPostMediaRow[];
-  media_summary: RedditPostMediaSummary;
-  assigned_threads: RedditThreadRow[];
-}
-
-interface RedditPostRowRaw {
-  reddit_post_id: string;
-  subreddit: string;
-  title: string;
-  selftext: string | null;
-  url: string | null;
-  permalink: string | null;
-  author: string | null;
-  score: number | null;
-  num_comments: number | null;
-  posted_at: string | null;
-  link_flair_text: string | null;
-  canonical_flair_key: string | null;
-  upvote_ratio: number | null;
-  is_self: boolean | null;
-  post_type: string | null;
-  thumbnail: string | null;
-  content_url: string | null;
-  is_nsfw: boolean | null;
-  is_spoiler: boolean | null;
-  author_flair_text: string | null;
-  detail_scraped_at: string | null;
-  source_sorts: unknown;
-  media_metadata: unknown;
-  poll_data: unknown;
-}
-
-interface RedditCommentSummaryRowRaw {
-  total_comments: number | null;
-  top_level_comments: number | null;
-  earliest_comment_at: string | null;
-  latest_comment_at: string | null;
-}
-
-interface RedditPostMediaSummaryRowRaw {
-  total_media: number | null;
-  mirrored_media: number | null;
-  pending_media: number | null;
-  failed_media: number | null;
-}
-
-interface RedditDetailSlugCandidateRow {
-  reddit_post_id: string;
-  title: string;
-  author: string | null;
-  posted_at: string | null;
-  url: string | null;
-  permalink: string | null;
-}
-
 export interface ResolvedRedditPostDetail {
   reddit_post_id: string;
   detail_slug: string;
@@ -866,365 +625,6 @@ export interface ResolvedRedditPostDetail {
   posted_at: string | null;
   url: string | null;
   permalink: string | null;
-}
-
-const toStringArray = (value: unknown): string[] => {
-  if (!Array.isArray(value)) return [];
-  return value.filter((item): item is string => typeof item === "string");
-};
-
-const toObjectRecord = (value: unknown): Record<string, unknown> | null => {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  return value as Record<string, unknown>;
-};
-
-const toCommentSummary = (value: RedditCommentSummaryRowRaw | undefined): RedditPostCommentSummary => {
-  const totalComments = toNumberOrZero(value?.total_comments ?? 0);
-  const topLevelComments = toNumberOrZero(value?.top_level_comments ?? 0);
-  return {
-    total_comments: totalComments,
-    top_level_comments: topLevelComments,
-    reply_comments: Math.max(0, totalComments - topLevelComments),
-    earliest_comment_at: value?.earliest_comment_at ?? null,
-    latest_comment_at: value?.latest_comment_at ?? null,
-  };
-};
-
-const toMediaSummary = (value: RedditPostMediaSummaryRowRaw | undefined): RedditPostMediaSummary => ({
-  total_media: toNumberOrZero(value?.total_media ?? 0),
-  mirrored_media: toNumberOrZero(value?.mirrored_media ?? 0),
-  pending_media: toNumberOrZero(value?.pending_media ?? 0),
-  failed_media: toNumberOrZero(value?.failed_media ?? 0),
-});
-
-export async function getRedditPostDetailsByCommunityAndSeason(input: {
-  communityId: string;
-  seasonId: string;
-  redditPostId: string;
-  commentsLimit?: number;
-}): Promise<RedditPostDetails | null> {
-  const commentsLimit = Math.max(25, Math.min(500, Math.floor(input.commentsLimit ?? 250)));
-  const postResult = await query<RedditPostRowRaw>(
-    `SELECT
-       p.reddit_post_id,
-       p.subreddit,
-       p.title,
-       p.selftext,
-       p.url,
-       p.permalink,
-       p.author,
-       p.score,
-       p.num_comments,
-       p.posted_at::text,
-       p.link_flair_text,
-       p.canonical_flair_key,
-       p.upvote_ratio,
-       p.is_self,
-       p.post_type,
-       p.thumbnail,
-       p.content_url,
-       p.is_nsfw,
-       p.is_spoiler,
-       p.author_flair_text,
-       p.detail_scraped_at::text,
-       p.source_sorts,
-       p.media_metadata,
-       p.poll_data
-     FROM social.reddit_posts p
-     JOIN social.reddit_period_post_matches m
-       ON m.reddit_post_id = p.reddit_post_id
-     WHERE m.community_id = $1::uuid
-       AND m.season_id = $2::uuid
-       AND p.reddit_post_id = $3
-     ORDER BY m.updated_at DESC
-     LIMIT 1`,
-    [input.communityId, input.seasonId, input.redditPostId],
-  );
-
-  const postRow = postResult.rows[0];
-  if (!postRow) return null;
-
-  const [matchesResult, commentsResult, commentSummaryResult, mediaResult, mediaSummaryResult, threadsResult] =
-    await Promise.all([
-      query<RedditPostMatchContextRow>(
-        `SELECT
-           period_key,
-           period_start::text,
-           period_end::text,
-           is_show_match,
-           passes_flair_filter,
-           match_score,
-           match_type,
-           admin_approved,
-           flair_mode,
-           source_sorts,
-           matched_terms,
-           matched_cast_terms,
-           cross_show_terms,
-           link_flair_text,
-           canonical_flair_key,
-           created_at::text,
-           updated_at::text
-         FROM social.reddit_period_post_matches
-         WHERE community_id = $1::uuid
-           AND season_id = $2::uuid
-           AND reddit_post_id = $3
-         ORDER BY updated_at DESC`,
-        [input.communityId, input.seasonId, input.redditPostId],
-      ),
-      query<RedditPostCommentRow>(
-        `SELECT
-           reddit_comment_id,
-           parent_comment_id,
-           author,
-           body,
-           score,
-           depth,
-           created_at_utc::text,
-           author_flair_text,
-           is_submitter,
-           controversiality,
-           ups,
-           downs,
-           gildings
-         FROM social.reddit_comments
-         WHERE reddit_post_id = $1
-         ORDER BY created_at_utc ASC NULLS LAST, depth ASC, score DESC
-         LIMIT $2`,
-        [input.redditPostId, commentsLimit],
-      ),
-      query<RedditCommentSummaryRowRaw>(
-        `SELECT
-           COUNT(*)::int AS total_comments,
-           COUNT(*) FILTER (WHERE COALESCE(depth, 0) = 0)::int AS top_level_comments,
-           MIN(created_at_utc)::text AS earliest_comment_at,
-           MAX(created_at_utc)::text AS latest_comment_at
-         FROM social.reddit_comments
-         WHERE reddit_post_id = $1`,
-        [input.redditPostId],
-      ),
-      query<RedditPostMediaRow>(
-        `SELECT
-           id::text,
-           reddit_comment_id,
-           source_url,
-           media_type,
-           hosted_url,
-           status,
-           content_type,
-           size_bytes::bigint,
-           error_message,
-           created_at::text
-         FROM social.reddit_media_mirrors
-         WHERE reddit_post_id = $1
-         ORDER BY created_at DESC`,
-        [input.redditPostId],
-      ),
-      query<RedditPostMediaSummaryRowRaw>(
-        `SELECT
-           COUNT(*)::int AS total_media,
-           COUNT(*) FILTER (WHERE status = 'mirrored')::int AS mirrored_media,
-           COUNT(*) FILTER (WHERE status = 'pending')::int AS pending_media,
-           COUNT(*) FILTER (WHERE status = 'failed')::int AS failed_media
-         FROM social.reddit_media_mirrors
-         WHERE reddit_post_id = $1`,
-        [input.redditPostId],
-      ),
-      query<RedditThreadRow>(
-        `SELECT *
-         FROM ${THREADS_TABLE}
-         WHERE community_id = $1::uuid
-           AND reddit_post_id = $2
-           AND (trr_season_id = $3::uuid OR trr_season_id IS NULL)
-         ORDER BY posted_at DESC NULLS LAST, created_at DESC`,
-        [input.communityId, input.redditPostId, input.seasonId],
-      ),
-    ]);
-
-  return {
-    reddit_post_id: postRow.reddit_post_id,
-    subreddit: postRow.subreddit,
-    title: postRow.title,
-    text: postRow.selftext,
-    url: postRow.url,
-    permalink: postRow.permalink,
-    author: postRow.author,
-    score: toNumberOrZero(postRow.score ?? 0),
-    num_comments: toNumberOrZero(postRow.num_comments ?? 0),
-    posted_at: postRow.posted_at ?? null,
-    link_flair_text: postRow.link_flair_text,
-    canonical_flair_key: postRow.canonical_flair_key,
-    upvote_ratio:
-      typeof postRow.upvote_ratio === "number" && Number.isFinite(postRow.upvote_ratio)
-        ? postRow.upvote_ratio
-        : null,
-    is_self: typeof postRow.is_self === "boolean" ? postRow.is_self : null,
-    post_type: postRow.post_type,
-    thumbnail: postRow.thumbnail,
-    content_url: postRow.content_url,
-    is_nsfw: typeof postRow.is_nsfw === "boolean" ? postRow.is_nsfw : null,
-    is_spoiler: typeof postRow.is_spoiler === "boolean" ? postRow.is_spoiler : null,
-    author_flair_text: postRow.author_flair_text,
-    detail_scraped_at: postRow.detail_scraped_at,
-    source_sorts: toStringArray(postRow.source_sorts),
-    media_metadata: toObjectRecord(postRow.media_metadata),
-    poll_data: toObjectRecord(postRow.poll_data),
-    matches: matchesResult.rows.map((row) => ({
-      ...row,
-      match_score: toNumberOrZero(row.match_score),
-      source_sorts: toStringArray(row.source_sorts),
-      matched_terms: toStringArray(row.matched_terms),
-      matched_cast_terms: toStringArray(row.matched_cast_terms),
-      cross_show_terms: toStringArray(row.cross_show_terms),
-    })),
-    comments: commentsResult.rows.map((row) => ({
-      ...row,
-      score: toNumberOrZero(row.score),
-      depth: toNumberOrZero(row.depth),
-      controversiality:
-        typeof row.controversiality === "number" && Number.isFinite(row.controversiality)
-          ? Math.trunc(row.controversiality)
-          : null,
-      ups: typeof row.ups === "number" && Number.isFinite(row.ups) ? Math.trunc(row.ups) : null,
-      downs: typeof row.downs === "number" && Number.isFinite(row.downs) ? Math.trunc(row.downs) : null,
-      gildings: toObjectRecord(row.gildings),
-    })),
-    comment_summary: toCommentSummary(commentSummaryResult.rows[0]),
-    media: mediaResult.rows.map((row) => ({
-      ...row,
-      size_bytes:
-        typeof row.size_bytes === "number" && Number.isFinite(row.size_bytes)
-          ? Math.trunc(row.size_bytes)
-          : null,
-    })),
-    media_summary: toMediaSummary(mediaSummaryResult.rows[0]),
-    assigned_threads: threadsResult.rows,
-  };
-}
-
-export async function resolveRedditPostDetailBySlug(input: {
-  communityId: string;
-  seasonId: string;
-  containerKey: string;
-  titleSlug?: string | null;
-  authorSlug?: string | null;
-  redditPostId?: string | null;
-}): Promise<ResolvedRedditPostDetail | null> {
-  const canonicalContainerSql = buildCanonicalRedditContainerSql();
-  const rowsResult = await query<RedditDetailSlugCandidateRow>(
-    `WITH scoped AS (
-       SELECT DISTINCT ON (p.reddit_post_id)
-         p.reddit_post_id,
-         p.title,
-         p.author,
-         p.posted_at::text,
-         p.url,
-         p.permalink,
-         ${canonicalContainerSql} AS canonical_container_key
-       FROM social.reddit_period_post_matches m
-       JOIN social.reddit_posts p ON p.reddit_post_id = m.reddit_post_id
-       WHERE m.community_id = $1::uuid
-         AND m.season_id = $2::uuid
-       ORDER BY p.reddit_post_id, m.updated_at DESC
-     )
-     SELECT
-       reddit_post_id,
-       title,
-       author,
-       posted_at,
-       url,
-       permalink
-     FROM scoped
-     WHERE canonical_container_key = $3`,
-    [input.communityId, input.seasonId, input.containerKey],
-  );
-
-  const candidates = rowsResult.rows.map((row) => ({
-    ...row,
-    slug_base: buildRedditDetailSlugBase({
-      title: row.title,
-      author: row.author,
-    }),
-  }));
-  const collisions = new Map<string, number>();
-  for (const candidate of candidates) {
-    collisions.set(candidate.slug_base, (collisions.get(candidate.slug_base) ?? 0) + 1);
-  }
-
-  const normalizedPostId = String(input.redditPostId ?? "").trim();
-  const requestedBase =
-    String(input.titleSlug ?? "").trim() && String(input.authorSlug ?? "").trim()
-      ? `${String(input.titleSlug).trim().toLowerCase()}--u-${String(input.authorSlug).trim().toLowerCase()}`
-      : "";
-
-  const matched =
-    (normalizedPostId
-      ? candidates.find((candidate) => candidate.reddit_post_id === normalizedPostId)
-      : null) ??
-    (requestedBase
-      ? candidates.find(
-          (candidate) =>
-            candidate.slug_base === requestedBase &&
-            (collisions.get(candidate.slug_base) ?? 0) === 1,
-        )
-      : null) ??
-    null;
-
-  if (!matched) return null;
-  const collision = (collisions.get(matched.slug_base) ?? 0) > 1;
-  return {
-    reddit_post_id: matched.reddit_post_id,
-    detail_slug: collision ? `${matched.slug_base}--p-${matched.reddit_post_id}` : matched.slug_base,
-    collision,
-    title: matched.title,
-    author: matched.author,
-    posted_at: matched.posted_at,
-    url: matched.url,
-    permalink: matched.permalink,
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Stored post counts from social.reddit_period_post_matches
-// ---------------------------------------------------------------------------
-
-interface StoredPostCountRow {
-  container_key: string;
-  post_count: number;
-}
-
-interface StoredPostTotalRow {
-  total_posts: number;
-}
-
-interface StoredTrackedFlairContainerRow {
-  flair_key: string;
-  flair_label: string;
-  post_count: number;
-  container_key: string | null;
-  container_post_count: number | null;
-}
-
-interface StoredPendingTrackedFlairRow {
-  container_key: string | null;
-  flair_key: string;
-  flair_label: string;
-  post_count: number;
-}
-
-interface StoredWindowPostRow {
-  reddit_post_id: string;
-  title: string | null;
-  text: string | null;
-  url: string | null;
-  permalink: string | null;
-  author: string | null;
-  score: number | null;
-  num_comments: number | null;
-  posted_at: string | null;
-  link_flair_text: string | null;
-  is_show_match: boolean | null;
-  match_score: number | null;
 }
 
 export interface StoredTrackedFlairContainerCount {
@@ -1244,6 +644,15 @@ export interface StoredPendingTrackedFlairCount {
   flair_key: string;
   flair_label: string;
   post_count: number;
+}
+
+export interface StoredPostCountsResult {
+  counts: Record<string, number>;
+  total_posts: number;
+  tracked_total_posts: number;
+  tracked_flair_counts: StoredTrackedFlairCount[];
+  pending_tracked_flair_counts: StoredPendingTrackedFlairCount[];
+  flair_counts: Array<{ flair: string; post_count: number }>;
 }
 
 export interface StoredWindowPost {
@@ -1272,345 +681,150 @@ export interface StoredWindowPostsResult {
   posts: StoredWindowPost[];
 }
 
+type RedditReadOptions = {
+  adminContext: VerifiedAdminContext;
+};
+
+const REDDIT_POST_RESOLVE_BACKEND_PATH = "/admin/reddit/posts/resolve";
+const REDDIT_POST_WINDOW_COUNTS_BACKEND_PATH = "/admin/reddit/post-window-counts";
+const REDDIT_POST_WINDOWS_BACKEND_PATH = "/admin/reddit/post-windows";
 const CANONICAL_CONTAINER_KEY_RE = /^(episode-\d+|period-preseason|period-postseason)$/;
 
-const isCanonicalContainerKey = (value: string | null | undefined): boolean =>
-  CANONICAL_CONTAINER_KEY_RE.test(String(value ?? "").trim().toLowerCase());
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value) && typeof value === "object" && !Array.isArray(value);
 
-/**
- * Returns stored post counts grouped by container key for a given community
- * and season. Extracts the container key from the period_key column which has
- * the format `community:{cid}:season:{sid}:container:{containerKey}...`.
- */
+const optionalString = (value: unknown): string | null =>
+  typeof value === "string" ? value : null;
+
+const throwForRedditReadStatus = (
+  status: number,
+  data: Record<string, unknown>,
+  fallbackMessage: string,
+  routeName: string,
+): never => {
+  throw buildAdminBackendStatusError({
+    status,
+    data,
+    fallbackMessage,
+    routeName,
+  });
+};
+
+export async function resolveRedditPostDetailBySlug(input: {
+  communityId: string;
+  seasonId: string;
+  windowKey: string;
+  titleSlug?: string | null;
+  authorSlug?: string | null;
+  redditPostId?: string | null;
+  adminContext: VerifiedAdminContext;
+}): Promise<ResolvedRedditPostDetail | null> {
+  const query = new URLSearchParams({
+    community_id: input.communityId,
+    season_id: input.seasonId,
+    window_key: input.windowKey,
+  });
+  if (input.titleSlug) query.set("slug", input.titleSlug);
+  if (input.authorSlug) query.set("author", input.authorSlug);
+  if (input.redditPostId) query.set("post_id", input.redditPostId);
+
+  const upstream = await fetchAdminBackendJson(REDDIT_POST_RESOLVE_BACKEND_PATH, {
+    apiVersion: "v2",
+    adminContext: input.adminContext,
+    queryString: query.toString(),
+    timeoutMs: ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
+    routeName: "reddit-sources:resolve-post",
+  });
+  if (upstream.status === 404) return null;
+  if (upstream.status !== 200) {
+    throwForRedditReadStatus(
+      upstream.status,
+      upstream.data,
+      "Failed to resolve Reddit post detail",
+      "reddit-sources:resolve-post",
+    );
+  }
+
+  const post = isRecord(upstream.data.post) ? upstream.data.post : {};
+  return {
+    reddit_post_id: String(upstream.data.reddit_post_id ?? ""),
+    detail_slug: String(upstream.data.detail_slug ?? ""),
+    collision: upstream.data.collision === true,
+    title: typeof post.title === "string" ? post.title : "",
+    author: optionalString(post.author),
+    posted_at: optionalString(post.posted_at),
+    url: optionalString(post.url),
+    permalink: optionalString(post.permalink),
+  };
+}
+
 export async function getStoredPostCountsByCommunityAndSeason(
   communityId: string,
   seasonId: string,
-): Promise<Record<string, number>> {
-  const canonicalContainerSql = buildCanonicalRedditContainerSql();
-  const result = await query<StoredPostCountRow>(
-    `WITH scoped AS (
-       SELECT DISTINCT
-         m.reddit_post_id,
-         ${canonicalContainerSql} AS container_key
-       FROM social.reddit_period_post_matches m
-       LEFT JOIN social.reddit_posts p ON p.reddit_post_id = m.reddit_post_id
-       WHERE m.community_id = $1::uuid
-         AND m.season_id = $2::uuid
-         AND m.passes_flair_filter = true
-     )
-     SELECT
-       container_key,
-       COUNT(DISTINCT reddit_post_id)::int AS post_count
-     FROM scoped
-     WHERE container_key <> 'unmapped'
-     GROUP BY container_key
-     ORDER BY container_key`,
-    [communityId, seasonId],
-  );
-  const counts: Record<string, number> = {};
-  for (const row of result.rows) {
-    if (row.container_key) {
-      counts[row.container_key] = row.post_count;
-    }
+  options: RedditReadOptions,
+): Promise<StoredPostCountsResult> {
+  const query = new URLSearchParams({
+    community_id: communityId,
+    season_id: seasonId,
+  });
+  const upstream = await fetchAdminBackendJson(REDDIT_POST_WINDOW_COUNTS_BACKEND_PATH, {
+    apiVersion: "v2",
+    adminContext: options.adminContext,
+    queryString: query.toString(),
+    timeoutMs: ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
+    routeName: "reddit-sources:post-window-counts",
+  });
+  if (upstream.status !== 200) {
+    throwForRedditReadStatus(
+      upstream.status,
+      upstream.data,
+      "Failed to load Reddit post-window counts",
+      "reddit-sources:post-window-counts",
+    );
   }
-  return counts;
-}
-
-/**
- * Returns the total distinct reddit posts currently stored in Supabase for a
- * community+season scope across all period containers.
- */
-export async function getStoredPostTotalByCommunityAndSeason(
-  communityId: string,
-  seasonId: string,
-): Promise<number> {
-  const result = await query<StoredPostTotalRow>(
-    `SELECT COUNT(DISTINCT reddit_post_id)::int AS total_posts
-     FROM social.reddit_period_post_matches
-     WHERE community_id = $1::uuid
-       AND season_id = $2::uuid`,
-    [communityId, seasonId],
-  );
-  const total = result.rows[0]?.total_posts;
-  return Number.isFinite(total) ? total : 0;
-}
-
-/**
- * Returns the tracked-flair distinct reddit post total currently stored for
- * the community+season scope.
- */
-export async function getStoredTrackedPostTotalByCommunityAndSeason(
-  communityId: string,
-  seasonId: string,
-): Promise<number> {
-  const result = await query<StoredPostTotalRow>(
-    `SELECT COUNT(DISTINCT reddit_post_id)::int AS total_posts
-     FROM social.reddit_period_post_matches
-     WHERE community_id = $1::uuid
-       AND season_id = $2::uuid
-       AND passes_flair_filter = true`,
-    [communityId, seasonId],
-  );
-  const total = result.rows[0]?.total_posts;
-  return Number.isFinite(total) ? total : 0;
-}
-
-/**
- * Returns tracked-flair distinct post counts grouped by flair and by
- * container for the community+season scope.
- */
-export async function getStoredTrackedPostFlairCountsByCommunityAndSeason(
-  communityId: string,
-  seasonId: string,
-): Promise<StoredTrackedFlairCount[]> {
-  const canonicalContainerSql = buildCanonicalRedditContainerSql();
-  const result = await query<StoredTrackedFlairContainerRow>(
-    `WITH scoped AS (
-       SELECT DISTINCT
-         m.reddit_post_id,
-         ${canonicalContainerSql} AS container_key,
-         COALESCE(NULLIF(m.canonical_flair_key, ''), NULLIF(p.canonical_flair_key, ''), '') AS flair_key,
-         COALESCE(
-           NULLIF(TRIM(m.link_flair_text), ''),
-           NULLIF(TRIM(p.link_flair_text), ''),
-           '(No Flair)'
-         ) AS flair_label
-       FROM social.reddit_period_post_matches m
-       LEFT JOIN social.reddit_posts p ON p.reddit_post_id = m.reddit_post_id
-       WHERE m.community_id = $1::uuid
-         AND m.season_id = $2::uuid
-         AND m.passes_flair_filter = true
-     ),
-     flair_totals AS (
-       SELECT
-         flair_key,
-         MIN(flair_label) AS flair_label,
-         COUNT(DISTINCT reddit_post_id)::int AS post_count
-       FROM scoped
-       GROUP BY flair_key
-     ),
-     flair_containers AS (
-       SELECT
-         flair_key,
-         container_key,
-         COUNT(DISTINCT reddit_post_id)::int AS container_post_count
-       FROM scoped
-       WHERE container_key <> 'unmapped'
-       GROUP BY flair_key, container_key
-     )
-     SELECT
-       t.flair_key,
-       t.flair_label,
-       t.post_count,
-       c.container_key,
-       c.container_post_count
-     FROM flair_totals t
-     LEFT JOIN flair_containers c ON c.flair_key = t.flair_key
-     ORDER BY t.post_count DESC, t.flair_label ASC, c.container_key ASC`,
-    [communityId, seasonId],
-  );
-
-  const byFlair = new Map<string, StoredTrackedFlairCount>();
-  for (const row of result.rows) {
-    const flairKey = row.flair_key ?? "";
-    if (!byFlair.has(flairKey)) {
-      byFlair.set(flairKey, {
-        flair_key: flairKey,
-        flair_label: row.flair_label || "(No Flair)",
-        post_count: row.post_count,
-        container_counts: [],
-      });
-    }
-    if (row.container_key) {
-      const containerPostCount =
-        typeof row.container_post_count === "number" && Number.isFinite(row.container_post_count)
-          ? row.container_post_count
-          : 0;
-      byFlair.get(flairKey)?.container_counts.push({
-        container_key: row.container_key,
-        post_count: containerPostCount,
-      });
-    }
-  }
-  return [...byFlair.values()];
-}
-
-/**
- * Returns unassigned tracked-flair post counts grouped by container+flair for
- * a community+season. "Unassigned" excludes posts already saved as reddit
- * threads for the same community in either the selected season or global
- * (season null) scope.
- */
-export async function getStoredPendingTrackedFlairCountsByCommunityAndSeason(
-  communityId: string,
-  seasonId: string,
-): Promise<StoredPendingTrackedFlairCount[]> {
-  const canonicalContainerSql = buildCanonicalRedditContainerSql();
-  const result = await query<StoredPendingTrackedFlairRow>(
-    `WITH scoped AS (
-       SELECT DISTINCT
-         m.reddit_post_id,
-         ${canonicalContainerSql} AS container_key,
-         COALESCE(NULLIF(m.canonical_flair_key, ''), NULLIF(p.canonical_flair_key, ''), '') AS flair_key,
-         COALESCE(
-           NULLIF(TRIM(m.link_flair_text), ''),
-           NULLIF(TRIM(p.link_flair_text), ''),
-           '(No Flair)'
-         ) AS flair_label
-       FROM social.reddit_period_post_matches m
-       LEFT JOIN social.reddit_posts p ON p.reddit_post_id = m.reddit_post_id
-       WHERE m.community_id = $1::uuid
-         AND m.season_id = $2::uuid
-         AND m.passes_flair_filter = true
-     ),
-     unassigned AS (
-       SELECT s.*
-       FROM scoped s
-       WHERE s.container_key <> 'unmapped'
-         AND NOT EXISTS (
-           SELECT 1
-           FROM ${THREADS_TABLE} t
-           WHERE t.community_id = $1::uuid
-             AND t.reddit_post_id = s.reddit_post_id
-             AND (t.trr_season_id = $2::uuid OR t.trr_season_id IS NULL)
-         )
-     )
-     SELECT
-       container_key,
-       flair_key,
-       MIN(flair_label) AS flair_label,
-       COUNT(DISTINCT reddit_post_id)::int AS post_count
-     FROM unassigned
-     GROUP BY container_key, flair_key
-     ORDER BY container_key ASC, post_count DESC, flair_label ASC`,
-    [communityId, seasonId],
-  );
-
-  return result.rows
-    .filter(
-      (row): row is StoredPendingTrackedFlairRow =>
-        typeof row.container_key === "string" &&
-        row.container_key.length > 0 &&
-        typeof row.flair_key === "string" &&
-        typeof row.flair_label === "string" &&
-        typeof row.post_count === "number" &&
-        Number.isFinite(row.post_count),
-    )
-    .map((row) => ({
-      container_key: row.container_key as string,
-      flair_key: row.flair_key,
-      flair_label: row.flair_label || "(No Flair)",
-      post_count: row.post_count,
-    }));
+  return upstream.data as unknown as StoredPostCountsResult;
 }
 
 export async function getStoredWindowPostsByCommunityAndSeason(
   communityId: string,
   seasonId: string,
   containerKey: string,
-  page = 1,
-  perPage = 200,
+  page: number,
+  perPage: number,
+  options: RedditReadOptions,
 ): Promise<StoredWindowPostsResult> {
   const normalizedContainerKey = String(containerKey ?? "").trim().toLowerCase();
-  if (!isCanonicalContainerKey(normalizedContainerKey)) {
+  if (!CANONICAL_CONTAINER_KEY_RE.test(normalizedContainerKey)) {
     throw new Error("container_key must be a canonical season window key");
   }
-
   const normalizedPage =
     Number.isFinite(page) && page > 0 ? Math.max(1, Math.trunc(page)) : 1;
   const normalizedPerPage =
     Number.isFinite(perPage) && perPage > 0
       ? Math.min(200, Math.max(1, Math.trunc(perPage)))
       : 200;
-  const offset = (normalizedPage - 1) * normalizedPerPage;
-  const canonicalContainerSql = buildCanonicalRedditContainerSql();
 
-  const countResult = await query<{ total_count: number }>(
-    `WITH scoped AS (
-       SELECT DISTINCT ON (m.reddit_post_id)
-         m.reddit_post_id
-       FROM social.reddit_period_post_matches m
-       JOIN social.reddit_posts p ON p.reddit_post_id = m.reddit_post_id
-       WHERE m.community_id = $1::uuid
-         AND m.season_id = $2::uuid
-         AND m.passes_flair_filter = true
-         AND ${canonicalContainerSql} = $3
-       ORDER BY m.reddit_post_id, m.updated_at DESC, p.posted_at DESC NULLS LAST
-     )
-     SELECT COUNT(*)::int AS total_count
-     FROM scoped`,
-    [communityId, seasonId, normalizedContainerKey],
-  );
-
-  const rowsResult = await query<StoredWindowPostRow>(
-    `WITH scoped AS (
-       SELECT DISTINCT ON (m.reddit_post_id)
-         p.reddit_post_id,
-         p.title,
-         p.selftext AS text,
-         p.url,
-         p.permalink,
-         p.author,
-         p.score,
-         p.num_comments,
-         p.posted_at::text,
-         COALESCE(
-           NULLIF(TRIM(m.link_flair_text), ''),
-           NULLIF(TRIM(p.link_flair_text), '')
-         ) AS link_flair_text,
-         m.is_show_match,
-         m.match_score
-       FROM social.reddit_period_post_matches m
-       JOIN social.reddit_posts p ON p.reddit_post_id = m.reddit_post_id
-       WHERE m.community_id = $1::uuid
-         AND m.season_id = $2::uuid
-         AND m.passes_flair_filter = true
-         AND ${canonicalContainerSql} = $3
-       ORDER BY m.reddit_post_id, m.updated_at DESC, p.posted_at DESC NULLS LAST
-     )
-     SELECT
-       reddit_post_id,
-       title,
-       text,
-       url,
-       permalink,
-       author,
-       score,
-       num_comments,
-       posted_at,
-       link_flair_text,
-       is_show_match,
-       match_score
-     FROM scoped
-     ORDER BY posted_at DESC NULLS LAST, num_comments DESC NULLS LAST, score DESC NULLS LAST
-     LIMIT $4
-     OFFSET $5`,
-    [communityId, seasonId, normalizedContainerKey, normalizedPerPage, offset],
-  );
-
-  const totalCount = countResult.rows[0]?.total_count ?? 0;
-
-  return {
-    pagination: {
-      page: normalizedPage,
-      per_page: normalizedPerPage,
-      total_count: Number.isFinite(totalCount) ? totalCount : 0,
-    },
-    posts: rowsResult.rows.map((row) => ({
-      reddit_post_id: row.reddit_post_id,
-      title: row.title?.trim() || "(Untitled Post)",
-      text: row.text,
-      url: row.url?.trim() || "",
-      permalink: row.permalink?.trim() || null,
-      author: row.author?.trim() || null,
-      score: toNumberOrZero(row.score),
-      num_comments: toNumberOrZero(row.num_comments),
-      posted_at: row.posted_at,
-      link_flair_text: row.link_flair_text?.trim() || null,
-      is_show_match: row.is_show_match === true,
-      passes_flair_filter: true,
-      match_score: typeof row.match_score === "number" && Number.isFinite(row.match_score) ? row.match_score : null,
-      match_type: "flair",
-    })),
-  };
+  const query = new URLSearchParams({
+    community_id: communityId,
+    season_id: seasonId,
+    container_key: normalizedContainerKey,
+    page: String(normalizedPage),
+    per_page: String(normalizedPerPage),
+  });
+  const upstream = await fetchAdminBackendJson(REDDIT_POST_WINDOWS_BACKEND_PATH, {
+    apiVersion: "v2",
+    adminContext: options.adminContext,
+    queryString: query.toString(),
+    timeoutMs: ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
+    routeName: "reddit-sources:post-windows",
+  });
+  if (upstream.status !== 200) {
+    throwForRedditReadStatus(
+      upstream.status,
+      upstream.data,
+      "Failed to load stored Reddit posts",
+      "reddit-sources:post-windows",
+    );
+  }
+  return upstream.data as unknown as StoredWindowPostsResult;
 }

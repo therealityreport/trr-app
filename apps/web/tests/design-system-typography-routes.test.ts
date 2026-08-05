@@ -5,6 +5,7 @@ import { captureExpectedConsoleError } from "./helpers/expected-console";
 
 const {
   requireAdminMock,
+  toVerifiedAdminContextMock,
   getTypographyStateMock,
   createTypographySetMock,
   updateTypographySetMock,
@@ -14,6 +15,7 @@ const {
   buildTypographyStateSnapshotMock,
 } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
+  toVerifiedAdminContextMock: vi.fn(),
   getTypographyStateMock: vi.fn(),
   createTypographySetMock: vi.fn(),
   updateTypographySetMock: vi.fn(),
@@ -25,6 +27,7 @@ const {
 
 vi.mock("@/lib/server/auth", () => ({
   requireAdmin: requireAdminMock,
+  toVerifiedAdminContext: toVerifiedAdminContextMock,
 }));
 
 vi.mock("@/lib/server/admin/typography-repository", () => ({
@@ -56,6 +59,7 @@ describe("design system typography routes", () => {
   beforeEach(() => {
     invalidateTypographyRouteCaches();
     requireAdminMock.mockReset();
+    toVerifiedAdminContextMock.mockReset();
     getTypographyStateMock.mockReset();
     createTypographySetMock.mockReset();
     updateTypographySetMock.mockReset();
@@ -64,6 +68,7 @@ describe("design system typography routes", () => {
     resolvePostgresConnectionCandidatesMock.mockReset();
     buildTypographyStateSnapshotMock.mockReset();
     requireAdminMock.mockResolvedValue({ uid: "admin-user" });
+    toVerifiedAdminContextMock.mockReturnValue({ uid: "admin-user", email: null, verifiedAt: 1 });
     resolvePostgresConnectionCandidatesMock.mockReturnValue(["configured"]);
     buildTypographyStateSnapshotMock.mockReturnValue({ sets: [], assignments: [] });
   });
@@ -76,7 +81,9 @@ describe("design system typography routes", () => {
 
     expect(response.status).toBe(200);
     expect(payload).toEqual({ sets: [], assignments: [] });
-    expect(getTypographyStateMock).toHaveBeenCalledTimes(1);
+    expect(getTypographyStateMock).toHaveBeenCalledWith({
+      adminContext: { uid: "admin-user", email: null, verifiedAt: 1 },
+    });
   });
 
   it("returns public typography state without admin auth", async () => {
@@ -168,7 +175,10 @@ describe("design system typography routes", () => {
     const payload = await response.json();
 
     expect(response.status).toBe(201);
-    expect(createTypographySetMock).toHaveBeenCalledWith(expect.objectContaining({ name: "User Home" }));
+    expect(createTypographySetMock).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "User Home" }),
+      { adminContext: { uid: "admin-user", email: null, verifiedAt: 1 } },
+    );
     expect(payload.set.id).toBe("set-1");
   });
 
@@ -283,12 +293,21 @@ describe("design system typography routes", () => {
     const updatePayload = await updateResponse.json();
     expect(updateResponse.status).toBe(200);
     expect(updatePayload.set.name).toBe("User Home Updated");
+    expect(updateTypographySetMock).toHaveBeenCalledWith(
+      "set-1",
+      { name: "User Home Updated" },
+      { adminContext: { uid: "admin-user", email: null, verifiedAt: 1 } },
+    );
 
     const blockedDelete = await deleteTypography(
       new NextRequest("http://localhost/api/admin/design-system/typography/sets/set-1", { method: "DELETE" }),
       { params: Promise.resolve({ setId: "set-1" }) },
     );
     expect(blockedDelete.status).toBe(409);
+    expect(deleteTypographySetMock).toHaveBeenCalledWith(
+      "set-1",
+      { adminContext: { uid: "admin-user", email: null, verifiedAt: 1 } },
+    );
 
     const deleted = await deleteTypography(
       new NextRequest("http://localhost/api/admin/design-system/typography/sets/set-1", { method: "DELETE" }),
@@ -331,6 +350,7 @@ describe("design system typography routes", () => {
         pageKey: "single-select",
         instanceKey: "text-multiple-choice",
       }),
+      { adminContext: { uid: "admin-user", email: null, verifiedAt: 1 } },
     );
     expect(payload.assignment.id).toBe("assignment-1");
   });

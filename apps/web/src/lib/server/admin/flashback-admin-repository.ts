@@ -1,164 +1,231 @@
 import "server-only";
 
-import type { PoolClient } from "pg";
-
 import type { FlashbackEvent, FlashbackQuiz } from "@/lib/flashback/types";
-import { query, withTransaction } from "@/lib/server/postgres";
+import {
+  AdminReadProxyError,
+  buildAdminBackendStatusError,
+  fetchAdminBackendJson,
+} from "@/lib/server/trr-api/admin-read-proxy";
+import type { VerifiedAdminContext } from "@/lib/server/trr-api/internal-admin-auth";
 
-type SortOrderRow = {
-  max_sort_order: number | null;
+const FLASHBACK_BACKEND_PATH = "/admin/flashback";
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value) && typeof value === "object" && !Array.isArray(value);
+
+const hasExactKeys = (value: Record<string, unknown>, keys: readonly string[]): boolean => {
+  const actual = Object.keys(value).sort();
+  const expected = [...keys].sort();
+  return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
 };
 
-type DeletedEventRow = {
-  quiz_id: string;
-  sort_order: number;
+const invalidBackendResponse = (message: string): never => {
+  throw new AdminReadProxyError(message, 502, {
+    code: "INVALID_BACKEND_RESPONSE",
+    retryable: false,
+  });
 };
 
-const FLASHBACK_QUIZ_COLUMNS = `
-  id,
-  title,
-  publish_date,
-  description,
-  is_published,
-  created_at,
-  updated_at
-`;
+const parseQuiz = (value: unknown): FlashbackQuiz => {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, [
+      "id",
+      "title",
+      "publish_date",
+      "description",
+      "is_published",
+      "created_at",
+      "updated_at",
+    ]) ||
+    typeof value.id !== "string" ||
+    typeof value.title !== "string" ||
+    typeof value.publish_date !== "string" ||
+    (value.description !== null && typeof value.description !== "string") ||
+    typeof value.is_published !== "boolean" ||
+    typeof value.created_at !== "string" ||
+    typeof value.updated_at !== "string"
+  ) {
+    return invalidBackendResponse("Invalid Flashback quiz response from backend");
+  }
+  return value as unknown as FlashbackQuiz;
+};
 
-const FLASHBACK_EVENT_COLUMNS = `
-  id,
-  quiz_id,
-  description,
-  image_url,
-  year,
-  sort_order,
-  point_value
-`;
+const parseEvent = (value: unknown): FlashbackEvent => {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, [
+      "id",
+      "quiz_id",
+      "description",
+      "image_url",
+      "year",
+      "sort_order",
+      "point_value",
+    ]) ||
+    typeof value.id !== "string" ||
+    typeof value.quiz_id !== "string" ||
+    typeof value.description !== "string" ||
+    (value.image_url !== null && typeof value.image_url !== "string") ||
+    !Number.isInteger(value.year) ||
+    !Number.isInteger(value.sort_order) ||
+    !Number.isInteger(value.point_value)
+  ) {
+    return invalidBackendResponse("Invalid Flashback event response from backend");
+  }
+  return value as unknown as FlashbackEvent;
+};
 
-export async function listFlashbackQuizzes(): Promise<FlashbackQuiz[]> {
-  const result = await query<FlashbackQuiz>(
-    `SELECT ${FLASHBACK_QUIZ_COLUMNS}
-       FROM public.flashback_quizzes
-      ORDER BY publish_date DESC, created_at DESC`,
-  );
-  return result.rows;
+const requireStatus = (
+  result: Awaited<ReturnType<typeof fetchAdminBackendJson>>,
+  expectedStatus: number,
+  routeName: string,
+): Record<string, unknown> => {
+  if (result.status !== expectedStatus) {
+    throw buildAdminBackendStatusError({
+      status: result.status,
+      data: result.data,
+      fallbackMessage: "Flashback administration request failed",
+      routeName,
+      requestRole: "primary",
+    });
+  }
+  return result.data;
+};
+
+export async function listFlashbackQuizzes(
+  adminContext: VerifiedAdminContext,
+): Promise<FlashbackQuiz[]> {
+  const routeName = "flashback-admin:list-quizzes";
+  const result = await fetchAdminBackendJson(`${FLASHBACK_BACKEND_PATH}/quizzes`, {
+    apiVersion: "v2",
+    adminContext,
+    routeName,
+    requestRole: "primary",
+  });
+  const data = requireStatus(result, 200, routeName);
+  if (!Array.isArray(data.quizzes)) {
+    return invalidBackendResponse("Invalid Flashback quiz list response from backend");
+  }
+  return data.quizzes.map(parseQuiz);
 }
 
-export async function createFlashbackQuiz(input: {
-  title: string;
-  publishDate: string;
-  description?: string | null;
-}): Promise<FlashbackQuiz> {
-  const result = await query<FlashbackQuiz>(
-    `INSERT INTO public.flashback_quizzes (title, publish_date, description, is_published)
-     VALUES ($1, $2, $3, false)
-     RETURNING ${FLASHBACK_QUIZ_COLUMNS}`,
-    [input.title, input.publishDate, input.description ?? null],
-  );
-  return result.rows[0];
+export async function createFlashbackQuiz(
+  adminContext: VerifiedAdminContext,
+  input: {
+    title: string;
+    publishDate: string;
+    description?: string | null;
+  },
+): Promise<FlashbackQuiz> {
+  const routeName = "flashback-admin:create-quiz";
+  const result = await fetchAdminBackendJson(`${FLASHBACK_BACKEND_PATH}/quizzes`, {
+    apiVersion: "v2",
+    adminContext,
+    routeName,
+    requestRole: "primary",
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      title: input.title,
+      publish_date: input.publishDate,
+      description: input.description ?? null,
+    }),
+  });
+  return parseQuiz(requireStatus(result, 201, routeName).quiz);
 }
 
 export async function setFlashbackQuizPublished(
+  adminContext: VerifiedAdminContext,
   quizId: string,
   isPublished: boolean,
 ): Promise<FlashbackQuiz | null> {
-  const result = await query<FlashbackQuiz>(
-    `UPDATE public.flashback_quizzes
-        SET is_published = $2,
-            updated_at = now()
-      WHERE id = $1
-      RETURNING ${FLASHBACK_QUIZ_COLUMNS}`,
-    [quizId, isPublished],
+  const routeName = "flashback-admin:update-quiz";
+  const result = await fetchAdminBackendJson(
+    `${FLASHBACK_BACKEND_PATH}/quizzes/${encodeURIComponent(quizId)}`,
+    {
+      apiVersion: "v2",
+      adminContext,
+      routeName,
+      requestRole: "primary",
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ is_published: isPublished }),
+    },
   );
-  return result.rows[0] ?? null;
+  if (result.status === 404) return null;
+  return parseQuiz(requireStatus(result, 200, routeName).quiz);
 }
 
-export async function listFlashbackEvents(quizId: string): Promise<FlashbackEvent[]> {
-  const result = await query<FlashbackEvent>(
-    `SELECT ${FLASHBACK_EVENT_COLUMNS}
-       FROM public.flashback_events
-      WHERE quiz_id = $1
-      ORDER BY sort_order ASC`,
-    [quizId],
+export async function listFlashbackEvents(
+  adminContext: VerifiedAdminContext,
+  quizId: string,
+): Promise<FlashbackEvent[]> {
+  const routeName = "flashback-admin:list-events";
+  const result = await fetchAdminBackendJson(
+    `${FLASHBACK_BACKEND_PATH}/quizzes/${encodeURIComponent(quizId)}/events`,
+    {
+      apiVersion: "v2",
+      adminContext,
+      routeName,
+      requestRole: "primary",
+    },
   );
-  return result.rows;
-}
-
-async function requireFlashbackQuizForMutation(client: PoolClient, quizId: string): Promise<void> {
-  const result = await client.query<{ id: string }>(
-    `SELECT id
-       FROM public.flashback_quizzes
-      WHERE id = $1
-      FOR UPDATE`,
-    [quizId],
-  );
-  if ((result.rowCount ?? 0) === 0) {
-    throw new Error("quiz_not_found");
+  const data = requireStatus(result, 200, routeName);
+  if (!Array.isArray(data.events)) {
+    return invalidBackendResponse("Invalid Flashback event list response from backend");
   }
+  return data.events.map(parseEvent);
 }
 
-export async function createFlashbackEvent(input: {
-  quizId: string;
-  description: string;
-  year: number;
-  imageUrl?: string | null;
-  pointValue: number;
-}): Promise<FlashbackEvent> {
-  return withTransaction(async (client) => {
-    await requireFlashbackQuizForMutation(client, input.quizId);
-    const sortOrderResult = await client.query<SortOrderRow>(
-      `SELECT COALESCE(MAX(sort_order), 0)::int AS max_sort_order
-         FROM public.flashback_events
-        WHERE quiz_id = $1`,
-      [input.quizId],
-    );
-    const nextSortOrder = (sortOrderResult.rows[0]?.max_sort_order ?? 0) + 1;
-
-    const result = await client.query<FlashbackEvent>(
-      `INSERT INTO public.flashback_events (
-         quiz_id,
-         description,
-         year,
-         image_url,
-         point_value,
-         sort_order
-       )
-       VALUES ($1, $2, $3, $4, $5, $6)
-       RETURNING ${FLASHBACK_EVENT_COLUMNS}`,
-      [
-        input.quizId,
-        input.description,
-        input.year,
-        input.imageUrl ?? null,
-        input.pointValue,
-        nextSortOrder,
-      ],
-    );
-    return result.rows[0];
-  });
+export async function createFlashbackEvent(
+  adminContext: VerifiedAdminContext,
+  input: {
+    quizId: string;
+    description: string;
+    year: number;
+    imageUrl?: string | null;
+    pointValue: number;
+  },
+): Promise<FlashbackEvent | null> {
+  const routeName = "flashback-admin:create-event";
+  const result = await fetchAdminBackendJson(
+    `${FLASHBACK_BACKEND_PATH}/quizzes/${encodeURIComponent(input.quizId)}/events`,
+    {
+      apiVersion: "v2",
+      adminContext,
+      routeName,
+      requestRole: "primary",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        description: input.description,
+        year: input.year,
+        image_url: input.imageUrl ?? null,
+        point_value: input.pointValue,
+      }),
+    },
+  );
+  if (result.status === 404) return null;
+  return parseEvent(requireStatus(result, 201, routeName).event);
 }
 
-export async function deleteFlashbackEvent(eventId: string): Promise<boolean> {
-  return withTransaction(async (client) => {
-    const eventResult = await client.query<DeletedEventRow>(
-      `SELECT quiz_id, sort_order
-         FROM public.flashback_events
-        WHERE id = $1
-        FOR UPDATE`,
-      [eventId],
-    );
-    const deletedEvent = eventResult.rows[0];
-    if (!deletedEvent) {
-      return false;
-    }
-
-    await client.query(`DELETE FROM public.flashback_events WHERE id = $1`, [eventId]);
-    await client.query(
-      `UPDATE public.flashback_events
-          SET sort_order = sort_order - 1
-        WHERE quiz_id = $1
-          AND sort_order > $2`,
-      [deletedEvent.quiz_id, deletedEvent.sort_order],
-    );
-    return true;
-  });
+export async function deleteFlashbackEvent(
+  adminContext: VerifiedAdminContext,
+  eventId: string,
+): Promise<boolean> {
+  const routeName = "flashback-admin:delete-event";
+  const result = await fetchAdminBackendJson(
+    `${FLASHBACK_BACKEND_PATH}/events/${encodeURIComponent(eventId)}`,
+    {
+      apiVersion: "v2",
+      adminContext,
+      routeName,
+      requestRole: "primary",
+      method: "DELETE",
+    },
+  );
+  if (result.status === 404) return false;
+  requireStatus(result, 204, routeName);
+  return true;
 }

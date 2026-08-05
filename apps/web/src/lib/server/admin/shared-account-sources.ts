@@ -7,7 +7,12 @@ import type {
   SocialLandingPlatform,
 } from "@/lib/admin/social-landing";
 import { normalizeSocialAccountProfileHandle } from "@/lib/admin/show-admin-routes";
-import { query } from "@/lib/server/postgres";
+import {
+  AdminReadProxyError,
+  buildAdminBackendStatusError,
+  fetchAdminBackendJson,
+} from "@/lib/server/trr-api/admin-read-proxy";
+import type { VerifiedAdminContext } from "@/lib/server/trr-api/internal-admin-auth";
 
 export type SharedAccountSourceLoadSource = "backend" | "local_db_fallback";
 
@@ -19,7 +24,7 @@ export type SharedAccountSourceLoadStatus = {
   error_message?: string | null;
 };
 
-type SharedAccountSourceRow = {
+type SharedAccountSourcePayload = {
   id?: string | null;
   platform?: string | null;
   source_scope?: string | null;
@@ -28,9 +33,17 @@ type SharedAccountSourceRow = {
   scrape_priority?: number | string | null;
   metadata?: Record<string, unknown> | null;
   last_scrape_status?: string | null;
-  last_scrape_at?: string | Date | null;
-  last_classified_at?: string | Date | null;
+  last_scrape_at?: string | null;
+  last_classified_at?: string | null;
 };
+
+export type SharedAccountSourcesPayload = {
+  source_scope: SharedAccountSourceSetScope;
+  sources: SharedAccountSourceSummary[];
+  using_defaults: boolean;
+};
+
+const SHARED_ACCOUNT_SOURCES_BACKEND_PATH = "/admin/socials/shared-account-sources";
 
 export const normalizeSharedAccountSourceScope = (
   value: string | null | undefined,
@@ -101,14 +114,8 @@ export const toCanonicalInternalHandle = (
   return normalizeSocialAccountProfileHandle(trimmed);
 };
 
-const timestampToIsoString = (value: string | Date | null | undefined): string | null => {
-  if (!value) return null;
-  if (value instanceof Date) return value.toISOString();
-  return value;
-};
-
 const mapSharedSourceRow = (
-  row: SharedAccountSourceRow,
+  row: SharedAccountSourcePayload,
 ): SharedAccountSourceSummary | null => {
   const platform = normalizePlatform(row.platform);
   if (!platform || typeof row.account_handle !== "string") return null;
@@ -129,46 +136,93 @@ const mapSharedSourceRow = (
     scrape_priority: Number.isFinite(scrapePriority) ? scrapePriority : 0,
     metadata: row.metadata ?? null,
     last_scrape_status: row.last_scrape_status ?? null,
-    last_scrape_at: timestampToIsoString(row.last_scrape_at),
-    last_classified_at: timestampToIsoString(row.last_classified_at),
+    last_scrape_at: row.last_scrape_at ?? null,
+    last_classified_at: row.last_classified_at ?? null,
   };
 };
 
-export const loadSharedAccountSourcesFromLocalDb = async (options: {
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value) && typeof value === "object" && !Array.isArray(value);
+
+const invalidBackendResponse = (message: string): never => {
+  throw new AdminReadProxyError(message, 502, {
+    code: "INVALID_BACKEND_RESPONSE",
+    retryable: false,
+  });
+};
+
+const parseSharedAccountSourcesPayload = (value: unknown): SharedAccountSourcesPayload => {
+  if (!isRecord(value) || !Array.isArray(value.sources)) {
+    return invalidBackendResponse("Invalid shared account sources response from backend");
+  }
+  const sourceScope = normalizeSharedAccountSourceScope(
+    typeof value.source_scope === "string" ? value.source_scope : null,
+  );
+  const sources = value.sources
+    .map((source) => (isRecord(source) ? mapSharedSourceRow(source as SharedAccountSourcePayload) : null))
+    .filter((source): source is SharedAccountSourceSummary => source !== null);
+  return {
+    source_scope: sourceScope,
+    sources,
+    using_defaults: value.using_defaults === true,
+  };
+};
+
+const requireSuccess = (
+  result: Awaited<ReturnType<typeof fetchAdminBackendJson>>,
+  routeName: string,
+): Record<string, unknown> => {
+  if (result.status !== 200) {
+    throw buildAdminBackendStatusError({
+      status: result.status,
+      data: result.data,
+      fallbackMessage: "Shared account source request failed",
+      routeName,
+      requestRole: "primary",
+    });
+  }
+  return result.data;
+};
+
+export const loadSharedAccountSourcesFromBackend = async (
+  adminContext: VerifiedAdminContext,
+  options: {
   sourceScope: SharedAccountSourceSetScope;
   includeInactive?: boolean;
   platforms?: readonly SocialLandingPlatform[] | null;
-}): Promise<SharedAccountSourceSummary[]> => {
-  const params: unknown[] = [options.sourceScope];
-  const filters = ["source_scope = $1"];
-  if (options.includeInactive === false) {
-    filters.push("is_active = true");
-  }
+  },
+): Promise<SharedAccountSourcesPayload> => {
+  const query = new URLSearchParams({
+    source_scope: options.sourceScope,
+    include_inactive: String(options.includeInactive !== false),
+  });
   if (options.platforms?.length) {
-    params.push([...options.platforms]);
-    filters.push(`platform = any($${params.length}::text[])`);
+    query.set("platforms", options.platforms.join(","));
   }
+  const routeName = "shared-account-sources:get";
+  const result = await fetchAdminBackendJson(SHARED_ACCOUNT_SOURCES_BACKEND_PATH, {
+    apiVersion: "v2",
+    adminContext,
+    queryString: query.toString(),
+    routeName,
+    requestRole: "primary",
+  });
+  return parseSharedAccountSourcesPayload(requireSuccess(result, routeName));
+};
 
-  const result = await query(
-    `
-      select
-        id::text as id,
-        platform,
-        source_scope,
-        account_handle,
-        is_active,
-        scrape_priority,
-        metadata,
-        last_scrape_status,
-        last_scrape_at,
-        last_classified_at
-      from social.shared_account_sources
-      where ${filters.join(" and ")}
-      order by scrape_priority asc, platform asc, account_handle asc
-    `,
-    params,
-  );
-  return (result.rows as SharedAccountSourceRow[])
-    .map((row) => mapSharedSourceRow(row))
-    .filter((source): source is SharedAccountSourceSummary => source !== null);
+export const updateSharedAccountSourcesInBackend = async (
+  adminContext: VerifiedAdminContext,
+  body: string,
+): Promise<SharedAccountSourcesPayload> => {
+  const routeName = "shared-account-sources:put";
+  const result = await fetchAdminBackendJson(SHARED_ACCOUNT_SOURCES_BACKEND_PATH, {
+    apiVersion: "v2",
+    adminContext,
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body,
+    routeName,
+    requestRole: "primary",
+  });
+  return parseSharedAccountSourcesPayload(requireSuccess(result, routeName));
 };

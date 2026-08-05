@@ -2,9 +2,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { invalidateRouteResponseCache } from "@/lib/server/admin/route-response-cache";
 import { SURVEY_DETAIL_CACHE_NAMESPACE } from "@/lib/server/admin/survey-route-cache";
+import { AdminReadProxyError } from "@/lib/server/trr-api/admin-read-proxy";
 
 const {
   requireAdminMock,
+  toVerifiedAdminContextMock,
   getSurveyBySlugMock,
   getLinkBySurveyIdMock,
   getCastByShowSeasonMock,
@@ -13,6 +15,7 @@ const {
   listSeasonCastSurveyRolesMock,
 } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
+  toVerifiedAdminContextMock: vi.fn(),
   getSurveyBySlugMock: vi.fn(),
   getLinkBySurveyIdMock: vi.fn(),
   getCastByShowSeasonMock: vi.fn(),
@@ -23,6 +26,7 @@ const {
 
 vi.mock("@/lib/server/auth", () => ({
   requireAdmin: requireAdminMock,
+  toVerifiedAdminContext: toVerifiedAdminContextMock,
 }));
 
 vi.mock("@/lib/server/surveys/normalized-survey-admin-repository", () => ({
@@ -50,6 +54,7 @@ import { GET } from "@/app/api/admin/surveys/[surveyKey]/route";
 describe("survey detail route", () => {
   beforeEach(() => {
     requireAdminMock.mockReset();
+    toVerifiedAdminContextMock.mockReset();
     getSurveyBySlugMock.mockReset();
     getLinkBySurveyIdMock.mockReset();
     getCastByShowSeasonMock.mockReset();
@@ -57,6 +62,11 @@ describe("survey detail route", () => {
     getAssetsByShowSeasonMock.mockReset();
     listSeasonCastSurveyRolesMock.mockReset();
     requireAdminMock.mockResolvedValue({ uid: "admin-1" });
+    toVerifiedAdminContextMock.mockReturnValue({
+      uid: "admin-1",
+      email: null,
+      verifiedAt: 1_721_131_200_000,
+    });
     getSurveyBySlugMock.mockResolvedValue({
       id: "survey-1",
       slug: "traitors-season-3",
@@ -100,5 +110,76 @@ describe("survey detail route", () => {
     expect(second.status).toBe(200);
     expect(second.headers.get("x-trr-cache")).toBe("hit");
     expect(getSurveyBySlugMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("passes the verified admin context to season-role and asset reads", async () => {
+    getLinkBySurveyIdMock.mockResolvedValue({
+      survey_id: "survey-1",
+      trr_show_id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      season_number: 3,
+    });
+    getCastByShowSeasonMock.mockResolvedValue([]);
+    listSeasonCastSurveyRolesMock.mockResolvedValue([]);
+    getAssetsByShowSeasonMock.mockResolvedValue([]);
+
+    const response = await GET(
+      new NextRequest(
+        "http://localhost/api/admin/surveys/traitors-season-3?includeCast=true&includeAssets=true&refresh=1",
+      ),
+      { params: Promise.resolve({ surveyKey: "traitors-season-3" }) },
+    );
+
+    expect(response.status).toBe(200);
+    expect(listSeasonCastSurveyRolesMock).toHaveBeenCalledWith(
+      "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      3,
+      {
+        adminContext: {
+          uid: "admin-1",
+          email: null,
+          verifiedAt: 1_721_131_200_000,
+        },
+      },
+    );
+    expect(getAssetsByShowSeasonMock).toHaveBeenCalledWith(
+      "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      3,
+      {
+        limit: 200,
+        adminContext: {
+          uid: "admin-1",
+          email: null,
+          verifiedAt: 1_721_131_200_000,
+        },
+      },
+    );
+  });
+
+  it("maps typed retryable asset proxy errors", async () => {
+    getLinkBySurveyIdMock.mockResolvedValue({
+      survey_id: "survey-1",
+      trr_show_id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      season_number: 3,
+    });
+    getAssetsByShowSeasonMock.mockRejectedValue(
+      new AdminReadProxyError("Backend unavailable", 503, {
+        code: "BACKEND_UNAVAILABLE",
+        retryable: true,
+      }),
+    );
+
+    const response = await GET(
+      new NextRequest(
+        "http://localhost/api/admin/surveys/traitors-season-3?includeAssets=true&refresh=1",
+      ),
+      { params: Promise.resolve({ surveyKey: "traitors-season-3" }) },
+    );
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({
+      error: "Backend unavailable",
+      code: "BACKEND_UNAVAILABLE",
+      retryable: true,
+    });
   });
 });

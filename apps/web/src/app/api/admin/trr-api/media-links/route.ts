@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/server/auth";
+import { requireAdmin, toVerifiedAdminContext } from "@/lib/server/auth";
 import { createMediaLink, getAllLinksForAsset } from "@/lib/server/trr-api/media-links-repository";
-import { query } from "@/lib/server/postgres";
+import { buildAdminProxyErrorResponse } from "@/lib/server/trr-api/admin-read-proxy";
 
 /**
  * POST /api/admin/trr-api/media-links
@@ -16,7 +16,7 @@ import { query } from "@/lib/server/postgres";
  */
 export async function POST(request: NextRequest) {
   try {
-    await requireAdmin(request);
+    const user = await requireAdmin(request);
 
     const body = await request.json();
     const { media_asset_id, entity_type, entity_id, kind, context } = body;
@@ -43,21 +43,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Verify media asset exists using direct SQL (avoids PostgREST drift issues).
-    const assetResult = await query<{ id: string }>(
-      `SELECT id
-       FROM core.media_assets
-       WHERE id = $1::uuid
-       LIMIT 1`,
-      [media_asset_id]
-    );
-    if (!assetResult.rows[0]) {
-      return NextResponse.json(
-        { error: "Media asset not found" },
-        { status: 404 }
-      );
-    }
-
     // Create the link
     const result = await createMediaLink({
       media_asset_id,
@@ -65,21 +50,18 @@ export async function POST(request: NextRequest) {
       entity_id,
       kind: kind || "gallery",
       context: context || {},
+    }, {
+      adminContext: toVerifiedAdminContext(user),
     });
 
     return NextResponse.json({
       link: result.link,
       already_exists: result.already_exists,
-      message: result.already_exists
-        ? "Link already exists"
-        : "Link created successfully",
+      message: result.message,
     });
   } catch (error) {
     console.error("[media-links] POST error:", error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Internal server error" },
-      { status: 500 }
-    );
+    return buildAdminProxyErrorResponse(error);
   }
 }
 
@@ -89,7 +71,7 @@ export async function POST(request: NextRequest) {
  */
 export async function GET(request: NextRequest) {
   try {
-    await requireAdmin(request);
+    const user = await requireAdmin(request);
 
     const { searchParams } = new URL(request.url);
     const mediaAssetId = searchParams.get("media_asset_id");
@@ -101,14 +83,13 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const links = await getAllLinksForAsset(mediaAssetId);
+    const links = await getAllLinksForAsset(mediaAssetId, {
+      adminContext: toVerifiedAdminContext(user),
+    });
 
     return NextResponse.json({ links });
   } catch (error) {
     console.error("[media-links] GET error:", error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Internal server error" },
-      { status: 500 }
-    );
+    return buildAdminProxyErrorResponse(error);
   }
 }

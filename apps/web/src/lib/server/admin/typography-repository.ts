@@ -1,13 +1,12 @@
 import "server-only";
 
 import {
-  getOrCreateRouteResponsePromise,
-  getRouteResponseCache,
-  invalidateRouteResponseCache,
-  setRouteResponseCache,
-} from "@/lib/server/admin/route-response-cache";
-import { query } from "@/lib/server/postgres";
-import { buildSeededTypographyState, buildTypographyStateSnapshot } from "@/lib/server/admin/typography-seed";
+  AdminReadProxyError,
+  buildAdminBackendStatusError,
+  fetchAdminBackendJson,
+  ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
+} from "@/lib/server/trr-api/admin-read-proxy";
+import type { VerifiedAdminContext } from "@/lib/server/trr-api/internal-admin-auth";
 import { normalizeRoleConfig } from "@/lib/typography/runtime";
 import type {
   TypographyArea,
@@ -17,221 +16,151 @@ import type {
   TypographyState,
 } from "@/lib/typography/types";
 
-type TypographySetRow = {
-  id: string;
-  slug: string;
-  name: string;
-  area: TypographyArea;
-  seed_source: string;
-  roles: unknown;
-  created_at: string;
-  updated_at: string;
+const TYPOGRAPHY_AREAS = new Set<TypographyArea>(["user-frontend", "surveys", "admin"]);
+const TYPOGRAPHY_SET_KEYS = new Set([
+  "id",
+  "slug",
+  "name",
+  "area",
+  "seed_source",
+  "roles",
+  "created_at",
+  "updated_at",
+]);
+const TYPOGRAPHY_ASSIGNMENT_KEYS = new Set([
+  "id",
+  "area",
+  "page_key",
+  "instance_key",
+  "set_id",
+  "source_path",
+  "notes",
+  "created_at",
+  "updated_at",
+]);
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value) && typeof value === "object" && !Array.isArray(value);
+
+const hasExactKeys = (value: Record<string, unknown>, keys: ReadonlySet<string>): boolean =>
+  Object.keys(value).length === keys.size && Object.keys(value).every((key) => keys.has(key));
+
+const isTypographyArea = (value: unknown): value is TypographyArea =>
+  typeof value === "string" && TYPOGRAPHY_AREAS.has(value as TypographyArea);
+
+const optionalString = (value: unknown): string | null | undefined => {
+  if (value === null || value === undefined) return value;
+  return typeof value === "string" ? value : undefined;
 };
 
-type TypographyAssignmentRow = {
-  id: string;
-  area: TypographyArea;
-  page_key: string | null;
-  instance_key: string | null;
-  set_id: string;
-  source_path: string;
-  notes: string | null;
-  created_at: string;
-  updated_at: string;
-};
-
-const TYPOGRAPHY_STATE_CACHE_NAMESPACE = "typography-state";
-const TYPOGRAPHY_STATE_CACHE_KEY = "state";
-const TYPOGRAPHY_STATE_CACHE_TTL_MS = 30_000;
-const SEEDED_SNAPSHOT = buildTypographyStateSnapshot();
-const SEEDED_SET_ID_TO_SLUG = new Map(SEEDED_SNAPSHOT.sets.map((set) => [set.id, set.slug]));
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
+const invalidBackendResponse = (): AdminReadProxyError =>
+  new AdminReadProxyError("TRR-Backend returned an invalid typography response", 502, {
+    code: "INVALID_BACKEND_RESPONSE",
+    retryable: false,
+  });
 
 function parseRoles(value: unknown): Record<string, TypographyRoleConfig> {
-  if (!isRecord(value)) return {};
-  const next: Record<string, TypographyRoleConfig> = {};
+  if (!isRecord(value)) throw invalidBackendResponse();
+  const parsed: Record<string, TypographyRoleConfig> = {};
   for (const [key, role] of Object.entries(value)) {
     const normalized = normalizeRoleConfig(role as Partial<TypographyRoleConfig>);
-    if (!normalized) continue;
-    next[key] = normalized;
+    if (!normalized) throw invalidBackendResponse();
+    parsed[key] = normalized;
   }
-  return next;
+  if (Object.keys(parsed).length === 0) throw invalidBackendResponse();
+  return parsed;
 }
 
-function mapSet(row: TypographySetRow): TypographySet {
+export function parseTypographySet(value: unknown): TypographySet {
+  if (!isRecord(value) || !hasExactKeys(value, TYPOGRAPHY_SET_KEYS)) throw invalidBackendResponse();
+  if (
+    typeof value.id !== "string" ||
+    typeof value.slug !== "string" ||
+    typeof value.name !== "string" ||
+    !isTypographyArea(value.area) ||
+    typeof value.seed_source !== "string" ||
+    typeof value.created_at !== "string" ||
+    typeof value.updated_at !== "string"
+  ) {
+    throw invalidBackendResponse();
+  }
   return {
-    id: row.id,
-    slug: row.slug,
-    name: row.name,
-    area: row.area,
-    seedSource: row.seed_source,
-    roles: parseRoles(row.roles),
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
+    id: value.id,
+    slug: value.slug,
+    name: value.name,
+    area: value.area,
+    seedSource: value.seed_source,
+    roles: parseRoles(value.roles),
+    createdAt: value.created_at,
+    updatedAt: value.updated_at,
   };
 }
 
-function mapAssignment(row: TypographyAssignmentRow): TypographyAssignment {
+export function parseTypographyAssignment(value: unknown): TypographyAssignment {
+  if (!isRecord(value) || !hasExactKeys(value, TYPOGRAPHY_ASSIGNMENT_KEYS)) throw invalidBackendResponse();
+  const pageKey = optionalString(value.page_key);
+  const instanceKey = optionalString(value.instance_key);
+  const notes = optionalString(value.notes);
+  if (
+    typeof value.id !== "string" ||
+    !isTypographyArea(value.area) ||
+    pageKey === undefined ||
+    instanceKey === undefined ||
+    typeof value.set_id !== "string" ||
+    typeof value.source_path !== "string" ||
+    notes === undefined ||
+    typeof value.created_at !== "string" ||
+    typeof value.updated_at !== "string"
+  ) {
+    throw invalidBackendResponse();
+  }
   return {
-    id: row.id,
-    area: row.area,
-    pageKey: row.page_key,
-    instanceKey: row.instance_key,
-    setId: row.set_id,
-    sourcePath: row.source_path,
-    notes: row.notes,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
+    id: value.id,
+    area: value.area,
+    pageKey,
+    instanceKey,
+    setId: value.set_id,
+    sourcePath: value.source_path,
+    notes,
+    createdAt: value.created_at,
+    updatedAt: value.updated_at,
   };
 }
 
-function isConcurrentUpdateError(error: unknown): boolean {
-  if (!error || typeof error !== "object") return false;
-  const record = error as { code?: unknown; message?: unknown };
-  return record.code === "XX000" && typeof record.message === "string" && record.message.includes("tuple concurrently updated");
-}
-
-async function sleep(ms: number): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function invalidateTypographyStateCache(): void {
-  invalidateRouteResponseCache(TYPOGRAPHY_STATE_CACHE_NAMESPACE, TYPOGRAPHY_STATE_CACHE_KEY);
-}
-
-// Schema ownership moved to backend migration
-// 20260427140000_quarantine_typography_runtime_ddl.sql (Wave A E1/I4 mirror, 2026-04-27).
-// Request-time schema bootstrap was removed; runtime now assumes the backend
-// migration has applied site_typography_sets / site_typography_assignments.
-
-async function seedTypographyIfMissing(): Promise<void> {
-  const seeded = buildSeededTypographyState();
-
-  for (const set of seeded.sets) {
-    await query(
-      `INSERT INTO site_typography_sets (slug, name, area, seed_source, roles)
-       VALUES ($1, $2, $3, $4, $5::jsonb)
-       ON CONFLICT (slug) DO NOTHING`,
-      [set.slug, set.name, set.area, set.seedSource, JSON.stringify(set.roles)],
-    );
+export function parseTypographyStatePayload(value: unknown): TypographyState {
+  if (!isRecord(value) || !hasExactKeys(value, new Set(["sets", "assignments"]))) {
+    throw invalidBackendResponse();
   }
-
-  const existingSetsResult = await query<TypographySetRow>(
-    `SELECT id, slug, name, area, seed_source, roles, created_at, updated_at
-     FROM site_typography_sets`
-  );
-  const setIdBySlug = new Map(existingSetsResult.rows.map((row) => [row.slug, row.id]));
-
-  for (const assignment of seeded.assignments) {
-    const setId = setIdBySlug.get(assignment.setSlug);
-    if (!setId) continue;
-    await query(
-      `INSERT INTO site_typography_assignments (area, page_key, instance_key, set_id, source_path, notes)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       ON CONFLICT (
-         area,
-         COALESCE(page_key, ''),
-         COALESCE(instance_key, '')
-       ) DO NOTHING`,
-      [assignment.area, assignment.pageKey, assignment.instanceKey, setId, assignment.sourcePath, assignment.notes],
-    );
-  }
+  if (!Array.isArray(value.sets) || !Array.isArray(value.assignments)) throw invalidBackendResponse();
+  return {
+    sets: value.sets.map(parseTypographySet),
+    assignments: value.assignments.map(parseTypographyAssignment),
+  };
 }
 
-function isMissingTypographyTableError(error: unknown): boolean {
-  if (!error || typeof error !== "object") return false;
-  const record = error as { code?: unknown; message?: unknown };
-  if (record.code !== "42P01") return false;
-  return String(record.message ?? "").toLowerCase().includes("site_typography_");
+export function parseTypographySetPayload(value: unknown): TypographySet {
+  if (!isRecord(value) || !hasExactKeys(value, new Set(["set"]))) throw invalidBackendResponse();
+  return parseTypographySet(value.set);
 }
 
-async function resolveTypographySetId(setId: string): Promise<string> {
-  await seedTypographyIfMissing();
-
-  const seededSlug = SEEDED_SET_ID_TO_SLUG.get(setId);
-  if (!seededSlug) {
-    return setId;
-  }
-
-  const resolved = await query<{ id: string }>(
-    `SELECT id
-     FROM site_typography_sets
-     WHERE slug = $1
-     LIMIT 1`,
-    [seededSlug],
-  );
-  return resolved.rows[0]?.id ?? setId;
+export function parseTypographyAssignmentPayload(value: unknown): TypographyAssignment {
+  if (!isRecord(value) || !hasExactKeys(value, new Set(["assignment"]))) throw invalidBackendResponse();
+  return parseTypographyAssignment(value.assignment);
 }
 
-async function readPersistedTypographyState(): Promise<TypographyState | null> {
-  try {
-    const [setsResult, assignmentsResult] = await Promise.all([
-      query<TypographySetRow>(
-        `SELECT id, slug, name, area, seed_source, roles, created_at, updated_at
-         FROM site_typography_sets
-         ORDER BY area ASC, name ASC`
-      ),
-      query<TypographyAssignmentRow>(
-        `SELECT id, area, page_key, instance_key, set_id, source_path, notes, created_at, updated_at
-         FROM site_typography_assignments
-         ORDER BY area ASC, page_key ASC NULLS FIRST, instance_key ASC NULLS FIRST, source_path ASC`
-      ),
-    ]);
+const backendFailure = (status: number, data: Record<string, unknown>, fallbackMessage: string, routeName: string) =>
+  buildAdminBackendStatusError({ status, data, fallbackMessage, routeName });
 
-    if (setsResult.rows.length === 0 && assignmentsResult.rows.length === 0) {
-      return null;
-    }
-
-    return {
-      sets: setsResult.rows.map(mapSet),
-      assignments: assignmentsResult.rows.map(mapAssignment),
-    };
-  } catch (error) {
-    if (isMissingTypographyTableError(error)) {
-      return null;
-    }
-    throw error;
-  }
-}
-
-export async function getTypographyState(): Promise<TypographyState> {
-  const cached = getRouteResponseCache<TypographyState>(TYPOGRAPHY_STATE_CACHE_NAMESPACE, TYPOGRAPHY_STATE_CACHE_KEY);
-  if (cached) {
-    return cached;
-  }
-
-  return getOrCreateRouteResponsePromise(TYPOGRAPHY_STATE_CACHE_NAMESPACE, TYPOGRAPHY_STATE_CACHE_KEY, async () => {
-    for (let attempt = 1; attempt <= 3; attempt += 1) {
-      try {
-        const state = (await readPersistedTypographyState()) ?? SEEDED_SNAPSHOT;
-        setRouteResponseCache(
-          TYPOGRAPHY_STATE_CACHE_NAMESPACE,
-          TYPOGRAPHY_STATE_CACHE_KEY,
-          state,
-          TYPOGRAPHY_STATE_CACHE_TTL_MS,
-        );
-        return state;
-      } catch (error) {
-        if (!isConcurrentUpdateError(error) || attempt === 3) {
-          throw error;
-        }
-      }
-
-      await sleep(50 * attempt);
-    }
-
-    const fallback = SEEDED_SNAPSHOT;
-    setRouteResponseCache(
-      TYPOGRAPHY_STATE_CACHE_NAMESPACE,
-      TYPOGRAPHY_STATE_CACHE_KEY,
-      fallback,
-      TYPOGRAPHY_STATE_CACHE_TTL_MS,
-    );
-    return fallback;
+export async function getTypographyState(options?: { adminContext?: VerifiedAdminContext }): Promise<TypographyState> {
+  const routeName = "site-typography:state";
+  const upstream = await fetchAdminBackendJson("/admin/site-typography", {
+    apiVersion: "v2",
+    adminContext: options?.adminContext,
+    timeoutMs: ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
+    routeName,
   });
+  if (upstream.status !== 200) throw backendFailure(upstream.status, upstream.data, "Failed to fetch typography state", routeName);
+  return parseTypographyStatePayload(upstream.data);
 }
 
 export interface CreateTypographySetInput {
@@ -242,20 +171,28 @@ export interface CreateTypographySetInput {
   roles: Record<string, TypographyRoleConfig>;
 }
 
-export async function createTypographySet(input: CreateTypographySetInput): Promise<TypographySet> {
-  await seedTypographyIfMissing();
-  const slug = (input.slug?.trim() || input.name)
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-  const result = await query<TypographySetRow>(
-    `INSERT INTO site_typography_sets (slug, name, area, seed_source, roles)
-     VALUES ($1, $2, $3, $4, $5::jsonb)
-     RETURNING id, slug, name, area, seed_source, roles, created_at, updated_at`,
-    [slug, input.name.trim(), input.area, input.seedSource.trim(), JSON.stringify(input.roles)],
-  );
-  invalidateTypographyStateCache();
-  return mapSet(result.rows[0]!);
+export async function createTypographySet(
+  input: CreateTypographySetInput,
+  options?: { adminContext?: VerifiedAdminContext },
+): Promise<TypographySet> {
+  const routeName = "site-typography:create-set";
+  const upstream = await fetchAdminBackendJson("/admin/site-typography/sets", {
+    apiVersion: "v2",
+    method: "POST",
+    adminContext: options?.adminContext,
+    timeoutMs: ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
+    routeName,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      ...(input.slug?.trim() ? { slug: input.slug.trim() } : {}),
+      name: input.name.trim(),
+      area: input.area,
+      seed_source: input.seedSource.trim(),
+      roles: input.roles,
+    }),
+  });
+  if (upstream.status !== 201) throw backendFailure(upstream.status, upstream.data, "Failed to create typography set", routeName);
+  return parseTypographySetPayload(upstream.data);
 }
 
 export interface UpdateTypographySetInput {
@@ -265,64 +202,50 @@ export interface UpdateTypographySetInput {
   roles?: Record<string, TypographyRoleConfig>;
 }
 
-export async function updateTypographySet(setId: string, input: UpdateTypographySetInput): Promise<TypographySet | null> {
-  const resolvedSetId = await resolveTypographySetId(setId);
-  const updates: string[] = [];
-  const values: unknown[] = [];
-  let index = 1;
-
-  if (input.name !== undefined) {
-    updates.push(`name = $${index++}`);
-    values.push(input.name.trim());
-  }
-  if (input.area !== undefined) {
-    updates.push(`area = $${index++}`);
-    values.push(input.area);
-  }
-  if (input.seedSource !== undefined) {
-    updates.push(`seed_source = $${index++}`);
-    values.push(input.seedSource.trim());
-  }
-  if (input.roles !== undefined) {
-    updates.push(`roles = $${index++}::jsonb`);
-    values.push(JSON.stringify(input.roles));
-  }
-
-  if (updates.length === 0) {
-    const state = await getTypographyState();
-    return state.sets.find((set) => set.id === setId || set.id === resolvedSetId) ?? null;
-  }
-
-  values.push(resolvedSetId);
-  const result = await query<TypographySetRow>(
-    `UPDATE site_typography_sets
-     SET ${updates.join(", ")}
-     WHERE id = $${index}
-     RETURNING id, slug, name, area, seed_source, roles, created_at, updated_at`,
-    values,
-  );
-  if (result.rows[0]) {
-    invalidateTypographyStateCache();
-  }
-  return result.rows[0] ? mapSet(result.rows[0]) : null;
+export async function updateTypographySet(
+  setId: string,
+  input: UpdateTypographySetInput,
+  options?: { adminContext?: VerifiedAdminContext },
+): Promise<TypographySet | null> {
+  const routeName = "site-typography:update-set";
+  const upstream = await fetchAdminBackendJson(`/admin/site-typography/sets/${encodeURIComponent(setId)}`, {
+    apiVersion: "v2",
+    method: "PUT",
+    adminContext: options?.adminContext,
+    timeoutMs: ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
+    routeName,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      ...(input.name !== undefined ? { name: input.name.trim() } : {}),
+      ...(input.area !== undefined ? { area: input.area } : {}),
+      ...(input.seedSource !== undefined ? { seed_source: input.seedSource.trim() } : {}),
+      ...(input.roles !== undefined ? { roles: input.roles } : {}),
+    }),
+  });
+  if (upstream.status === 404) return null;
+  if (upstream.status !== 200) throw backendFailure(upstream.status, upstream.data, "Failed to update typography set", routeName);
+  return parseTypographySetPayload(upstream.data);
 }
 
-export async function deleteTypographySet(setId: string): Promise<"deleted" | "in-use" | "missing"> {
-  const resolvedSetId = await resolveTypographySetId(setId);
-  const assignments = await query<{ count: string }>(
-    `SELECT count(*)::text AS count
-     FROM site_typography_assignments
-     WHERE set_id = $1`,
-    [resolvedSetId],
-  );
-  if (Number(assignments.rows[0]?.count ?? "0") > 0) {
-    return "in-use";
+export async function deleteTypographySet(
+  setId: string,
+  options?: { adminContext?: VerifiedAdminContext },
+): Promise<"deleted" | "in-use" | "missing"> {
+  const routeName = "site-typography:delete-set";
+  const upstream = await fetchAdminBackendJson(`/admin/site-typography/sets/${encodeURIComponent(setId)}`, {
+    apiVersion: "v2",
+    method: "DELETE",
+    adminContext: options?.adminContext,
+    timeoutMs: ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
+    routeName,
+  });
+  if (upstream.status === 404) return "missing";
+  if (upstream.status === 409) return "in-use";
+  if (upstream.status !== 200) throw backendFailure(upstream.status, upstream.data, "Failed to delete typography set", routeName);
+  if (!isRecord(upstream.data) || !hasExactKeys(upstream.data, new Set(["ok"])) || upstream.data.ok !== true) {
+    throw invalidBackendResponse();
   }
-  const result = await query(`DELETE FROM site_typography_sets WHERE id = $1`, [resolvedSetId]);
-  if ((result.rowCount ?? 0) > 0) {
-    invalidateTypographyStateCache();
-  }
-  return (result.rowCount ?? 0) > 0 ? "deleted" : "missing";
+  return "deleted";
 }
 
 export interface UpdateTypographyAssignmentInput {
@@ -334,35 +257,27 @@ export interface UpdateTypographyAssignmentInput {
   notes?: string | null;
 }
 
-export async function upsertTypographyAssignment(input: UpdateTypographyAssignmentInput): Promise<TypographyAssignment> {
-  const resolvedSetId = await resolveTypographySetId(input.setId);
-  const existing = await query<TypographyAssignmentRow>(
-    `SELECT id, area, page_key, instance_key, set_id, source_path, notes, created_at, updated_at
-     FROM site_typography_assignments
-     WHERE area = $1
-       AND COALESCE(page_key, '') = COALESCE($2, '')
-       AND COALESCE(instance_key, '') = COALESCE($3, '')`,
-    [input.area, input.pageKey ?? null, input.instanceKey ?? null],
-  );
-
-  if (existing.rows[0]) {
-    const updated = await query<TypographyAssignmentRow>(
-      `UPDATE site_typography_assignments
-       SET set_id = $1, source_path = $2, notes = $3
-       WHERE id = $4
-       RETURNING id, area, page_key, instance_key, set_id, source_path, notes, created_at, updated_at`,
-      [resolvedSetId, input.sourcePath.trim(), input.notes ?? null, existing.rows[0].id],
-    );
-    invalidateTypographyStateCache();
-    return mapAssignment(updated.rows[0]!);
-  }
-
-  const inserted = await query<TypographyAssignmentRow>(
-    `INSERT INTO site_typography_assignments (area, page_key, instance_key, set_id, source_path, notes)
-     VALUES ($1, $2, $3, $4, $5, $6)
-     RETURNING id, area, page_key, instance_key, set_id, source_path, notes, created_at, updated_at`,
-    [input.area, input.pageKey ?? null, input.instanceKey ?? null, resolvedSetId, input.sourcePath.trim(), input.notes ?? null],
-  );
-  invalidateTypographyStateCache();
-  return mapAssignment(inserted.rows[0]!);
+export async function upsertTypographyAssignment(
+  input: UpdateTypographyAssignmentInput,
+  options?: { adminContext?: VerifiedAdminContext },
+): Promise<TypographyAssignment> {
+  const routeName = "site-typography:upsert-assignment";
+  const upstream = await fetchAdminBackendJson("/admin/site-typography/assignments", {
+    apiVersion: "v2",
+    method: "PUT",
+    adminContext: options?.adminContext,
+    timeoutMs: ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
+    routeName,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      area: input.area,
+      page_key: input.pageKey ?? null,
+      instance_key: input.instanceKey ?? null,
+      set_id: input.setId,
+      source_path: input.sourcePath.trim(),
+      notes: input.notes ?? null,
+    }),
+  });
+  if (upstream.status !== 200) throw backendFailure(upstream.status, upstream.data, "Failed to update typography assignment", routeName);
+  return parseTypographyAssignmentPayload(upstream.data);
 }

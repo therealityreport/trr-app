@@ -9,6 +9,7 @@ declare global {
   // Clearing them here keeps dedupe/cache tests independent from suite order.
   var __trrAdminRouteCache: Map<string, unknown> | undefined;
   var __trrAdminRouteInFlight: Map<string, Promise<unknown>> | undefined;
+  var __trrAdminRouteCacheGeneration: Map<string, number> | undefined;
 }
 
 // Scrub env vars that individual test files set via direct `process.env.X = "..."`
@@ -38,6 +39,7 @@ afterEach(() => {
   vi.useRealTimers();
   globalThis.__trrAdminRouteCache?.clear();
   globalThis.__trrAdminRouteInFlight?.clear();
+  globalThis.__trrAdminRouteCacheGeneration?.clear();
   scrubLeakedEnvs();
   try {
     window.localStorage.clear();

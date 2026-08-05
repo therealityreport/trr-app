@@ -1,16 +1,22 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { queryMock } = vi.hoisted(() => ({
+const { fetchAdminBackendJsonMock, queryMock } = vi.hoisted(() => ({
+  fetchAdminBackendJsonMock: vi.fn(),
   queryMock: vi.fn(),
 }));
 
-vi.mock("@/lib/server/postgres", () => ({
-  query: queryMock,
+vi.mock("@/lib/server/postgres", () => ({ query: queryMock }));
+
+vi.mock("@/lib/server/trr-api/admin-read-proxy", () => ({
+  ADMIN_READ_PROXY_SHORT_TIMEOUT_MS: 5_000,
+  fetchAdminBackendJson: fetchAdminBackendJsonMock,
+  buildAdminBackendStatusError: ({ fallbackMessage }: { fallbackMessage: string }) =>
+    new Error(fallbackMessage),
 }));
 
 import { getCastByShowId } from "@/lib/server/trr-api/trr-shows-repository";
 
-const buildShowCastRow = () => ({
+const castMember = {
   id: "cast-1",
   show_id: "show-1",
   person_id: "person-1",
@@ -20,84 +26,48 @@ const buildShowCastRow = () => ({
   billing_order: 1,
   credit_category: "cast",
   source_type: "imdb_show_membership",
+  full_name: "Person One",
+  known_for: null,
+  photo_url: "https://cdn.example.com/person-one.jpg",
   created_at: "2026-01-01T00:00:00.000Z",
   updated_at: "2026-01-01T00:00:00.000Z",
-});
+};
 
 describe("trr shows repository cast photo fallback mode", () => {
   beforeEach(() => {
-    queryMock.mockReset();
     vi.restoreAllMocks();
+    fetchAdminBackendJsonMock.mockReset();
+    queryMock.mockReset();
+    fetchAdminBackendJsonMock.mockResolvedValue({
+      status: 200,
+      data: { cast: [castMember] },
+    });
   });
 
-  it("does not call external Bravo profile fetch when fallback mode is none", async () => {
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue({
-      ok: false,
-      text: async () => "",
-    } as Response);
-    queryMock.mockImplementation(async (text: string) => {
-      if (text.includes("FROM core.v_show_cast")) {
-        return { rows: [buildShowCastRow()] };
-      }
-      if (text.includes("FROM core.people") && text.includes("known_for")) {
-        return { rows: [{ id: "person-1", full_name: "Person One", known_for: null }] };
-      }
-      if (text.includes("FROM core.media_links ml")) {
-        return { rows: [] };
-      }
-      if (text.includes("FROM core.v_cast_photos")) {
-        return { rows: [] };
-      }
-      return { rows: [] };
-    });
+  it("delegates none mode without running an app-side profile fetch", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
 
     const result = await getCastByShowId("show-1", {
       limit: 10,
       offset: 0,
       photoFallbackMode: "none",
     });
-
     expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject(castMember);
+
+    expect(fetchAdminBackendJsonMock).toHaveBeenCalledWith(
+      "/shows/show-1/cast",
+      expect.objectContaining({
+        queryString:
+          "view=membership&include_photos=true&photo_fallback=none&limit=10&offset=0",
+      }),
+    );
     expect(fetchSpy).not.toHaveBeenCalled();
+    expect(queryMock).not.toHaveBeenCalled();
   });
 
-  it("calls external Bravo profile fetch when fallback mode is bravo", async () => {
-    queryMock.mockImplementation(async (text: string) => {
-      if (text.includes("FROM core.v_show_cast")) {
-        return { rows: [buildShowCastRow()] };
-      }
-      if (text.includes("FROM core.people") && text.includes("known_for")) {
-        return { rows: [{ id: "person-1", full_name: "Person One", known_for: null }] };
-      }
-      if (text.includes("FROM core.media_links ml")) {
-        return { rows: [] };
-      }
-      if (text.includes("FROM core.v_cast_photos")) {
-        return { rows: [] };
-      }
-      if (text.includes("FROM core.entity_links")) {
-        return { rows: [] };
-      }
-      if (text.includes("FROM core.people") && text.includes("profile_image_url")) {
-        return {
-          rows: [
-            {
-              id: "person-1",
-              full_name: "Person One",
-              profile_image_url: null,
-              homepage: null,
-            },
-          ],
-        };
-      }
-      return { rows: [] };
-    });
-
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue({
-      ok: true,
-      text: async () =>
-        '<html><head><meta property="og:image" content="https://cdn.example.com/person-one.jpg"></head></html>',
-    } as Response);
+  it("delegates Bravo mode to the bounded backend fallback", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
 
     const result = await getCastByShowId("show-1", {
       limit: 10,
@@ -105,65 +75,15 @@ describe("trr shows repository cast photo fallback mode", () => {
       photoFallbackMode: "bravo",
     });
 
-    expect(result).toHaveLength(1);
-    expect(fetchSpy).toHaveBeenCalled();
-    expect(String(fetchSpy.mock.calls[0]?.[0] ?? "")).toContain("https://www.bravotv.com/people/person-one");
-  });
-
-  it("prefers entity link featured image metadata before live Bravo fetch", async () => {
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue({
-      ok: false,
-      text: async () => "",
-    } as Response);
-    queryMock.mockImplementation(async (text: string) => {
-      if (text.includes("FROM core.v_show_cast")) {
-        return { rows: [buildShowCastRow()] };
-      }
-      if (text.includes("FROM core.people") && text.includes("known_for")) {
-        return { rows: [{ id: "person-1", full_name: "Person One", known_for: null }] };
-      }
-      if (text.includes("FROM core.media_links ml")) {
-        return { rows: [] };
-      }
-      if (text.includes("FROM core.v_cast_photos")) {
-        return { rows: [] };
-      }
-      if (text.includes("FROM core.entity_links") && text.includes("featured_image_url")) {
-        return {
-          rows: [
-            {
-              person_id: "person-1",
-              featured_image_url: "https://cdn.example.com/person-one-link.jpg",
-            },
-          ],
-        };
-      }
-      if (text.includes("FROM core.entity_links")) {
-        return { rows: [] };
-      }
-      if (text.includes("FROM core.people") && text.includes("profile_image_url")) {
-        return {
-          rows: [
-            {
-              id: "person-1",
-              full_name: "Person One",
-              profile_image_url: null,
-              homepage: null,
-            },
-          ],
-        };
-      }
-      return { rows: [] };
-    });
-
-    const result = await getCastByShowId("show-1", {
-      limit: 10,
-      offset: 0,
-      photoFallbackMode: "bravo",
-    });
-
-    expect(result).toHaveLength(1);
-    expect(result[0]?.photo_url).toBe("https://cdn.example.com/person-one-link.jpg");
+    expect(result[0]?.photo_url).toBe("https://cdn.example.com/person-one.jpg");
+    expect(fetchAdminBackendJsonMock).toHaveBeenCalledWith(
+      "/shows/show-1/cast",
+      expect.objectContaining({
+        queryString:
+          "view=membership&include_photos=true&photo_fallback=bravo&limit=10&offset=0",
+      }),
+    );
     expect(fetchSpy).not.toHaveBeenCalled();
+    expect(queryMock).not.toHaveBeenCalled();
   });
 });

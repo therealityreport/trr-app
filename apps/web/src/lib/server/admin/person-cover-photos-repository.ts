@@ -1,15 +1,37 @@
 import "server-only";
 
-import { query, withAuthTransaction, type AuthContext } from "@/lib/server/postgres";
+import {
+  AdminReadProxyError,
+  ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
+  buildAdminBackendStatusError,
+  fetchAdminBackendJson,
+  type AdminBackendJsonResult,
+} from "@/lib/server/trr-api/admin-read-proxy";
+import type { VerifiedAdminContext } from "@/lib/server/trr-api/internal-admin-auth";
 
-// ============================================================================
-// Types
-// ============================================================================
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const RFC3339_PATTERN =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
+const COVER_PHOTO_ENVELOPE_KEYS = new Set(["coverPhoto"]);
+const COVER_PHOTO_READ_KEYS = new Set(["person_id", "photo_id", "photo_url"]);
+const COVER_PHOTO_V2_KEYS = new Set([
+  "person_id",
+  "photo_id",
+  "photo_url",
+  "created_at",
+  "updated_at",
+  "created_by_firebase_uid",
+]);
+const DELETE_RESPONSE_KEYS = new Set(["success", "removed"]);
 
-export interface PersonCoverPhoto {
+export interface PersonCoverPhotoRead {
   person_id: string;
   photo_id: string;
   photo_url: string;
+}
+
+export interface PersonCoverPhoto extends PersonCoverPhotoRead {
   created_at: string;
   updated_at: string;
   created_by_firebase_uid: string;
@@ -21,91 +43,223 @@ export interface SetCoverPhotoInput {
   photo_url: string;
 }
 
-// ============================================================================
-// Table Helper
-// ============================================================================
+type CoverPhotoReadOptions = {
+  adminContext: VerifiedAdminContext;
+};
 
-const TABLE = "admin.person_cover_photos";
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value) && typeof value === "object" && !Array.isArray(value);
 
-// ============================================================================
-// Read Operations
-// ============================================================================
+const hasExactKeys = (value: Record<string, unknown>, keys: ReadonlySet<string>): boolean =>
+  Object.keys(value).length === keys.size && Object.keys(value).every((key) => keys.has(key));
 
-/**
- * Get the cover photo for a person.
- */
-export async function getCoverPhoto(personId: string): Promise<PersonCoverPhoto | null> {
-  const result = await query<PersonCoverPhoto>(
-    `SELECT * FROM ${TABLE} WHERE person_id = $1`,
-    [personId],
-  );
-  return result.rows[0] ?? null;
-}
-
-/**
- * Get cover photos for multiple people (batch).
- */
-export async function getCoverPhotos(personIds: string[]): Promise<Map<string, PersonCoverPhoto>> {
-  if (personIds.length === 0) return new Map();
-
-  const placeholders = personIds.map((_, i) => `$${i + 1}`).join(", ");
-  const result = await query<PersonCoverPhoto>(
-    `SELECT * FROM ${TABLE} WHERE person_id IN (${placeholders})`,
-    personIds,
-  );
-
-  const map = new Map<string, PersonCoverPhoto>();
-  for (const photo of result.rows) {
-    map.set(photo.person_id, photo);
+const isValidHttpUrl = (value: string): boolean => {
+  try {
+    const parsed = new URL(value);
+    return (parsed.protocol === "http:" || parsed.protocol === "https:") && Boolean(parsed.host);
+  } catch {
+    return false;
   }
-  return map;
+};
+
+const isRfc3339 = (value: unknown): value is string =>
+  typeof value === "string" &&
+  RFC3339_PATTERN.test(value) &&
+  Number.isFinite(Date.parse(value));
+
+const invalidBackendResponse = (): AdminReadProxyError =>
+  new AdminReadProxyError("TRR-Backend returned an invalid person cover-photo response", 502, {
+    code: "INVALID_BACKEND_RESPONSE",
+    retryable: false,
+  });
+
+const parseReadRecord = (value: unknown, options: { strict: boolean }): PersonCoverPhotoRead => {
+  if (
+    !isRecord(value) ||
+    (options.strict && !hasExactKeys(value, COVER_PHOTO_READ_KEYS)) ||
+    typeof value.person_id !== "string" ||
+    !UUID_PATTERN.test(value.person_id) ||
+    typeof value.photo_id !== "string" ||
+    value.photo_id.trim().length === 0 ||
+    typeof value.photo_url !== "string" ||
+    !isValidHttpUrl(value.photo_url)
+  ) {
+    throw invalidBackendResponse();
+  }
+  return {
+    person_id: value.person_id,
+    photo_id: value.photo_id,
+    photo_url: value.photo_url,
+  };
+};
+
+const parseV2Record = (value: unknown): PersonCoverPhoto => {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, COVER_PHOTO_V2_KEYS) ||
+    !isRfc3339(value.created_at) ||
+    !isRfc3339(value.updated_at) ||
+    typeof value.created_by_firebase_uid !== "string" ||
+    value.created_by_firebase_uid.trim().length === 0
+  ) {
+    throw invalidBackendResponse();
+  }
+  return {
+    ...parseReadRecord(value, { strict: false }),
+    created_at: value.created_at,
+    updated_at: value.updated_at,
+    created_by_firebase_uid: value.created_by_firebase_uid,
+  };
+};
+
+const parseV2Payload = (data: Record<string, unknown>): PersonCoverPhoto | null => {
+  if (!hasExactKeys(data, COVER_PHOTO_ENVELOPE_KEYS)) throw invalidBackendResponse();
+  return data.coverPhoto === null ? null : parseV2Record(data.coverPhoto);
+};
+
+const parseLegacyPayload = (data: Record<string, unknown>): PersonCoverPhotoRead | null => {
+  if (!hasExactKeys(data, COVER_PHOTO_ENVELOPE_KEYS)) throw invalidBackendResponse();
+  return data.coverPhoto === null
+    ? null
+    : parseReadRecord(data.coverPhoto, { strict: true });
+};
+
+const isMissingV2Route = (upstream: AdminBackendJsonResult): boolean =>
+  upstream.status === 404 &&
+  hasExactKeys(upstream.data, new Set(["detail"])) &&
+  upstream.data.detail === "Not Found";
+
+const assertMatchingPerson = (photo: PersonCoverPhotoRead | null, personId: string): void => {
+  if (photo && photo.person_id.toLowerCase() !== personId.toLowerCase()) {
+    throw invalidBackendResponse();
+  }
+};
+
+const loadLegacyCoverPhoto = async (
+  personId: string,
+  options: CoverPhotoReadOptions,
+): Promise<PersonCoverPhotoRead | null> => {
+  const upstream = await fetchAdminBackendJson(
+    `/admin/people/${encodeURIComponent(personId)}/cover-photo`,
+    {
+      apiVersion: "v1",
+      adminContext: options.adminContext,
+      timeoutMs: ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
+      routeName: "person-cover-photo-legacy",
+    },
+  );
+  if (upstream.status !== 200) {
+    throw buildAdminBackendStatusError({
+      status: upstream.status,
+      data: upstream.data,
+      fallbackMessage: "Failed to get the legacy person cover photo",
+      routeName: "person-cover-photo-legacy",
+    });
+  }
+  const coverPhoto = parseLegacyPayload(upstream.data);
+  assertMatchingPerson(coverPhoto, personId);
+  return coverPhoto;
+};
+
+export async function getCoverPhoto(
+  personId: string,
+  options: CoverPhotoReadOptions,
+): Promise<PersonCoverPhotoRead | null> {
+  const upstream = await fetchAdminBackendJson(
+    `/admin/people/${encodeURIComponent(personId)}/cover-photos`,
+    {
+      apiVersion: "v2",
+      adminContext: options.adminContext,
+      timeoutMs: ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
+      routeName: "person-cover-photo",
+    },
+  );
+  if (upstream.status === 200) {
+    const fullPhoto = parseV2Payload(upstream.data);
+    assertMatchingPerson(fullPhoto, personId);
+    return fullPhoto
+      ? {
+          person_id: fullPhoto.person_id,
+          photo_id: fullPhoto.photo_id,
+          photo_url: fullPhoto.photo_url,
+        }
+      : null;
+  }
+  if (isMissingV2Route(upstream)) {
+    return loadLegacyCoverPhoto(personId, options);
+  }
+  throw buildAdminBackendStatusError({
+    status: upstream.status,
+    data: upstream.data,
+    fallbackMessage: "Failed to get the person cover photo",
+    routeName: "person-cover-photo",
+  });
 }
 
-// ============================================================================
-// Write Operations
-// ============================================================================
-
-/**
- * Set the cover photo for a person.
- * Upserts - creates if not exists, updates if exists.
- */
 export async function setCoverPhoto(
-  authContext: AuthContext,
+  adminContext: VerifiedAdminContext,
   input: SetCoverPhotoInput,
 ): Promise<PersonCoverPhoto> {
-  return withAuthTransaction(authContext, async (client) => {
-    const firebaseUid = authContext.firebaseUid;
-    if (!firebaseUid) {
-      throw new Error("Firebase UID is required to set a cover photo");
-    }
-
-    const result = await client.query<PersonCoverPhoto>(
-      `INSERT INTO ${TABLE} (person_id, photo_id, photo_url, created_by_firebase_uid)
-       VALUES ($1, $2, $3, $4)
-       ON CONFLICT (person_id) DO UPDATE SET
-         photo_id = EXCLUDED.photo_id,
-         photo_url = EXCLUDED.photo_url,
-         updated_at = now(),
-         created_by_firebase_uid = EXCLUDED.created_by_firebase_uid
-       RETURNING *`,
-      [input.person_id, input.photo_id, input.photo_url, firebaseUid],
-    );
-    return result.rows[0];
-  });
+  const upstream = await fetchAdminBackendJson(
+    `/admin/people/${encodeURIComponent(input.person_id)}/cover-photos`,
+    {
+      apiVersion: "v2",
+      adminContext,
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ photo_id: input.photo_id, photo_url: input.photo_url }),
+      timeoutMs: ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
+      routeName: "person-cover-photo",
+    },
+  );
+  if (upstream.status !== 200) {
+    throw buildAdminBackendStatusError({
+      status: upstream.status,
+      data: upstream.data,
+      fallbackMessage: "Failed to set the person cover photo",
+      routeName: "person-cover-photo",
+    });
+  }
+  const coverPhoto = parseV2Payload(upstream.data);
+  if (
+    !coverPhoto ||
+    coverPhoto.person_id.toLowerCase() !== input.person_id.toLowerCase() ||
+    coverPhoto.photo_id !== input.photo_id ||
+    coverPhoto.photo_url !== input.photo_url
+  ) {
+    throw invalidBackendResponse();
+  }
+  return coverPhoto;
 }
 
-/**
- * Remove the cover photo for a person (revert to default).
- */
 export async function removeCoverPhoto(
-  authContext: AuthContext,
+  adminContext: VerifiedAdminContext,
   personId: string,
 ): Promise<boolean> {
-  return withAuthTransaction(authContext, async (client) => {
-    const result = await client.query(
-      `DELETE FROM ${TABLE} WHERE person_id = $1`,
-      [personId],
-    );
-    return (result.rowCount ?? 0) > 0;
-  });
+  const upstream = await fetchAdminBackendJson(
+    `/admin/people/${encodeURIComponent(personId)}/cover-photos`,
+    {
+      apiVersion: "v2",
+      adminContext,
+      method: "DELETE",
+      timeoutMs: ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
+      routeName: "person-cover-photo",
+    },
+  );
+  if (upstream.status !== 200) {
+    throw buildAdminBackendStatusError({
+      status: upstream.status,
+      data: upstream.data,
+      fallbackMessage: "Failed to remove the person cover photo",
+      routeName: "person-cover-photo",
+    });
+  }
+  if (
+    !hasExactKeys(upstream.data, DELETE_RESPONSE_KEYS) ||
+    upstream.data.success !== true ||
+    typeof upstream.data.removed !== "boolean"
+  ) {
+    throw invalidBackendResponse();
+  }
+  return upstream.data.removed;
 }

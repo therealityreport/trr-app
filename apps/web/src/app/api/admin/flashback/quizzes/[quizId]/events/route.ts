@@ -4,7 +4,8 @@ import {
   createFlashbackEvent,
   listFlashbackEvents,
 } from "@/lib/server/admin/flashback-admin-repository";
-import { requireAdmin } from "@/lib/server/auth";
+import { requireAdmin, toVerifiedAdminContext } from "@/lib/server/auth";
+import { AdminReadProxyError } from "@/lib/server/trr-api/admin-read-proxy";
 
 export const dynamic = "force-dynamic";
 
@@ -14,21 +15,28 @@ interface RouteParams {
 
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
-    await requireAdmin(request);
+    const adminContext = toVerifiedAdminContext(await requireAdmin(request));
     const { quizId } = await params;
-    const events = await listFlashbackEvents(quizId);
+    const events = await listFlashbackEvents(adminContext, quizId);
     return NextResponse.json({ events });
   } catch (error) {
     console.error("[api/admin/flashback/quizzes/[quizId]/events] Failed to list events", error);
     const message = error instanceof Error ? error.message : "failed";
-    const status = message === "unauthorized" ? 401 : message === "forbidden" ? 403 : 500;
+    const status =
+      error instanceof AdminReadProxyError
+        ? error.status
+        : message === "unauthorized"
+          ? 401
+          : message === "forbidden"
+            ? 403
+            : 500;
     return NextResponse.json({ error: message }, { status });
   }
 }
 
 export async function POST(request: NextRequest, { params }: RouteParams) {
   try {
-    await requireAdmin(request);
+    const adminContext = toVerifiedAdminContext(await requireAdmin(request));
     const { quizId } = await params;
     const body = (await request.json().catch(() => ({}))) as {
       description?: string;
@@ -54,26 +62,28 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       return NextResponse.json({ error: "point_value must be between 2 and 5" }, { status: 400 });
     }
 
-    const event = await createFlashbackEvent({
+    const event = await createFlashbackEvent(adminContext, {
       quizId,
       description,
       year,
       imageUrl: body.image_url ?? null,
       pointValue,
     });
+    if (!event) {
+      return NextResponse.json({ error: "quiz not found" }, { status: 404 });
+    }
     return NextResponse.json({ event }, { status: 201 });
   } catch (error) {
     console.error("[api/admin/flashback/quizzes/[quizId]/events] Failed to create event", error);
     const message = error instanceof Error ? error.message : "failed";
     const status =
-      message === "unauthorized"
-        ? 401
-        : message === "forbidden"
-          ? 403
-          : message === "quiz_not_found"
-            ? 404
+      error instanceof AdminReadProxyError
+        ? error.status
+        : message === "unauthorized"
+          ? 401
+          : message === "forbidden"
+            ? 403
             : 500;
-    const responseMessage = message === "quiz_not_found" ? "quiz not found" : message;
-    return NextResponse.json({ error: responseMessage }, { status });
+    return NextResponse.json({ error: message }, { status });
   }
 }

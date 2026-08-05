@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/server/auth";
+import { requireAdmin, toVerifiedAdminContext } from "@/lib/server/auth";
 import { getTypographyState } from "@/lib/server/admin/typography-repository";
+import { AdminReadProxyError } from "@/lib/server/trr-api/admin-read-proxy";
 import {
   buildUserScopedRouteCacheKey,
   getOrCreateRouteResponsePromise,
@@ -27,7 +28,7 @@ export async function GET(request: NextRequest) {
       TYPOGRAPHY_ADMIN_CACHE_NAMESPACE,
       cacheKey,
       async () => {
-        const state = await getTypographyState();
+        const state = await getTypographyState({ adminContext: toVerifiedAdminContext(user) });
         setRouteResponseCache(TYPOGRAPHY_ADMIN_CACHE_NAMESPACE, cacheKey, state, TYPOGRAPHY_ADMIN_CACHE_TTL_MS);
         return state;
       },
@@ -37,7 +38,8 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     console.error("[api] Failed to load typography state", error);
     const message = error instanceof Error ? error.message : "failed";
-    const status = message === "unauthorized" ? 401 : message === "forbidden" ? 403 : 500;
+    const status =
+      error instanceof AdminReadProxyError ? error.status : message === "unauthorized" ? 401 : message === "forbidden" ? 403 : 500;
     return NextResponse.json({ error: message }, { status });
   }
 }

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/server/auth";
+import { requireAdmin, toVerifiedAdminContext } from "@/lib/server/auth";
 import { getBackendApiUrl } from "@/lib/server/trr-api/backend";
 import { updateShowById } from "@/lib/server/trr-api/trr-shows-repository";
 import { getInternalAdminBearerToken } from "@/lib/server/trr-api/internal-admin-auth";
@@ -55,7 +55,8 @@ const toErrorMessage = (value: unknown): string | null => {
 
 export async function POST(request: NextRequest, { params }: RouteParams) {
   try {
-    await requireAdmin(request);
+    const user = await requireAdmin(request);
+    const adminContext = toVerifiedAdminContext(user);
     const { showId } = await params;
 
     if (!showId) {
@@ -81,7 +82,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     if (showImageId) {
       const show = await updateShowById(showId, {
         primaryLogoImageId: showImageId,
-      });
+      }, { adminContext });
       if (!show) {
         return NextResponse.json({ error: "Show not found" }, { status: 404 });
       }
@@ -126,7 +127,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     const show = await updateShowById(showId, {
       primaryLogoImageId: null,
-    });
+    }, { adminContext });
     if (!show) {
       return NextResponse.json({ error: "Show not found" }, { status: 404 });
     }

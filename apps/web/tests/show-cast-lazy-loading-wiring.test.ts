@@ -6,9 +6,12 @@ describe("show detail cast lazy-loading wiring", () => {
   const filePath = path.resolve(__dirname, "../src/app/admin/trr-shows/[showId]/page.tsx");
   const castRouteStatePath = path.resolve(__dirname, "../src/lib/admin/cast-route-state.ts");
   const creditsViewsPath = path.resolve(__dirname, "../src/components/admin/show-tabs/ShowCreditsViews.tsx");
+  const showCastTabPath = path.resolve(__dirname, "../src/components/admin/show-tabs/ShowCastTab.tsx");
   const contents = fs.readFileSync(filePath, "utf8");
   const castRouteStateContents = fs.readFileSync(castRouteStatePath, "utf8");
   const creditsViewsContents = fs.readFileSync(creditsViewsPath, "utf8");
+  const showCastTabContents = fs.readFileSync(showCastTabPath, "utf8");
+  const combinedContents = `${contents}\n${showCastTabContents}`;
 
   it("keeps initial page load Promise.all free of fetchCast", () => {
     expect(contents).toMatch(/useShowIdentityLoad/);
@@ -23,7 +26,7 @@ describe("show detail cast lazy-loading wiring", () => {
     expect(contents).toMatch(/if \(castAutoLoadAttemptedRef\.current === autoLoadKey\) return;/);
     expect(contents).toMatch(/void fetchCast\(\{ force: true, includePhotos: false \}\);/);
     expect(contents).toMatch(/castAutoRecoveryAttemptedRef/);
-    expect(contents).toMatch(/Cast list unavailable; retrying cast roster\.\.\./);
+    expect(showCastTabContents).toMatch(/Cast list unavailable; retrying cast roster\.\.\./);
   });
 
   it("hardens cast loading with longer timeout, retry, and zero-episode exclusion", () => {
@@ -37,7 +40,7 @@ describe("show detail cast lazy-loading wiring", () => {
   });
 
   it("provides explicit enrich missing cast photos action with bravo fallback", () => {
-    expect(contents).toMatch(/Enrich Missing Cast Photos/);
+    expect(showCastTabContents).toMatch(/Enrich Missing Cast Photos/);
     expect(contents).toMatch(/photoFallbackMode: "bravo"/);
     expect(contents).toMatch(/includePhotos: true/);
     expect(contents).toMatch(/mergeMissingPhotosOnly: true/);
@@ -94,7 +97,7 @@ describe("show detail cast lazy-loading wiring", () => {
     expect(castRouteStateContents).toMatch(/cast_episode_max/);
     expect(castRouteStateContents).toMatch(/cast_view/);
     expect(castRouteStateContents).toMatch(/cast_cols/);
-    expect(contents).toMatch(/Search Name/);
+    expect(showCastTabContents).toMatch(/Search Name/);
   });
 
   it("keeps cast job state tracking even after removing per-card credits actions", () => {
@@ -106,32 +109,33 @@ describe("show detail cast lazy-loading wiring", () => {
 
   it("tracks and renders failed cast members with retry-failed control", () => {
     expect(contents).toMatch(/const \[castRunFailedMembers, setCastRunFailedMembers\] = useState<CastRunFailedMember\[]>\(\[\]\)/);
-    expect(contents).toMatch(/Retry failed only/);
+    expect(showCastTabContents).toMatch(/Retry failed only/);
     expect(contents).toMatch(/retryFailedCastMediaEnrich/);
-    expect(contents).toMatch(/Failed Members \(\{castRunFailedMembers\.length\}\)/);
+    expect(showCastTabContents).toMatch(/Failed Members \(\{castRunFailedMembers\.length\}\)/);
   });
 
   it("shows rendered\\/matched\\/total cast counters and exposes cancel for running cast jobs", () => {
     expect(contents).toMatch(/const castDisplayTotals = useMemo/);
-    expect(contents).toMatch(/renderedCastCount}\/\{matchedCastCount}\/\{totalCastCount} cast/);
-    expect(contents).toMatch(/renderedCrewCount}\/\{matchedCrewCount}\/\{totalCrewCount} crew/);
-    expect(contents).toMatch(/renderedVisibleCount}\/\{matchedVisibleCount}\/\{totalVisibleCount} visible/);
+    expect(showCastTabContents).toMatch(/renderedCastCount}\/\{matchedCastCount}\/\{totalCastCount} cast/);
+    expect(showCastTabContents).toMatch(/renderedCrewCount}\/\{matchedCrewCount}\/\{totalCrewCount} crew/);
+    expect(showCastTabContents).toMatch(/renderedVisibleCount}\/\{matchedVisibleCount}\/\{totalVisibleCount} visible/);
     expect(contents).toMatch(/const cancelShowCastWorkflow = useCallback/);
     expect(contents).toMatch(/castRefreshAbortControllerRef\.current\?\.abort\(\)/);
     expect(contents).toMatch(/castMediaEnrichAbortControllerRef\.current\?\.abort\(\)/);
-    expect(contents).toMatch(/\(castRefreshPipelineRunning \|\|\s*castMediaEnriching \|\|\s*hasPersonRefreshInFlight \|\|\s*hasReconnectableCreditsRun\) &&/s);
+    expect(contents).toMatch(/showCancelRunButton=\{/);
     expect(contents).toMatch(
       /castRefreshAbortControllerRef\.current\?\.abort\(\);\s*castMediaEnrichAbortControllerRef\.current\?\.abort\(\);/s
     );
     expect(contents).toMatch(/\/api\/admin\/trr-api\/operations\/\$\{operationId\}\/cancel/);
-    expect(contents).toMatch(/Cancel Run/);
+    expect(showCastTabContents).toMatch(/castRefreshCancelButtonLabel/);
     expect(contents).toMatch(/personRefreshAbortControllersRef/);
   });
 
   it("renders cast members through the dedicated credits view components", () => {
     expect(contents).toMatch(/const renderShowCreditsCastMember =/);
-    expect(contents).toMatch(/ShowCreditsCastMembers/);
-    expect(contents).toMatch(/ShowCreditsCastViewControls/);
+    expect(contents).toMatch(/<ShowCastTab/);
+    expect(showCastTabContents).toMatch(/ShowCreditsCastMembers/);
+    expect(showCastTabContents).toMatch(/ShowCreditsCastViewControls/);
     expect(contents).not.toMatch(/event\.preventDefault\(\);\s*event\.stopPropagation\(\);\s*handleRefreshCastMember/s);
   });
 
@@ -164,13 +168,13 @@ describe("show detail cast lazy-loading wiring", () => {
   });
 
   it("renders the credits header and cast view controls without per-card edit actions", () => {
-    expect(contents).toMatch(/<h3 className="text-xl font-bold text-zinc-900">\s*Credits\s*<\/h3>/);
-    expect(contents).not.toMatch(/The Real Housewives of Salt Lake City/);
-    expect(contents).toMatch(/ShowCreditsCastViewControls/);
-    expect(contents).toMatch(/ShowCreditsCastMembers/);
-    expect(contents).toMatch(/ShowCreditsCrewSections/);
-    expect(contents).not.toMatch(/Refresh Person/);
-    expect(contents).not.toMatch(/Edit Roles/);
+    expect(showCastTabContents).toMatch(/<h3 className="text-xl font-bold text-zinc-900">\s*Credits\s*<\/h3>/);
+    expect(showCastTabContents).not.toMatch(/The Real Housewives of Salt Lake City/);
+    expect(showCastTabContents).toMatch(/ShowCreditsCastViewControls/);
+    expect(showCastTabContents).toMatch(/ShowCreditsCastMembers/);
+    expect(showCastTabContents).toMatch(/ShowCreditsCrewSections/);
+    expect(combinedContents).not.toMatch(/Refresh Person/);
+    expect(combinedContents).not.toMatch(/Edit Roles/);
     expect(creditsViewsContents).toMatch(/<th[^>]*>\s*Name\s*<\/th>/);
     expect(creditsViewsContents).toMatch(/<th[^>]*>\s*Role\s*<\/th>/);
     expect(creditsViewsContents).toMatch(/<th[^>]*>\s*Episodes\s*<\/th>/);
@@ -186,18 +190,18 @@ describe("show detail cast lazy-loading wiring", () => {
   it("keeps cast tab usable when cast-role-members refresh fails", () => {
     expect(contents).toMatch(/Showing last successful cast intelligence snapshot/);
     expect(contents).toMatch(/setCastRoleMembersWarning/);
-    expect(contents).toMatch(/onClick=\{\(\) => void fetchCastRoleMembers\(\{ force: true \}\)\}/);
-    expect(contents).toMatch(/rolesWarningWithSnapshotAge && \(/);
-    expect(contents).toMatch(/Retry Roles/);
-    expect(contents).toMatch(/onClick=\{\(\) => void fetchShowRoles\(\{ force: true \}\)\}/);
-    expect(contents).toMatch(/Cast intelligence unavailable; showing base cast snapshot\./);
-    expect(contents).toMatch(/Retry Cast Intelligence/);
-    expect(contents).toMatch(/Refreshing cast intelligence\.\.\./);
+    expect(showCastTabContents).toMatch(/onClick=\{onRetryCastRoleMembers\}/);
+    expect(showCastTabContents).toMatch(/rolesWarningWithSnapshotAge && \(/);
+    expect(showCastTabContents).toMatch(/Retry Roles/);
+    expect(showCastTabContents).toMatch(/onClick=\{onRetryRoles\}/);
+    expect(showCastTabContents).toMatch(/Cast intelligence unavailable; showing base cast snapshot\./);
+    expect(showCastTabContents).toMatch(/Retry Cast Intelligence/);
+    expect(showCastTabContents).toMatch(/Refreshing cast intelligence\.\.\./);
     expect(contents).toMatch(/castUiTerminalReady/);
     expect(contents).toMatch(/const castRosterReady =/);
-    expect(contents).toMatch(/Loading role and credit filters\.\.\./);
-    expect(contents).toMatch(/Loading cast roster\.\.\./);
-    expect(contents).toMatch(/No cast members found for this show\./);
+    expect(showCastTabContents).toMatch(/Loading role and credit filters\.\.\./);
+    expect(showCastTabContents).toMatch(/Loading cast roster\.\.\./);
+    expect(showCastTabContents).toMatch(/No cast members found for this show\./);
     expect(contents).toMatch(
       /showCastIntelligenceUnavailable =\s*activeTab === "cast" &&\s*castSource === "show_fallback" &&\s*!castRoleMembersLoading &&\s*!rolesLoading &&\s*\(Boolean\(castRoleMembersError\) \|\| Boolean\(rolesError\)\)/
     );

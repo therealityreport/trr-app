@@ -3,23 +3,21 @@ import { NextRequest, NextResponse } from "next/server";
 
 process.env.TRR_ADMIN_ROUTE_CACHE_DISABLED = "1";
 
-const { requireAdminMock, fetchAdminBackendJsonMock } = vi.hoisted(() => ({
+const { requireAdminMock, toVerifiedAdminContextMock, fetchAdminBackendJsonMock } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
+  toVerifiedAdminContextMock: vi.fn(),
   fetchAdminBackendJsonMock: vi.fn(),
 }));
 
 vi.mock("@/lib/server/auth", () => ({
   requireAdmin: requireAdminMock,
-}));
-
-vi.mock("@/lib/server/admin/covered-shows-repository", () => ({
-  addCoveredShow: vi.fn(),
-  getCoveredShows: vi.fn(),
+  toVerifiedAdminContext: toVerifiedAdminContextMock,
 }));
 
 vi.mock("@/lib/server/trr-api/admin-read-proxy", () => ({
   fetchAdminBackendJson: fetchAdminBackendJsonMock,
-  invalidateAdminBackendCache: vi.fn(),
+  buildAdminBackendStatusError: ({ fallbackMessage, status }: { fallbackMessage: string; status: number }) =>
+    Object.assign(new Error(fallbackMessage), { status }),
   ADMIN_READ_PROXY_SHORT_TIMEOUT_MS: 5_000,
   buildAdminProxyErrorResponse: (error: unknown) =>
     NextResponse.json(
@@ -33,8 +31,14 @@ import { GET } from "@/app/api/admin/covered-shows/route";
 describe("covered shows route metadata fields", () => {
   beforeEach(() => {
     requireAdminMock.mockReset();
+    toVerifiedAdminContextMock.mockReset();
     fetchAdminBackendJsonMock.mockReset();
     requireAdminMock.mockResolvedValue({ uid: "admin-test-user" });
+    toVerifiedAdminContextMock.mockReturnValue({
+      uid: "admin-test-user",
+      email: null,
+      verifiedAt: 1_700_000_000_000,
+    });
   });
 
   it("returns only the batch-1 covered-show contract fields", async () => {
@@ -43,8 +47,8 @@ describe("covered shows route metadata fields", () => {
       data: {
         shows: [
           {
-            id: "covered-1",
-            trr_show_id: "show-1",
+            id: "00000000-0000-0000-0000-000000000010",
+            trr_show_id: "00000000-0000-0000-0000-000000000011",
             show_name: "The Real Housewives",
             canonical_slug: "the-real-housewives",
             alternative_names: ["RH"],
@@ -63,8 +67,8 @@ describe("covered shows route metadata fields", () => {
     expect(response.status).toBe(200);
     expect(payload.shows).toEqual([
       {
-        id: "covered-1",
-        trr_show_id: "show-1",
+        id: "00000000-0000-0000-0000-000000000010",
+        trr_show_id: "00000000-0000-0000-0000-000000000011",
         show_name: "The Real Housewives",
         canonical_slug: "the-real-housewives",
         alternative_names: ["RH"],

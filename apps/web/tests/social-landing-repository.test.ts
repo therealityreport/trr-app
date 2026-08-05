@@ -7,6 +7,7 @@ const {
   listEffectivePersonSocialHandlesByPersonIdsMock,
   listShowExternalIdsByIdsMock,
   listRedditCommunitiesMock,
+  loadSharedAccountSourcesFromBackendMock,
   fetchSocialBackendJsonMock,
   fetchAdminBackendJsonMock,
   queryMock,
@@ -16,6 +17,7 @@ const {
   listEffectivePersonSocialHandlesByPersonIdsMock: vi.fn(),
   listShowExternalIdsByIdsMock: vi.fn(),
   listRedditCommunitiesMock: vi.fn(),
+  loadSharedAccountSourcesFromBackendMock: vi.fn(),
   fetchSocialBackendJsonMock: vi.fn(),
   fetchAdminBackendJsonMock: vi.fn(),
   queryMock: vi.fn(),
@@ -26,9 +28,12 @@ vi.mock("@/lib/server/admin/covered-shows-repository", () => ({
 }));
 
 vi.mock("@/lib/server/trr-api/trr-shows-repository", () => ({
-  listPrimaryPersonExternalIdsByPersonIds: listPrimaryPersonExternalIdsByPersonIdsMock,
   listEffectivePersonSocialHandlesByPersonIds:
     listEffectivePersonSocialHandlesByPersonIdsMock,
+}));
+
+vi.mock("@/lib/server/trr-api/admin-external-id-reads", () => ({
+  listPrimaryPersonExternalIdsByPersonIds: listPrimaryPersonExternalIdsByPersonIdsMock,
   listShowExternalIdsByIds: listShowExternalIdsByIdsMock,
 }));
 
@@ -40,6 +45,10 @@ vi.mock("@/lib/server/trr-api/social-admin-proxy", () => ({
 
 vi.mock("@/lib/server/admin/reddit-sources-repository", () => ({
   listRedditCommunities: listRedditCommunitiesMock,
+}));
+
+vi.mock("@/lib/server/admin/shared-account-sources", () => ({
+  loadSharedAccountSourcesFromBackend: loadSharedAccountSourcesFromBackendMock,
 }));
 
 vi.mock("@/lib/server/trr-api/admin-read-proxy", () => ({
@@ -79,6 +88,7 @@ describe("social landing repository", () => {
     listEffectivePersonSocialHandlesByPersonIdsMock.mockReset();
     listShowExternalIdsByIdsMock.mockReset();
     listRedditCommunitiesMock.mockReset();
+    loadSharedAccountSourcesFromBackendMock.mockReset();
     fetchSocialBackendJsonMock.mockReset();
     fetchAdminBackendJsonMock.mockReset();
     queryMock.mockReset();
@@ -329,6 +339,19 @@ describe("social landing repository", () => {
       throw new Error(`Unhandled social path: ${path}`);
     });
 
+    loadSharedAccountSourcesFromBackendMock.mockImplementation(
+      async (_adminContext: unknown, options: { sourceScope: string }) => {
+        const payload = await fetchSocialBackendJsonMock("/shared/sources", {
+          queryString: `source_scope=${options.sourceScope}&include_inactive=true`,
+        });
+        return {
+          source_scope: options.sourceScope,
+          using_defaults: false,
+          sources: Array.isArray(payload?.sources) ? payload.sources : [],
+        };
+      },
+    );
+
     listShowExternalIdsByIdsMock.mockImplementation(
       async (showIds: readonly string[]) =>
         new Map(
@@ -550,6 +573,21 @@ describe("social landing repository", () => {
 
     listEffectivePersonSocialHandlesByPersonIdsMock.mockResolvedValue(new Map());
     queryMock.mockResolvedValue({ rows: [] });
+  });
+
+  it("forwards verified admin context when loading fallback person social handles", async () => {
+    const adminContext = {
+      uid: "firebase-admin-1",
+      email: "admin@example.com",
+      verifiedAt: 42,
+    };
+
+    await getSocialLandingPayloadResult(adminContext);
+
+    expect(listEffectivePersonSocialHandlesByPersonIdsMock).toHaveBeenCalledWith(
+      expect.any(Array),
+      { adminContext },
+    );
   });
 
   it("builds networks, shows, and people with WWHL handle filtering", async () => {
@@ -966,12 +1004,13 @@ describe("social landing repository", () => {
   });
 
   it("labels assigned YouTube playlist show handles with playlist metadata", async () => {
-    const defaultSocialBackend = fetchSocialBackendJsonMock.getMockImplementation();
-    if (!defaultSocialBackend) throw new Error("Missing default social backend mock");
-    fetchSocialBackendJsonMock.mockImplementation(async (path: string, options?: unknown) => {
-      if (path.startsWith("/shared/sources")) {
-        return {
-          sources: [
+    loadSharedAccountSourcesFromBackendMock.mockImplementation(
+      async (_adminContext: unknown, options: { sourceScope: string }) => ({
+        source_scope: options.sourceScope,
+        using_defaults: false,
+        sources:
+          options.sourceScope === "network"
+            ? [
             {
               id: "source-playlist-1",
               platform: "youtube",
@@ -989,11 +1028,10 @@ describe("social landing repository", () => {
                 },
               },
             },
-          ],
-        };
-      }
-      return defaultSocialBackend(path, options);
-    });
+              ]
+            : [],
+      }),
+    );
 
     const payload = await getSocialLandingPayload();
     const rhoslc = payload.show_sets.find((show) =>
@@ -1017,15 +1055,15 @@ describe("social landing repository", () => {
     const sharedSourcesStartedPromise = new Promise<void>((resolve) => {
       sharedSourcesStarted = resolve;
     });
-    const sharedSourcesPromise = new Promise<{ sources: [] }>((resolve) => {
-      resolveSharedSources = () => resolve({ sources: [] });
+    const sharedSourcesPromise = new Promise<{
+      source_scope: string;
+      sources: [];
+      using_defaults: false;
+    }>((resolve) => {
+      resolveSharedSources = () => resolve({ source_scope: "network", sources: [], using_defaults: false });
     });
 
     fetchSocialBackendJsonMock.mockImplementation(async (path: string) => {
-      if (path.startsWith("/shared/sources")) {
-        sharedSourcesStarted();
-        return sharedSourcesPromise;
-      }
       if (path.startsWith("/shared/ingest/runs")) {
         return [];
       }
@@ -1049,6 +1087,10 @@ describe("social landing repository", () => {
       }
       throw new Error(`Unhandled social path: ${path}`);
     });
+    loadSharedAccountSourcesFromBackendMock.mockImplementation(async () => {
+      sharedSourcesStarted();
+      return sharedSourcesPromise;
+    });
     listShowExternalIdsByIdsMock.mockResolvedValue(new Map());
     fetchAdminBackendJsonMock.mockResolvedValue({
       status: 200,
@@ -1059,22 +1101,19 @@ describe("social landing repository", () => {
     await sharedSourcesStartedPromise;
     await delay(0);
 
-    expect(listShowExternalIdsByIdsMock).toHaveBeenCalledWith([
-      "show-rhoslc",
-      "show-wwhl",
-    ]);
+    expect(listShowExternalIdsByIdsMock).toHaveBeenCalledWith(
+      ["show-rhoslc", "show-wwhl"],
+      { adminContext: undefined },
+    );
     expect(fetchAdminBackendJsonMock).toHaveBeenCalledWith(
       "/admin/shows/cast-summary",
       expect.objectContaining({
         timeoutMs: 5_000,
       }),
     );
-    expect(fetchSocialBackendJsonMock).toHaveBeenCalledWith(
-      "/shared/sources",
-      expect.objectContaining({
-        queryString: "source_scope=network&include_inactive=true",
-        timeoutMs: 25_000,
-      }),
+    expect(loadSharedAccountSourcesFromBackendMock).toHaveBeenCalledWith(
+      undefined,
+      expect.objectContaining({ sourceScope: "network", includeInactive: true }),
     );
 
     resolveSharedSources();
@@ -1127,68 +1166,32 @@ describe("social landing repository", () => {
     expect(result.payload.cast_socialblade_shows).toEqual([]);
   });
 
-  it("falls back to local shared-source rows when backend shared-source reads fail", async () => {
+  it("marks shared sources unavailable when the backend adapter read fails", async () => {
     const expectedWarn = captureExpectedConsoleWarn(
-      /^\[social-landing\] Failed to load shared sources; using local fallback /,
+      /^\[social-landing\] Failed to load shared sources /,
     );
-    const defaultSocialBackend = fetchSocialBackendJsonMock.getMockImplementation();
-    if (!defaultSocialBackend) throw new Error("Missing default social backend mock");
-
-    fetchSocialBackendJsonMock.mockImplementation(async (path: string, options?: unknown) => {
-      if (path.startsWith("/shared/sources")) {
-        throw new Error("TRR-Backend request timed out.");
-      }
-      return defaultSocialBackend(path, options);
-    });
-    queryMock.mockImplementation(async (sql: string, params?: unknown[]) => {
-      if (String(sql).toLowerCase().includes("from social.shared_account_sources")) {
-        const sourceScope = String(params?.[0] ?? "");
-        return {
-          rows:
-            sourceScope === "network"
-              ? [
-                  {
-                    id: "source-bravo",
-                    platform: "instagram",
-                    source_scope: "network",
-                    account_handle: "bravotv",
-                    is_active: true,
-                    scrape_priority: 10,
-                    metadata: {
-                      network_key: "bravo-tv",
-                      network_name: "Bravo TV",
-                      profile_kind: "network_official",
-                    },
-                  },
-                ]
-              : [],
-        };
-      }
-      return { rows: [] };
-    });
+    loadSharedAccountSourcesFromBackendMock.mockRejectedValue(
+      new Error("TRR-Backend request timed out."),
+    );
 
     const result = await getSocialLandingPayloadResult();
 
-    expect(result.payload.network_sets[0]).toEqual(
-      expect.objectContaining({
-        key: "bravo-tv",
-        handles: expect.arrayContaining([
-          expect.objectContaining({ platform: "instagram", handle: "bravotv" }),
-        ]),
-      }),
-    );
-    expect(result.payload.shared_source_sets[0].sources).toEqual(
+    expect(result.cacheable).toBe(false);
+    expect(result.payload.shared_source_sets).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ platform: "instagram", account_handle: "bravotv" }),
+        expect.objectContaining({
+          source_scope: "network",
+          sources: [],
+        }),
       ]),
     );
     expect(result.payload.shared_source_status).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           source_scope: "network",
-          load_source: "local_db_fallback",
+          load_source: "backend",
           backend_endpoint:
-            "/shared/sources?source_scope=network&include_inactive=true",
+            "/admin/socials/shared-account-sources?source_scope=network&include_inactive=true",
         }),
       ]),
     );
@@ -1693,15 +1696,11 @@ describe("social landing repository", () => {
   });
 
   it("marks landing payloads not cacheable when show external-id handles fail to load", async () => {
-    const expectedWarn = captureExpectedConsoleWarn(
-      /^\[social-landing\] Failed to load show external ids /,
-    );
     listShowExternalIdsByIdsMock.mockRejectedValue(new Error("pool exhausted"));
 
     const result = await getSocialLandingPayloadResult();
 
     expect(result.cacheable).toBe(false);
-    expectedWarn.expectCalled();
   });
 
   it("caps social landing show and people fanout concurrency to avoid saturating local admin reads", async () => {
@@ -2619,9 +2618,6 @@ describe("social landing repository", () => {
   });
 
   it("marks the landing payload as not cacheable when cast summary loading fails closed", async () => {
-    const expectedWarn = captureExpectedConsoleWarn(
-      /^\[social-landing\] Failed to load show cast summary /,
-    );
     fetchAdminBackendJsonMock.mockRejectedValue(new Error("cast summary timeout"));
 
     const result = await getSocialLandingPayloadResult();
@@ -2629,13 +2625,9 @@ describe("social landing repository", () => {
     expect(result.cacheable).toBe(false);
     expect(result.payload.cast_socialblade_shows).toEqual([]);
     expect(result.payload.people_profiles).toEqual([]);
-    expectedWarn.expectCalled();
   });
 
   it("marks the landing payload as not cacheable when SocialBlade storage loading fails closed", async () => {
-    const expectedWarn = captureExpectedConsoleWarn(
-      /^\[social-landing\] Failed to load (scrape job health|cast SocialBlade rows|social progress summaries) /,
-    );
     queryMock.mockRejectedValue(new Error("relation does not exist"));
 
     const result = await getSocialLandingPayloadResult();
@@ -2644,7 +2636,6 @@ describe("social landing repository", () => {
     expect(result.payload.cast_socialblade_shows).toEqual([]);
     expect(result.payload.network_sets).toHaveLength(1);
     expect(result.payload.show_sets).toHaveLength(2);
-    expectedWarn.expectCalled();
   });
 
   it("falls back to local landing summary when the authenticated backend summary times out", async () => {

@@ -1,63 +1,43 @@
 "use client";
 
-import { useDeferredValue, useEffect, useLayoutEffect, useState, useCallback, useRef, useMemo, type ReactNode } from "react";
+import { useDeferredValue, useEffect, useLayoutEffect, useState, useCallback, useRef, useMemo } from "react";
 import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import Image from "next/image";
 import dynamic from "next/dynamic";
 import type { Route } from "next";
 import ClientOnly from "@/components/ClientOnly";
 import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
 import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
-import AdminModal from "@/components/admin/AdminModal";
+import ShowBatchRoleModals from "@/components/admin/ShowBatchRoleModals";
+import ShowBravoSyncModal from "@/components/admin/ShowBravoSyncModal";
+import ShowHealthCenterModal from "@/components/admin/ShowHealthCenterModal";
+import ShowLinksDiscoveryModal from "@/components/admin/ShowLinksDiscoveryModal";
+import { SocialHandlePill, SourceBadge } from "@/components/admin/ShowLinkBadges";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 import { useAdminOperationUnloadGuard } from "@/lib/admin/use-operation-unload-guard";
 import {
   GettyLocalPrefetchError,
   prefetchGettyLocallyForPerson,
 } from "@/lib/admin/getty-local-prefetch";
-import {
-  Editable,
-  EditableArea,
-  EditableCancel,
-  EditableInput,
-  EditablePreview,
-  EditableSubmit,
-  EditableToolbar,
-  EditableTrigger,
-} from "@/components/ui/editable";
 import SocialPostsSection from "@/components/admin/social-posts-section";
 import SeasonSocialAnalyticsSection, {
   type PlatformTab,
   type SocialAnalyticsView,
   type SocialTarget,
 } from "@/components/admin/season-social-analytics-section";
-import ShowBrandEditor from "@/components/admin/ShowBrandEditor";
 import ShowSurveysTab from "@/components/admin/show-tabs/ShowSurveysTab";
 import ShowOverviewTab from "@/components/admin/show-tabs/ShowOverviewTab";
 import {
-  ShowCreditsCastMembers,
-  ShowCreditsCastViewControls,
-  ShowCreditsCrewSections,
   type ShowCreditsCrewSectionData,
 } from "@/components/admin/show-tabs/ShowCreditsViews";
-import {
-  CastMatrixSyncPanel,
-  type CastMatrixSyncResult,
-} from "@/components/admin/CastMatrixSyncPanel";
-import { ExternalLinks, TmdbLinkIcon, ImdbLinkIcon } from "@/components/admin/ExternalLinks";
+import { type CastMatrixSyncResult } from "@/components/admin/CastMatrixSyncPanel";
+import { TmdbLinkIcon, ImdbLinkIcon } from "@/components/admin/ExternalLinks";
 import { ImageLightbox } from "@/components/admin/ImageLightbox";
 import { GalleryAssetEditTools } from "@/components/admin/GalleryAssetEditTools";
 import { ImageScrapeDrawer, type EntityContext } from "@/components/admin/ImageScrapeDrawer";
 import { AdvancedFilterDrawer } from "@/components/admin/AdvancedFilterDrawer";
-import { BravotvImageRunPanel } from "@/components/admin/BravotvImageRunPanel";
 import { ShowTabsNav } from "@/components/admin/show-tabs/ShowTabsNav";
-import { ShowAssetsImageSections } from "@/components/admin/show-tabs/ShowAssetsImageSections";
-import {
-  ShowBrandLogosSection,
-  type ShowLogoVariant,
-} from "@/components/admin/show-tabs/ShowBrandLogosSection";
-import { ShowFeaturedMediaSelectors } from "@/components/admin/show-tabs/ShowFeaturedMediaSelectors";
+import type { ShowLogoVariant } from "@/components/admin/show-tabs/show-logo-types";
 import { resolveGalleryAssetCapabilities } from "@/lib/admin/gallery-asset-capabilities";
 import { shouldIncludeCastMemberForSeasonFilter } from "@/lib/admin/cast-role-filtering";
 import {
@@ -108,7 +88,6 @@ import {
 import { buildSeasonSocialBreadcrumb, buildShowBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
 import {
   buildPipelineRows,
-  isRefreshLogTerminalSuccess,
   normalizeRefreshLogTopic,
   resolveRefreshLogTopicKey,
   shouldDedupeRefreshLogEntry,
@@ -129,10 +108,6 @@ import {
   contentTypeToContextType,
   normalizeContentTypeToken,
 } from "@/lib/media/content-type";
-import {
-  THUMBNAIL_DEFAULTS,
-  parseThumbnailCrop,
-} from "@/lib/thumbnail-crop";
 import {
   ASSET_SECTION_LABELS,
   ASSET_SECTION_TO_BATCH_CONTENT_TYPE,
@@ -189,22 +164,117 @@ import { SHOW_SOCIAL_PLATFORM_TABS } from "@/lib/admin/show-page/constants";
 import { useShowCoverage } from "@/lib/admin/show-page/use-show-coverage";
 import { useShowDetailsController } from "@/lib/admin/show-page/use-show-details-controller";
 import { useShowIdentityLoad } from "@/lib/admin/show-page/use-show-identity-load";
-import SocialPlatformTabIcon, { type SocialPlatformTabIconKey } from "@/components/admin/SocialPlatformTabIcon";
+import {
+  GalleryAssetSourceError,
+  buildSeasonEpisodeSummary,
+  buildSeasonEpisodeSummaryMap,
+  getMeaningfulShowCreditsRoles,
+  groupShowCrewRows,
+  normalizeErrorMessage,
+  normalizeShowCreditsCastRoster as normalizeShowCreditsCastRosterValue,
+  type BravoCandidateSummary,
+  type BravoImportImageKind,
+  type BravoNewsItem,
+  type BravoPersonCandidateResult,
+  type BravoPreviewPerson,
+  type BravoVideoItem,
+  type CastBatchRunSummary,
+  type CastPhotoFallbackMode,
+  type CastRoleEditDraft,
+  type CastRoleMember,
+  type CastRunFailedMember,
+  type EntityLink,
+  type GalleryAssetSourceFailure,
+  type GalleryAssetSourceRequest,
+  type HealthStatus,
+  type PersonApprovedLinkPill,
+  type PersonLinkCoverageCard,
+  type PersonLinkSourceKey,
+  type PersonLinkSourceSummary,
+  type PersonRefreshMode,
+  type RefreshLogEntry,
+  type RefreshProgressState,
+  type RoleRenameDraft,
+  type SeasonCoverageLinkPill,
+  type SeasonEpisodeSummary,
+  type SeasonUrlCoverageRow,
+  type ShowCastEligibilityMode,
+  type ShowCastRosterMode,
+  type ShowCastSource,
+  type ShowCreditsPayload,
+  type ShowCrewSection,
+  type ShowGalleryVisibleBySection,
+  type ShowRedditCommunity,
+  type ShowRefreshRunOptions as WorkspaceShowRefreshRunOptions,
+  type ShowRefreshTarget,
+  type ShowRole,
+  type ShowSocialLinkPill,
+  type ShowTab,
+  type SyncBravoRunMode,
+  type TabId,
+  type TrrCastMember,
+  type TrrSeason,
+  type TrrShow,
+  type UnifiedNewsFacets,
+  type UnifiedNewsItem,
+} from "@/lib/admin/show-page/workspace-model";
+import SocialPlatformTabIcon from "@/components/admin/SocialPlatformTabIcon";
 import {
   buildHostFaviconUrl,
-  getHostnameFromUrl,
-  isFandomSeedUrl,
-  isLikelyPageUrl,
   isSocialLinkKind,
-  normalizeLinkKind,
-  parsePersonNameFromLink,
   resolveLinkPageTitle,
-  resolveLinkSiteTitle,
-  resolveShowPageDisplayTitle,
 } from "@/lib/admin/show-page/link-display";
 import {
-  deriveShowDetailsSlugPreview,
-} from "@/lib/admin/show-page/details-form";
+  classifyPersonLinkSource,
+  getApprovedLinkText,
+  getCastMemberLinkText,
+  getLinkSourceBadgeKind,
+  getLinkSourceLabel,
+  getShowPageLinkTitle,
+  getSourceBadgeOrder,
+  isRenderableSeasonPageLink,
+  isRenderableShowPageLink,
+  normalizeEntityLinkStatus,
+  pickPreferredPersonSourceLink,
+  resolveCastMemberNameFromLinks,
+  usesBrandIconOnly,
+} from "@/lib/admin/show-page/show-link-display-model";
+import {
+  CAST_REFRESH_PHASE_ORDER,
+  SEASON_PAGE_TABS,
+  areNumberArraysEqual,
+  areStringArraysEqual,
+  buildAssetAutoCropPayloadWithFallback,
+  buildProgressMessage,
+  extractBravoSocialHandle,
+  formatBravoSocialLabel,
+  formatFixed1,
+  formatGallerySourceFailure,
+  formatIsoAgeLabel,
+  getAssetDisplayUrl,
+  getFeaturedShowImageKind,
+  getShowRefreshTargetLabel,
+  inferBravoImportImageKind,
+  inferBravoPersonUrl,
+  inferBravoShowUrl,
+  isAbortError,
+  isBravoNetworkName,
+  isCastRefreshPhaseId,
+  isHttpUrlValue,
+  isRefreshTopicDone,
+  isRefreshTopicFailed,
+  looksLikeUuid,
+  normalizeBravoSocialKey,
+  normalizeGallerySourceFailure,
+  normalizeRefreshLogMessage,
+  parseGalleryAssetErrorPayload,
+  parseProgressNumber,
+  readTrimmedToken,
+  resolveStageLabel,
+  toIsoNow,
+  updateCastRefreshPhaseStates,
+  withSnapshotAgeSuffix,
+} from "@/lib/admin/show-page/show-detail-utilities";
 import {
   buildOverviewAlternativeNamesText,
   buildOverviewRedditGroups,
@@ -236,697 +306,13 @@ import {
 const EPISODE_ID_GAP_WARNING_CODE = "episodes_tmdb_missing_imdb_ids";
 const EPISODE_ID_IGNORED_SEASON_ZERO_WARNING_CODE = "episodes_tmdb_season_zero_ignored_specials";
 
-// Types
-type ShowSyncWarningSample = {
-  season_number?: number | null;
-  episode_number?: number | null;
-  title?: string | null;
-  air_date?: string | null;
-  tmdb_episode_id?: number | null;
-};
+// Keep the route-local name as a stable source-inspection seam while the implementation lives in the model.
+const normalizeShowCreditsCastRoster = (value: unknown): TrrCastMember[] =>
+  normalizeShowCreditsCastRosterValue(value);
 
-type ShowSyncWarning = {
-  code: string;
-  severity?: "info" | "warning" | "error" | string;
-  message: string;
-  count?: number | null;
-  ignored_season_zero_count?: number | null;
-  samples?: ShowSyncWarningSample[] | null;
-};
-
-interface TrrShow {
-  id: string;
-  name: string;
-  slug: string;
-  canonical_slug: string;
-  alternative_names: string[];
-  overview_alternative_names?: string[] | null;
-  imdb_id: string | null;
-  tmdb_id: number | null;
-  external_ids?: Record<string, unknown> | null;
-  derived_external_links?: {
-    justwatch_url?: string | null;
-  } | null;
-  overview_watch_availability?: Array<{
-    region: "US" | "GB" | "CA" | "AU";
-    stream: string[];
-    buy: string[];
-  }> | null;
-  watch_provider_regions?: Array<{
-    region: string;
-    stream: string[];
-    free: string[];
-    buy_rent: string[];
-  }> | null;
-  show_total_seasons: number | null;
-  show_total_episodes: number | null;
-  description: string | null;
-  premiere_date: string | null;
-  networks: string[];
-  overview_networks?: string[] | null;
-  genres: string[];
-  tags: string[];
-  tmdb_status: string | null;
-  tmdb_vote_average: number | null;
-  imdb_rating_value: number | null;
-  primary_poster_image_id?: string | null;
-  primary_backdrop_image_id?: string | null;
-  primary_logo_image_id?: string | null;
-  logo_url?: string | null;
-  streaming_providers?: string[] | null;
-  overview_streaming_providers?: string[] | null;
-  watch_providers?: string[] | null;
-  sync_warnings?: ShowSyncWarning[] | null;
-}
-
-interface ShowRedditCommunity {
-  id: string;
-  subreddit: string;
-  display_name: string | null;
-  post_flairs: string[];
-  analysis_flairs: string[];
-  analysis_all_flairs: string[];
-  is_show_focused: boolean;
-  network_focus_targets: string[];
-  franchise_focus_targets: string[];
-}
-
-interface TrrSeason {
-  id: string;
-  show_id: string;
-  season_number: number;
-  name: string | null;
-  title: string | null;
-  overview: string | null;
-  air_date: string | null;
-  premiere_date?: string | null;
-  url_original_poster: string | null;
-  tmdb_season_id: number | null;
-  episode_count?: number | null;
-  episode_airdate_count?: number | null;
-  first_episode_air_date?: string | null;
-  last_episode_air_date?: string | null;
-  fandom_source_url?: string | null;
-  fandom_page_title?: string | null;
-}
-
-type SeasonEpisodeSummary = {
-  count: number;
-  premiereDate: string | null;
-  finaleDate: string | null;
-};
-
-const buildSeasonEpisodeSummary = (season: TrrSeason): SeasonEpisodeSummary | null => {
-  const count =
-    typeof season.episode_count === "number"
-      ? season.episode_count
-      : typeof season.episode_airdate_count === "number"
-        ? season.episode_airdate_count
-        : null;
-  const premiereDate = season.first_episode_air_date ?? season.premiere_date ?? season.air_date ?? null;
-  const finaleDate = season.last_episode_air_date ?? season.air_date ?? season.premiere_date ?? premiereDate;
-
-  if (count === null && !premiereDate && !finaleDate) return null;
-
-  return {
-    count: count ?? 0,
-    premiereDate,
-    finaleDate,
-  };
-};
-
-const buildSeasonEpisodeSummaryMap = (seasonList: TrrSeason[]): Record<string, SeasonEpisodeSummary> => {
-  const summaries: Record<string, SeasonEpisodeSummary> = {};
-  for (const season of seasonList) {
-    const summary = buildSeasonEpisodeSummary(season);
-    if (!summary) continue;
-    summaries[season.id] = summary;
-  }
-  return summaries;
-};
-
-const normalizeErrorMessage = (value: unknown): string | null => {
-  if (typeof value === "string") {
-    const trimmed = value.trim();
-    return trimmed.length > 0 ? trimmed : null;
-  }
-
-  if (Array.isArray(value)) {
-    const messages = value
-      .map((entry) => normalizeErrorMessage(entry))
-      .filter((entry): entry is string => Boolean(entry));
-    return messages.length > 0 ? messages.join("; ") : null;
-  }
-
-  if (value && typeof value === "object") {
-    const candidate = value as {
-      detail?: unknown;
-      error?: unknown;
-      msg?: unknown;
-      message?: unknown;
-    };
-    return (
-      normalizeErrorMessage(candidate.error) ??
-      normalizeErrorMessage(candidate.detail) ??
-      normalizeErrorMessage(candidate.msg) ??
-      normalizeErrorMessage(candidate.message) ??
-      JSON.stringify(value)
-    );
-  }
-
-  return null;
-};
-
-const parsePositiveIntegerInputValue = (value: string): number | null => {
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  const parsed = Number.parseInt(trimmed, 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
-};
-
-
-interface TrrCastMember {
-  id: string;
-  person_id: string;
-  full_name: string | null;
-  cast_member_name: string | null;
-  role: string | null;
-  roles?: string[] | null;
-  billing_order: number | null;
-  credit_category: string;
-  photo_url: string | null;
-  cover_photo_url: string | null;
-  thumbnail_focus_x?: number | null;
-  thumbnail_focus_y?: number | null;
-  thumbnail_zoom?: number | null;
-  thumbnail_crop_mode?: "manual" | "auto" | null;
-  total_episodes?: number | null;
-  archive_episode_count?: number | null;
-  latest_season?: number | null;
-  seasons_appeared?: number[] | null;
-}
-
-type ShowCastEligibilityMode = "default" | "links";
-
-type EntityLinkType = "show" | "season" | "person";
-type EntityLinkGroup = "official" | "social" | "knowledge" | "cast_announcements" | "other";
-type EntityLinkStatus = "pending" | "approved" | "rejected";
-
-interface EntityLink {
-  id: string;
-  show_id: string;
-  entity_type: EntityLinkType;
-  entity_id: string;
-  season_number: number;
-  link_group: EntityLinkGroup;
-  link_kind: string;
-  label: string | null;
-  url: string;
-  status: EntityLinkStatus;
-  confidence: number | null;
-  source: string | null;
-  metadata: Record<string, unknown> | null;
-  created_at: string | null;
-  updated_at: string | null;
-}
-
-interface ShowRole {
-  id: string;
-  show_id: string;
-  name: string;
-  normalized_name: string;
-  sort_order: number;
-  is_active: boolean;
-}
-
-interface CastRoleMember {
-  person_id: string;
-  person_name: string | null;
-  total_episodes: number | null;
-  seasons_appeared: number | null;
-  latest_season: number | null;
-  roles: string[];
-  photo_url: string | null;
-}
-
-interface ShowCrewCreditRow {
-  credit_id: string;
-  person_id: string;
-  person_name: string | null;
-  role: string | null;
-  billing_order: number | null;
-  source_type: string | null;
-  episode_count: number | null;
-  episodes_label: string | null;
-  years_label: string | null;
-  imdb_name_id: string | null;
-  display_order: number | null;
-}
-
-interface ShowCrewGroupedRow {
-  person_id: string;
-  person_name: string | null;
-  role_lines: ShowCrewCreditRow[];
-}
-
-interface ShowCrewSection {
-  title: string;
-  rows: ShowCrewCreditRow[];
-  grouped_rows?: ShowCrewGroupedRow[];
-}
-
-interface ShowCreditsPayload {
-  cast_roster: Array<Record<string, unknown>>;
-  crew_sections: ShowCrewSection[];
-  source_metadata?: {
-    source_page_url?: string | null;
-    show_imdb_id?: string | null;
-    last_synced_at?: string | null;
-  } | null;
-}
-
-const normalizeShowCreditsCastRoster = (value: unknown): TrrCastMember[] => {
-  if (!Array.isArray(value)) return [];
-  return value
-    .map((row) => {
-      if (!row || typeof row !== "object") return null;
-      const candidate = row as Record<string, unknown>;
-      const personId =
-        typeof candidate.person_id === "string" ? candidate.person_id.trim() : "";
-      if (!personId) return null;
-      const roles = Array.isArray(candidate.roles)
-        ? candidate.roles.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
-        : [];
-      const seasonNumbers = Array.isArray(candidate.season_numbers)
-        ? candidate.season_numbers.filter(
-            (item): item is number => typeof item === "number" && Number.isFinite(item)
-          )
-        : [];
-      return {
-        id:
-          typeof candidate.person_id === "string" && candidate.person_id.trim()
-            ? candidate.person_id.trim()
-            : typeof candidate.show_id === "string"
-              ? `${candidate.show_id}:${personId}`
-              : personId,
-        person_id: personId,
-        full_name:
-          typeof candidate.person_name === "string" && candidate.person_name.trim()
-            ? candidate.person_name
-            : null,
-        cast_member_name:
-          typeof candidate.person_name === "string" && candidate.person_name.trim()
-            ? candidate.person_name
-            : null,
-        role: roles[0] ?? null,
-        roles,
-        billing_order: null,
-        credit_category: "Self",
-        photo_url:
-          typeof candidate.photo_url === "string" && candidate.photo_url.trim()
-            ? candidate.photo_url
-            : null,
-        cover_photo_url: null,
-        total_episodes:
-          typeof candidate.total_episodes === "number" ? candidate.total_episodes : null,
-        archive_episode_count:
-          typeof candidate.archive_episodes === "number" ? candidate.archive_episodes : null,
-        latest_season:
-          typeof candidate.latest_season === "number" ? candidate.latest_season : null,
-        seasons_appeared: seasonNumbers,
-      } as TrrCastMember;
-    })
-    .filter((row): row is TrrCastMember => row !== null);
-};
-
-const shouldHideShowCreditsRoleChip = (role: string): boolean => {
-  const normalized = role.trim().toLowerCase();
-  return (
-    normalized === "cast" ||
-    normalized === "self" ||
-    normalized.startsWith("self ") ||
-    normalized.startsWith("self-") ||
-    normalized.startsWith("self/")
-  );
-};
-
-const getMeaningfulShowCreditsRoles = (roles: string[] | null | undefined): string[] => {
-  if (!Array.isArray(roles)) return [];
-  return roles
-    .map((role) => role.trim())
-    .filter((role) => role.length > 0 && !shouldHideShowCreditsRoleChip(role));
-};
-
-const groupShowCrewRows = (rows: ShowCrewCreditRow[]): ShowCrewGroupedRow[] => {
-  const grouped = new Map<string, ShowCrewGroupedRow>();
-  const orderedKeys: string[] = [];
-
-  for (const row of rows) {
-    const personId = typeof row.person_id === "string" && row.person_id.trim() ? row.person_id.trim() : row.credit_id;
-    const existing = grouped.get(personId);
-    if (existing) {
-      existing.role_lines.push(row);
-      continue;
-    }
-    grouped.set(personId, {
-      person_id: personId,
-      person_name: row.person_name,
-      role_lines: [row],
-    });
-    orderedKeys.push(personId);
-  }
-
-  return orderedKeys
-    .map((key) => grouped.get(key))
-    .filter((row): row is ShowCrewGroupedRow => Boolean(row));
-};
-
-interface BravoPersonTag {
-  person_id?: string | null;
-  person_name?: string | null;
-  person_url?: string | null;
-}
-
-interface BravoVideoItem {
-  title?: string | null;
-  runtime?: string | null;
-  kicker?: string | null;
-  image_url?: string | null;
-  hosted_image_url?: string | null;
-  original_image_url?: string | null;
-  media_asset_id?: string | null;
-  thumbnail_sync_status?: string | null;
-  thumbnail_sync_error?: string | null;
-  clip_url: string;
-  season_number?: number | null;
-  published_at?: string | null;
-  person_tags?: BravoPersonTag[];
-}
-
-interface BravoNewsItem {
-  headline?: string | null;
-  image_url?: string | null;
-  article_url: string;
-  published_at?: string | null;
-  person_tags?: BravoPersonTag[];
-}
-
-interface UnifiedNewsSeasonMatch {
-  season_number?: number | null;
-  match_types?: string[] | null;
-}
-
-interface UnifiedNewsItem {
-  source_id?: string | null;
-  headline?: string | null;
-  article_url: string;
-  canonical_article_url?: string | null;
-  image_url?: string | null;
-  hosted_image_url?: string | null;
-  original_image_url?: string | null;
-  mirror_status?: string | null;
-  mirror_attempt_count?: number | null;
-  last_mirror_attempt_at?: string | null;
-  last_mirror_success_at?: string | null;
-  last_mirror_error?: string | null;
-  mirror_retry_after?: string | null;
-  published_at?: string | null;
-  publisher_name?: string | null;
-  publisher_domain?: string | null;
-  person_tags?: BravoPersonTag[];
-  topic_tags?: string[] | null;
-  season_matches?: UnifiedNewsSeasonMatch[] | null;
-  feed_rank?: number | null;
-  trending_rank?: number | null;
-  quality_score?: number | null;
-}
-
-interface UnifiedNewsFacetSource {
-  token: string;
-  label: string;
-  count: number;
-}
-
-interface UnifiedNewsFacetPerson {
-  person_id: string;
-  person_name: string;
-  count: number;
-}
-
-interface UnifiedNewsFacetTopic {
-  topic: string;
-  count: number;
-}
-
-interface UnifiedNewsFacetSeason {
-  season_number: number;
-  count: number;
-}
-
-interface UnifiedNewsFacets {
-  sources: UnifiedNewsFacetSource[];
-  people: UnifiedNewsFacetPerson[];
-  topics: UnifiedNewsFacetTopic[];
-  seasons: UnifiedNewsFacetSeason[];
-}
-
-interface BravoPreviewPerson {
-  name?: string | null;
-  canonical_url?: string | null;
-  bio?: string | null;
-  hero_image_url?: string | null;
-  social_links?: Record<string, string> | null;
-}
-
-interface BravoPersonCandidateResult {
-  url: string;
-  source?: "bravo" | "fandom";
-  name?: string | null;
-  status?: "pending" | "in_progress" | "ok" | "missing" | "error" | string;
-  error?: string | null;
-  person?: BravoPreviewPerson | null;
-}
-
-type BravoCandidateSummary = {
-  tested: number;
-  valid: number;
-  missing: number;
-  errors: number;
-};
-
-type BravoImportImageKind =
-  | "poster"
-  | "backdrop"
-  | "logo"
-  | "episode_still"
-  | "cast"
-  | "promo"
-  | "intro"
-  | "reunion"
-  | "other";
-type SyncBravoRunMode = "full" | "cast-only";
-
-type TabId = "seasons" | "assets" | "news" | "cast" | "surveys" | "social" | "details" | "settings";
-type ShowCastSource = "episode_evidence" | "show_fallback" | "imdb_show_membership";
-type ShowCastRosterMode = "episode_evidence" | "imdb_show_membership";
-type CastPhotoFallbackMode = "none" | "bravo";
-type ShowRefreshTarget =
-  | "details"
-  | "seasons_episodes"
-  | "photos"
-  | "cast_credits"
-  | "videos"
-  | "news"
-  | "social_setup"
-  | "show_core"
-  | "links"
-  | "bravo"
-  | "cast_profiles"
-  | "cast_media"
-  | "get_images";
-type ShowTab = { id: TabId; label: string; icon?: "home" };
-type RefreshProgressState = {
-  stage?: string | null;
-  message?: string | null;
-  current: number | null;
-  total: number | null;
-};
-
-type RefreshLogEntry = {
-  id: string;
-  at: string;
-  category: string;
-  message: string;
-  current: number | null;
-  total: number | null;
-  stageKey?: string | null;
-  topic?: RefreshLogTopicKey | null;
-  provider?: string | null;
-  subOperationId?: string | null;
-  executionOwner?: string | null;
-  parentOperationId?: string | null;
-};
-
-type RoleRenameDraft = {
-  roleId: string;
-  originalName: string;
-  nextName: string;
-};
-
-type CastRoleEditDraft = {
-  personId: string;
-  personName: string;
-  roleCsv: string;
-};
-
-type CastRunFailedMember = {
-  personId: string;
-  name: string;
-  reason: string;
-};
-
-type CastBatchRunSummary = {
-  attempted: number;
-  succeeded: number;
-  skipped: number;
-  failed: number;
-  failedMembers: CastRunFailedMember[];
-};
-
-type ShowRefreshRunOptions = {
-  photoMode?: "fast" | "full";
-  skipCastPhotos?: boolean;
-  includeCastProfiles?: boolean;
+type ShowRefreshRunOptions = WorkspaceShowRefreshRunOptions & {
   suppressSuccessNotice?: boolean;
-  onProgress?: (progress: Partial<CastRefreshPhaseProgress>) => void;
 };
-type PersonRefreshMode = "full" | "ingest_only" | "profile_only";
-
-type HealthStatus = "ready" | "missing" | "stale";
-type PersonLinkSourceKey = "bravo" | "imdb" | "tmdb" | "wikipedia" | "wikidata" | "fandom";
-type PersonLinkSourceState = "missing" | "unvalidated";
-type LinkSourceBadgeKind =
-  | PersonLinkSourceKey
-  | "official"
-  | "google_news"
-  | "instagram"
-  | "tiktok"
-  | "x"
-  | "youtube"
-  | "threads"
-  | "facebook"
-  | "reddit"
-  | "tvdb"
-  | "tvmaze"
-  | "trakt"
-  | "freebase"
-  | "google_kg"
-  | "ratinggraph"
-  | "x_topic"
-  | "other";
-
-type PersonLinkSourceSummary = {
-  key: PersonLinkSourceKey;
-  label: string;
-  state: PersonLinkSourceState;
-  url: string | null;
-  link: EntityLink | null;
-};
-
-type ShowSocialLinkPill = {
-  id: string;
-  sourceKind: LinkSourceBadgeKind;
-  sourceLabel: string;
-  text: string;
-  url: string;
-  link: EntityLink;
-};
-
-type PersonApprovedLinkPill = {
-  id: string;
-  sourceKind: LinkSourceBadgeKind;
-  sourceLabel: string;
-  text: string;
-  label: string;
-  url: string;
-  iconUrl: string | null;
-  link: EntityLink;
-};
-
-type PersonLinkCoverageCard = {
-  personId: string;
-  personName: string;
-  avatarUrl: string | null;
-  seasons: number[];
-  approvedLinkCount: number;
-  approvedLinks: PersonApprovedLinkPill[];
-  missingSources: PersonLinkSourceSummary[];
-};
-
-type SeasonCoverageLinkPill = {
-  id: string;
-  seasonNumber: number;
-  url: string;
-  sourceKind: LinkSourceBadgeKind;
-  sourceLabel: string;
-  iconUrl: string | null;
-  linkTitle: string | null;
-  link?: EntityLink;
-};
-
-type SeasonUrlCoverageRow = {
-  seasonNumber: number;
-  links: SeasonCoverageLinkPill[];
-};
-
-type ShowGalleryVisibleBySection = Partial<Record<AssetSectionKey, number>>;
-type GalleryAssetSourceRequest = {
-  id: string;
-  label: string;
-  baseUrl: string;
-};
-type GalleryAssetSourceFailure = {
-  sourceId: string;
-  label: string;
-  message: string;
-  status: number;
-  retryable: boolean;
-  code?: string;
-  reason?: string;
-  detail?: Record<string, unknown>;
-};
-
-class GalleryAssetSourceError extends Error {
-  status: number;
-  retryable: boolean;
-  code?: string;
-  reason?: string;
-  detail?: Record<string, unknown>;
-
-  constructor({
-    message,
-    status,
-    retryable,
-    code,
-    reason,
-    detail,
-  }: {
-    message: string;
-    status: number;
-    retryable: boolean;
-    code?: string;
-    reason?: string;
-    detail?: Record<string, unknown>;
-  }) {
-    super(message);
-    this.name = "GalleryAssetSourceError";
-    this.status = status;
-    this.retryable = retryable;
-    this.code = code;
-    this.reason = reason;
-    this.detail = detail;
-  }
-}
 
 const TabLoadingFallback = ({ label }: { label: string }) => (
   <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
@@ -946,13 +332,13 @@ const ShowNewsTab = dynamic(() => import("@/components/admin/show-tabs/ShowNewsT
 });
 const ShowCastTab = dynamic(() => import("@/components/admin/show-tabs/ShowCastTab"), {
   loading: () => <TabLoadingFallback label="Credits" />,
-});
+}) as typeof import("@/components/admin/show-tabs/ShowCastTab").default;
 const ShowSocialTab = dynamic(() => import("@/components/admin/show-tabs/ShowSocialTab"), {
   loading: () => <TabLoadingFallback label="Social" />,
 });
 const ShowSettingsTab = dynamic(() => import("@/components/admin/show-tabs/ShowSettingsTab"), {
   loading: () => <TabLoadingFallback label="Settings" />,
-});
+}) as typeof import("@/components/admin/show-tabs/ShowSettingsTab").default;
 
 const REFRESH_LOG_TOPIC_DEFINITIONS: RefreshLogTopicDefinition[] = [
   { key: "show_core", label: "SHOW CORE", description: "Details, seasons, episodes, cast, and setup" },
@@ -1126,22 +512,6 @@ const PERSON_LINK_SOURCE_DEFINITIONS: Array<{ key: PersonLinkSourceKey; label: s
   { key: "fandom", label: "Fandom/Wikia" },
 ];
 
-const SHOW_REFRESH_TARGET_LABELS: Record<ShowRefreshTarget, string> = {
-  details: "Show Info",
-  seasons_episodes: "Seasons & Episodes",
-  photos: "Gallery Media",
-  cast_credits: "Credits",
-  videos: "Bravo Videos",
-  news: "Google News",
-  social_setup: "Social Setup",
-  show_core: "Show Core",
-  links: "Links",
-  bravo: "Bravo",
-  cast_profiles: "Cast Profiles",
-  cast_media: "Cast Media",
-  get_images: "Getty/NBCUMV Images",
-};
-
 const SHOW_REFRESH_STAGE_LABELS: Record<string, string> = {
   starting: "Initializing",
   show_core: "Show Core",
@@ -1276,14 +646,6 @@ const CAST_REFRESH_PHASE_STAGES: Record<CastRefreshPhaseId, string> = {
   media_ingest: "Media",
 };
 
-const CAST_REFRESH_PHASE_ORDER: CastRefreshPhaseId[] = [
-  "credits_sync",
-  "profile_links_sync",
-  "bio_sync",
-  "network_augmentation",
-  "media_ingest",
-];
-
 const CREDITS_PIPELINE_BACKEND_TARGET = "credits_pipeline";
 
 const createCastRefreshPhaseStates = (): CastRefreshPhaseState[] =>
@@ -1332,12 +694,6 @@ const shouldPreferLocalAdminExecution = (): boolean => {
   if (typeof window === "undefined") return false;
   const hostname = window.location.hostname.trim().toLowerCase();
   return hostname === "localhost" || hostname === "127.0.0.1" || hostname.endsWith(".localhost");
-};
-
-const readTrimmedToken = (value: unknown): string | null => {
-  if (typeof value !== "string") return null;
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
 };
 
 const shortenAdminToken = (value: string | null | undefined): string | null => {
@@ -1456,911 +812,6 @@ const readLinkDiscoverySourceCounts = (value: unknown): LinkDiscoverySourceCount
       if (b.count !== a.count) return b.count - a.count;
       return a.label.localeCompare(b.label);
     });
-};
-
-const formatIsoAgeLabel = (value: string | null | undefined): string | null => {
-  const trimmed = readTrimmedToken(value);
-  if (!trimmed) return null;
-  const timestamp = Date.parse(trimmed);
-  if (!Number.isFinite(timestamp)) return null;
-  const diffSeconds = Math.max(0, Math.round((Date.now() - timestamp) / 1000));
-  return `${diffSeconds}s ago`;
-};
-
-const isCastRefreshPhaseId = (value: unknown): value is CastRefreshPhaseId =>
-  typeof value === "string" && CAST_REFRESH_PHASE_ORDER.includes(value as CastRefreshPhaseId);
-
-const toIsoNow = (): string => new Date().toISOString();
-
-const updateCastRefreshPhaseStates = (
-  states: CastRefreshPhaseState[],
-  phaseId: CastRefreshPhaseId,
-  updater: (state: CastRefreshPhaseState) => CastRefreshPhaseState
-): CastRefreshPhaseState[] => states.map((state) => (state.id === phaseId ? updater(state) : state));
-
-const SEASON_PAGE_TABS = [
-  { tab: "overview", label: "Home" },
-  { tab: "episodes", label: "Episodes" },
-  { tab: "assets", label: "Assets" },
-  { tab: "news", label: "News" },
-  { tab: "fandom", label: "Fandom" },
-  { tab: "cast", label: "Credits" },
-  { tab: "surveys", label: "Surveys" },
-  { tab: "social", label: "Social Media" },
-] as const;
-
-const UUID_RE =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const looksLikeUuid = (value: string) => UUID_RE.test(value);
-
-const normalizeEntityLinkStatus = (value: unknown): EntityLinkStatus => {
-  const normalized = String(value ?? "").trim().toLowerCase();
-  if (normalized === "approved") return "approved";
-  if (normalized === "rejected") return "rejected";
-  return "pending";
-};
-
-const classifyPersonLinkSource = (linkKind: string): PersonLinkSourceKey | null => {
-  const kind = linkKind.trim().toLowerCase();
-  if (!kind) return null;
-  if (kind === "bravo_profile" || kind.includes("bravo")) return "bravo";
-  if (kind.includes("imdb")) return "imdb";
-  if (kind.includes("tmdb")) return "tmdb";
-  if (kind === "wikipedia") return "wikipedia";
-  if (kind === "wikidata") return "wikidata";
-  if (kind === "fandom" || kind === "wikia") return "fandom";
-  return null;
-};
-
-const getPersonSourceKindPriority = (sourceKey: PersonLinkSourceKey, linkKind: string): number => {
-  const kind = linkKind.trim().toLowerCase();
-  if (sourceKey === "wikidata") return kind === "wikidata" ? 0 : 99;
-  if (sourceKey === "wikipedia") return kind === "wikipedia" ? 0 : 99;
-  return 99;
-};
-
-const pickPreferredPersonSourceLink = (
-  sourceKey: PersonLinkSourceKey,
-  links: EntityLink[]
-): EntityLink | null => {
-  if (links.length === 0) return null;
-  const rankByStatus = (status: EntityLinkStatus): number => {
-    if (status === "approved") return 0;
-    if (status === "pending") return 1;
-    return 2;
-  };
-  const sorted = [...links].sort((a, b) => {
-    const statusDiff = rankByStatus(normalizeEntityLinkStatus(a.status)) - rankByStatus(normalizeEntityLinkStatus(b.status));
-    if (statusDiff !== 0) return statusDiff;
-    const kindDiff =
-      getPersonSourceKindPriority(sourceKey, a.link_kind) -
-      getPersonSourceKindPriority(sourceKey, b.link_kind);
-    if (kindDiff !== 0) return kindDiff;
-    return (a.label || a.url).localeCompare(b.label || b.url);
-  });
-  return sorted[0] ?? null;
-};
-
-function PersonSourceLogo({ sourceKey }: { sourceKey: PersonLinkSourceKey }) {
-  const baseClass =
-    "inline-flex h-5 min-w-[2.1rem] items-center justify-center rounded border px-1 text-[10px] font-bold uppercase tracking-[0.08em]";
-  if (sourceKey === "imdb") {
-    return <span className={`${baseClass} border-zinc-300 bg-[#f5c518] text-zinc-900`}>IMDb</span>;
-  }
-  if (sourceKey === "tmdb") {
-    return <span className={`${baseClass} border-zinc-300 bg-[#01d277] text-zinc-900`}>TMDb</span>;
-  }
-  if (sourceKey === "bravo") {
-    return <span className={`${baseClass} border-zinc-300 bg-zinc-900 text-white`}>Bravo</span>;
-  }
-  if (sourceKey === "wikipedia") {
-    return <span className={`${baseClass} border-zinc-300 bg-sky-600 text-white`}>Wiki</span>;
-  }
-  if (sourceKey === "wikidata") {
-    return <span className={`${baseClass} border-zinc-300 bg-cyan-700 text-white`}>WD</span>;
-  }
-  return <span className={`${baseClass} border-zinc-300 bg-[#f3f4f6] text-zinc-800`}>Fandom</span>;
-}
-
-const PAGE_LINK_SOURCE_ORDER: LinkSourceBadgeKind[] = [
-  "official",
-  "bravo",
-  "fandom",
-  "wikipedia",
-  "wikidata",
-  "imdb",
-  "tmdb",
-  "tvdb",
-  "tvmaze",
-  "trakt",
-  "ratinggraph",
-  "freebase",
-  "google_kg",
-  "x_topic",
-  "google_news",
-  "instagram",
-  "tiktok",
-  "x",
-  "youtube",
-  "threads",
-  "facebook",
-  "reddit",
-  "other",
-];
-
-const PAGE_LINK_SOURCE_LABELS: Record<LinkSourceBadgeKind, string> = {
-  official: "Official",
-  google_news: "Google News",
-  bravo: "Bravo TV",
-  fandom: "Fandom",
-  wikipedia: "Wikipedia",
-  wikidata: "Wikidata",
-  imdb: "IMDb",
-  tmdb: "TMDb",
-  instagram: "Instagram",
-  tiktok: "TikTok",
-  x: "X",
-  youtube: "YouTube",
-  threads: "Threads",
-  facebook: "Facebook",
-  reddit: "Reddit",
-  tvdb: "TVDB",
-  tvmaze: "TVmaze",
-  trakt: "Trakt",
-  freebase: "Freebase",
-  google_kg: "Google KG",
-  ratinggraph: "RatingGraph",
-  x_topic: "X Topic",
-  other: "Link",
-};
-
-const getLinkSourceBadgeKind = (link: EntityLink): LinkSourceBadgeKind => {
-  const normalizedKind = normalizeLinkKind(link.link_kind);
-  const sourceKey = classifyPersonLinkSource(normalizedKind);
-  if (sourceKey) return sourceKey;
-  if (isSocialLinkKind(normalizedKind)) {
-    if (normalizedKind === "x") return "x";
-    return normalizedKind as LinkSourceBadgeKind;
-  }
-  if (normalizedKind === "official_page" || normalizedKind === "network_blog" || normalizedKind === "cast_announcement") {
-    const host = getHostnameFromUrl(link.url)?.toLowerCase() ?? "";
-    if (host.includes("bravotv.com")) return "bravo";
-    return "official";
-  }
-  if (normalizedKind === "tvdb") return "tvdb";
-  if (normalizedKind === "tvmaze") return "tvmaze";
-  if (normalizedKind === "trakt") return "trakt";
-  if (normalizedKind === "freebase") return "freebase";
-  if (normalizedKind === "google_kg") return "google_kg";
-  if (normalizedKind === "ratinggraph") return "ratinggraph";
-  if (normalizedKind === "x_topic") return "x_topic";
-  if (normalizedKind === "google_news_url") return "google_news";
-  return "other";
-};
-
-const getSourceBadgeOrder = (kind: LinkSourceBadgeKind): number => {
-  const index = PAGE_LINK_SOURCE_ORDER.indexOf(kind);
-  return index === -1 ? PAGE_LINK_SOURCE_ORDER.length : index;
-};
-
-const getLinkSourceLabel = (link: EntityLink): string => {
-  const badgeKind = getLinkSourceBadgeKind(link);
-  if (badgeKind === "fandom") {
-    return resolveLinkSiteTitle(link) || PAGE_LINK_SOURCE_LABELS.fandom;
-  }
-  if (badgeKind === "official" || badgeKind === "bravo") {
-    const host = getHostnameFromUrl(link.url)?.toLowerCase() ?? "";
-    if (host.includes("bravotv.com")) return "Bravo TV";
-  }
-  return PAGE_LINK_SOURCE_LABELS[badgeKind] || String(link.label || link.link_kind || "Link").trim() || "Link";
-};
-
-const getShowPageLinkTitle = (link: EntityLink, showName: string): string => {
-  return resolveShowPageDisplayTitle(link, showName);
-};
-
-const decodeHandleToken = (value: string): string => {
-  try {
-    return decodeURIComponent(value);
-  } catch {
-    return value;
-  }
-};
-
-const normalizeSocialHandleValue = (value: string): string | null => {
-  const decoded = decodeHandleToken(value).trim();
-  if (!decoded) return null;
-  const handleMatch = decoded.match(/@[\w.]+/);
-  if (handleMatch) {
-    return `@${handleMatch[0].replace(/^@+/, "")}`;
-  }
-  const normalized = decoded.replace(/^@+/, "").trim();
-  if (!normalized) return null;
-  return `@${normalized}`;
-};
-
-const extractSocialHandleFromUrl = (url: string): string | null => {
-  try {
-    const parsed = new URL(url);
-    const segments = parsed.pathname.split("/").filter(Boolean);
-    const handle = segments.at(-1) ?? "";
-    return normalizeSocialHandleValue(handle);
-  } catch {
-    return null;
-  }
-};
-
-const getApprovedLinkText = (link: EntityLink, fallbackTitle: string): string => {
-  const badgeKind = getLinkSourceBadgeKind(link);
-  if (isSocialLinkKind(badgeKind)) {
-    const normalizedUrlHandle = extractSocialHandleFromUrl(link.url);
-    if (normalizedUrlHandle) return normalizedUrlHandle;
-    const rawLabel = String(link.label || "").trim();
-    const normalizedLabelHandle = normalizeSocialHandleValue(rawLabel);
-    if (normalizedLabelHandle) return normalizedLabelHandle;
-    return rawLabel.startsWith("@") ? rawLabel : link.url;
-  }
-  return (
-    resolveLinkPageTitle(link) ||
-    String(link.label || "").trim() ||
-    fallbackTitle
-  );
-};
-
-const getCastMemberLinkText = (link: EntityLink, personName: string): string => {
-  const badgeKind = getLinkSourceBadgeKind(link);
-  if (isSocialLinkKind(badgeKind)) {
-    return getApprovedLinkText(link, personName);
-  }
-  if (badgeKind === "fandom") {
-    return resolveLinkPageTitle(link) || personName;
-  }
-  return personName;
-};
-
-const getCastMemberNameSourcePriority = (link: EntityLink): number => {
-  const normalizedKind = normalizeLinkKind(link.link_kind);
-  if (normalizedKind === "bravo_profile") return 0;
-  if (normalizedKind === "wikipedia") return 1;
-  if (normalizedKind === "fandom") return 2;
-  if (normalizedKind === "wikidata") return 3;
-  if (normalizedKind === "imdb") return 4;
-  if (normalizedKind === "tmdb") return 5;
-  if (isSocialLinkKind(normalizedKind)) return 99;
-  if (normalizedKind === "freebase" || normalizedKind === "google_kg") return 98;
-  return 50;
-};
-
-const resolveCastMemberNameFromLinks = (
-  links: EntityLink[],
-  rosterName: string | null | undefined
-): string => {
-  const normalizedRosterName = String(rosterName || "").trim();
-  if (normalizedRosterName) return normalizedRosterName;
-
-  const rankedCandidates = links
-    .map((link) => ({
-      link,
-      name: parsePersonNameFromLink(link),
-      statusPriority: normalizeEntityLinkStatus(link.status) === "approved" ? 0 : 1,
-      sourcePriority: getCastMemberNameSourcePriority(link),
-    }))
-    .filter((candidate): candidate is typeof candidate & { name: string } => Boolean(candidate.name))
-    .sort((a, b) => {
-      const statusDiff = a.statusPriority - b.statusPriority;
-      if (statusDiff !== 0) return statusDiff;
-      const sourceDiff = a.sourcePriority - b.sourcePriority;
-      if (sourceDiff !== 0) return sourceDiff;
-      const shorterDiff = a.name.length - b.name.length;
-      if (shorterDiff !== 0) return shorterDiff;
-      return a.name.localeCompare(b.name);
-    });
-
-  return rankedCandidates[0]?.name || "Unknown Person";
-};
-
-const isRenderableSeasonPageLink = (link: EntityLink): boolean => {
-  if (normalizeEntityLinkStatus(link.status) !== "approved") return false;
-  if (link.entity_type !== "season" && !(typeof link.season_number === "number" && link.season_number > 0)) return false;
-  const normalizedKind = normalizeLinkKind(link.link_kind);
-  if (isSocialLinkKind(normalizedKind)) return false;
-  if (normalizedKind === "cast_announcement" || normalizedKind === "network_blog") return false;
-  if (isFandomSeedUrl(link.url)) return false;
-  return isLikelyPageUrl(link.url);
-};
-
-const isRenderableShowPageLink = (link: EntityLink): boolean => {
-  if (normalizeEntityLinkStatus(link.status) !== "approved") return false;
-  if (link.entity_type !== "show" || Number(link.season_number || 0) > 0) return false;
-  const normalizedKind = normalizeLinkKind(link.link_kind);
-  if (link.link_group === "social" || isSocialLinkKind(normalizedKind)) return false;
-  if (normalizedKind === "cast_announcement") return false;
-  if (isFandomSeedUrl(link.url)) return false;
-  return isLikelyPageUrl(link.url);
-};
-
-const toSocialPlatformIconKey = (kind: LinkSourceBadgeKind): SocialPlatformTabIconKey | null => {
-  if (kind === "instagram" || kind === "tiktok" || kind === "youtube" || kind === "threads" || kind === "facebook" || kind === "reddit") {
-    return kind;
-  }
-  if (kind === "x") return "twitter";
-  return null;
-};
-
-const usesBrandIconOnly = (kind: LinkSourceBadgeKind): boolean =>
-  Boolean(
-    toSocialPlatformIconKey(kind) ||
-      kind === "imdb" ||
-      kind === "tmdb" ||
-      kind === "bravo" ||
-      kind === "wikipedia" ||
-      kind === "wikidata"
-  );
-
-function SourceBadge({
-  kind,
-  label,
-  iconUrl,
-  iconOnly = false,
-}: {
-  kind: LinkSourceBadgeKind;
-  label: string;
-  iconUrl?: string | null;
-  iconOnly?: boolean;
-}) {
-  const socialIconKey = toSocialPlatformIconKey(kind);
-  if (socialIconKey) {
-    return (
-      <span className="inline-flex items-center justify-center">
-        <SocialPlatformTabIcon tab={socialIconKey} />
-        {!iconOnly ? <span className="sr-only">{label}</span> : null}
-      </span>
-    );
-  }
-
-  if (kind === "imdb") return <PersonSourceLogo sourceKey="imdb" />;
-  if (kind === "tmdb") return <PersonSourceLogo sourceKey="tmdb" />;
-  if (kind === "bravo") return <PersonSourceLogo sourceKey="bravo" />;
-  if (kind === "wikipedia") return <PersonSourceLogo sourceKey="wikipedia" />;
-  if (kind === "wikidata") return <PersonSourceLogo sourceKey="wikidata" />;
-  if (kind === "fandom") {
-    if (iconUrl) {
-      return (
-        <span className="inline-flex items-center gap-1">
-          <Image
-            src={iconUrl}
-            alt=""
-            width={14}
-            height={14}
-            className="h-3.5 w-3.5 shrink-0 rounded-sm"
-            unoptimized
-          />
-          {!iconOnly ? <span className="text-xs font-semibold text-zinc-700">{label}</span> : null}
-        </span>
-      );
-    }
-    return iconOnly ? <PersonSourceLogo sourceKey="fandom" /> : <span className="text-xs font-semibold text-zinc-700">{label}</span>;
-  }
-
-  const baseClass =
-    "inline-flex h-5 min-w-[2.1rem] items-center justify-center rounded border px-1 text-[10px] font-bold uppercase tracking-[0.08em]";
-  const tokenText = (() => {
-    if (kind === "official") return "Site";
-    if (kind === "tvdb") return "TVDB";
-    if (kind === "tvmaze") return "TVM";
-    if (kind === "trakt") return "Trakt";
-    if (kind === "freebase") return "FB";
-    if (kind === "google_kg") return "GKG";
-    if (kind === "ratinggraph") return "RG";
-    if (kind === "x_topic") return "X";
-    if (kind === "google_news") return "News";
-    return label.slice(0, 6) || "Link";
-  })();
-  return <span className={`${baseClass} border-zinc-300 bg-zinc-100 text-zinc-700`}>{tokenText}</span>;
-}
-
-function SocialHandlePill({ pill }: { pill: ShowSocialLinkPill }) {
-  return (
-    <a
-      href={pill.url}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="inline-flex max-w-full items-center gap-2 rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs font-semibold text-zinc-700 hover:bg-zinc-100"
-      title={pill.url}
-    >
-      <SourceBadge
-        kind={pill.sourceKind}
-        label={pill.sourceLabel}
-        iconOnly={true}
-      />
-      <span className="truncate">{pill.text}</span>
-    </a>
-  );
-}
-
-function InlineEditableLinkUrl({
-  linkId,
-  url,
-  openUrl,
-  label,
-  saving,
-  onSubmit,
-  children,
-  actions,
-  containerClassName,
-  canEdit = true,
-}: {
-  linkId: string;
-  url: string;
-  openUrl?: string | null;
-  label?: string;
-  saving: boolean;
-  onSubmit: (linkId: string, nextUrl: string) => Promise<void>;
-  children?: ReactNode;
-  actions?: ReactNode;
-  containerClassName?: string;
-  canEdit?: boolean;
-}) {
-  const editButton = canEdit ? (
-    <EditableTrigger asChild>
-      <button
-        type="button"
-        disabled={saving}
-        className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-zinc-200 bg-white text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
-        aria-label={label ? `Edit URL for ${label}` : "Edit link URL"}
-        title={label ? `Edit URL for ${label}` : "Edit link URL"}
-      >
-        <EditActionIcon />
-      </button>
-    </EditableTrigger>
-  ) : null;
-  const openButton = openUrl ? (
-    <a
-      href={openUrl}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-zinc-200 bg-white text-zinc-700 transition hover:bg-zinc-50"
-      aria-label={label ? `Open ${label}` : "Open link"}
-      title={label ? `Open ${label}` : "Open link"}
-    >
-      <OpenLinkActionIcon />
-    </a>
-  ) : null;
-
-  return (
-    <Editable value={url} placeholder="https://example.com" onSubmit={(nextUrl) => onSubmit(linkId, nextUrl)}>
-      <div className={containerClassName ? `${containerClassName} space-y-2` : "space-y-2"}>
-        {(children || actions || editButton || openButton) && (
-          <div className="flex flex-wrap items-start justify-between gap-2">
-            <div className="min-w-0 flex-1">{children}</div>
-            <div className="flex shrink-0 items-center gap-2">
-              {editButton}
-              {openButton}
-              {actions}
-            </div>
-          </div>
-        )}
-        {!children && !actions && (editButton || openButton) && (
-          <div className="flex justify-end">
-            <div className="flex items-center gap-2">
-              {editButton}
-              {openButton}
-            </div>
-          </div>
-        )}
-        <EditableArea className="space-y-1">
-          <EditablePreview className="hidden" />
-          <EditableInput
-            type="url"
-            autoCapitalize="off"
-            autoCorrect="off"
-            spellCheck={false}
-            className="min-h-9 rounded-lg text-xs"
-          />
-        </EditableArea>
-        <EditableToolbar className="pt-1">
-          <EditableSubmit asChild>
-            <button
-              type="button"
-              disabled={saving}
-              className="rounded border border-zinc-300 bg-zinc-900 px-2 py-1 text-[11px] font-semibold text-white hover:bg-zinc-800 disabled:opacity-50"
-            >
-              {saving ? "Saving..." : "Save URL"}
-            </button>
-          </EditableSubmit>
-          <EditableCancel asChild>
-            <button
-              type="button"
-              disabled={saving}
-              className="rounded border border-zinc-200 bg-white px-2 py-1 text-[11px] font-semibold text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
-            >
-              Cancel
-            </button>
-          </EditableCancel>
-        </EditableToolbar>
-      </div>
-    </Editable>
-  );
-}
-
-function EditActionIcon() {
-  return (
-    <svg className="h-4 w-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
-      <path d="M11.8 2.2a1.7 1.7 0 0 1 2.4 2.4l-7.5 7.5-3 .6.6-3z" />
-      <path d="M10.7 3.3l2 2" />
-    </svg>
-  );
-}
-
-function OpenLinkActionIcon() {
-  return (
-    <svg
-      className="h-4 w-4"
-      viewBox="0 0 16 16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M7 3H3v10h10V9" />
-      <path d="M10 3h3v3" />
-      <path d="M6.5 9.5L13 3" />
-    </svg>
-  );
-}
-
-const toFiniteNumber = (value: unknown): number | null => {
-  if (typeof value === "number") {
-    return Number.isFinite(value) ? value : null;
-  }
-  if (typeof value === "string" && value.trim().length > 0) {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : null;
-  }
-  return null;
-};
-
-const formatFixed1 = (value: unknown): string | null => {
-  const parsed = toFiniteNumber(value);
-  return parsed === null ? null : parsed.toFixed(1);
-};
-
-const parseProgressNumber = (value: unknown): number | null => {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value === "string" && value.trim().length > 0) {
-    const parsed = Number.parseInt(value, 10);
-    return Number.isFinite(parsed) ? parsed : null;
-  }
-  return null;
-};
-
-const isAbortError = (error: unknown): boolean =>
-  error instanceof Error && error.name === "AbortError";
-
-const isRetryableGalleryStatus = (status: number): boolean =>
-  status === 408 || status === 409 || status === 425 || status === 429 || status >= 500;
-
-const readGalleryErrorString = (value: unknown): string | undefined =>
-  typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
-
-const readGalleryErrorBoolean = (value: unknown): boolean | undefined =>
-  typeof value === "boolean" ? value : undefined;
-
-const parseGalleryAssetErrorPayload = async (
-  response: Response,
-): Promise<{
-  message: string;
-  code?: string;
-  reason?: string;
-  retryable: boolean;
-  detail?: Record<string, unknown>;
-}> => {
-  let payload: Record<string, unknown> | null = null;
-  try {
-    const parsed = (await response.clone().json()) as unknown;
-    payload = parsed && typeof parsed === "object" && !Array.isArray(parsed)
-      ? (parsed as Record<string, unknown>)
-      : null;
-  } catch {
-    payload = null;
-  }
-
-  const detail =
-    payload?.detail && typeof payload.detail === "object" && !Array.isArray(payload.detail)
-      ? (payload.detail as Record<string, unknown>)
-      : null;
-  const code = readGalleryErrorString(payload?.code) ?? readGalleryErrorString(detail?.code);
-  const reason = readGalleryErrorString(payload?.reason) ?? readGalleryErrorString(detail?.reason);
-  return {
-    message:
-      readGalleryErrorString(payload?.error) ??
-      readGalleryErrorString(payload?.detail) ??
-      readGalleryErrorString(detail?.message) ??
-      `${response.status} ${response.statusText || "Failed to load gallery assets"}`,
-    ...(code ? { code } : {}),
-    ...(reason ? { reason } : {}),
-    retryable:
-      readGalleryErrorBoolean(payload?.retryable) ??
-      readGalleryErrorBoolean(detail?.retryable) ??
-      isRetryableGalleryStatus(response.status),
-    ...(detail ? { detail } : {}),
-  };
-};
-
-const normalizeGallerySourceFailure = (
-  source: GalleryAssetSourceRequest,
-  reason: unknown,
-): GalleryAssetSourceFailure => {
-  if (reason instanceof GalleryAssetSourceError) {
-    return {
-      sourceId: source.id,
-      label: source.label,
-      message: reason.message,
-      status: reason.status,
-      retryable: reason.retryable,
-      ...(reason.code ? { code: reason.code } : {}),
-      ...(reason.reason ? { reason: reason.reason } : {}),
-      ...(reason.detail ? { detail: reason.detail } : {}),
-    };
-  }
-  return {
-    sourceId: source.id,
-    label: source.label,
-    message: reason instanceof Error ? reason.message : "Failed to load gallery assets",
-    status: 500,
-    retryable: false,
-  };
-};
-
-const formatGallerySourceFailure = (failure: GalleryAssetSourceFailure): string => {
-  const retryLabel = failure.retryable ? "retryable" : "not retryable";
-  const codeLabel = failure.code ? ` (${failure.code})` : "";
-  return `${failure.label}: ${failure.message}${codeLabel}, ${retryLabel}`;
-};
-
-const formatSnapshotAgeLabel = (timestampMs: number): string => {
-  const diffMs = Math.max(0, Date.now() - timestampMs);
-  const diffMinutes = Math.floor(diffMs / 60_000);
-  if (diffMinutes < 1) return "just now";
-  if (diffMinutes < 60) return `${diffMinutes}m ago`;
-  const diffHours = Math.floor(diffMinutes / 60);
-  if (diffHours < 24) return `${diffHours}h ago`;
-  const diffDays = Math.floor(diffHours / 24);
-  return `${diffDays}d ago`;
-};
-
-const isHttpUrlValue = (value: string): boolean => {
-  try {
-    const parsed = new URL(value);
-    return parsed.protocol === "http:" || parsed.protocol === "https:";
-  } catch {
-    return false;
-  }
-};
-
-const withSnapshotAgeSuffix = (warning: string | null, timestampMs: number | null): string | null => {
-  if (!warning) return null;
-  if (!timestampMs) return warning;
-  return `${warning} Last successful snapshot: ${formatSnapshotAgeLabel(timestampMs)}.`;
-};
-
-const inferBravoShowUrl = (showName: string | null | undefined): string | null => {
-  if (typeof showName !== "string") return null;
-  const slug = showName
-    .trim()
-    .toLowerCase()
-    .replace(/&/g, " and ")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)/g, "");
-  if (!slug) return null;
-  return `https://www.bravotv.com/${slug}`;
-};
-
-const inferBravoPersonUrl = (personName: string | null | undefined): string | null => {
-  if (typeof personName !== "string") return null;
-  const slug = personName
-    .trim()
-    .toLowerCase()
-    .replace(/&/g, " and ")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)/g, "");
-  if (!slug) return null;
-  return `https://www.bravotv.com/people/${slug}`;
-};
-
-const isBravoNetworkName = (value: unknown): boolean => {
-  const normalized = String(value ?? "")
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "");
-  if (!normalized) return false;
-  return normalized === "bravo" || normalized === "bravotv" || normalized.includes("bravo");
-};
-
-const normalizeBravoSocialKey = (value: string): string => {
-  const normalized = value.trim().toLowerCase();
-  if (!normalized) return "link";
-  if (normalized.includes("instagram")) return "instagram";
-  if (normalized === "x" || normalized.includes("twitter")) return "x";
-  if (normalized.includes("facebook")) return "facebook";
-  if (normalized.includes("tiktok")) return "tiktok";
-  if (normalized.includes("youtube")) return "youtube";
-  return normalized;
-};
-
-const formatBravoSocialLabel = (key: string): string => {
-  if (key === "x") return "X";
-  if (key === "instagram") return "Instagram";
-  if (key === "facebook") return "Facebook";
-  if (key === "tiktok") return "TikTok";
-  if (key === "youtube") return "YouTube";
-  return key.replace(/[_-]+/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
-};
-
-const extractBravoSocialHandle = (url: string): string | null => {
-  return extractSocialHandleFromUrl(url);
-};
-
-const BRAVO_IMPORT_IMAGE_KIND_OPTIONS: Array<{ value: BravoImportImageKind; label: string }> = [
-  { value: "poster", label: "Poster" },
-  { value: "backdrop", label: "Backdrop" },
-  { value: "logo", label: "Logo" },
-  { value: "episode_still", label: "Episode Still" },
-  { value: "cast", label: "Cast" },
-  { value: "promo", label: "Promo" },
-  { value: "intro", label: "Intro" },
-  { value: "reunion", label: "Reunion" },
-  { value: "other", label: "Other" },
-];
-
-const inferBravoImportImageKind = (
-  image: { url: string; alt?: string | null }
-): BravoImportImageKind => {
-  const haystack = `${image.alt ?? ""} ${image.url}`.toLowerCase();
-  if (haystack.includes("logo")) return "logo";
-  if (haystack.includes("key art") || haystack.includes("poster")) return "poster";
-  if (haystack.includes("backdrop") || haystack.includes("background")) return "backdrop";
-  if (haystack.includes("cast")) return "cast";
-  if (haystack.includes("still")) return "episode_still";
-  if (haystack.includes("intro")) return "intro";
-  if (haystack.includes("reunion")) return "reunion";
-  return "promo";
-};
-
-const humanizeStage = (value: string): string => {
-  const normalized = value.replace(/[_-]+/g, " ").trim();
-  if (!normalized) return "Working";
-  return normalized
-    .split(" ")
-    .map((token) =>
-      token.length > 0 ? token.charAt(0).toUpperCase() + token.slice(1) : token
-    )
-    .join(" ");
-};
-
-const resolveStageLabel = (
-  stageValue: unknown,
-  stageLabels: Record<string, string>
-): string | null => {
-  if (typeof stageValue !== "string") return null;
-  const normalized = stageValue.trim().toLowerCase();
-  if (!normalized) return null;
-  return stageLabels[normalized] ?? humanizeStage(normalized);
-};
-
-const getShowRefreshTargetLabel = (target: ShowRefreshTarget): string => {
-  return SHOW_REFRESH_TARGET_LABELS[target] ?? target;
-};
-
-const buildProgressMessage = (
-  stageLabel: string | null,
-  rawMessage: unknown,
-  fallback: string
-): string => {
-  const message = typeof rawMessage === "string" ? rawMessage.trim() : "";
-  if (!message) return stageLabel ? `Working on ${stageLabel}...` : fallback;
-  if (stageLabel) return `${stageLabel}: ${message}`;
-  return message;
-};
-
-const UUID_LIKE_RE =
-  /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi;
-
-const normalizeRefreshLogMessage = (value: string): string => {
-  return value
-    .replace(UUID_LIKE_RE, "person")
-    .replace(/\s+/g, " ")
-    .trim();
-};
-
-const extractRefreshLogSubJob = (entry: RefreshLogEntry): { subJob: string; details: string } => {
-  const normalizedMessage = normalizeRefreshLogMessage(entry.message);
-  const prefixMatch = normalizedMessage.match(/^([^:]{2,50}):\s+(.+)$/);
-  if (prefixMatch) {
-    return {
-      subJob: prefixMatch[1].trim(),
-      details: prefixMatch[2].trim(),
-    };
-  }
-  const fallbackSubJob = entry.category.trim() || "Update";
-  return {
-    subJob: fallbackSubJob,
-    details: normalizedMessage,
-  };
-};
-
-const isRefreshTopicDone = (entry: RefreshLogEntry | null): boolean => {
-  return isRefreshLogTerminalSuccess(entry);
-};
-
-const isRefreshTopicFailed = (entry: RefreshLogEntry | null): boolean => {
-  if (!entry) return false;
-  const message = entry.message.toLowerCase();
-  return message.includes("failed") || message.includes("error");
-};
-
-const getAssetDisplayUrl = (asset: SeasonAsset): string =>
-  firstImageUrlCandidate(getSeasonAssetCardUrlCandidates(asset)) ?? asset.hosted_url;
-
-const getFeaturedShowImageKind = (asset: SeasonAsset): "poster" | "backdrop" | null => {
-  const normalizedKind = String(asset.kind ?? "").trim().toLowerCase();
-  if (normalizedKind === "poster") return "poster";
-  if (normalizedKind === "backdrop") return "backdrop";
-  return null;
-};
-
-const buildAssetAutoCropPayload = (asset: SeasonAsset): Record<string, unknown> | null => {
-  const directCrop = parseThumbnailCrop(
-    {
-      x: asset.thumbnail_focus_x,
-      y: asset.thumbnail_focus_y,
-      zoom: asset.thumbnail_zoom,
-      mode: asset.thumbnail_crop_mode,
-    },
-    { clamp: true }
-  );
-  const metadataCrop = parseThumbnailCrop(
-    (asset.metadata as Record<string, unknown> | null)?.thumbnail_crop,
-    { clamp: true }
-  );
-  const crop = directCrop ?? metadataCrop;
-  if (!crop) return null;
-  return {
-    x: crop.x,
-    y: crop.y,
-    zoom: crop.zoom,
-    mode: crop.mode,
-  };
-};
-
-const buildAssetAutoCropPayloadWithFallback = (
-  asset: SeasonAsset
-): Record<string, unknown> =>
-  buildAssetAutoCropPayload(asset) ?? {
-    x: THUMBNAIL_DEFAULTS.x,
-    y: THUMBNAIL_DEFAULTS.y,
-    zoom: THUMBNAIL_DEFAULTS.zoom,
-    mode: "auto",
-    strategy: "resize_center_fallback_v1",
-  };
-
-const areStringArraysEqual = (a: string[], b: string[]): boolean => {
-  if (a === b) return true;
-  if (a.length !== b.length) return false;
-  for (let index = 0; index < a.length; index += 1) {
-    if (a[index] !== b[index]) return false;
-  }
-  return true;
-};
-
-const areNumberArraysEqual = (a: number[], b: number[]): boolean => {
-  if (a === b) return true;
-  if (a.length !== b.length) return false;
-  for (let index = 0; index < a.length; index += 1) {
-    if (a[index] !== b[index]) return false;
-  }
-  return true;
 };
 
 export default function TrrShowDetailPage() {
@@ -8259,42 +6710,6 @@ export default function TrrShowDetailPage() {
     [newsFacets.seasons]
   );
 
-  const settingsLinkSections = useMemo(
-    () =>
-      [
-        {
-          key: "social-links",
-          title: "Social Links",
-          description:
-            "Show-level handles routed from submitted Instagram, TikTok, X, YouTube, Threads, Facebook, and Reddit links.",
-        },
-        {
-          key: "show-pages",
-          title: "Show Pages",
-          description:
-            "Validated show-level pages. Fandom community roots stay internal and only page URLs render here.",
-        },
-        {
-          key: "season-pages",
-          title: "Season Pages",
-          description:
-            "Validated season pages only. Cast-announcement, social, and non-page links are excluded.",
-        },
-        {
-          key: "cast-member-pages",
-          title: "Cast Member Pages",
-          description: showIsBravo
-            ? "Cast-member profile links (BravoTV, Fandom, Wikipedia, IMDb, TMDb, and related pages)."
-            : "Cast-member profile links (Fandom, Wikipedia, IMDb, TMDb, and related pages). Bravo appears only when a Bravo profile link exists.",
-        },
-      ] as const,
-    [showIsBravo]
-  );
-  const socialLinksSection = settingsLinkSections[0];
-  const showPagesSection = settingsLinkSections[1];
-  const seasonPagesSection = settingsLinkSections[2];
-  const castMemberPagesSection = settingsLinkSections[3];
-
   const showSocialLinks = useMemo<ShowSocialLinkPill[]>(() => {
     const socialLinks = showLinks
       .filter((link) => {
@@ -11927,6 +10342,12 @@ export default function TrrShowDetailPage() {
           : null;
     return formatIsoAgeLabel(stageTransition);
   }, [linksRefreshLatestPayload, linksRefreshResult]);
+  const linksRefreshTimeoutMessage = useMemo(() => {
+    const timeout = linksRefreshLatestPayload?.timeout;
+    if (!timeout || typeof timeout !== "object") return null;
+    const detail = (timeout as Record<string, unknown>).detail;
+    return typeof detail === "string" ? detail : "Discovery reported a timeout condition.";
+  }, [linksRefreshLatestPayload]);
 
   if (checking) {
     return (
@@ -12224,12 +10645,6 @@ export default function TrrShowDetailPage() {
         </Link>
       </div>
     );
-  };
-
-  const healthBadgeClassName = (status: HealthStatus): string => {
-    if (status === "ready") return "border-emerald-200 bg-emerald-50 text-emerald-700";
-    if (status === "stale") return "border-amber-200 bg-amber-50 text-amber-700";
-    return "border-rose-200 bg-rose-50 text-rose-700";
   };
 
   const showHealthStatus: HealthStatus = refreshingTargets.details
@@ -12729,452 +11144,154 @@ export default function TrrShowDetailPage() {
 
           {/* ASSETS Tab */}
           {activeTab === "assets" && (
-            <ShowAssetsTab>
-            {assetsView === "images" && (
-              <div className="mb-6">
-                <BravotvImageRunPanel
-                  mode="show"
-                  targetId={showId}
-                  title={`BRAVOTV Get Images for ${show.name}`}
-                  season={selectedGallerySeason === "all" ? null : selectedGallerySeason}
-                  onCompleted={async () => {
-                    await loadGalleryAssets(selectedGallerySeason);
-                  }}
+            <ShowAssetsTab
+              assetsView={assetsView}
+              showId={showId}
+              showName={show.name}
+              featuredPosterImageId={show.primary_poster_image_id}
+              featuredBackdropImageId={show.primary_backdrop_image_id}
+              images={{
+                selectedSeason: selectedGallerySeason,
+                seasonOptions: visibleSeasons,
+                refreshCenterButtonLabel,
+                autoAdvanceMode: galleryAutoAdvanceMode,
+                hasActiveAdvancedFilters,
+                activeAdvancedFilterCount,
+                refreshingGetImages: refreshingTargets.get_images,
+                photosNotice: refreshTargetNotice.photos,
+                photosError: refreshTargetError.photos,
+                getImagesNotice: refreshTargetNotice.get_images,
+                getImagesError: refreshTargetError.get_images,
+                getImagesProgress: refreshTargetProgress.get_images,
+                batchJobsNotice,
+                batchJobsError,
+                batchJobsRunning,
+                batchJobsProgress,
+                truncatedWarning: galleryTruncatedWarning,
+                fallbackTelemetry: galleryFallbackTelemetry,
+                mirrorTelemetry: galleryMirrorTelemetry,
+                sourceFailures: gallerySourceFailures,
+                loading: galleryLoading,
+                filteredAssetCount: filteredGalleryAssets.length,
+                sections: gallerySectionAssets,
+                castPromoAssets: castPromoSectionAssets,
+                onRunCompleted: async () => {
+                  await loadGalleryAssets(selectedGallerySeason);
+                },
+                onSelectSeason: (value) =>
+                  setSelectedGallerySeason(value === "all" ? "all" : parseInt(value)),
+                onOpenRefreshCenter: () => setRefreshLogOpen(true),
+                onOpenFilters: () => setAdvancedFiltersOpen(true),
+                onToggleAutoAdvance: () =>
+                  setGalleryAutoAdvanceMode((previous) =>
+                    previous === "manual" ? "auto" : "manual",
+                  ),
+                onClearFilters: clearGalleryFilters,
+                onOpenBatchJobs: () => {
+                  setBatchJobsError(null);
+                  setBatchJobsNotice(null);
+                  setBatchJobsOpen(true);
+                },
+                onGetImages: () => {
+                  void refreshShow("get_images");
+                },
+                onOpenImport: () => {
+                  if (selectedGallerySeason !== "all") {
+                    const selectedSeason = visibleSeasons.find(
+                      (season) => season.season_number === selectedGallerySeason,
+                    );
+                    setScrapeDrawerContext({
+                      type: "season",
+                      showId,
+                      showName: show.name,
+                      seasonNumber: selectedGallerySeason,
+                      seasonId: selectedSeason?.id,
+                    });
+                  } else {
+                    setScrapeDrawerContext({
+                      type: "show",
+                      showId,
+                      showName: show.name,
+                      seasons: visibleSeasons.map((season) => ({
+                        seasonNumber: season.season_number,
+                        seasonId: season.id,
+                      })),
+                      defaultSeasonNumber: null,
+                    });
+                  }
+                  setScrapeDrawerOpen(true);
+                },
+                onLoadMoreBackdrops: () => increaseGallerySectionVisible("backdrops"),
+                onLoadMoreBanners: () => increaseGallerySectionVisible("banners"),
+                onLoadMorePosters: () => increaseGallerySectionVisible("posters"),
+                onLoadMoreProfilePictures: () =>
+                  increaseGallerySectionVisible("profile_pictures"),
+                onLoadMoreCastPromos: () => increaseGallerySectionVisible("cast_photos"),
+                onOpenAssetLightbox: openAssetLightbox,
+                formatSourceFailure: formatGallerySourceFailure,
+              }}
+              videos={{
+                error: bravoError,
+                loading: bravoLoading,
+                thumbnailSyncing: bravoVideoSyncing,
+                thumbnailSyncWarning: bravoVideoSyncWarning,
+                rows: bravoVideos,
+                getThumbnailUrl: resolveBravoVideoThumbnailUrl,
+                formatPublishedDate: formatBravoPublishedDate,
+              }}
+              branding={{
+                posterAssets: featuredPosterCandidates,
+                backdropAssets: featuredBackdropCandidates,
+                featuredPosterImageId: show.primary_poster_image_id,
+                featuredBackdropImageId: show.primary_backdrop_image_id,
+                logoAssets: brandLogoAssets,
+                featuredLogoAssetId: featuredShowLogoAssetId,
+                featuredLogoSavingAssetId,
+                featuredLogoVariant,
+                seasons,
+                cast,
+                getAssetDisplayUrl,
+                onSetFeaturedPoster: (showImageId) => {
+                  void setFeaturedShowImage("poster", showImageId);
+                },
+                onSetFeaturedBackdrop: (showImageId) => {
+                  void setFeaturedShowImage("backdrop", showImageId);
+                },
+                onSelectFeaturedLogoVariant: selectFeaturedLogoVariant,
+                onSetFeaturedLogo: (asset) => {
+                  void setFeaturedShowLogo(asset);
+                },
+              }}
+              renderProgress={(progress) => <RefreshProgressBar {...progress} />}
+              renderAssetImage={({ asset, alt, sizes, className, useResolvedUrl }) => (
+                <GalleryImage
+                  src={
+                    useResolvedUrl
+                      ? getResolvedGalleryAssetDisplayUrl(asset)
+                      : getAssetDisplayUrl(asset)
+                  }
+                  srcCandidates={
+                    useResolvedUrl
+                      ? getResolvedGalleryAssetCardUrlCandidates(asset)
+                      : getSeasonAssetCardUrlCandidates(asset)
+                  }
+                  diagnosticKey={`${asset.origin_table || "unknown"}:${asset.id}`}
+                  onFallbackEvent={trackGalleryFallbackEvent}
+                  alt={alt}
+                  sizes={sizes}
+                  className={className}
                 />
-              </div>
-            )}
-            <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
-              {assetsView === "images" ? (
-                <>
-                  {/* Season filter and Import button */}
-                  <div className="mb-6 flex items-center justify-between">
-                    <div className="flex items-center gap-4">
-                      <label className="text-sm font-medium text-zinc-700">
-                        Filter by season:
-                      </label>
-                      <select
-                        value={selectedGallerySeason}
-                        onChange={(e) =>
-                          setSelectedGallerySeason(
-                            e.target.value === "all" ? "all" : parseInt(e.target.value)
-                          )
-                        }
-                        className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm"
-                      >
-                        <option value="all">All Seasons</option>
-                        {visibleSeasons.map((s) => (
-                          <option key={s.id} value={s.season_number}>
-                            Season {s.season_number}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setRefreshLogOpen(true)}
-                        className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
-                      >
-                        <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M4 4v6h6M20 20v-6h-6M20 8a8 8 0 00-14-4M4 16a8 8 0 0014 4"
-                          />
-                        </svg>
-                        {refreshCenterButtonLabel}
-                      </button>
-
-                      <button type="button"
-                        onClick={() => setAdvancedFiltersOpen(true)}
-                        className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50"
-                      >
-                        <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 6h18M7 12h10M10 18h4" />
-                        </svg>
-                        Filters
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setGalleryAutoAdvanceMode((prev) =>
-                            prev === "manual" ? "auto" : "manual"
-                          )
-                        }
-                        className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50"
-                      >
-                        Auto-Load: {galleryAutoAdvanceMode === "auto" ? "On" : "Off"}
-                      </button>
-                      {hasActiveAdvancedFilters && (
-                        <button
-                          type="button"
-                          onClick={clearGalleryFilters}
-                          className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-100"
-                        >
-                          Clear Filters ({activeAdvancedFilterCount})
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setBatchJobsError(null);
-                          setBatchJobsNotice(null);
-                          setBatchJobsOpen(true);
-                        }}
-                        className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50"
-                      >
-                        Batch Jobs
-                      </button>
-
-                      <button
-                        type="button"
-                        disabled={refreshingTargets.get_images}
-                        onClick={() => refreshShow("get_images")}
-                        className="flex items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-2 text-sm font-semibold text-indigo-700 transition hover:bg-indigo-100 disabled:opacity-50"
-                      >
-                        <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                        </svg>
-                        {refreshingTargets.get_images ? "Getting Images..." : "Get Images"}
-                      </button>
-
-                      <button type="button"
-                        onClick={() => {
-                          if (selectedGallerySeason !== "all") {
-                            const selectedSeason = visibleSeasons.find(
-                              (season) => season.season_number === selectedGallerySeason
-                            );
-                            setScrapeDrawerContext({
-                              type: "season",
-                              showId: showId,
-                              showName: show.name,
-                              seasonNumber: selectedGallerySeason,
-                              seasonId: selectedSeason?.id,
-                            });
-                          } else {
-                            setScrapeDrawerContext({
-                              type: "show",
-                              showId: showId,
-                              showName: show.name,
-                              seasons: visibleSeasons.map((season) => ({
-                                seasonNumber: season.season_number,
-                                seasonId: season.id,
-                              })),
-                              defaultSeasonNumber: null,
-                            });
-                          }
-                          setScrapeDrawerOpen(true);
-                        }}
-                        className="flex items-center gap-2 rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800"
-                      >
-                        <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                        </svg>
-                        Import Images
-                      </button>
-                    </div>
-                  </div>
-
-                  {(refreshTargetNotice.photos || refreshTargetError.photos) && (
-                    <p
-                      className={`mb-4 text-sm ${
-                        refreshTargetError.photos ? "text-red-600" : "text-zinc-500"
-                      }`}
-                    >
-                      {refreshTargetError.photos || refreshTargetNotice.photos}
-                    </p>
-                  )}
-                  {(refreshTargetNotice.get_images || refreshTargetError.get_images || refreshingTargets.get_images) && (
-                    <div className="mb-4">
-                      {refreshTargetProgress.get_images && refreshingTargets.get_images && (
-                        <RefreshProgressBar
-                          show={true}
-                          stage={refreshTargetProgress.get_images.stage}
-                          message={refreshTargetProgress.get_images.message}
-                          current={refreshTargetProgress.get_images.current}
-                          total={refreshTargetProgress.get_images.total}
-                        />
-                      )}
-                      {(refreshTargetNotice.get_images || refreshTargetError.get_images) && (
-                        <p className={`text-sm ${refreshTargetError.get_images ? "text-red-600" : "text-indigo-600"}`}>
-                          {refreshTargetError.get_images || refreshTargetNotice.get_images}
-                        </p>
-                      )}
-                    </div>
-                  )}
-                  {(batchJobsNotice || batchJobsError) && (
-                    <p className={`mb-4 text-sm ${batchJobsError ? "text-red-600" : "text-zinc-500"}`}>
-                      {batchJobsError || batchJobsNotice}
-                    </p>
-                  )}
-                  <RefreshProgressBar
-                    show={batchJobsRunning}
-                    stage={batchJobsProgress?.stage}
-                    message={batchJobsProgress?.message}
-                    current={batchJobsProgress?.current}
-                    total={batchJobsProgress?.total}
-                  />
-                  {galleryTruncatedWarning && (
-                    <p className="mb-4 text-xs font-medium text-amber-700">{galleryTruncatedWarning}</p>
-                  )}
-                  <p className="mb-4 text-xs text-zinc-500">
-                    Fallback diagnostics: {galleryFallbackTelemetry.fallbackRecoveredCount} recovered,{" "}
-                    {galleryFallbackTelemetry.allCandidatesFailedCount} failed,{" "}
-                    {galleryFallbackTelemetry.totalImageAttempts} attempted. Mirrored URL usage:{" "}
-                    {galleryMirrorTelemetry.mirroredCount}/{galleryMirrorTelemetry.totalCount} (
-                    {Math.round(galleryMirrorTelemetry.mirroredRatio * 100)}%).
-                  </p>
-                  {process.env.NODE_ENV === "development" && gallerySourceFailures.length > 0 && (
-                    <details className="mb-4 rounded border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-700">
-                      <summary className="cursor-pointer font-medium text-zinc-900">
-                        Gallery source debug
-                      </summary>
-                      <ul className="mt-2 space-y-1">
-                        {gallerySourceFailures.map((failure) => (
-                          <li key={failure.sourceId}>{formatGallerySourceFailure(failure)}</li>
-                        ))}
-                      </ul>
-                    </details>
-                  )}
-
-                  {galleryLoading ? (
-                    <div className="flex items-center justify-center py-12">
-                      <div className="h-8 w-8 animate-spin rounded-full border-4 border-zinc-300 border-t-blue-500" />
-                    </div>
-                  ) : filteredGalleryAssets.length === 0 ? (
-                    <p className="py-8 text-center text-zinc-500">
-                      No images found for this selection.
-                    </p>
-                  ) : (
-                    <div className="space-y-8">
-                      <ShowAssetsImageSections
-                        backdrops={gallerySectionAssets.backdrops}
-                        banners={gallerySectionAssets.banners}
-                        posters={gallerySectionAssets.posters}
-                        featuredBackdropImageId={show.primary_backdrop_image_id}
-                        featuredPosterImageId={show.primary_poster_image_id}
-                        autoAdvanceMode={galleryAutoAdvanceMode}
-                        hasMoreBackdrops={Boolean(gallerySectionAssets.hasMoreBySection.backdrops)}
-                        hasMoreBanners={Boolean(gallerySectionAssets.hasMoreBySection.banners)}
-                        hasMorePosters={Boolean(gallerySectionAssets.hasMoreBySection.posters)}
-                        onLoadMoreBackdrops={() => increaseGallerySectionVisible("backdrops")}
-                        onLoadMoreBanners={() => increaseGallerySectionVisible("banners")}
-                        onLoadMorePosters={() => increaseGallerySectionVisible("posters")}
-                        onOpenAssetLightbox={openAssetLightbox}
-                        renderGalleryImage={({ asset, alt, sizes, className }) => (
-                          <GalleryImage
-                            src={getAssetDisplayUrl(asset)}
-                            srcCandidates={getSeasonAssetCardUrlCandidates(asset)}
-                            diagnosticKey={`${asset.origin_table || "unknown"}:${asset.id}`}
-                            onFallbackEvent={trackGalleryFallbackEvent}
-                            alt={alt}
-                            sizes={sizes}
-                            className={className}
-                          />
-                        )}
-                      />
-
-                      {/* Profile Pictures */}
-                      {gallerySectionAssets.profile_pictures.length > 0 && (
-                        <section>
-                          <h4 className="mb-3 text-sm font-semibold text-zinc-900">
-                            Profile Pictures
-                          </h4>
-                          <div className="grid grid-cols-5 gap-4">
-                            {gallerySectionAssets.profile_pictures.map((asset, i, arr) => (
-                                <button type="button"
-                                  key={asset.id}
-                                  onClick={(e) =>
-                                    openAssetLightbox(asset, i, arr, e.currentTarget)
-                                  }
-                                  className="relative aspect-[2/3] overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                >
-                                  <GalleryImage
-                                    src={getAssetDisplayUrl(asset)}
-                                    srcCandidates={getSeasonAssetCardUrlCandidates(asset)}
-                                    diagnosticKey={`${asset.origin_table || "unknown"}:${asset.id}`}
-                                    onFallbackEvent={trackGalleryFallbackEvent}
-                                    alt={asset.caption || "Profile picture"}
-                                    sizes="180px"
-                                  />
-                                  {asset.person_name && (
-                                    <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent p-2">
-                                      <p className="truncate text-xs text-white">
-                                        {asset.person_name}
-                                      </p>
-                                    </div>
-                                  )}
-                                </button>
-                              ))}
-                          </div>
-                          {gallerySectionAssets.hasMoreBySection.profile_pictures && (
-                            <div className="mt-3 flex justify-center">
-                              <button
-                                type="button"
-                                onClick={() => increaseGallerySectionVisible("profile_pictures")}
-                                className="rounded-lg border border-zinc-300 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50"
-                              >
-                                Load More Profile Pictures
-                              </button>
-                            </div>
-                          )}
-                        </section>
-                      )}
-
-                      {/* Cast Photos (official season announcement only) */}
-                      {castPromoSectionAssets.length > 0 && (
-                        <section>
-                          <h4 className="mb-3 text-sm font-semibold text-zinc-900">
-                            Cast Promos
-                          </h4>
-                          <div className="grid grid-cols-5 gap-4">
-                            {castPromoSectionAssets.map((asset, i, arr) => (
-                                <button type="button"
-                                  key={asset.id}
-                                  onClick={(e) =>
-                                    openAssetLightbox(asset, i, arr, e.currentTarget)
-                                  }
-                                  className="relative aspect-[2/3] overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                >
-                                  <GalleryImage
-                                    src={getResolvedGalleryAssetDisplayUrl(asset)}
-                                    srcCandidates={getResolvedGalleryAssetCardUrlCandidates(asset)}
-                                    diagnosticKey={`${asset.origin_table || "unknown"}:${asset.id}`}
-                                    onFallbackEvent={trackGalleryFallbackEvent}
-                                    alt={asset.caption || "Cast photo"}
-                                    sizes="180px"
-                                  />
-                                  {asset.person_name && (
-                                    <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent p-2">
-                                      <p className="truncate text-xs text-white">
-                                        {asset.person_name}
-                                      </p>
-                                    </div>
-                                  )}
-                                </button>
-                              ))}
-                          </div>
-                          {gallerySectionAssets.hasMoreBySection.cast_photos && (
-                            <div className="mt-3 flex justify-center">
-                              <button
-                                type="button"
-                                onClick={() => increaseGallerySectionVisible("cast_photos")}
-                                className="rounded-lg border border-zinc-300 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50"
-                              >
-                                Load More Cast Promos
-                              </button>
-                            </div>
-                          )}
-                        </section>
-                      )}
-
-                    </div>
-                  )}
-                </>
-              ) : assetsView === "videos" ? (
-                <div className="space-y-4">
-                  {(bravoError || bravoLoading) && (
-                    <p className={`text-sm ${bravoError ? "text-red-600" : "text-zinc-500"}`}>
-                      {bravoError || "Loading Bravo videos..."}
-                    </p>
-                  )}
-                  {bravoVideoSyncing && (
-                    <p className="text-sm text-zinc-500">Syncing high-quality video thumbnails...</p>
-                  )}
-                  {bravoVideoSyncWarning && !bravoError && (
-                    <p className="text-sm text-amber-700">{bravoVideoSyncWarning}</p>
-                  )}
-                  {!bravoLoading && bravoVideos.length === 0 && !bravoError && (
-                    <p className="text-sm text-zinc-500">No persisted Bravo videos found for this show.</p>
-                  )}
-                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                    {bravoVideos.map((video) => {
-                      const thumbnailUrl = resolveBravoVideoThumbnailUrl(video);
-                      return (
-                      <article key={`${video.clip_url}-${video.published_at ?? "unknown"}`} className="rounded-xl border border-zinc-200 bg-zinc-50 p-3">
-                        <a
-                          href={video.clip_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="group block"
-                        >
-                          <div className="relative mb-3 aspect-video overflow-hidden rounded-lg bg-zinc-200">
-                            {thumbnailUrl ? (
-                              <GalleryImage
-                                src={thumbnailUrl}
-                                alt={video.title || "Bravo video"}
-                                sizes="400px"
-                                className="object-cover transition group-hover:scale-105"
-                              />
-                            ) : (
-                              <div className="flex h-full items-center justify-center text-zinc-400">No image</div>
-                            )}
-                          </div>
-                          <h4 className="text-sm font-semibold text-zinc-900 group-hover:text-blue-700">
-                            {video.title || "Untitled video"}
-                          </h4>
-                        </a>
-                        <div className="mt-1 flex flex-wrap gap-2 text-xs text-zinc-500">
-                          {video.runtime && <span>{video.runtime}</span>}
-                          {typeof video.season_number === "number" && <span>Season {video.season_number}</span>}
-                          {video.kicker && <span>{video.kicker}</span>}
-                          {formatBravoPublishedDate(video.published_at) && (
-                            <span>Posted {formatBravoPublishedDate(video.published_at)}</span>
-                          )}
-                        </div>
-                      </article>
-                      );
-                    })}
-                  </div>
-                </div>
-              ) : (
-                <div className="space-y-6">
-                  <section>
-                    <h4 className="mb-3 text-sm font-semibold text-zinc-900">Featured Images</h4>
-                    <ShowFeaturedMediaSelectors
-                      posterAssets={featuredPosterCandidates}
-                      backdropAssets={featuredBackdropCandidates}
-                      featuredPosterImageId={show.primary_poster_image_id}
-                      featuredBackdropImageId={show.primary_backdrop_image_id}
-                      getAssetDisplayUrl={getAssetDisplayUrl}
-                      onSetFeaturedPoster={(showImageId) => {
-                        void setFeaturedShowImage("poster", showImageId);
-                      }}
-                      onSetFeaturedBackdrop={(showImageId) => {
-                        void setFeaturedShowImage("backdrop", showImageId);
-                      }}
-                    />
-                  </section>
-
-                  <section>
-                    <h4 className="mb-3 text-sm font-semibold text-zinc-900">Logos</h4>
-                    <ShowBrandLogosSection
-                      logoAssets={brandLogoAssets}
-                      featuredLogoAssetId={featuredShowLogoAssetId}
-                      featuredLogoSavingAssetId={featuredLogoSavingAssetId}
-                      selectedFeaturedLogoVariant={featuredLogoVariant}
-                      getAssetDisplayUrl={getAssetDisplayUrl}
-                      onSelectFeaturedLogoVariant={selectFeaturedLogoVariant}
-                      onSetFeaturedLogo={(asset) => {
-                        void setFeaturedShowLogo(asset);
-                      }}
-                    />
-                  </section>
-
-                  <ShowBrandEditor
-                    trrShowId={showId}
-                    trrShowName={show.name}
-                    trrSeasons={seasons}
-                    trrCast={cast}
-                    showDefaultMediaSection={false}
-                  />
-                </div>
               )}
-            </div>
-            </ShowAssetsTab>
+              renderVideoThumbnail={({ src, alt, sizes, className }) => (
+                <GalleryImage
+                  src={src}
+                  alt={alt}
+                  sizes={sizes}
+                  className={className}
+                />
+              )}
+            />
           )}
-
           {/* NEWS Tab */}
           {activeTab === "news" && (
             <ShowNewsTab
@@ -13224,618 +11341,147 @@ export default function TrrShowDetailPage() {
 
           {/* Cast Tab */}
           {activeTab === "cast" && (
-            <ShowCastTab>
-            <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
-              <div className="mb-6 flex items-center justify-between">
-                <div>
-                  <h3 className="text-xl font-bold text-zinc-900">Credits</h3>
-                </div>
-                <div className="flex items-center gap-3">
-                  <span className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-semibold text-zinc-700">
-                    {renderedCastCount}/{matchedCastCount}/{totalCastCount} cast ·{" "}
-                    {renderedCrewCount}/{matchedCrewCount}/{totalCrewCount} crew ·{" "}
-                    {renderedVisibleCount}/{matchedVisibleCount}/{totalVisibleCount} visible
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => void enrichCastMedia()}
-                    disabled={isCastRefreshBusy}
-                    title={isCastRefreshBusy ? "Cast sync in progress" : undefined}
-                    className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
-                  >
-                    {castMediaEnriching ? "Enriching..." : "Enrich Media"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void enrichMissingCastPhotos()}
-                    disabled={isCastRefreshBusy || castPhotoEnriching || castLoading || missingCastPhotoCount <= 0}
-                    title={isCastRefreshBusy ? "Cast sync in progress" : undefined}
-                    className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
-                  >
-                    {castPhotoEnriching
-                      ? "Enriching..."
-                      : `Enrich Missing Cast Photos${missingCastPhotoCount > 0 ? ` (${missingCastPhotoCount})` : ""}`}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => refreshShowCast()}
-                    disabled={isCastRefreshBusy}
-                    title={isCastRefreshBusy ? "Cast sync in progress" : undefined}
-                    className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
-                  >
-                    {castRefreshButtonLabel}
-                  </button>
-                  {(castRefreshPipelineRunning ||
-                    castMediaEnriching ||
-                    hasPersonRefreshInFlight ||
-                    hasReconnectableCreditsRun) && (
-                    <button
-                      type="button"
-                      onClick={() => void cancelShowCastWorkflow()}
-                      disabled={castRefreshCanceling}
-                      className="rounded-full border border-rose-200 bg-white px-3 py-1 text-xs font-semibold text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      {castRefreshCancelButtonLabel}
-                    </button>
-                  )}
-                </div>
-              </div>
-                  {(refreshTargetNotice.cast_credits ||
-                refreshTargetError.cast_credits) && (
-                <p
-                  className={`mb-4 text-sm ${
-                    refreshTargetError.cast_credits ? "text-red-600" : "text-zinc-500"
-                  }`}
-                >
-                  {refreshTargetError.cast_credits ||
-                    refreshTargetNotice.cast_credits}
-                </p>
-              )}
-              {(castRefreshPipelineRunning || castRefreshPhaseStates.length > 0) && (
-                <div className="mb-4 rounded-xl border border-zinc-200 bg-zinc-50 p-4">
-                  <div className="mb-3 flex items-center justify-between gap-3">
-                    <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                      Credits Refresh Pipeline
-                    </p>
-                    {castRefreshPipelineRunning && (
-                      <p className="text-[11px] text-zinc-500">Fail-fast timeout policy enabled</p>
-                    )}
-                  </div>
-                  <div className="space-y-2">
-                    {castRefreshPhasePanelStates.map((phase, index) => (
-                      <div
-                        key={`cast-refresh-phase-${phase.id}`}
-                        className="flex items-center justify-between gap-3 rounded-lg border border-zinc-200 bg-white px-3 py-2"
-                      >
-                        <div className="min-w-0">
-                          <p className="text-sm font-semibold text-zinc-800">
-                            {index + 1}. {CAST_REFRESH_PHASE_STAGES[phase.id] ?? phase.label}
-                          </p>
-                          {phase.status !== "pending" && phase.progress.message && (
-                              <p className="truncate text-xs text-zinc-500">{phase.progress.message}</p>
-                            )}
-                        </div>
-                        <span
-                          className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${castRefreshPhaseStatusChipClassName(
-                            phase.status
-                          )}`}
-                        >
-                          {castRefreshPhaseStatusLabel(phase.status)}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {(refreshNotice || refreshError) && (
-                <p className={`mb-4 text-sm ${refreshError ? "text-red-600" : "text-zinc-500"}`}>
-                  {refreshError || refreshNotice}
-                </p>
-              )}
-              {(castPhotoEnrichNotice || castPhotoEnrichError) && (
-                <p className={`mb-4 text-sm ${castPhotoEnrichError ? "text-red-600" : "text-zinc-500"}`}>
-                  {castPhotoEnrichError || castPhotoEnrichNotice}
-                </p>
-              )}
-              {(castMediaEnrichNotice || castMediaEnrichError) && (
-                <p className={`mb-4 text-sm ${castMediaEnrichError ? "text-red-600" : "text-zinc-500"}`}>
-                  {castMediaEnrichError || castMediaEnrichNotice}
-                </p>
-              )}
-              {castLoadWarning && (
-                <div className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-                  <span>{castLoadWarning}</span>
-                  <button
-                    type="button"
-                    onClick={() => void fetchCast({ throwOnError: false })}
-                    className="rounded-full border border-amber-400 bg-white px-3 py-1 text-xs font-semibold text-amber-900 transition hover:bg-amber-100"
-                  >
-                    Retry Cast
-                  </button>
-                </div>
-              )}
-              {castLoadError && (
-                <div className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
-                  <span>{castLoadError}</span>
-                  <button
-                    type="button"
-                    onClick={() => void fetchCast({ throwOnError: false })}
-                    className="rounded-full border border-rose-300 bg-white px-3 py-1 text-xs font-semibold text-rose-700 transition hover:bg-rose-100"
-                  >
-                    Retry Cast
-                  </button>
-                </div>
-              )}
-              {showCreditsError && (
-                <div className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
-                  <span>{showCreditsError}</span>
-                  <button
-                    type="button"
-                    onClick={() => void fetchShowCredits()}
-                    className="rounded-full border border-rose-300 bg-white px-3 py-1 text-xs font-semibold text-rose-700 transition hover:bg-rose-100"
-                  >
-                    Retry Crew
-                  </button>
-                </div>
-              )}
-              {showCreditsLoading && !showCreditsLoadedOnce && (
-                <p className="mb-4 text-sm text-zinc-500">Loading crew credits...</p>
-              )}
-              {showCreditsSourceUrl && (
-                <p className="mb-4 text-xs text-zinc-500">
-                  Crew source:{" "}
-                  <a
-                    href={showCreditsSourceUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="font-semibold text-zinc-700 underline decoration-zinc-300 underline-offset-2"
-                  >
-                    IMDb Full Credits
-                  </a>
-                </p>
-              )}
-              {castRoleMembersWarningWithSnapshotAge && (
-                <div className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-                  <span>{castRoleMembersWarningWithSnapshotAge}</span>
-                  <button
-                    type="button"
-                    onClick={() => void fetchCastRoleMembers({ force: true })}
-                    className="rounded-full border border-amber-400 bg-white px-3 py-1 text-xs font-semibold text-amber-900 transition hover:bg-amber-100"
-                  >
-                    Retry
-                  </button>
-                </div>
-              )}
-              {rolesWarningWithSnapshotAge && (
-                <div className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-                  <span>{rolesWarningWithSnapshotAge}</span>
-                  <button
-                    type="button"
-                    onClick={() => void fetchShowRoles({ force: true })}
-                    className="rounded-full border border-amber-400 bg-white px-3 py-1 text-xs font-semibold text-amber-900 transition hover:bg-amber-100"
-                  >
-                    Retry Roles
-                  </button>
-                </div>
-              )}
-              {showCastIntelligenceUnavailable && (
-                <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-3 py-3 text-sm text-amber-900">
-                  <p className="font-semibold">
-                    Cast intelligence unavailable; showing base cast snapshot.
-                  </p>
-                  {(castRoleMembersError || rolesError) && (
-                    <p className="mt-1 text-xs">
-                      {[castRoleMembersError, rolesError].filter(Boolean).join(" · ")}
-                    </p>
-                  )}
-                  <div className="mt-2 flex flex-wrap items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => void fetchCastRoleMembers({ force: true })}
-                      className="rounded-full border border-amber-400 bg-white px-3 py-1 text-xs font-semibold text-amber-900 transition hover:bg-amber-100"
-                    >
-                      Retry Cast Intelligence
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void fetchShowRoles({ force: true })}
-                      className="rounded-full border border-amber-400 bg-white px-3 py-1 text-xs font-semibold text-amber-900 transition hover:bg-amber-100"
-                    >
-                      Retry Roles
-                    </button>
-                  </div>
-                </div>
-              )}
-              {castRoleEditorDeepLinkWarning && (
-                <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-                  {castRoleEditorDeepLinkWarning}
-                </div>
-              )}
-              {castSource === "show_fallback" && castEligibilityWarning && (
-                <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-                  {castEligibilityWarning}
-                </div>
-              )}
-              {castRunFailedMembers.length > 0 && (
-                <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <p className="text-sm font-semibold text-amber-900">
-                      Failed Members ({castRunFailedMembers.length})
-                    </p>
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setCastFailedMembersOpen((prev) => !prev)}
-                        className="rounded-full border border-amber-300 bg-white px-3 py-1 text-xs font-semibold text-amber-900 hover:bg-amber-100"
-                      >
-                        {castFailedMembersOpen ? "Hide" : "Show"}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => void retryFailedCastMediaEnrich()}
-                        disabled={isCastRefreshBusy}
-                        className="rounded-full border border-amber-300 bg-white px-3 py-1 text-xs font-semibold text-amber-900 hover:bg-amber-100 disabled:opacity-50"
-                      >
-                        Retry failed only
-                      </button>
-                    </div>
-                  </div>
-                  {castFailedMembersOpen && (
-                    <ul className="mt-3 space-y-2 text-xs text-amber-900">
-                      {castRunFailedMembers.map((member) => (
-                        <li
-                          key={`${member.personId}-${member.name}-${member.reason}`}
-                          className="rounded-md border border-amber-200 bg-white px-2 py-1"
-                        >
-                          <span className="font-semibold">{member.name}</span>: {member.reason}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              )}
-
-              <CastMatrixSyncPanel
-                loading={castMatrixSyncLoading}
-                error={castMatrixSyncError}
-                result={castMatrixSyncResult}
-                scopeLabel={castMatrixSyncScopeLabel}
-                onSync={() => void syncCastMatrixRoles()}
-              />
-
-              <div className="mb-4 rounded-xl border border-zinc-200 bg-zinc-50 p-4">
-                <div className="grid gap-3 md:grid-cols-5">
-                  <label className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500 md:col-span-2">
-                    Search Name
-                    <input
-                      value={castSearchQuery}
-                      onChange={(event) => setCastSearchQuery(event.target.value)}
-                      placeholder="Search cast or crew..."
-                      className="mt-1 block w-full rounded-lg border border-zinc-300 bg-white px-2 py-2 text-sm font-medium normal-case tracking-normal text-zinc-700"
-                    />
-                  </label>
-                  <label className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                    Sort By
-                    <select
-                      value={castSortBy}
-                      onChange={(event) =>
-                        setCastSortBy(event.target.value as "episodes" | "season" | "name")
-                      }
-                      className="mt-1 block w-full rounded-lg border border-zinc-300 bg-white px-2 py-2 text-sm font-medium normal-case tracking-normal text-zinc-700"
-                    >
-                      <option value="episodes">Episodes</option>
-                      <option value="season">Season Recency</option>
-                      <option value="name">Name</option>
-                    </select>
-                  </label>
-                  <label className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                    Order
-                    <select
-                      value={castSortOrder}
-                      onChange={(event) => setCastSortOrder(event.target.value as "desc" | "asc")}
-                      className="mt-1 block w-full rounded-lg border border-zinc-300 bg-white px-2 py-2 text-sm font-medium normal-case tracking-normal text-zinc-700"
-                    >
-                      <option value="desc">Desc</option>
-                      <option value="asc">Asc</option>
-                    </select>
-                  </label>
-                  <label className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                    Has Image
-                    <select
-                      value={castHasImageFilter}
-                      onChange={(event) =>
-                        setCastHasImageFilter(event.target.value as "all" | "yes" | "no")
-                      }
-                      className="mt-1 block w-full rounded-lg border border-zinc-300 bg-white px-2 py-2 text-sm font-medium normal-case tracking-normal text-zinc-700"
-                    >
-                      <option value="all">All</option>
-                      <option value="yes">With Image</option>
-                      <option value="no">Without Image</option>
-                    </select>
-                  </label>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setCastSeasonFilters([]);
-                      setCastRoleAndCreditFilters([]);
-                      setCastHasImageFilter("all");
-                      setCastExactEpisodeCount(null);
-                      setCastMinEpisodeCount(null);
-                      setCastMaxEpisodeCount(null);
-                      setCastSortBy("episodes");
-                      setCastSortOrder("desc");
-                      setCastSearchQuery("");
-                    }}
-                    className="self-end rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-100"
-                  >
-                    Clear Filters
-                  </button>
-                </div>
-                <div className="mt-3 grid gap-3 md:grid-cols-3">
-                  <label className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                    Episode Exact
-                    <input
-                      type="number"
-                      min={1}
-                      inputMode="numeric"
-                      value={castExactEpisodeCount ?? ""}
-                      onChange={(event) =>
-                        setCastExactEpisodeCount(parsePositiveIntegerInputValue(event.target.value))
-                      }
-                      placeholder="Any"
-                      className="mt-1 block w-full rounded-lg border border-zinc-300 bg-white px-2 py-2 text-sm font-medium normal-case tracking-normal text-zinc-700"
-                    />
-                  </label>
-                  <label className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                    Episode Min
-                    <input
-                      type="number"
-                      min={1}
-                      inputMode="numeric"
-                      value={castMinEpisodeCount ?? ""}
-                      onChange={(event) =>
-                        setCastMinEpisodeCount(parsePositiveIntegerInputValue(event.target.value))
-                      }
-                      placeholder="Any"
-                      className="mt-1 block w-full rounded-lg border border-zinc-300 bg-white px-2 py-2 text-sm font-medium normal-case tracking-normal text-zinc-700"
-                    />
-                  </label>
-                  <label className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                    Episode Max
-                    <input
-                      type="number"
-                      min={1}
-                      inputMode="numeric"
-                      value={castMaxEpisodeCount ?? ""}
-                      onChange={(event) =>
-                        setCastMaxEpisodeCount(parsePositiveIntegerInputValue(event.target.value))
-                      }
-                      placeholder="Any"
-                      className="mt-1 block w-full rounded-lg border border-zinc-300 bg-white px-2 py-2 text-sm font-medium normal-case tracking-normal text-zinc-700"
-                    />
-                  </label>
-                </div>
-                <div className="mt-3 space-y-2">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                      Seasons
-                    </span>
-                    {availableCastSeasons.length === 0 ? (
-                      <span className="text-xs text-zinc-500">No season recency data yet.</span>
-                    ) : (
-                      availableCastSeasons.map((seasonNumber) => {
-                        const active = castSeasonFilters.includes(seasonNumber);
-                        return (
-                          <button
-                            key={`season-filter-${seasonNumber}`}
-                            type="button"
-                            aria-pressed={active}
-                            onClick={() =>
-                              setCastSeasonFilters((prev) =>
-                                prev.includes(seasonNumber)
-                                  ? prev.filter((value) => value !== seasonNumber)
-                                  : [...prev, seasonNumber]
-                              )
-                            }
-                            className={`rounded-full border px-2 py-1 text-xs font-semibold ${
-                              active
-                                ? "border-zinc-900 bg-zinc-900 text-white"
-                                : "border-zinc-200 bg-white text-zinc-600"
-                            }`}
-                          >
-                            S{seasonNumber}
-                          </button>
-                        );
-                      })
-                    )}
-                  </div>
-                  <p className="text-[11px] text-zinc-500">
-                    Season filters use season-scoped role assignments plus global season-0 roles.{" "}
-                    {castEpisodeScopeLabel}
-                  </p>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                      Roles & Credit
-                    </span>
-                    {shouldShowRoleCreditEmptyState ? (
-                      <span className="text-xs text-zinc-500">No role or credit filters available.</span>
-                    ) : !castUiTerminalReady ? (
-                      <span className="text-xs text-zinc-500">Loading role and credit filters...</span>
-                    ) : (
-                      availableCastRoleAndCreditFilters.map((option) => {
-                        const active = castRoleAndCreditFilters.includes(option.key);
-                        return (
-                          <button
-                            key={`role-credit-filter-${option.key}`}
-                            type="button"
-                            aria-pressed={active}
-                            onClick={() =>
-                              setCastRoleAndCreditFilters((prev) =>
-                                active ? prev.filter((value) => value !== option.key) : [...prev, option.key]
-                              )
-                            }
-                            className={`rounded-full border px-2 py-1 text-xs font-semibold ${
-                              active
-                                ? "border-zinc-900 bg-zinc-900 text-white"
-                                : "border-zinc-200 bg-white text-zinc-600"
-                            }`}
-                          >
-                            {option.label}
-                          </button>
-                        );
-                      })
-                    )}
-                  </div>
-                </div>
-              </div>
-              {castRoleMembersLoading && (
-                <p className="mb-4 text-sm text-zinc-500" aria-live="polite">
-                  Refreshing cast intelligence...
-                </p>
-              )}
-              {castLoading && !castLoadedOnce && (
-                <p className="mb-4 text-sm text-zinc-500" aria-live="polite">
-                  Loading cast members...
-                </p>
-              )}
-              {castLoading && castLoadedOnce && cast.length === 0 && (
-                <p className="mb-4 text-sm text-zinc-500" aria-live="polite">
-                  Cast list unavailable; retrying cast roster...
-                </p>
-              )}
-              {castRenderProgressLabel && (
-                <p className="mb-3 text-xs text-zinc-500" role="status" aria-live="polite">
-                  {castRenderProgressLabel}
-                </p>
-              )}
-              <div className="space-y-8">
-                <section>
-                  <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-                    <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-500">
-                      Cast
-                    </p>
-                    <ShowCreditsCastViewControls
-                      viewMode={castViewMode}
-                      galleryColumns={castGalleryColumns}
-                      onViewModeChange={setCastViewMode}
-                      onGalleryColumnsChange={setCastGalleryColumns}
-                    />
-                  </div>
-                  {castGalleryMembers.length === 0 ? (
-                    !castRosterReady ? (
-                      <p className="text-sm text-zinc-500">Loading cast roster...</p>
-                    ) : cast.length === 0 && archiveFootageCast.length === 0 ? (
-                      <p className="text-sm text-zinc-500">No cast members found for this show.</p>
-                    ) : (
-                      <p className="text-sm text-zinc-500">No cast members match the selected filters.</p>
-                    )
-                  ) : (
-                    <ShowCreditsCastMembers
-                      members={visibleCastMembers}
-                      viewMode={castViewMode}
-                      galleryColumns={castGalleryColumns}
-                      renderMember={renderShowCreditsCastMember}
-                    />
-                  )}
-                </section>
-
-                {crewDisplaySections.length > 0 && (
-                  <section>
-                    <p className="mb-3 text-xs font-semibold uppercase tracking-[0.3em] text-zinc-500">
-                      Crew
-                    </p>
-                    <ShowCreditsCrewSections
-                      sections={visibleCrewSections}
-                      renderPersonName={(row) => (
-                        <Link
-                          href={buildPersonAdminUrl({
-                            showSlug: showSlugForRouting,
-                            personSlug: buildPersonRouteSlug({
-                              personName: row.personName,
-                              personId: row.personId,
-                            }),
-                            tab: "overview",
-                          }) as Route}
-                          className="hover:underline"
-                        >
-                          {row.personName || "Unknown"}
-                        </Link>
-                      )}
-                    />
-                  </section>
-                )}
-
-                {archiveFootageCast.length > 0 && (
-                  <section>
-                    <p className="mb-3 text-xs font-semibold uppercase tracking-[0.3em] text-zinc-500">
-                      Archive Footage
-                    </p>
-                    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                      {archiveFootageCast.map((member) => {
-                        const thumbnailUrl = member.cover_photo_url || member.photo_url;
-                        const archiveLabel =
-                          typeof member.archive_episode_count === "number"
-                            ? `${member.archive_episode_count} archive footage episodes`
-                            : "Archive footage appearance";
-
-                        return (
-                          <Link
-                            key={`archive-${member.id}`}
-                            href={buildPersonAdminUrl({
-                              showSlug: showSlugForRouting,
-                              personSlug: buildPersonRouteSlug({
-                                personName: member.full_name || member.cast_member_name || null,
-                                personId: member.person_id,
-                              }),
-                              tab: "overview",
-                            }) as Route}
-                            className="rounded-xl border border-amber-200 bg-amber-50/40 p-4 transition hover:border-amber-300 hover:bg-amber-100/40"
-                          >
-                            <div className="relative mb-3 aspect-[4/5] overflow-hidden rounded-lg bg-zinc-200">
-                              {thumbnailUrl ? (
-                                <CastPhoto
-                                  src={thumbnailUrl}
-                                  alt={member.full_name || member.cast_member_name || "Cast member"}
-                                  thumbnail_focus_x={member.thumbnail_focus_x}
-                                  thumbnail_focus_y={member.thumbnail_focus_y}
-                                  thumbnail_zoom={member.thumbnail_zoom}
-                                  thumbnail_crop_mode={member.thumbnail_crop_mode}
-                                />
-                              ) : (
-                                <div className="flex h-full items-center justify-center text-zinc-400">
-                                  <svg width="48" height="48" viewBox="0 0 24 24" fill="none">
-                                    <circle cx="12" cy="8" r="4" stroke="currentColor" strokeWidth="2" />
-                                    <path d="M4 20c0-4 4-6 8-6s8 2 8 6" stroke="currentColor" strokeWidth="2" />
-                                  </svg>
-                                </div>
-                              )}
-                            </div>
-                            <p className="font-semibold text-zinc-900">
-                              {member.full_name || member.cast_member_name || "Unknown"}
-                            </p>
-                            <p className="text-sm text-amber-700">{archiveLabel}</p>
-                          </Link>
-                        );
-                      })}
-                    </div>
-                  </section>
-                )}
-
-                {castUiTerminalReady &&
-                  castGalleryMembers.length === 0 &&
-                  crewDisplaySections.length === 0 &&
-                  cast.length > 0 && (
-                  <p className="text-sm text-zinc-500">No cast members match the selected filters.</p>
-                )}
-
-                {castUiTerminalReady && cast.length === 0 && archiveFootageCast.length === 0 && (
-                  <p className="text-sm text-zinc-500">
-                    No cast members found for this show.
-                  </p>
-                )}
-              </div>
-            </div>
-            </ShowCastTab>
+            <ShowCastTab<TrrCastMember & { merged_photo_url?: string | null }>
+              renderedCastCount={renderedCastCount}
+              matchedCastCount={matchedCastCount}
+              totalCastCount={totalCastCount}
+              renderedCrewCount={renderedCrewCount}
+              matchedCrewCount={matchedCrewCount}
+              totalCrewCount={totalCrewCount}
+              renderedVisibleCount={renderedVisibleCount}
+              matchedVisibleCount={matchedVisibleCount}
+              totalVisibleCount={totalVisibleCount}
+              castMediaEnriching={castMediaEnriching}
+              isCastRefreshBusy={isCastRefreshBusy}
+              castPhotoEnriching={castPhotoEnriching}
+              castLoading={castLoading}
+              missingCastPhotoCount={missingCastPhotoCount}
+              castRefreshButtonLabel={castRefreshButtonLabel}
+              showCancelRunButton={
+                castRefreshPipelineRunning ||
+                castMediaEnriching ||
+                hasPersonRefreshInFlight ||
+                hasReconnectableCreditsRun
+              }
+              castRefreshCanceling={castRefreshCanceling}
+              castRefreshCancelButtonLabel={castRefreshCancelButtonLabel}
+              onEnrichCastMedia={() => void enrichCastMedia()}
+              onEnrichMissingCastPhotos={() => void enrichMissingCastPhotos()}
+              onRefreshShowCast={() => refreshShowCast()}
+              onCancelShowCastWorkflow={() => void cancelShowCastWorkflow()}
+              castCreditsRefreshNotice={refreshTargetNotice.cast_credits ?? null}
+              castCreditsRefreshError={refreshTargetError.cast_credits ?? null}
+              castRefreshPhaseRows={castRefreshPhasePanelStates.map((phase) => ({
+                id: phase.id,
+                label: CAST_REFRESH_PHASE_STAGES[phase.id] ?? phase.label,
+                message: phase.status !== "pending" ? phase.progress.message ?? null : null,
+                statusClassName: castRefreshPhaseStatusChipClassName(phase.status),
+                statusLabel: castRefreshPhaseStatusLabel(phase.status),
+              }))}
+              castRefreshPipelineRunning={castRefreshPipelineRunning}
+              refreshNotice={refreshNotice}
+              refreshError={refreshError}
+              castPhotoEnrichNotice={castPhotoEnrichNotice}
+              castPhotoEnrichError={castPhotoEnrichError}
+              castMediaEnrichNotice={castMediaEnrichNotice}
+              castMediaEnrichError={castMediaEnrichError}
+              castLoadWarning={castLoadWarning}
+              castLoadError={castLoadError}
+              onRetryCast={() => void fetchCast({ throwOnError: false })}
+              showCreditsError={showCreditsError}
+              onRetryCrew={() => void fetchShowCredits()}
+              showCreditsLoading={showCreditsLoading}
+              showCreditsLoadedOnce={showCreditsLoadedOnce}
+              showCreditsSourceUrl={showCreditsSourceUrl}
+              castRoleMembersWarningWithSnapshotAge={castRoleMembersWarningWithSnapshotAge}
+              onRetryCastRoleMembers={() => void fetchCastRoleMembers({ force: true })}
+              rolesWarningWithSnapshotAge={rolesWarningWithSnapshotAge}
+              onRetryRoles={() => void fetchShowRoles({ force: true })}
+              showCastIntelligenceUnavailable={showCastIntelligenceUnavailable}
+              castRoleMembersError={castRoleMembersError}
+              rolesError={rolesError}
+              castRoleEditorDeepLinkWarning={castRoleEditorDeepLinkWarning}
+              castEligibilityWarning={castSource === "show_fallback" ? castEligibilityWarning : null}
+              castRunFailedMembers={castRunFailedMembers}
+              castFailedMembersOpen={castFailedMembersOpen}
+              onToggleCastFailedMembersOpen={() => setCastFailedMembersOpen((prev) => !prev)}
+              onRetryFailedCastMediaEnrich={() => void retryFailedCastMediaEnrich()}
+              castMatrixSyncLoading={castMatrixSyncLoading}
+              castMatrixSyncError={castMatrixSyncError}
+              castMatrixSyncResult={castMatrixSyncResult}
+              castMatrixSyncScopeLabel={castMatrixSyncScopeLabel}
+              onSyncCastMatrixRoles={() => void syncCastMatrixRoles()}
+              castSearchQuery={castSearchQuery}
+              onSetCastSearchQuery={setCastSearchQuery}
+              castSortBy={castSortBy}
+              onSetCastSortBy={setCastSortBy}
+              castSortOrder={castSortOrder}
+              onSetCastSortOrder={setCastSortOrder}
+              castHasImageFilter={castHasImageFilter}
+              onSetCastHasImageFilter={setCastHasImageFilter}
+              onClearCastFilters={() => {
+                setCastSeasonFilters([]);
+                setCastRoleAndCreditFilters([]);
+                setCastHasImageFilter("all");
+                setCastExactEpisodeCount(null);
+                setCastMinEpisodeCount(null);
+                setCastMaxEpisodeCount(null);
+                setCastSortBy("episodes");
+                setCastSortOrder("desc");
+                setCastSearchQuery("");
+              }}
+              castExactEpisodeCount={castExactEpisodeCount}
+              onSetCastExactEpisodeCount={setCastExactEpisodeCount}
+              castMinEpisodeCount={castMinEpisodeCount}
+              onSetCastMinEpisodeCount={setCastMinEpisodeCount}
+              castMaxEpisodeCount={castMaxEpisodeCount}
+              onSetCastMaxEpisodeCount={setCastMaxEpisodeCount}
+              availableCastSeasons={availableCastSeasons}
+              castSeasonFilters={castSeasonFilters}
+              onToggleCastSeasonFilter={(seasonNumber) =>
+                setCastSeasonFilters((prev) =>
+                  prev.includes(seasonNumber)
+                    ? prev.filter((value) => value !== seasonNumber)
+                    : [...prev, seasonNumber]
+                )
+              }
+              castEpisodeScopeLabel={castEpisodeScopeLabel}
+              shouldShowRoleCreditEmptyState={shouldShowRoleCreditEmptyState}
+              castUiTerminalReady={castUiTerminalReady}
+              availableCastRoleAndCreditFilters={availableCastRoleAndCreditFilters}
+              castRoleAndCreditFilters={castRoleAndCreditFilters}
+              onToggleCastRoleAndCreditFilter={(key) =>
+                setCastRoleAndCreditFilters((prev) =>
+                  prev.includes(key) ? prev.filter((value) => value !== key) : [...prev, key]
+                )
+              }
+              castRoleMembersLoading={castRoleMembersLoading}
+              castLoadedOnce={castLoadedOnce}
+              castRenderProgressLabel={castRenderProgressLabel}
+              castRosterReady={castRosterReady}
+              castViewMode={castViewMode}
+              castGalleryColumns={castGalleryColumns}
+              onSetCastViewMode={setCastViewMode}
+              onSetCastGalleryColumns={setCastGalleryColumns}
+              castGalleryMembers={castGalleryMembers}
+              castCount={cast.length}
+              archiveFootageCount={archiveFootageCast.length}
+              visibleCastMembers={visibleCastMembers}
+              renderCastMember={renderShowCreditsCastMember}
+              crewDisplaySections={crewDisplaySections}
+              visibleCrewSections={visibleCrewSections}
+              archiveFootageCast={archiveFootageCast}
+              getPersonOverviewHref={({ personId, personName }) =>
+                buildPersonAdminUrl({
+                  showSlug: showSlugForRouting,
+                  personSlug: buildPersonRouteSlug({
+                    personName,
+                    personId,
+                  }),
+                  tab: "overview",
+                }) as Route
+              }
+            />
           )}
 
           {/* Surveys Tab */}
@@ -13890,1364 +11536,163 @@ export default function TrrShowDetailPage() {
 
           {/* Settings Tab */}
           {activeTab === "settings" && (
-            <ShowSettingsTab>
-            <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
-              <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">
-                    Show Settings
-                  </p>
-                  <h3 className="text-xl font-bold text-zinc-900">
-                    Settings
-                  </h3>
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => void syncShowScopedBrandLogos()}
-                    disabled={showLogoSyncing}
-                    className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:opacity-50"
-                  >
-                    {showLogoSyncing ? "Syncing..." : "Sync Show Logo Targets"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setRefreshLogOpen(true)}
-                    disabled={showLogoSyncing}
-                    className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
-                  >
-                    {refreshCenterButtonLabel}
-                  </button>
-                </div>
-              </div>
-
-              {(linksError ||
-                linksNotice ||
-                rolesError ||
-                rolesWarning ||
-                showLogoSyncError ||
-                showLogoSyncNotice) && (
-                <div className="mb-4 text-sm space-y-2">
-                  <p
-                    className={`${
-                      linksError || rolesError || showLogoSyncError
-                        ? linksLoadTimedOut || rolesLoadTimedOut
-                          ? "text-amber-700"
-                          : "text-red-600"
-                        : "text-zinc-500"
-                    }`}
-                  >
-                    {linksError ||
-                      rolesError ||
-                      showLogoSyncError ||
-                      rolesWarning ||
-                      linksNotice ||
-                      showLogoSyncNotice}
-                  </p>
-                  {linksError && linksLoadTimedOut && (
-                    <button
-                      type="button"
-                      onClick={() => void fetchShowLinks()}
-                      className="inline-flex items-center rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-700 transition hover:bg-amber-100"
-                    >
-                      Retry links
-                    </button>
-                  )}
-                  {rolesError && rolesLoadTimedOut && (
-                    <button
-                      type="button"
-                      onClick={() => void fetchShowRoles({ force: true })}
-                      className="inline-flex items-center rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-700 transition hover:bg-amber-100"
-                    >
-                      Retry roles
-                    </button>
-                  )}
-                </div>
+            <ShowSettingsTab
+              header={{
+                showLogoSyncing,
+                refreshCenterButtonLabel,
+                onSyncShowLogoTargets: syncShowScopedBrandLogos,
+                onOpenRefreshLog: () => setRefreshLogOpen(true),
+              }}
+              status={{
+                linksError,
+                linksNotice,
+                linksLoadTimedOut,
+                rolesError,
+                rolesWarning,
+                rolesLoadTimedOut,
+                showLogoSyncError,
+                showLogoSyncNotice,
+                onRetryLinks: () => fetchShowLinks(),
+                onRetryRoles: () => fetchShowRoles({ force: true }),
+              }}
+              metadata={{
+                form: detailsForm,
+                editing: detailsEditing,
+                saving: detailsSaving,
+                notice: detailsNotice,
+                error: detailsError,
+                onChangeField: (field, value) =>
+                  setDetailsForm((previous) => ({ ...previous, [field]: value })),
+                onStartEdit: startDetailsEdit,
+                onCancelEdit: cancelDetailsEdit,
+                onSave: saveShowDetails,
+              }}
+              roles={{
+                newRoleName,
+                loading: rolesLoading,
+                rows: showRoles,
+                onNewRoleNameChange: setNewRoleName,
+                onCreate: createShowRole,
+                onRename: renameShowRole,
+                onToggleActive: toggleShowRoleActive,
+              }}
+              links={{
+                showIsBravo,
+                refreshing: linksRefreshing,
+                bulkInput: linkBulkInput,
+                bulkSaving: linkBulkSaving,
+                loading: linksLoading,
+                totalCount: showLinks.length,
+                eligibleCastLoading: linksEligibleCastLoading,
+                eligibleCastLoadedOnce: linksEligibleCastLoadedOnce,
+                savingLinkIds,
+                socialLinks: showSocialLinks,
+                showPageLinks,
+                seasonUrlCoverageRows,
+                castMemberLinkCoverageCards,
+                onRefresh: refreshShowLinks,
+                onBulkInputChange: setLinkBulkInput,
+                onAdd: addShowLinks,
+                onUpdateUrl: updateShowLinkUrl,
+                onDelete: deleteShowLink,
+              }}
+              reddit={{
+                loading: redditLoading,
+                error: redditError,
+                groups: overviewRedditGroups,
+                getCommunityHref: (community) =>
+                  buildAdminRedditCommunityUrl({
+                    communitySlug: community.subreddit,
+                    showSlug: showSlugForRouting,
+                  }),
+              }}
+              getShowPageLinkTitle={(link) =>
+                getShowPageLinkTitle(link, show?.name ?? "Show")
+              }
+              renderShowPageLinkBadge={(link) => {
+                const sourceKind = getLinkSourceBadgeKind(link);
+                return (
+                  <SourceBadge
+                    kind={sourceKind}
+                    label={getLinkSourceLabel(link)}
+                    iconUrl={sourceKind === "fandom" ? buildHostFaviconUrl(link.url) : null}
+                    iconOnly={usesBrandIconOnly(sourceKind)}
+                  />
+                );
+              }}
+              renderSourceBadge={({ kind, label, iconUrl, iconOnly }) => (
+                <SourceBadge
+                  kind={kind}
+                  label={label}
+                  iconUrl={iconUrl}
+                  iconOnly={iconOnly}
+                />
               )}
-
-              <div className="space-y-6">
-                <section>
-                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                    <h4 className="text-sm font-semibold text-zinc-700">Editable Metadata</h4>
-                    <div className="flex flex-wrap items-center gap-2">
-                      {detailsEditing ? (
-                        <>
-                          <button
-                            type="button"
-                            onClick={cancelDetailsEdit}
-                            disabled={detailsSaving}
-                            className="rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
-                          >
-                            Cancel
-                          </button>
-                          <button
-                            type="button"
-                            onClick={saveShowDetails}
-                            disabled={detailsSaving}
-                            className="rounded-lg bg-zinc-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-zinc-800 disabled:opacity-50"
-                          >
-                            {detailsSaving ? "Saving..." : "Save"}
-                          </button>
-                        </>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={startDetailsEdit}
-                          className="rounded-lg bg-zinc-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-zinc-800"
-                        >
-                          Edit Metadata
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                  {(detailsNotice || detailsError) && (
-                    <p className={`mb-3 text-sm ${detailsError ? "text-red-600" : "text-zinc-500"}`}>
-                      {detailsError || detailsNotice}
-                    </p>
-                  )}
-                  <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
-                    <div className="grid gap-4 md:grid-cols-2">
-                      <label className="block md:col-span-2">
-                        <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                          Display Name
-                        </span>
-                        <input
-                          type="text"
-                          value={detailsForm.displayName}
-                          onChange={(e) => setDetailsForm((prev) => ({ ...prev, displayName: e.target.value }))}
-                          disabled={!detailsEditing}
-                          className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 disabled:bg-zinc-100 disabled:text-zinc-500"
-                        />
-                      </label>
-                      <label className="block">
-                        <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                          Nickname / Slug
-                        </span>
-                        <input
-                          type="text"
-                          value={detailsForm.nickname}
-                          onChange={(e) => setDetailsForm((prev) => ({ ...prev, nickname: e.target.value }))}
-                          disabled={!detailsEditing}
-                          className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 disabled:bg-zinc-100 disabled:text-zinc-500"
-                        />
-                        {detailsForm.nickname.trim() && (
-                          <span className="mt-1 block text-xs text-zinc-400">
-                            Canonical slug: <span className="font-mono">{deriveShowDetailsSlugPreview(detailsForm.nickname)}</span>
-                            {" · "}
-                            Hashtag: <span className="font-mono">#{detailsForm.nickname.trim().replace(/\s+/g, "")}</span>
-                          </span>
-                        )}
-                      </label>
-                      <div className="block">
-                        <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                          Premiere Date
-                        </span>
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="date"
-                            value={detailsForm.premiereDate}
-                            onChange={(e) => setDetailsForm((prev) => ({ ...prev, premiereDate: e.target.value }))}
-                            disabled={!detailsEditing}
-                            className="flex-1 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 disabled:bg-zinc-100 disabled:text-zinc-500"
-                          />
-                          {detailsEditing && detailsForm.premiereDate && (
-                            <button
-                              type="button"
-                              onClick={() => setDetailsForm((prev) => ({ ...prev, premiereDate: "" }))}
-                              className="rounded-lg border border-zinc-200 bg-white px-2 py-2 text-xs text-zinc-500 hover:bg-zinc-50"
-                              title="Clear premiere date"
-                            >
-                              ✕
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                      <label className="block md:col-span-2">
-                        <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                          Alt Names
-                        </span>
-                        <textarea
-                          value={detailsForm.altNamesText}
-                          onChange={(e) => setDetailsForm((prev) => ({ ...prev, altNamesText: e.target.value }))}
-                          rows={3}
-                          disabled={!detailsEditing}
-                          className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 disabled:bg-zinc-100 disabled:text-zinc-500"
-                        />
-                      </label>
-                      <label className="block md:col-span-2">
-                        <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                          Description
-                        </span>
-                        <textarea
-                          value={detailsForm.description}
-                          onChange={(e) => setDetailsForm((prev) => ({ ...prev, description: e.target.value }))}
-                          rows={4}
-                          disabled={!detailsEditing}
-                          className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 disabled:bg-zinc-100 disabled:text-zinc-500"
-                        />
-                      </label>
-                      <label className="block">
-                        <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                          TMDb
-                        </span>
-                        <input
-                          type="text"
-                          value={detailsForm.tmdbId}
-                          onChange={(e) => setDetailsForm((prev) => ({ ...prev, tmdbId: e.target.value }))}
-                          disabled={!detailsEditing}
-                          className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 disabled:bg-zinc-100 disabled:text-zinc-500"
-                        />
-                      </label>
-                      <label className="block">
-                        <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                          IMDb
-                        </span>
-                        <input
-                          type="text"
-                          value={detailsForm.imdbId}
-                          onChange={(e) => setDetailsForm((prev) => ({ ...prev, imdbId: e.target.value }))}
-                          disabled={!detailsEditing}
-                          className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 disabled:bg-zinc-100 disabled:text-zinc-500"
-                        />
-                      </label>
-                      <label className="block">
-                        <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                          TVDb
-                        </span>
-                        <input
-                          type="text"
-                          value={detailsForm.tvdbId}
-                          onChange={(e) => setDetailsForm((prev) => ({ ...prev, tvdbId: e.target.value }))}
-                          disabled={!detailsEditing}
-                          className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 disabled:bg-zinc-100 disabled:text-zinc-500"
-                        />
-                      </label>
-                      <label className="block">
-                        <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                          Wikidata
-                        </span>
-                        <input
-                          type="text"
-                          value={detailsForm.wikidataId}
-                          onChange={(e) => setDetailsForm((prev) => ({ ...prev, wikidataId: e.target.value }))}
-                          disabled={!detailsEditing}
-                          className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 disabled:bg-zinc-100 disabled:text-zinc-500"
-                        />
-                      </label>
-                      <label className="block md:col-span-2">
-                        <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                          TV Rage
-                        </span>
-                        <input
-                          type="text"
-                          value={detailsForm.tvRageId}
-                          onChange={(e) => setDetailsForm((prev) => ({ ...prev, tvRageId: e.target.value }))}
-                          disabled={!detailsEditing}
-                          className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 disabled:bg-zinc-100 disabled:text-zinc-500"
-                        />
-                      </label>
-                      <label className="block md:col-span-2">
-                        <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                          Genres
-                        </span>
-                        <textarea
-                          value={detailsForm.genresText}
-                          onChange={(e) => setDetailsForm((prev) => ({ ...prev, genresText: e.target.value }))}
-                          rows={2}
-                          disabled={!detailsEditing}
-                          className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 disabled:bg-zinc-100 disabled:text-zinc-500"
-                        />
-                      </label>
-                      <label className="block md:col-span-2">
-                        <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                          Networks
-                        </span>
-                        <textarea
-                          value={detailsForm.networksText}
-                          onChange={(e) => setDetailsForm((prev) => ({ ...prev, networksText: e.target.value }))}
-                          rows={2}
-                          disabled={!detailsEditing}
-                          className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 disabled:bg-zinc-100 disabled:text-zinc-500"
-                        />
-                      </label>
-                      <label className="block md:col-span-2">
-                        <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                          Streaming
-                        </span>
-                        <textarea
-                          value={detailsForm.streamingProvidersText}
-                          onChange={(e) =>
-                            setDetailsForm((prev) => ({ ...prev, streamingProvidersText: e.target.value }))
-                          }
-                          rows={2}
-                          disabled={!detailsEditing}
-                          className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 disabled:bg-zinc-100 disabled:text-zinc-500"
-                        />
-                      </label>
-                      <label className="block md:col-span-2">
-                        <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                          Tags
-                        </span>
-                        <textarea
-                          value={detailsForm.tagsText}
-                          onChange={(e) => setDetailsForm((prev) => ({ ...prev, tagsText: e.target.value }))}
-                          rows={2}
-                          disabled={!detailsEditing}
-                          className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 disabled:bg-zinc-100 disabled:text-zinc-500"
-                        />
-                      </label>
-                    </div>
-                  </div>
-                </section>
-
-                <section>
-                  <h4 className="mb-3 text-sm font-semibold text-zinc-700">Role Catalog</h4>
-                  <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
-                    <div className="mb-3 flex flex-wrap gap-2">
-                      <input
-                        value={newRoleName}
-                        onChange={(event) => setNewRoleName(event.target.value)}
-                        placeholder="Housewife"
-                        className="min-w-[220px] flex-1 rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-700"
-                      />
-                      <button
-                        type="button"
-                        onClick={createShowRole}
-                        disabled={rolesLoading}
-                        className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 disabled:opacity-50"
-                      >
-                        Add Role
-                      </button>
-                    </div>
-                    {showRoles.length === 0 ? (
-                      <p className="text-sm text-zinc-500">No roles configured yet.</p>
-                    ) : (
-                      <div className="flex flex-wrap items-center gap-2">
-                        {showRoles.map((role) => (
-                          <div
-                            key={`settings-role-catalog-${role.id}`}
-                            className="flex items-center gap-1 rounded-full border border-zinc-200 bg-white px-2 py-1"
-                          >
-                            <span
-                              className={`text-xs font-semibold ${
-                                role.is_active ? "text-zinc-700" : "text-zinc-400 line-through"
-                              }`}
-                            >
-                              {role.name}
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => void renameShowRole(role)}
-                              className="rounded border border-zinc-200 bg-white px-1.5 py-0.5 text-[10px] font-semibold text-zinc-700"
-                            >
-                              Rename
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => void toggleShowRoleActive(role)}
-                              className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${
-                                role.is_active
-                                  ? "border border-amber-200 bg-amber-50 text-amber-700"
-                                  : "border border-emerald-200 bg-emerald-50 text-emerald-700"
-                              }`}
-                            >
-                              {role.is_active ? "Deactivate" : "Activate"}
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </section>
-
-                <section>
-                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                    <h4 className="text-sm font-semibold text-zinc-700">Links</h4>
-                    <button
-                      type="button"
-                      onClick={() => void refreshShowLinks()}
-                      disabled={linksRefreshing}
-                      className="rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
-                    >
-                      {linksRefreshing ? "Refreshing..." : "Refresh Links"}
-                    </button>
-                  </div>
-                  <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
-                    <div className="mb-4 rounded-lg border border-zinc-200 bg-white p-3">
-                      <p className="text-xs text-zinc-500">
-                        Paste one or more URLs or handles. The classifier auto-assigns show vs season vs cast-member
-                        links and routes social handles (Instagram/TikTok/X/YouTube/Threads/Facebook/Reddit) into
-                        social links, with show pages, season pages, cast-member pages, and Google News topic URLs
-                        routed into the matching sections below.
-                      </p>
-                      <textarea
-                        value={linkBulkInput}
-                        onChange={(event) => setLinkBulkInput(event.target.value)}
-                        rows={4}
-                        placeholder={
-                          "https://thetraitors.fandom.com/wiki/The_Traitors_(US)\nhttps://news.google.com/topics/CAAqKAgKIiJDQkFTRXdvTkwyY3ZNVEZvYlhBeGVtUndNQklDWlc0b0FBUAE?ceid=US:en&oc=3\ninstagram:@thetraitorsus"
-                        }
-                        className="mt-2 block w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-700"
-                      />
-                      <div className="mt-2 flex justify-end">
-                        <button
-                          type="button"
-                          onClick={() => void addShowLinks()}
-                          disabled={linkBulkSaving}
-                          className="rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
-                        >
-                          {linkBulkSaving ? "Adding..." : "Add Link(s)"}
-                        </button>
-                      </div>
-                    </div>
-                    {linksLoading ? (
-                      <p className="text-sm text-zinc-500">Loading links...</p>
-                    ) : showLinks.length === 0 ? (
-                      <p className="text-sm text-zinc-500">No links yet. Run discovery to populate this list.</p>
-                    ) : (
-                      <div className="space-y-5">
-                        <div className="space-y-2">
-                          <div>
-                            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                              {socialLinksSection.title}
-                            </p>
-                            <p className="text-xs text-zinc-500">{socialLinksSection.description}</p>
-                          </div>
-                          {showSocialLinks.length === 0 ? (
-                            <p className="text-sm text-zinc-500">No show-level social handles discovered yet.</p>
-                          ) : (
-                            <div className="space-y-1">
-                              {showSocialLinks.map((pill) => (
-                                <InlineEditableLinkUrl
-                                  key={`settings-social-link-${pill.id}`}
-                                  linkId={pill.link.id}
-                                  url={pill.url}
-                                  openUrl={pill.url}
-                                  label={pill.text}
-                                  saving={Boolean(savingLinkIds[pill.link.id])}
-                                  onSubmit={updateShowLinkUrl}
-                                  containerClassName="rounded-md border border-zinc-200 bg-white px-3 py-2"
-                                  actions={
-                                    <button
-                                      type="button"
-                                      onClick={() => void deleteShowLink(pill.link.id)}
-                                      className="rounded border border-red-200 bg-red-50 px-2 py-0.5 text-[11px] font-semibold text-red-700"
-                                    >
-                                      Delete
-                                    </button>
-                                  }
-                                >
-                                  <div className="inline-flex min-w-0 flex-1 items-center gap-2" title={pill.url}>
-                                    <SourceBadge kind={pill.sourceKind} label={pill.sourceLabel} iconOnly={true} />
-                                    <span className="truncate text-zinc-900">{pill.text}</span>
-                                  </div>
-                                </InlineEditableLinkUrl>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-
-                        <div className="space-y-2">
-                          <div>
-                            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                              {showPagesSection.title}
-                            </p>
-                            <p className="text-xs text-zinc-500">{showPagesSection.description}</p>
-                          </div>
-                          {showPageLinks.length === 0 ? (
-                            <p className="text-sm text-zinc-500">No links in this category yet.</p>
-                          ) : (
-                            <div className="space-y-1">
-                              {showPageLinks.map((link) => {
-                                const sourceKind = getLinkSourceBadgeKind(link);
-                                const sourceLabel = getLinkSourceLabel(link);
-                                const linkTitle = getShowPageLinkTitle(link, show?.name ?? "Show");
-                                const iconUrl = sourceKind === "fandom" ? buildHostFaviconUrl(link.url) : null;
-                                return (
-                                  <InlineEditableLinkUrl
-                                    key={`settings-link-show-pages-${link.id}`}
-                                    linkId={link.id}
-                                    url={link.url}
-                                    openUrl={link.url}
-                                    label={linkTitle}
-                                    saving={Boolean(savingLinkIds[link.id])}
-                                    onSubmit={updateShowLinkUrl}
-                                    containerClassName="rounded-md border border-zinc-200 bg-white px-3 py-2"
-                                    actions={
-                                      <button
-                                        type="button"
-                                        onClick={() => void deleteShowLink(link.id)}
-                                        className="rounded border border-red-200 bg-red-50 px-2 py-0.5 text-[11px] font-semibold text-red-700"
-                                      >
-                                        Delete
-                                      </button>
-                                    }
-                                  >
-                                    <div className="inline-flex min-w-0 flex-1 items-center gap-2">
-                                      <SourceBadge
-                                        kind={sourceKind}
-                                        label={sourceLabel}
-                                        iconUrl={iconUrl}
-                                        iconOnly={usesBrandIconOnly(sourceKind)}
-                                      />
-                                      <span className="shrink-0 text-zinc-300">|</span>
-                                      <span className="truncate text-zinc-900">{linkTitle}</span>
-                                    </div>
-                                  </InlineEditableLinkUrl>
-                                );
-                              })}
-                            </div>
-                          )}
-                        </div>
-
-                        <div className="space-y-2">
-                          <div>
-                            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                              {seasonPagesSection.title}
-                            </p>
-                            <p className="text-xs text-zinc-500">{seasonPagesSection.description}</p>
-                          </div>
-                          {seasonUrlCoverageRows.length === 0 ? (
-                            <p className="text-sm text-zinc-500">No season-scoped validated links yet.</p>
-                          ) : (
-                            <div className="space-y-2">
-                              {seasonUrlCoverageRows.map((row) => (
-                                <div
-                                  key={`settings-season-pages-${row.seasonNumber}`}
-                                  className="rounded-lg border border-zinc-200 bg-white px-3 py-2"
-                                >
-                                  <div className="flex flex-wrap items-center gap-2">
-                                    <p className="text-sm font-semibold text-zinc-900">Season {row.seasonNumber}</p>
-                                    <div className="flex flex-wrap items-center gap-2">
-                                      {row.links.map((link) => (
-                                        <a
-                                          key={`settings-season-link-pill-${row.seasonNumber}-${link.id}`}
-                                          href={link.url}
-                                          target="_blank"
-                                          rel="noopener noreferrer"
-                                          className="inline-flex items-center rounded-full border border-zinc-200 bg-zinc-50 px-2 py-1 text-xs font-semibold text-zinc-700 hover:bg-zinc-100"
-                                          title={`${link.sourceLabel} | ${(link.link && resolveLinkPageTitle(link.link)) || `Season ${row.seasonNumber}`}`}
-                                        >
-                                          <SourceBadge
-                                            kind={link.sourceKind}
-                                            label={link.sourceLabel}
-                                            iconUrl={link.iconUrl}
-                                            iconOnly={true}
-                                          />
-                                        </a>
-                                      ))}
-                                    </div>
-                                  </div>
-                                  <div className="mt-3 grid gap-2">
-                                    {row.links.filter((link) => link.link).map((link) => (
-                                      <InlineEditableLinkUrl
-                                        key={`settings-season-link-editor-${row.seasonNumber}-${link.id}`}
-                                        linkId={link.link!.id}
-                                        url={link.url}
-                                        openUrl={link.url}
-                                        label={`${link.sourceLabel} season page`}
-                                        saving={Boolean(savingLinkIds[link.link!.id])}
-                                        onSubmit={updateShowLinkUrl}
-                                        containerClassName="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2"
-                                        actions={
-                                          <button
-                                            type="button"
-                                            onClick={() => void deleteShowLink(link.link!.id)}
-                                            className="rounded border border-red-200 bg-red-50 px-1.5 py-0.5 text-[10px] font-semibold text-red-700"
-                                          >
-                                            Delete
-                                          </button>
-                                        }
-                                        >
-                                          <div className="flex items-center gap-2 text-xs font-semibold text-zinc-700">
-                                            <SourceBadge
-                                              kind={link.sourceKind}
-                                              label={link.sourceLabel}
-                                            iconUrl={link.iconUrl}
-                                            iconOnly={usesBrandIconOnly(link.sourceKind)}
-                                          />
-                                          <span>{link.sourceLabel}</span>
-                                        </div>
-                                      </InlineEditableLinkUrl>
-                                    ))}
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-
-                        <div className="space-y-2">
-                          <div>
-                            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                              {castMemberPagesSection.title}
-                            </p>
-                            <p className="text-xs text-zinc-500">{castMemberPagesSection.description}</p>
-                          </div>
-                          {castMemberLinkCoverageCards.length === 0 ? (
-                            linksEligibleCastLoading && !linksEligibleCastLoadedOnce ? (
-                              <p className="text-sm text-zinc-500">Loading eligible cast roster...</p>
-                            ) : (
-                              <p className="text-sm text-zinc-500">No cast-member links in this category yet.</p>
-                            )
-                          ) : (
-                            <div className="space-y-3">
-                              {castMemberLinkCoverageCards.map((card) => (
-                                <div
-                                  key={`person-link-coverage-${card.personId}`}
-                                  className="rounded-lg border border-zinc-200 bg-white p-3"
-                                >
-                                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                                    <div className="flex min-w-0 items-center gap-2">
-                                      {card.avatarUrl ? (
-                                        <Image
-                                          src={card.avatarUrl}
-                                          alt={card.personName}
-                                          width={32}
-                                          height={32}
-                                          className="h-8 w-8 rounded-full border border-zinc-200 object-cover"
-                                          unoptimized
-                                        />
-                                      ) : (
-                                        <div className="flex h-8 w-8 items-center justify-center rounded-full border border-zinc-200 bg-zinc-100 text-[10px] font-semibold uppercase text-zinc-500">
-                                          {card.personName.slice(0, 1) || "?"}
-                                        </div>
-                                      )}
-                                      <p className="truncate text-sm font-semibold text-zinc-900">{card.personName}</p>
-                                    </div>
-                                    <div className="flex flex-wrap items-center gap-1">
-                                      <span className="rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-700">
-                                        {card.approvedLinkCount} approved
-                                      </span>
-                                      {card.seasons.length > 0 && (
-                                        <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[11px] font-semibold text-zinc-600">
-                                          Seasons {card.seasons.map((season) => `S${season}`).join(", ")}
-                                        </span>
-                                      )}
-                                    </div>
-                                  </div>
-
-                                  {card.approvedLinks.length === 0 ? (
-                                    <p className="text-sm text-zinc-500">No validated links for this person yet.</p>
-                                  ) : (
-                                    <div className="flex flex-wrap gap-2">
-                                      {card.approvedLinks.map((approvedLink) => (
-                                        <InlineEditableLinkUrl
-                                          key={`person-approved-link-${card.personId}-${approvedLink.id}`}
-                                          linkId={approvedLink.link.id}
-                                          url={approvedLink.url}
-                                          openUrl={approvedLink.url}
-                                          label={approvedLink.text}
-                                          saving={Boolean(savingLinkIds[approvedLink.link.id])}
-                                          onSubmit={updateShowLinkUrl}
-                                          containerClassName="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2"
-                                          actions={
-                                            <button
-                                              type="button"
-                                              onClick={() => void deleteShowLink(approvedLink.link.id)}
-                                              className="rounded border border-red-200 bg-red-50 px-1.5 py-0.5 text-[10px] font-semibold text-red-700"
-                                            >
-                                              Delete
-                                            </button>
-                                          }
-                                        >
-                                          <div
-                                            className="inline-flex min-w-0 max-w-full items-center gap-2 text-xs font-semibold text-zinc-700"
-                                            title={approvedLink.url}
-                                          >
-                                            <SourceBadge
-                                              kind={approvedLink.sourceKind}
-                                              label={approvedLink.sourceLabel}
-                                              iconUrl={approvedLink.iconUrl}
-                                              iconOnly={usesBrandIconOnly(approvedLink.sourceKind)}
-                                            />
-                                            <span className="truncate">{approvedLink.text}</span>
-                                          </div>
-                                        </InlineEditableLinkUrl>
-                                      ))}
-                                    </div>
-                                  )}
-
-                                  {card.missingSources.length > 0 && (
-                                    <details className="mt-3 rounded-lg border border-zinc-200 bg-zinc-50 p-3">
-                                      <summary className="cursor-pointer text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">
-                                        Missing / Unvalidated Sources
-                                      </summary>
-                                      <div className="mt-3 space-y-2">
-                                        {card.missingSources.map((source) => (
-                                          <InlineEditableLinkUrl
-                                            key={`person-link-source-${card.personId}-${source.key}`}
-                                            linkId={source.link?.id ?? `missing-${card.personId}-${source.key}`}
-                                            url={source.link?.url ?? source.url ?? ""}
-                                            openUrl={source.link?.url ?? source.url ?? null}
-                                            label={source.label}
-                                            saving={source.link ? Boolean(savingLinkIds[source.link.id]) : false}
-                                            onSubmit={updateShowLinkUrl}
-                                            containerClassName="rounded-md border border-amber-200 bg-white px-3 py-2"
-                                            canEdit={Boolean(source.link)}
-                                            actions={
-                                              source.link ? (
-                                                <button
-                                                  type="button"
-                                                  onClick={() => source.link && void deleteShowLink(source.link.id)}
-                                                  className="rounded border border-red-200 bg-red-50 px-2 py-0.5 text-[10px] font-semibold text-red-700"
-                                                >
-                                                  Delete
-                                                </button>
-                                              ) : null
-                                            }
-                                          >
-                                            <div className="space-y-2">
-                                              <div className="flex flex-wrap items-center gap-2">
-                                                <PersonSourceLogo sourceKey={source.key} />
-                                                <span className="text-xs font-semibold text-zinc-800">
-                                                  {source.label}
-                                                </span>
-                                                <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-700">
-                                                  {source.state === "unvalidated" ? "Unvalidated" : "Missing"}
-                                                </span>
-                                              </div>
-                                              <p className="text-xs text-zinc-600">No validated source URL found</p>
-                                              {source.url ? (
-                                                <p className="max-w-full truncate text-xs font-medium text-zinc-700" title={source.url}>
-                                                  {source.url}
-                                                </p>
-                                              ) : null}
-                                            </div>
-                                          </InlineEditableLinkUrl>
-                                        ))}
-                                      </div>
-                                    </details>
-                                  )}
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </section>
-
-                <section>
-                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                    <h4 className="text-sm font-semibold text-zinc-700">Reddit</h4>
-                    <Link
-                      href={"/admin/social/reddit"}
-                      className="rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-50"
-                    >
-                      Open Reddit Admin
-                    </Link>
-                  </div>
-                  <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
-                    {redditLoading ? (
-                      <p className="text-sm text-zinc-500">Loading Reddit communities...</p>
-                    ) : redditError ? (
-                      <p className="text-sm text-red-600">{redditError}</p>
-                    ) : overviewRedditGroups.length === 0 ? (
-                      <p className="text-sm text-zinc-500">No relevant Reddit communities configured for this show.</p>
-                    ) : (
-                      <div className="space-y-4">
-                        {overviewRedditGroups.map((group) => (
-                          <div key={`settings-reddit-group-${group.key}`} className="space-y-2">
-                            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                              {group.label}
-                            </p>
-                            <div className="space-y-2">
-                              {group.communities.map((community) => (
-                                <div
-                                  key={`settings-reddit-community-${community.id}`}
-                                  className="rounded-lg border border-zinc-200 bg-white p-3"
-                                >
-                                  <div className="flex flex-wrap items-center justify-between gap-2">
-                                    <div>
-                                      <p className="text-sm font-semibold text-zinc-900">{community.displayName}</p>
-                                      <p className="text-xs text-zinc-500">r/{community.subreddit}</p>
-                                    </div>
-                                    <Link
-                                      href={buildAdminRedditCommunityUrl({
-                                        communitySlug: community.subreddit,
-                                        showSlug: showSlugForRouting,
-                                      })}
-                                      className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-100"
-                                    >
-                                      Open Community
-                                    </Link>
-                                  </div>
-                                  <div className="mt-3 space-y-2">
-                                    <div>
-                                      <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
-                                        Assigned Flairs
-                                      </p>
-                                      <div className="mt-1 flex flex-wrap gap-1.5">
-                                        {community.assignedFlairs.length > 0 ? (
-                                          community.assignedFlairs.map((flair) => (
-                                            <span
-                                              key={`settings-reddit-flair-${community.id}-${flair}`}
-                                              className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[11px] font-semibold text-zinc-700"
-                                            >
-                                              {flair}
-                                            </span>
-                                          ))
-                                        ) : (
-                                          <span className="text-xs text-zinc-500">No assigned flairs</span>
-                                        )}
-                                      </div>
-                                    </div>
-                                    {community.postFlairs.length > 0 && (
-                                      <div>
-                                        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
-                                          Post Flairs
-                                        </p>
-                                        <div className="mt-1 flex flex-wrap gap-1.5">
-                                          {community.postFlairs.map((flair) => (
-                                            <span
-                                              key={`settings-reddit-post-flair-${community.id}-${flair}`}
-                                              className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700"
-                                            >
-                                              {flair}
-                                            </span>
-                                          ))}
-                                        </div>
-                                      </div>
-                                    )}
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </section>
-              </div>
-            </div>
-            </ShowSettingsTab>
+              usesBrandIconOnly={usesBrandIconOnly}
+            />
           )}
 
           {/* Details Tab - External IDs */}
           {activeTab === "details" && (
-            <ShowOverviewTab>
-            <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
-              <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">
-                    Show Overview
-                  </p>
-                  <h3 className="text-xl font-bold text-zinc-900">
-                    Details and Metadata
-                  </h3>
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setTab("settings")}
-                    className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800"
-                  >
-                    Open Settings
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setRefreshLogOpen(true)}
-                    className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
-                  >
-                    {refreshCenterButtonLabel}
-                  </button>
-                </div>
-              </div>
-
-              {(refreshTargetNotice.details || refreshTargetError.details) && (
-                <p
-                  className={`mb-4 text-sm ${
-                    refreshTargetError.details ? "text-red-600" : "text-zinc-500"
-                  }`}
-                >
-                  {refreshTargetError.details || refreshTargetNotice.details}
-                </p>
+            <ShowOverviewTab
+              show={show}
+              nickname={detailsBaseline.nickname}
+              alternativeNamesText={overviewAlternativeNamesText}
+              refreshCenterButtonLabel={refreshCenterButtonLabel}
+              refreshNotice={refreshTargetNotice.details}
+              refreshError={refreshTargetError.details}
+              refreshing={refreshingTargets.details}
+              refreshProgress={refreshTargetProgress.details}
+              renderRefreshProgress={(props) => <RefreshProgressBar {...props} />}
+              detailsNotice={detailsNotice}
+              detailsError={detailsError}
+              externalIdLinks={overviewExternalIdLinks}
+              getExternalIdLinkTitle={(link) => getShowPageLinkTitle(link, show.name)}
+              renderExternalIdLinkBadge={(link) => {
+                const sourceKind = getLinkSourceBadgeKind(link);
+                return (
+                  <SourceBadge
+                    kind={sourceKind}
+                    label={getLinkSourceLabel(link)}
+                    iconUrl={sourceKind === "fandom" ? buildHostFaviconUrl(link.url) : null}
+                    iconOnly={usesBrandIconOnly(sourceKind)}
+                  />
+                );
+              }}
+              socialHandleLinks={overviewSocialHandleLinks}
+              renderSocialHandlePill={(pill) => <SocialHandlePill pill={pill} />}
+              redditLoading={redditLoading}
+              redditError={redditError}
+              redditGroups={overviewRedditGroups}
+              getRedditCommunityHref={(community) =>
+                buildAdminRedditCommunityUrl({
+                  communitySlug: community.subreddit,
+                  showSlug: showSlugForRouting,
+                })
+              }
+              seasonUrlCoverageRows={seasonUrlCoverageRows}
+              renderSeasonCoverageBadge={(link) => (
+                <SourceBadge
+                  kind={link.sourceKind}
+                  label={link.sourceLabel}
+                  iconUrl={link.iconUrl}
+                  iconOnly={true}
+                />
               )}
-              <RefreshProgressBar
-                show={refreshingTargets.details}
-                stage={refreshTargetProgress.details?.stage}
-                message={refreshTargetProgress.details?.message}
-                current={refreshTargetProgress.details?.current}
-                total={refreshTargetProgress.details?.total}
-              />
-              {(detailsNotice || detailsError) && (
-                <p className={`mb-4 text-sm ${detailsError ? "text-red-600" : "text-zinc-500"}`}>
-                  {detailsError || detailsNotice}
-                </p>
-              )}
-
-              <div className="space-y-6">
-                <div>
-                  <h4 className="mb-3 text-sm font-semibold text-zinc-700">Show Info</h4>
-                  <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
-                    <div className="grid gap-4 md:grid-cols-2">
-                      <div className="md:col-span-2">
-                        <p className="mb-1 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                          Display Name
-                        </p>
-                        <p className="text-sm text-zinc-900">{show.name || "Not set"}</p>
-                      </div>
-                      <div>
-                        <p className="mb-1 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                          Nickname
-                        </p>
-                        <p className="text-sm text-zinc-900">{detailsBaseline.nickname || "Not set"}</p>
-                      </div>
-                      <div>
-                        <p className="mb-1 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                          Premiere Date
-                        </p>
-                        <p className="text-sm text-zinc-900">
-                          {show.premiere_date
-                            ? new Date(show.premiere_date).toLocaleDateString("en-US", {
-                                year: "numeric",
-                                month: "long",
-                                day: "numeric",
-                              })
-                            : "Not set"}
-                        </p>
-                      </div>
-                      <div className="md:col-span-2">
-                        <p className="mb-1 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                          Alt Names
-                        </p>
-                        <p className="text-sm text-zinc-900 whitespace-pre-line">
-                          {overviewAlternativeNamesText || "None"}
-                        </p>
-                      </div>
-                      <div className="md:col-span-2">
-                        <p className="mb-1 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                          Description
-                        </p>
-                        <p className="text-sm leading-6 text-zinc-900">
-                          {show.description || "No description available."}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div>
-                  <h4 className="mb-3 text-sm font-semibold text-zinc-700">External IDs</h4>
-                  <div className="space-y-3 rounded-lg border border-zinc-200 bg-zinc-50 p-4">
-                    <ExternalLinks
-                      externalIds={(show.external_ids as Record<string, unknown> | null) ?? null}
-                      tmdbId={show.tmdb_id}
-                      imdbId={show.imdb_id}
-                      derivedLinks={show.derived_external_links ?? null}
-                      type="show"
-                    />
-                    {overviewExternalIdLinks.length > 0 ? (
-                      <div className="space-y-2">
-                        {overviewExternalIdLinks.map((link) => (
-                          <a
-                            key={`overview-external-id-link-${link.id}`}
-                            href={link.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex min-w-0 max-w-full items-center gap-2 rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs font-semibold text-zinc-700 hover:bg-zinc-100"
-                          >
-                            <SourceBadge
-                              kind={getLinkSourceBadgeKind(link)}
-                              label={getLinkSourceLabel(link)}
-                              iconUrl={getLinkSourceBadgeKind(link) === "fandom" ? buildHostFaviconUrl(link.url) : null}
-                              iconOnly={usesBrandIconOnly(getLinkSourceBadgeKind(link))}
-                            />
-                            <span className="text-zinc-300">|</span>
-                            <span className="truncate">{getShowPageLinkTitle(link, show.name)}</span>
-                          </a>
-                        ))}
-                      </div>
-                    ) : (
-                      !show.tmdb_id &&
-                      !show.imdb_id && (
-                        <p className="text-sm text-zinc-500">No external IDs available for this show.</p>
-                      )
-                    )}
-                  </div>
-                </div>
-
-                <div>
-                  <h4 className="mb-3 text-sm font-semibold text-zinc-700">Social Handles</h4>
-                  <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
-                    {overviewSocialHandleLinks.length === 0 ? (
-                      <p className="text-sm text-zinc-500">No show-level social handles discovered yet.</p>
-                    ) : (
-                      <div className="flex flex-wrap gap-2">
-                        {overviewSocialHandleLinks.map((pill) => (
-                          <SocialHandlePill key={`overview-social-link-${pill.id}`} pill={pill} />
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                <div>
-                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                    <h4 className="text-sm font-semibold text-zinc-700">Reddit</h4>
-                    <Link
-                      href={"/admin/social/reddit"}
-                      className="rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-50"
-                    >
-                      Open Reddit Admin
-                    </Link>
-                  </div>
-                  <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
-                    {redditLoading ? (
-                      <p className="text-sm text-zinc-500">Loading Reddit communities...</p>
-                    ) : redditError ? (
-                      <p className="text-sm text-red-600">{redditError}</p>
-                    ) : overviewRedditGroups.length === 0 ? (
-                      <p className="text-sm text-zinc-500">No relevant Reddit communities configured for this show.</p>
-                    ) : (
-                      <div className="space-y-4">
-                        {overviewRedditGroups.map((group) => (
-                          <div key={`overview-reddit-group-${group.key}`} className="space-y-2">
-                            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                              {group.label}
-                            </p>
-                            <div className="grid gap-3 md:grid-cols-2">
-                              {group.communities.map((community) => (
-                                <div
-                                  key={`overview-reddit-community-${community.id}`}
-                                  className="rounded-lg border border-zinc-200 bg-white p-3"
-                                >
-                                  <div className="flex flex-wrap items-center justify-between gap-2">
-                                    <div>
-                                      <p className="text-sm font-semibold text-zinc-900">{community.displayName}</p>
-                                      <p className="text-xs text-zinc-500">r/{community.subreddit}</p>
-                                    </div>
-                                    <Link
-                                      href={buildAdminRedditCommunityUrl({
-                                        communitySlug: community.subreddit,
-                                        showSlug: showSlugForRouting,
-                                      })}
-                                      className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-100"
-                                    >
-                                      Open Community
-                                    </Link>
-                                  </div>
-                                  <div className="mt-3 flex flex-wrap gap-1.5">
-                                    {community.assignedFlairs.length > 0 ? (
-                                      community.assignedFlairs.map((flair) => (
-                                        <span
-                                          key={`overview-reddit-flair-${community.id}-${flair}`}
-                                          className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[11px] font-semibold text-zinc-700"
-                                        >
-                                          {flair}
-                                        </span>
-                                      ))
-                                    ) : (
-                                      <span className="text-xs text-zinc-500">No assigned flairs</span>
-                                    )}
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                <div>
-                  <h4 className="mb-3 text-sm font-semibold text-zinc-700">Season URL Coverage</h4>
-                  <div className="space-y-2 rounded-lg border border-zinc-200 bg-zinc-50 p-4">
-                    {seasonUrlCoverageRows.length === 0 ? (
-                      <p className="text-sm text-zinc-500">No seasons available for URL coverage yet.</p>
-                    ) : (
-                      seasonUrlCoverageRows.map((row) => (
-                        <div
-                          key={`overview-season-url-coverage-${row.seasonNumber}`}
-                          className="rounded-lg border border-zinc-200 bg-white px-3 py-2"
-                        >
-                          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">
-                            Season {row.seasonNumber}
-                          </p>
-                          {row.links.length === 0 ? (
-                            <p className="mt-1 text-sm text-zinc-500">No validated season-scoped URLs discovered.</p>
-                          ) : (
-                            <div className="mt-2 flex flex-wrap items-center gap-2">
-                              {row.links.map((link) => (
-                                <a
-                                  key={`overview-season-url-pill-${row.seasonNumber}-${link.id}`}
-                                  href={link.url}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="inline-flex items-center rounded-full border border-zinc-200 bg-zinc-50 px-2 py-1 text-xs font-semibold text-zinc-700 hover:bg-zinc-100"
-                                  title={`${link.sourceLabel} | ${link.linkTitle || `Season ${row.seasonNumber}`}`}
-                                >
-                                  <SourceBadge
-                                    kind={link.sourceKind}
-                                    label={link.sourceLabel}
-                                    iconUrl={link.iconUrl}
-                                    iconOnly={true}
-                                  />
-                                </a>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </div>
-
-                {/* Genres */}
-                {show.genres && show.genres.length > 0 && (
-                  <div>
-                    <h4 className="mb-3 text-sm font-semibold text-zinc-700">
-                      Genres
-                    </h4>
-                    <div className="flex flex-wrap gap-2">
-                      {show.genres.map((genre) => (
-                        <span
-                          key={genre}
-                          className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-sm text-zinc-700"
-                        >
-                          {genre}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                <div>
-                  <h4 className="mb-3 text-sm font-semibold text-zinc-700">
-                    Networks & Streaming
-                  </h4>
-                  <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
-                    <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                      Networks
-                    </p>
-                    <div className="mb-4 flex flex-wrap gap-2">
-                      {overviewNetworks.length > 0 ? (
-                        overviewNetworks.map((network) => (
-                          <span
-                            key={network}
-                            className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-sm text-zinc-700"
-                          >
-                            {network}
-                          </span>
-                        ))
-                      ) : (
-                        <p className="text-sm text-zinc-500">No network metadata.</p>
-                      )}
-                    </div>
-                    <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                      Availability
-                    </p>
-                    {watchProviderRegions.length > 0 ? (
-                      <div className="space-y-3">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
-                            Region
-                          </span>
-                          <div className="relative inline-flex">
-                            <select
-                              aria-label="Availability region"
-                              className="appearance-none rounded-full border border-zinc-200 bg-white px-3 py-1 pr-8 text-sm font-medium text-zinc-700 shadow-sm"
-                              value={selectedAvailabilityRegion?.regionCode ?? ""}
-                              onChange={(event) => setSelectedAvailabilityRegionCode(event.target.value)}
-                            >
-                              {watchProviderRegionOptions.map((option) => (
-                                <option key={`availability-region-${option.regionCode}`} value={option.regionCode}>
-                                  {option.regionCode} · {option.regionLabel}
-                                </option>
-                              ))}
-                            </select>
-                            <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-xs text-zinc-500">
-                              ▾
-                            </span>
-                          </div>
-                        </div>
-                        {selectedAvailabilityRegion ? (
-                          <div className="rounded-lg border border-zinc-200 bg-white p-3">
-                            <p className="text-sm font-semibold text-zinc-900">
-                              {selectedAvailabilityRegion.regionLabel}
-                            </p>
-                            <div className="mt-3 space-y-3">
-                              <div>
-                                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
-                                  Stream
-                                </p>
-                                <div className="mt-1 flex flex-wrap gap-1.5">
-                                  {selectedAvailabilityRegion.stream.length > 0 ? (
-                                    selectedAvailabilityRegion.stream.map((provider) => (
-                                      <span
-                                        key={`overview-watch-stream-${selectedAvailabilityRegion.regionCode}-${provider}`}
-                                        className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[11px] font-semibold text-zinc-700"
-                                      >
-                                        {provider}
-                                      </span>
-                                    ))
-                                  ) : (
-                                    <span className="text-xs text-zinc-500">None</span>
-                                  )}
-                                </div>
-                              </div>
-                              <div>
-                                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
-                                  Free
-                                </p>
-                                <div className="mt-1 flex flex-wrap gap-1.5">
-                                  {selectedAvailabilityRegion.free.length > 0 ? (
-                                    selectedAvailabilityRegion.free.map((provider) => (
-                                      <span
-                                        key={`overview-watch-free-${selectedAvailabilityRegion.regionCode}-${provider}`}
-                                        className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700"
-                                      >
-                                        {provider}
-                                      </span>
-                                    ))
-                                  ) : (
-                                    <span className="text-xs text-zinc-500">None</span>
-                                  )}
-                                </div>
-                              </div>
-                              <div>
-                                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
-                                  Rent / Buy
-                                </p>
-                                <div className="mt-1 flex flex-wrap gap-1.5">
-                                  {selectedAvailabilityRegion.buyRent.length > 0 ? (
-                                    selectedAvailabilityRegion.buyRent.map((provider) => (
-                                      <span
-                                        key={`overview-watch-buy-rent-${selectedAvailabilityRegion.regionCode}-${provider}`}
-                                        className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700"
-                                      >
-                                        {provider}
-                                      </span>
-                                    ))
-                                  ) : (
-                                    <span className="text-xs text-zinc-500">None</span>
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        ) : null}
-                      </div>
-                    ) : (
-                      <div className="space-y-3">
-                        <div className="flex flex-wrap gap-2">
-                          {fallbackWatchProviders.length > 0 ? (
-                            fallbackWatchProviders.map((provider) => (
-                              <span
-                                key={`overview-watch-fallback-${provider}`}
-                                className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-sm text-zinc-700"
-                              >
-                                {provider}
-                              </span>
-                            ))
-                          ) : (
-                            <p className="text-sm text-zinc-500">No streaming providers on this record.</p>
-                          )}
-                        </div>
-                        <p className="text-xs text-zinc-500">
-                          Typed TMDb availability is unavailable for this show.
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Tags */}
-                {show.tags && show.tags.length > 0 && (
-                  <div>
-                    <h4 className="mb-3 text-sm font-semibold text-zinc-700">
-                      Tags
-                    </h4>
-                    <div className="flex flex-wrap gap-2">
-                      {show.tags.map((tag) => (
-                        <span
-                          key={tag}
-                          className="rounded-full bg-blue-50 border border-blue-200 px-3 py-1 text-sm text-blue-700"
-                        >
-                          {tag}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Premiere Date */}
-                {show.premiere_date && (
-                  <div>
-                    <h4 className="mb-3 text-sm font-semibold text-zinc-700">
-                      Premiere Date
-                    </h4>
-                    <p className="text-sm text-zinc-700">
-                      {new Date(show.premiere_date).toLocaleDateString("en-US", {
-                        year: "numeric",
-                        month: "long",
-                        day: "numeric",
-                      })}
-                    </p>
-                  </div>
-                )}
-
-                <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
-                  <p className="text-sm text-zinc-700">
-                    Link management and role catalog tools are now on the <span className="font-semibold">Settings</span> tab.
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => setTab("settings")}
-                    className="mt-3 rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-100"
-                  >
-                    Open Settings
-                  </button>
-                </div>
-
-                {/* Internal ID */}
-                <div>
-                  <h4 className="mb-3 text-sm font-semibold text-zinc-700">
-                    Internal ID
-                  </h4>
-                  <code className="text-xs bg-zinc-100 rounded px-2 py-1 text-zinc-600 font-mono">
-                    {show.id}
-                  </code>
-                </div>
-
-                <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
-                  <p className="mb-3 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                    Show Visibility
-                  </p>
-                  {isCovered ? (
-                    <button type="button"
-                      onClick={removeFromCoveredShows}
-                      disabled={coverageLoading}
-                      className="flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-4 py-2 text-sm font-semibold text-green-700 transition hover:bg-green-100 disabled:opacity-50"
-                    >
-                      <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
-                        <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                      </svg>
-                      {coverageLoading ? "..." : "Remove from Shows"}
-                    </button>
-                  ) : (
-                    <button type="button"
-                      onClick={addToCoveredShows}
-                      disabled={coverageLoading}
-                      className="flex items-center gap-2 rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:opacity-50"
-                    >
-                      <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                      </svg>
-                      {coverageLoading ? "..." : "Add to Shows"}
-                    </button>
-                  )}
-                  {coverageError && (
-                    <p className="mt-2 text-xs font-medium text-rose-700">{coverageError}</p>
-                  )}
-                </div>
-              </div>
-            </div>
-            </ShowOverviewTab>
+              networks={overviewNetworks}
+              watchProviderRegions={watchProviderRegions}
+              watchProviderRegionOptions={watchProviderRegionOptions}
+              selectedAvailabilityRegion={selectedAvailabilityRegion}
+              fallbackWatchProviders={fallbackWatchProviders}
+              isCovered={isCovered}
+              coverageLoading={coverageLoading}
+              coverageError={coverageError}
+              onOpenSettings={() => setTab("settings")}
+              onOpenRefreshLog={() => setRefreshLogOpen(true)}
+              onSelectAvailabilityRegion={setSelectedAvailabilityRegionCode}
+              onAddToCoveredShows={addToCoveredShows}
+              onRemoveFromCoveredShows={removeFromCoveredShows}
+            />
           )}
         </main>
 
@@ -15365,302 +11810,58 @@ export default function TrrShowDetailPage() {
           />
         )}
 
-        <AdminModal
-          isOpen={linksRefreshModalOpen}
-          onClose={() => setLinksRefreshModalOpen(false)}
-          closeLabel="Close links discovery progress"
-          ariaLabel="Links discovery progress"
-          panelClassName="max-h-[90vh] max-w-3xl overflow-y-auto"
-          preserveScrollPosition={true}
-        >
-          <div className="mb-4 flex items-start justify-between gap-4">
-            <div>
-              <h3 className="text-lg font-bold text-zinc-900">Links Discovery</h3>
-              <p className="text-sm text-zinc-500">
-                Remote worker-backed refresh for show, season, and cast member pages.
-              </p>
-            </div>
-            <div className="flex items-center gap-2">
-              {canCancelLinksRefresh && (
-                <button
-                  type="button"
-                  onClick={() => void cancelShowLinksRefresh()}
-                  disabled={linksRefreshCancelling}
-                  className="rounded-md border border-rose-200 bg-rose-50 px-3 py-1 text-sm font-semibold text-rose-700 hover:bg-rose-100 disabled:opacity-50"
-                >
-                  {linksRefreshCancelButtonLabel}
-                </button>
-              )}
-              <span
-                className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] ${
-                  linksRefreshStatus === "completed"
-                    ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                    : linksRefreshStatus === "failed" || linksRefreshStatus === "cancelled"
-                      ? "border-rose-200 bg-rose-50 text-rose-700"
-                      : linksRefreshStatus === "running"
-                        ? "border-blue-200 bg-blue-50 text-blue-700"
-                        : "border-zinc-200 bg-zinc-50 text-zinc-600"
-                }`}
-              >
-                {linksRefreshStatus ?? "queued"}
-              </span>
-              <button
-                type="button"
-                onClick={() => setLinksRefreshModalOpen(false)}
-                className="rounded-md border border-zinc-200 px-3 py-1 text-sm font-semibold text-zinc-600 hover:bg-zinc-50"
-              >
-                Close
-              </button>
-            </div>
-          </div>
+        <ShowLinksDiscoveryModal
+          dialog={{
+            open: linksRefreshModalOpen,
+            onClose: () => setLinksRefreshModalOpen(false),
+            status: linksRefreshStatus,
+            error: linksError,
+            notice: linksNotice,
+            completionNotice: linksRefreshCompletionNotice,
+          }}
+          cancellation={{
+            visible: canCancelLinksRefresh,
+            pending: linksRefreshCancelling,
+            buttonLabel: linksRefreshCancelButtonLabel,
+            onCancel: () => void cancelShowLinksRefresh(),
+          }}
+          execution={{
+            runLabel: linksRefreshRunId ? `Run ${shortenAdminToken(linksRefreshRunId)}` : "Pending",
+            operationLabel: linksRefreshOperationId
+              ? `Op ${shortenAdminToken(linksRefreshOperationId)}`
+              : "Pending",
+            owner: linksRefreshExecutionOwner,
+            backend: linksRefreshExecutionBackend,
+            mode: linksRefreshExecutionMode,
+          }}
+          progress={{
+            summary: linksRefreshSummary,
+            refreshing: linksRefreshing,
+            timeoutMessage: linksRefreshTimeoutMessage,
+            stalled: linksRefreshStalled,
+            stalledReason: linksRefreshStalledReason,
+            lastUpdateLabel: linksRefreshLastUpdateLabel,
+            lastStageChangeLabel: linksRefreshLastStageChangeLabel,
+            validatedSourceCounts: linksRefreshValidatedSourceCounts,
+            deletedSourceCounts: linksRefreshDeletedSourceCounts,
+            hasResult: Boolean(linksRefreshResult),
+          }}
+        />
 
-          {(linksError || linksNotice || linksRefreshCompletionNotice) && (
-            <p className={`mb-4 text-sm ${linksError ? "text-red-600" : "text-zinc-600"}`}>
-              {linksError || linksRefreshCompletionNotice || linksNotice}
-            </p>
-          )}
-
-          <section className="mb-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-500">Run ID</p>
-              <p className="mt-1 text-sm font-semibold text-zinc-900">
-                {linksRefreshRunId ? `Run ${shortenAdminToken(linksRefreshRunId)}` : "Pending"}
-              </p>
-            </div>
-            <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-500">Operation ID</p>
-              <p className="mt-1 text-sm font-semibold text-zinc-900">
-                {linksRefreshOperationId ? `Op ${shortenAdminToken(linksRefreshOperationId)}` : "Pending"}
-              </p>
-            </div>
-            <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-500">Execution</p>
-              <p className="mt-1 text-sm font-semibold text-zinc-900">
-                {linksRefreshExecutionOwner === "remote_worker"
-                  ? "remote worker"
-                  : linksRefreshExecutionOwner || "Awaiting worker"}
-              </p>
-              {(linksRefreshExecutionBackend || linksRefreshExecutionMode) && (
-                <p className="mt-1 text-xs text-zinc-500">
-                  {[linksRefreshExecutionBackend, linksRefreshExecutionMode ? `mode ${linksRefreshExecutionMode}` : null]
-                    .filter((value): value is string => Boolean(value))
-                    .join(" · ")}
-                </p>
-              )}
-            </div>
-            <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-500">Status</p>
-              <p className="mt-1 text-sm font-semibold text-zinc-900">
-                {linksRefreshSummary?.stageLabel || "Discovery"}
-              </p>
-              <p className="mt-1 text-xs text-zinc-500">
-                {linksRefreshSummary?.elapsedLabel || "Waiting for stream updates"}
-              </p>
-            </div>
-          </section>
-
-          <section className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
-            <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">Progress</p>
-            {linksRefreshSummary ? (
-              <div className="mt-3 space-y-3">
-                <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-semibold text-zinc-900">{linksRefreshSummary.headline}</p>
-                      {linksRefreshSummary.detail && (
-                        <p className="mt-1 text-sm text-zinc-600">{linksRefreshSummary.detail}</p>
-                      )}
-                    </div>
-                    <div className="text-right text-xs text-zinc-500">
-                      {linksRefreshSummary.stageElapsedLabel && <p>{linksRefreshSummary.stageElapsedLabel}</p>}
-                      {linksRefreshSummary.elapsedLabel && <p>{linksRefreshSummary.elapsedLabel}</p>}
-                    </div>
-                  </div>
-                  {(linksRefreshSummary.targetSummary ||
-                    linksRefreshSummary.stageProgressLabel ||
-                    linksRefreshSummary.currentTargetLabel ||
-                    linksRefreshSummary.budgetLabel) && (
-                    <div className="mt-3 space-y-1 text-sm text-zinc-600">
-                      {linksRefreshSummary.targetSummary && <p>{linksRefreshSummary.targetSummary}</p>}
-                      {linksRefreshSummary.stageProgressLabel && <p>{linksRefreshSummary.stageProgressLabel}</p>}
-                      {linksRefreshSummary.currentTargetLabel && (
-                        <p>
-                          Checking: <span className="font-semibold text-zinc-900">{linksRefreshSummary.currentTargetLabel}</span>
-                        </p>
-                      )}
-                      {linksRefreshSummary.budgetLabel && <p className="text-amber-700">{linksRefreshSummary.budgetLabel}</p>}
-                    </div>
-                  )}
-                  {linksRefreshSummary.metrics.length > 0 && (
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      {linksRefreshSummary.metrics.map((metric) => (
-                        <span
-                          key={`${metric.label}:${metric.value}`}
-                          className="rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-zinc-700"
-                        >
-                          {metric.label}: {metric.value}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                {Boolean(linksRefreshLatestPayload?.timeout) && typeof linksRefreshLatestPayload?.timeout === "object" && (
-                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-                    {typeof (linksRefreshLatestPayload.timeout as Record<string, unknown>).detail === "string"
-                      ? String((linksRefreshLatestPayload.timeout as Record<string, unknown>).detail)
-                      : "Discovery reported a timeout condition."}
-                  </div>
-                )}
-
-                <div className="grid gap-3 lg:grid-cols-2">
-                  <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-500">Worker Monitor</p>
-                    <div className="mt-2 space-y-1 text-sm text-zinc-700">
-                      <p>
-                        Worker health:{" "}
-                        <span className={linksRefreshStalled ? "font-semibold text-amber-700" : "font-semibold text-emerald-700"}>
-                          {linksRefreshStalled ? "Stalled" : "Healthy"}
-                        </span>
-                      </p>
-                      {linksRefreshLastUpdateLabel && <p>Last stream update: {linksRefreshLastUpdateLabel}</p>}
-                      {linksRefreshLastStageChangeLabel && <p>Last stage change: {linksRefreshLastStageChangeLabel}</p>}
-                      {linksRefreshStalledReason && (
-                        <p className="text-amber-700">
-                          Reason: <span className="font-semibold">{linksRefreshStalledReason}</span>
-                        </p>
-                      )}
-                    </div>
-                  </div>
-
-                  {(linksRefreshValidatedSourceCounts.length > 0 || linksRefreshDeletedSourceCounts.length > 0) && (
-                    <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3">
-                      <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                        Correct / Live by Source
-                      </p>
-                      {linksRefreshValidatedSourceCounts.length > 0 ? (
-                        <div className="mt-2 flex flex-wrap gap-2">
-                          {linksRefreshValidatedSourceCounts.map((entry) => (
-                            <span
-                              key={`links-live-source-${entry.key}`}
-                              className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700"
-                            >
-                              {entry.label}: {entry.count}
-                            </span>
-                          ))}
-                        </div>
-                      ) : (
-                        <p className="mt-2 text-sm text-zinc-500">No validated live source counts reported yet.</p>
-                      )}
-                      {linksRefreshDeletedSourceCounts.length > 0 && (
-                        <div className="mt-3">
-                          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
-                            Invalid Deleted
-                          </p>
-                          <div className="mt-2 flex flex-wrap gap-2">
-                            {linksRefreshDeletedSourceCounts.map((entry) => (
-                              <span
-                                key={`links-deleted-source-${entry.key}`}
-                                className="rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 text-[11px] font-semibold text-rose-700"
-                              >
-                                {entry.label}: {entry.count}
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                {linksRefreshResult && (
-                  <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-500">Result</p>
-                    <p className="mt-1 text-sm text-zinc-700">
-                      {linksRefreshCompletionNotice || "Links discovery finished."}
-                    </p>
-                    {linksRefreshValidatedSourceCounts.length > 0 && (
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        {linksRefreshValidatedSourceCounts.map((entry) => (
-                          <span
-                            key={`links-result-live-source-${entry.key}`}
-                            className="rounded-full border border-emerald-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-emerald-700"
-                          >
-                            {entry.label}: {entry.count} live
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                    {linksRefreshDeletedSourceCounts.length > 0 && (
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        {linksRefreshDeletedSourceCounts.map((entry) => (
-                          <span
-                            key={`links-result-deleted-source-${entry.key}`}
-                            className="rounded-full border border-rose-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-rose-700"
-                          >
-                            {entry.label}: {entry.count} invalid deleted
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            ) : (
-              <p className="mt-3 text-sm text-zinc-500">
-                {linksRefreshing ? "Waiting for worker progress..." : "Start a links refresh to see live updates here."}
-              </p>
-            )}
-          </section>
-        </AdminModal>
-
-        <AdminModal
-          isOpen={refreshLogOpen}
-          onClose={() => setRefreshLogOpen(false)}
-          closeLabel="Close health center"
-          ariaLabel="Health Center"
-          panelClassName="max-h-[90vh] max-w-5xl overflow-y-auto"
-          preserveScrollPosition={true}
-        >
-              <div className="mb-4 flex items-start justify-between gap-4">
-                <div>
-                  <h3 className="text-lg font-bold text-zinc-900">Health Center</h3>
-                  <p className="text-sm text-zinc-500">
-                    Content Health, Sync Pipeline, Operations Inbox, and Refresh Log.
-                  </p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (refreshingShowAll) return;
-                      captureHealthCenterScrollPosition();
-                      void refreshAllShowData();
-                    }}
-                    aria-disabled={refreshingShowAll}
-                    className={`rounded-md px-3 py-1 text-sm font-semibold text-white ${
-                      refreshingShowAll
-                        ? "cursor-not-allowed bg-zinc-500"
-                        : "bg-zinc-900 hover:bg-zinc-800"
-                    }`}
-                  >
-                    {refreshRunButtonLabel}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setRefreshLogOpen(false)}
-                    className="rounded-md border border-zinc-200 px-3 py-1 text-sm font-semibold text-zinc-600 hover:bg-zinc-50"
-                  >
-                    Close
-                  </button>
-                </div>
-              </div>
-
-              {(refreshAllNotice || refreshAllError) && (
-                <p className={`mb-4 text-sm ${refreshAllError ? "text-red-600" : "text-zinc-500"}`}>
-                  {refreshAllError || refreshAllNotice}
-                </p>
-              )}
+        <ShowHealthCenterModal
+          dialog={{
+            open: refreshLogOpen,
+            onClose: () => setRefreshLogOpen(false),
+            onRun: () => {
+              if (refreshingShowAll) return;
+              captureHealthCenterScrollPosition();
+              void refreshAllShowData();
+            },
+            runDisabled: refreshingShowAll,
+            runButtonLabel: refreshRunButtonLabel,
+            notice: refreshAllNotice,
+            error: refreshAllError,
+            progressContent: (
               <RefreshProgressBar
                 show={refreshingShowAll}
                 stage={refreshAllProgress?.stage}
@@ -15668,1478 +11869,148 @@ export default function TrrShowDetailPage() {
                 current={refreshAllProgress?.current}
                 total={refreshAllProgress?.total}
               />
-
-              <section className="mb-6 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
-                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">
-                  Content Health
-                </p>
-                <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
-                  {contentHealthItems.map((item) => (
-                    <button
-                      key={item.key}
-                      type="button"
-                      onClick={item.onClick}
-                      className={`rounded-xl border px-3 py-2 text-left transition hover:shadow-sm ${healthBadgeClassName(
-                        item.status
-                      )}`}
-                    >
-                      <p className="text-[11px] font-semibold uppercase tracking-[0.16em]">
-                        {item.label}
-                      </p>
-                      <p className="mt-1 text-sm font-semibold">
-                        {item.status === "ready"
-                          ? "Ready"
-                          : item.status === "stale"
-                            ? "Stale"
-                            : "Missing"}
-                      </p>
-                      <p className="mt-1 text-xs opacity-80">{item.countLabel}</p>
-                    </button>
-                  ))}
-                </div>
-              </section>
-
-              <section className="mb-6 grid gap-4 lg:grid-cols-[1.3fr_1fr]">
-                <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
-                  <p className="mb-3 text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">
-                    Sync Pipeline
-                  </p>
-                  <div className="space-y-2">
-                    {pipelineSteps.map((step) => {
-                      const latestParts = step.latest ? extractRefreshLogSubJob(step.latest) : null;
-                      const statusPillClass =
-                        step.status === "done"
-                          ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                          : step.status === "active"
-                            ? "border-blue-200 bg-blue-50 text-blue-700"
-                            : step.status === "failed"
-                              ? "border-rose-200 bg-rose-50 text-rose-700"
-                              : "border-zinc-200 bg-zinc-50 text-zinc-600";
-                      const statusText =
-                        step.status === "done"
-                          ? "Done"
-                          : step.status === "active"
-                            ? "Running"
-                            : step.status === "failed"
-                              ? "Failed"
-                              : "Queued";
-                      return (
-                        <div
-                          key={step.topic.key}
-                          className="flex items-center justify-between gap-3 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2"
-                        >
-                          <div className="min-w-0">
-                            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-700">
-                              {step.topic.label}
-                              {step.executionOwner && (
-                                <span className="text-xs text-zinc-500 ml-1">
-                                  ({step.executionOwner === "remote_worker" ? "Modal" : step.executionOwner})
-                                </span>
-                              )}
-                            </p>
-                            <p className="truncate text-[11px] text-zinc-500">{step.topic.description}</p>
-                            <p className="truncate text-[11px] text-zinc-600">
-                              {latestParts?.details ?? "No updates yet."}
-                            </p>
-                          </div>
-                          <div className="shrink-0 text-right">
-                            <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${statusPillClass}`}>
-                              {statusText}
-                            </span>
-                            {step.status === "failed" && step.parentOperationId && (
-                              <button type="button"
-                                className="text-xs text-blue-500 hover:text-blue-700 ml-2"
-                                onClick={() => retryRefreshTarget(step.topic.key, step.parentOperationId!)}
-                              >
-                                Retry
-                              </button>
-                            )}
-                            {step.latest && (
-                              <p className="mt-1 text-[10px] text-zinc-400">
-                                {new Date(step.latest.at).toLocaleTimeString()}
-                              </p>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
-                  <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">
-                    Operations Inbox
-                  </p>
-                  {operationsInboxItems.length === 0 ? (
-                    <p className="mt-3 text-sm text-emerald-700">No blocking tasks.</p>
-                  ) : (
-                    <div className="mt-3 space-y-2">
-                      {operationsInboxItems.map((item) => (
-                        <button
-                          key={item.id}
-                          type="button"
-                          onClick={item.onClick}
-                          className="w-full rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-left transition hover:bg-amber-100"
-                        >
-                          <p className="text-sm font-semibold text-amber-800">{item.title}</p>
-                          <p className="mt-1 text-xs text-amber-700">{item.detail}</p>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </section>
-
-              <section className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
-                <p className="mb-3 text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">
-                  Refresh Log
-                </p>
-                {refreshLogEntries.length === 0 ? (
-                  <p className="text-xs text-zinc-500">No refresh activity yet.</p>
-                ) : (
-                  <div className="max-h-[44vh] space-y-3 overflow-y-auto pr-1">
-                    {refreshLogTopicGroups.map(({ topic, entries, entriesForView, latest, status }) => {
-                      const latestParts = latest ? extractRefreshLogSubJob(latest) : null;
-                      const latestPercent =
-                        latest &&
-                        typeof latest.current === "number" &&
-                        typeof latest.total === "number" &&
-                        latest.total > 0
-                          ? Math.min(100, Math.round((latest.current / latest.total) * 100))
-                          : null;
-
-                      if (status === "done") {
-                        return (
-                          <article
-                            key={topic.key}
-                            className="rounded-lg border border-green-200 bg-green-50 px-3 py-2"
-                          >
-                            <p className="text-xs font-semibold text-green-800">
-                              {topic.label}: Done ✔️
-                            </p>
-                          </article>
-                        );
-                      }
-
-                      return (
-                        <article key={topic.key} className="rounded-lg border border-zinc-200 bg-zinc-50 p-3">
-                          <div className="flex items-start justify-between gap-3">
-                            <div>
-                              <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-600">
-                                {topic.label}
-                              </p>
-                              <p className="text-[11px] text-zinc-500">{topic.description}</p>
-                            </div>
-                            {latest && (
-                              <p className="text-[10px] text-zinc-400">
-                                {new Date(latest.at).toLocaleTimeString()}
-                              </p>
-                            )}
-                          </div>
-
-                          {status === "failed" && (
-                            <p className="mt-2 text-xs font-semibold text-red-700">
-                              {topic.label}: Failed ✖
-                            </p>
-                          )}
-
-                          {latest ? (
-                            <div className="mt-2 rounded-md border border-zinc-200 bg-white p-2">
-                              <p className="text-xs font-semibold text-zinc-800">{latestParts?.subJob}</p>
-                              <p className="mt-1 text-xs text-zinc-600">{latestParts?.details}</p>
-                              {typeof latest.current === "number" &&
-                                typeof latest.total === "number" && (
-                                  <p className="mt-1 text-[11px] text-zinc-500">
-                                    {latest.current.toLocaleString()}/{latest.total.toLocaleString()}
-                                    {latestPercent !== null ? ` (${latestPercent}%)` : ""}
-                                  </p>
-                                )}
-                            </div>
-                          ) : (
-                            <p className="mt-2 text-xs text-zinc-500">No updates yet.</p>
-                          )}
-
-                          {entries.length > 0 && (
-                            <details className="mt-2" open={entries.length <= 3}>
-                              <summary className="cursor-pointer text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
-                                Sub-jobs ({entries.length})
-                              </summary>
-                              <div className="mt-2 space-y-1">
-                                {entriesForView.slice(0, 30).map((entry) => {
-                                  const parts = extractRefreshLogSubJob(entry);
-                                  const percent =
-                                    typeof entry.current === "number" &&
-                                    typeof entry.total === "number" &&
-                                    entry.total > 0
-                                      ? Math.min(100, Math.round((entry.current / entry.total) * 100))
-                                      : null;
-                                  return (
-                                    <div
-                                      key={entry.id}
-                                      className="rounded border border-zinc-100 bg-white px-2 py-1.5"
-                                    >
-                                      <div className="flex items-center justify-between gap-2">
-                                        <p className="text-[11px] font-semibold text-zinc-700">
-                                          {parts.subJob}
-                                        </p>
-                                        <p className="text-[10px] text-zinc-400">
-                                          {new Date(entry.at).toLocaleTimeString()}
-                                        </p>
-                                      </div>
-                                      <p className="mt-0.5 text-[11px] text-zinc-600">{parts.details}</p>
-                                      {typeof entry.current === "number" &&
-                                        typeof entry.total === "number" && (
-                                          <p className="mt-0.5 text-[10px] text-zinc-500">
-                                            {entry.current.toLocaleString()}/{entry.total.toLocaleString()}
-                                            {percent !== null ? ` (${percent}%)` : ""}
-                                          </p>
-                                        )}
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            </details>
-                          )}
-                        </article>
-                      );
-                    })}
-                  </div>
-                )}
-              </section>
-        </AdminModal>
-
-        <AdminModal
-          isOpen={syncBravoModePickerOpen}
-          onClose={() => setSyncBravoModePickerOpen(false)}
-          closeLabel="Close sync mode picker"
-          ariaLabel="Sync by Bravo mode picker"
-          panelClassName="max-w-md"
-        >
-              <h3 className="text-lg font-bold text-zinc-900">Sync by Bravo</h3>
-              <p className="mt-1 text-sm text-zinc-600">
-                Choose what to sync from Bravo for this run.
-              </p>
-              <div className="mt-4 space-y-3">
-                <button
-                  type="button"
-                  onClick={() => startSyncBravoFlow("full")}
-                  className="w-full rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white hover:bg-zinc-800"
-                >
-                  Sync All Info
-                </button>
-                <button
-                  type="button"
-                  onClick={() => startSyncBravoFlow("cast-only")}
-                  className="w-full rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50"
-                >
-                  Cast Info only
-                </button>
-              </div>
-              <button
-                type="button"
-                onClick={() => setSyncBravoModePickerOpen(false)}
-                className="mt-4 w-full rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50"
-              >
-                Cancel
-              </button>
-        </AdminModal>
-
-        <AdminModal
-          isOpen={syncBravoOpen}
-          onClose={() => {
-            if (syncBravoLoading) return;
-            setSyncBravoOpen(false);
-            setSyncBravoStep("preview");
+            ),
           }}
-          disableClose={syncBravoLoading}
-          closeLabel="Close Bravo sync dialog"
-          ariaLabel="Import by Bravo"
-          panelClassName="max-h-[90vh] max-w-3xl overflow-y-auto"
-        >
-              <div className="mb-4 flex items-start justify-between gap-4">
-                <div>
-                  <h3 className="text-lg font-bold text-zinc-900">
-                    Import by Bravo {syncBravoRunMode === "cast-only" ? "(Cast Info only)" : ""}
-                  </h3>
-                  <p className="text-sm text-zinc-500">Preview and commit persisted Bravo snapshots for this show.</p>
-                  <p className="mt-1 text-xs font-semibold uppercase tracking-[0.18em] text-zinc-400">
-                    Step {syncBravoStep === "preview" ? "1" : "2"} of 2
-                  </p>
-                  <p className="mt-1 text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">
-                    Selected Mode: {syncBravoModeSummaryLabel}
-                  </p>
-                  {syncBravoPreviewSignature && (
-                    <p className="mt-1 text-[11px] text-zinc-500">
-                      Preview Signature: {syncBravoPreviewSignature.slice(0, 12)}...
-                    </p>
-                  )}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSyncBravoOpen(false);
-                    setSyncBravoStep("preview");
-                  }}
-                  disabled={syncBravoLoading}
-                  className="rounded-md border border-zinc-200 px-3 py-1 text-sm font-semibold text-zinc-600 hover:bg-zinc-50"
-                >
-                  Close
-                </button>
-              </div>
+          contentHealthItems={contentHealthItems}
+          pipeline={{
+            steps: pipelineSteps,
+            onRetryStep: retryRefreshTarget,
+          }}
+          operationsInboxItems={operationsInboxItems}
+          refreshLog={{
+            hasEntries: refreshLogEntries.length > 0,
+            topicGroups: refreshLogTopicGroups,
+          }}
+        />
 
-              <div className="mb-4 rounded-lg border border-zinc-200 bg-zinc-50 p-3">
-                <label className="block text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                  Sync Season
-                  <select
-                    value={syncBravoTargetSeasonNumber ?? ""}
-                    onChange={(event) => {
-                      const raw = event.target.value;
-                      const parsed = Number.parseInt(raw, 10);
-                      setSyncBravoTargetSeasonNumber(
-                        Number.isFinite(parsed) ? parsed : defaultSyncBravoSeasonNumber
-                      );
-                    }}
-                    disabled={syncBravoLoading || syncBravoSeasonOptions.length === 0}
-                    className="mt-1 block w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm font-semibold normal-case tracking-normal text-zinc-800 disabled:opacity-50"
-                  >
-                    {syncBravoSeasonOptions.length === 0 ? (
-                      <option value="">No eligible seasons</option>
-                    ) : (
-                      syncBravoSeasonOptions.map((seasonNumber) => (
-                        <option key={seasonNumber} value={seasonNumber}>
-                          Season {seasonNumber}
-                        </option>
-                      ))
-                    )}
-                  </select>
-                </label>
-                <p className="mt-2 text-xs text-zinc-500">
-                  Bravo profile images from this run will be assigned as season promos for the selected season. Eligible seasons require more than 1 episode or a premiere date.
-                </p>
-              </div>
+        <ShowBravoSyncModal
+          modePicker={{
+            open: syncBravoModePickerOpen,
+            onClose: () => setSyncBravoModePickerOpen(false),
+            onStart: startSyncBravoFlow,
+          }}
+          dialog={{
+            open: syncBravoOpen,
+            step: syncBravoStep,
+            modeSummaryLabel: syncBravoModeSummaryLabel,
+            previewSignature: syncBravoPreviewSignature,
+            commitLoading: syncBravoCommitLoading,
+            onClose: () => {
+              if (syncBravoLoading) return;
+              setSyncBravoOpen(false);
+              setSyncBravoStep("preview");
+            },
+            onBack: () => setSyncBravoStep("preview"),
+            onCancel: () => {
+              setSyncBravoOpen(false);
+              setSyncBravoStep("preview");
+            },
+            onNext: openSyncBravoConfirmStep,
+            onCommit: commitSyncByBravo,
+          }}
+          season={{
+            targetSeasonNumber: syncBravoTargetSeasonNumber,
+            defaultSeasonNumber: defaultSyncBravoSeasonNumber,
+            options: syncBravoSeasonOptions,
+            onChange: setSyncBravoTargetSeasonNumber,
+          }}
+          preview={{
+            runMode: syncBravoRunMode,
+            loading: syncBravoLoading,
+            previewLoading: syncBravoPreviewLoading,
+            showName: show.name,
+            bravoUrl: autoGeneratedBravoUrl,
+            error: syncBravoError,
+            notice: syncBravoNotice,
+            description: syncBravoDescription,
+            airs: syncBravoAirs,
+            applyDescriptionToShow: syncBravoApplyDescriptionToShow,
+            images: syncBravoImages,
+            selectedImages: syncBravoSelectedImages,
+            imageKinds: syncBravoImageKinds,
+            personCandidateResults: syncBravoPersonCandidateResults,
+            fandomPersonCandidateResults: syncFandomPersonCandidateResults,
+            probeSummary: syncBravoProbeSummary,
+            fandomProbeSummary: syncFandomProbeSummary,
+            probeStatusMessage: syncBravoProbeStatusMessage,
+            probeActive: syncBravoProbeActive,
+            probeTotal: syncBravoProbeTotal,
+            validProfileCards: syncBravoValidProfileCards,
+            fandomValidProfileCards: syncFandomValidProfileCards,
+            candidateIssues: syncBravoCandidateIssues,
+            fandomCandidateIssues: syncFandomCandidateIssues,
+            fandomDomainsUsed: syncFandomDomainsUsed,
+            castLinks: syncBravoPreviewCastLinks,
+            newsItems: syncBravoPreviewNews,
+            videos: syncBravoFilteredPreviewVideos,
+            videoSeasonFilter: syncBravoPreviewSeasonFilter,
+            videoSeasonOptions: syncBravoPreviewSeasonOptions,
+            onRefreshPreview: previewSyncByBravo,
+            onDescriptionChange: setSyncBravoDescription,
+            onAirsChange: setSyncBravoAirs,
+            onApplyDescriptionChange: setSyncBravoApplyDescriptionToShow,
+            onImageSelectionChange: (url, selected) => {
+              setSyncBravoSelectedImages((prev) => {
+                const next = new Set(prev);
+                if (selected) next.add(url);
+                else next.delete(url);
+                return next;
+              });
+            },
+            onImageKindChange: (url, kind) => {
+              setSyncBravoImageKinds((prev) => ({ ...prev, [url]: kind }));
+            },
+            onVideoSeasonFilterChange: setSyncBravoPreviewSeasonFilter,
+            inferImageKind: inferBravoImportImageKind,
+            formatPublishedDate: formatBravoPublishedDate,
+          }}
+          confirm={{
+            castSyncCount: syncBravoCastSyncCount,
+            selectedImageSummaries: syncBravoSelectedImageSummaries,
+          }}
+        />
 
-              {syncBravoStep === "preview" ? (
-                <>
-              <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-                <div>
-                  <p className="mb-1 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                    Show Name
-                  </p>
-                  <p className="text-sm font-semibold text-zinc-900">{show.name}</p>
-                  <p className="mt-2 mb-1 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                    Bravo Show URL
-                  </p>
-                  {autoGeneratedBravoUrl ? (
-                    <a
-                      href={autoGeneratedBravoUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="block break-all text-xs text-blue-700 hover:underline"
-                    >
-                      {autoGeneratedBravoUrl}
-                    </a>
-                  ) : (
-                    <p className="text-xs text-zinc-500">Could not infer URL yet.</p>
-                  )}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => void previewSyncByBravo()}
-                  disabled={syncBravoLoading}
-                  className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
-                >
-                  {syncBravoPreviewLoading
-                    ? "Refreshing..."
-                    : syncBravoRunMode === "cast-only"
-                      ? "Refresh Cast Preview"
-                      : "Refresh Preview"}
-                </button>
-              </div>
-
-              {(syncBravoError || syncBravoNotice) && (
-                <p className={`mb-4 text-sm ${syncBravoError ? "text-red-600" : "text-zinc-600"}`}>
-                  {syncBravoError || syncBravoNotice}
-                </p>
-              )}
-
-              {syncBravoRunMode === "cast-only" && (
-                <p className="mb-4 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-600">
-                  Cast-only mode probes canonical Bravo (`/people/*`) and Fandom (`/wiki/*`) cast profile URLs and reports
-                  valid, missing, and error candidates for each source.
-                </p>
-              )}
-
-              {syncBravoRunMode !== "cast-only" && (
-                <>
-                  <div className="mb-4 grid gap-4 md:grid-cols-2">
-                    <label className="block">
-                      <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                        Description
-                      </span>
-                      <textarea
-                        value={syncBravoDescription}
-                        onChange={(event) => setSyncBravoDescription(event.target.value)}
-                        rows={4}
-                        className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-900 focus:border-zinc-400 focus:outline-none"
-                      />
-                    </label>
-                    <label className="block">
-                      <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                        Airs / Tune-In
-                      </span>
-                      <textarea
-                        value={syncBravoAirs}
-                        onChange={(event) => setSyncBravoAirs(event.target.value)}
-                        rows={4}
-                        className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-900 focus:border-zinc-400 focus:outline-none"
-                      />
-                    </label>
-                  </div>
-                  <label className="mb-4 flex items-start gap-2 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-700">
-                    <input
-                      type="checkbox"
-                      checked={syncBravoApplyDescriptionToShow}
-                      onChange={(event) => setSyncBravoApplyDescriptionToShow(event.target.checked)}
-                      className="mt-0.5"
-                    />
-                    <span>
-                      Apply Bravo description to show profile.
-                      <span className="ml-1 text-xs text-zinc-500">
-                        Off by default. When off, commit keeps canonical show bio sources (IMDb/TMDb/Knowledge/Fandom).
-                      </span>
-                    </span>
-                  </label>
-
-                  <div className="mb-4">
-                    <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                      Show Images
-                    </p>
-                    {syncBravoImages.length === 0 ? (
-                      <p className="text-sm text-zinc-500">Run preview to load image candidates.</p>
-                    ) : (
-                      <div className="grid gap-3 sm:grid-cols-2">
-                        {syncBravoImages.map((image) => {
-                          const checked = syncBravoSelectedImages.has(image.url);
-                          const selectedKind =
-                            syncBravoImageKinds[image.url] ?? inferBravoImportImageKind(image);
-                          return (
-                            <div key={image.url} className="flex items-start gap-3 rounded-lg border border-zinc-200 p-3">
-                              <input
-                                type="checkbox"
-                                checked={checked}
-                                onChange={(event) =>
-                                  setSyncBravoSelectedImages((prev) => {
-                                    const next = new Set(prev);
-                                    if (event.target.checked) next.add(image.url);
-                                    else next.delete(image.url);
-                                    return next;
-                                  })
-                                }
-                                className="mt-1"
-                              />
-                              <div className="relative h-16 w-28 overflow-hidden rounded bg-zinc-100">
-                                <GalleryImage src={image.url} alt={image.alt || "Bravo image"} sizes="120px" />
-                              </div>
-                              <div className="min-w-0 flex-1">
-                                <span className="line-clamp-2 text-xs text-zinc-600">{image.alt || image.url}</span>
-                                <div className="mt-2 flex items-center gap-2">
-                                  <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">
-                                    Type
-                                  </span>
-                                  <select
-                                    value={selectedKind}
-                                    onChange={(event) =>
-                                      setSyncBravoImageKinds((prev) => ({
-                                        ...prev,
-                                        [image.url]: event.target.value as BravoImportImageKind,
-                                      }))
-                                    }
-                                    className="rounded border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-700"
-                                  >
-                                    {BRAVO_IMPORT_IMAGE_KIND_OPTIONS.map((option) => (
-                                      <option key={option.value} value={option.value}>
-                                        {option.label}
-                                      </option>
-                                    ))}
-                                  </select>
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                </>
-              )}
-
-              <div className="mb-4">
-                <div className="mb-2 flex items-center justify-between gap-2">
-                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                    Cast Member URLs
-                  </p>
-                  {syncBravoRunMode === "cast-only" && (
-                    <div className="text-right text-[11px] font-semibold text-zinc-500">
-                      <p>
-                        Bravo tested {syncBravoProbeSummary.tested} / valid {syncBravoProbeSummary.valid} /
-                        missing {syncBravoProbeSummary.missing} / error {syncBravoProbeSummary.errors}
-                      </p>
-                      <p>
-                        Fandom tested {syncFandomProbeSummary.tested} / valid {syncFandomProbeSummary.valid} /
-                        missing {syncFandomProbeSummary.missing} / error {syncFandomProbeSummary.errors}
-                      </p>
-                    </div>
-                  )}
-                </div>
-                {syncBravoRunMode === "cast-only" && syncBravoProbeStatusMessage && (
-                  <p className="mb-2 text-xs text-zinc-500">
-                    {syncBravoProbeStatusMessage}
-                    {syncBravoProbeActive && syncBravoProbeTotal > 30 ? " This may take several minutes." : ""}
-                  </p>
-                )}
-
-                {syncBravoRunMode === "cast-only" ? (
-                  <div className="space-y-3">
-                    <div className="rounded-lg border border-zinc-200 bg-white p-3">
-                      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                        Probe Queue
-                      </p>
-                      {syncBravoPersonCandidateResults.length === 0 ? (
-                        <p className="mt-2 text-sm text-zinc-500">
-                          Preparing canonical `/people/*` candidate probes...
-                        </p>
-                      ) : (
-                        <div className="mt-2 space-y-2">
-                          {syncBravoPersonCandidateResults.map((result) => {
-                            const status = String(result.status || "pending").trim().toLowerCase();
-                            const badgeClass =
-                              status === "ok"
-                                ? "bg-emerald-100 text-emerald-700"
-                                : status === "missing"
-                                  ? "bg-amber-100 text-amber-700"
-                                  : status === "error"
-                                    ? "bg-red-100 text-red-700"
-                                    : status === "in_progress"
-                                      ? "bg-blue-100 text-blue-700"
-                                      : "bg-zinc-200 text-zinc-700";
-                            return (
-                              <article
-                                key={`candidate-${result.url}`}
-                                className="rounded-md border border-zinc-200 bg-zinc-50 p-2"
-                              >
-                                <div className="flex items-center gap-2">
-                                  <span
-                                    className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] ${badgeClass}`}
-                                  >
-                                    {status}
-                                  </span>
-                                  <div className="min-w-0">
-                                    <p className="truncate text-xs font-semibold text-zinc-800">
-                                      {result.name || "Unresolved cast member"}
-                                    </p>
-                                    <a
-                                      href={result.url}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="min-w-0 break-all text-xs text-blue-700 hover:underline"
-                                    >
-                                      {result.url}
-                                    </a>
-                                  </div>
-                                </div>
-                                {result.error && (
-                                  <p className="mt-1 text-xs text-zinc-600">{result.error}</p>
-                                )}
-                              </article>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-
-                    {syncBravoValidProfileCards.length === 0 ? (
-                      <p className="text-sm text-zinc-500">
-                        No valid Bravo profile pages resolved from canonical `/people/*` probes.
-                      </p>
-                    ) : (
-                      <div className="space-y-2">
-                        {syncBravoValidProfileCards.map((person) => (
-                          <article
-                            key={person.url}
-                            className="rounded-lg border border-zinc-200 bg-zinc-50 p-3"
-                          >
-                            <div className="flex gap-3">
-                              <div className="relative h-20 w-20 shrink-0 overflow-hidden rounded bg-zinc-100">
-                                {person.heroImageUrl ? (
-                                  <GalleryImage
-                                    src={person.heroImageUrl}
-                                    alt={person.name || "Bravo profile"}
-                                    sizes="96px"
-                                  />
-                                ) : (
-                                  <div className="flex h-full items-center justify-center text-[11px] text-zinc-400">
-                                    No image
-                                  </div>
-                                )}
-                              </div>
-                              <div className="min-w-0 flex-1">
-                                <p className="text-sm font-semibold text-zinc-900">
-                                  {person.name || "Unresolved cast member"}
-                                </p>
-                                <a
-                                  href={person.url}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="mt-1 block break-all text-xs text-blue-700 hover:underline"
-                                >
-                                  {person.url}
-                                </a>
-                                {person.bio && (
-                                  <p className="mt-2 line-clamp-3 text-xs text-zinc-600">{person.bio}</p>
-                                )}
-                                {person.socialLinks.length > 0 && (
-                                  <div className="mt-2 flex flex-wrap gap-1.5">
-                                    {person.socialLinks.map((social) => (
-                                      <a
-                                        key={`${person.url}-${social.key}-${social.url}`}
-                                        href={social.url}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="rounded-full border border-zinc-300 bg-white px-2 py-0.5 text-[11px] font-medium text-zinc-700 hover:bg-zinc-100"
-                                      >
-                                        {social.label}
-                                        {social.handle ? ` ${social.handle}` : ""}
-                                      </a>
-                                    ))}
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          </article>
-                        ))}
-                      </div>
-                    )}
-
-                    {syncBravoCandidateIssues.length > 0 && (
-                      <div className="rounded-lg border border-zinc-200 bg-white p-3">
-                        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                          Missing / Error Profiles
-                        </p>
-                        <div className="mt-2 space-y-2">
-                          {syncBravoCandidateIssues.map((result) => (
-                            <article
-                              key={`${result.status}-${result.url}`}
-                              className="rounded-md border border-zinc-200 bg-zinc-50 p-2"
-                            >
-                              <div className="flex items-center gap-2">
-                                <span
-                                  className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] ${
-                                    result.status === "missing"
-                                      ? "bg-amber-100 text-amber-700"
-                                      : "bg-red-100 text-red-700"
-                                  }`}
-                                >
-                                  {result.status}
-                                </span>
-                                <a
-                                  href={result.url}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="min-w-0 break-all text-xs text-blue-700 hover:underline"
-                                >
-                                  {result.url}
-                                </a>
-                              </div>
-                              {result.reason && (
-                                <p className="mt-1 text-xs text-zinc-600">{result.reason}</p>
-                              )}
-                            </article>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    <div className="rounded-lg border border-zinc-200 bg-white p-3">
-                      <div className="flex items-center justify-between gap-2">
-                        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                          Fandom Probe Queue
-                        </p>
-                        <p className="text-[11px] font-semibold text-zinc-500">
-                          tested {syncFandomProbeSummary.tested} / valid {syncFandomProbeSummary.valid} /
-                          missing {syncFandomProbeSummary.missing} / error {syncFandomProbeSummary.errors}
-                        </p>
-                      </div>
-                      {syncFandomDomainsUsed.length > 0 && (
-                        <p className="mt-1 text-[11px] text-zinc-500">
-                          Domains: {syncFandomDomainsUsed.join(", ")}
-                        </p>
-                      )}
-                      {syncFandomPersonCandidateResults.length === 0 ? (
-                        <p className="mt-2 text-sm text-zinc-500">
-                          Preparing canonical `/wiki/*` candidate probes...
-                        </p>
-                      ) : (
-                        <div className="mt-2 space-y-2">
-                          {syncFandomPersonCandidateResults.map((result) => {
-                            const status = String(result.status || "pending").trim().toLowerCase();
-                            const badgeClass =
-                              status === "ok"
-                                ? "bg-emerald-100 text-emerald-700"
-                                : status === "missing"
-                                  ? "bg-amber-100 text-amber-700"
-                                  : status === "error"
-                                    ? "bg-red-100 text-red-700"
-                                    : status === "in_progress"
-                                      ? "bg-blue-100 text-blue-700"
-                                      : "bg-zinc-200 text-zinc-700";
-                            return (
-                              <article
-                                key={`fandom-candidate-${result.url}`}
-                                className="rounded-md border border-zinc-200 bg-zinc-50 p-2"
-                              >
-                                <div className="flex items-center gap-2">
-                                  <span
-                                    className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] ${badgeClass}`}
-                                  >
-                                    {status}
-                                  </span>
-                                  <div className="min-w-0">
-                                    <p className="truncate text-xs font-semibold text-zinc-800">
-                                      {result.name || "Unresolved cast member"}
-                                    </p>
-                                    <a
-                                      href={result.url}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="min-w-0 break-all text-xs text-blue-700 hover:underline"
-                                    >
-                                      {result.url}
-                                    </a>
-                                  </div>
-                                </div>
-                                {result.error && (
-                                  <p className="mt-1 text-xs text-zinc-600">{result.error}</p>
-                                )}
-                              </article>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-
-                    {syncFandomValidProfileCards.length === 0 ? (
-                      <p className="text-sm text-zinc-500">
-                        No valid Fandom profile pages resolved from canonical `/wiki/*` probes.
-                      </p>
-                    ) : (
-                      <div className="space-y-2">
-                        {syncFandomValidProfileCards.map((person) => (
-                          <article
-                            key={`fandom-profile-${person.url}`}
-                            className="rounded-lg border border-zinc-200 bg-zinc-50 p-3"
-                          >
-                            <div className="flex gap-3">
-                              <div className="relative h-20 w-20 shrink-0 overflow-hidden rounded bg-zinc-100">
-                                {person.heroImageUrl ? (
-                                  <GalleryImage
-                                    src={person.heroImageUrl}
-                                    alt={person.name || "Fandom profile"}
-                                    sizes="96px"
-                                  />
-                                ) : (
-                                  <div className="flex h-full items-center justify-center text-[11px] text-zinc-400">
-                                    No image
-                                  </div>
-                                )}
-                              </div>
-                              <div className="min-w-0 flex-1">
-                                <p className="text-sm font-semibold text-zinc-900">
-                                  {person.name || "Unresolved cast member"}
-                                </p>
-                                <a
-                                  href={person.url}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="mt-1 block break-all text-xs text-blue-700 hover:underline"
-                                >
-                                  {person.url}
-                                </a>
-                                {person.bio && (
-                                  <p className="mt-2 line-clamp-3 text-xs text-zinc-600">{person.bio}</p>
-                                )}
-                              </div>
-                            </div>
-                          </article>
-                        ))}
-                      </div>
-                    )}
-
-                    {syncFandomCandidateIssues.length > 0 && (
-                      <div className="rounded-lg border border-zinc-200 bg-white p-3">
-                        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                          Fandom Missing / Error Profiles
-                        </p>
-                        <div className="mt-2 space-y-2">
-                          {syncFandomCandidateIssues.map((result) => (
-                            <article
-                              key={`fandom-${result.status}-${result.url}`}
-                              className="rounded-md border border-zinc-200 bg-zinc-50 p-2"
-                            >
-                              <div className="flex items-center gap-2">
-                                <span
-                                  className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] ${
-                                    result.status === "missing"
-                                      ? "bg-amber-100 text-amber-700"
-                                      : "bg-red-100 text-red-700"
-                                  }`}
-                                >
-                                  {result.status}
-                                </span>
-                                <a
-                                  href={result.url}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="min-w-0 break-all text-xs text-blue-700 hover:underline"
-                                >
-                                  {result.url}
-                                </a>
-                              </div>
-                              {result.reason && (
-                                <p className="mt-1 text-xs text-zinc-600">{result.reason}</p>
-                              )}
-                            </article>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                ) : syncBravoPreviewCastLinks.length === 0 ? (
-                  <p className="text-sm text-zinc-500">No cast member URLs found in this preview.</p>
-                ) : (
-                  <div className="space-y-2">
-                    {syncBravoPreviewCastLinks.map((person) => (
-                      <article
-                        key={person.url}
-                        className="rounded-lg border border-zinc-200 bg-zinc-50 p-3"
-                      >
-                        <p className="text-sm font-semibold text-zinc-900">
-                          {person.name || "Unresolved cast member"}
-                        </p>
-                        <a
-                          href={person.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="mt-1 block break-all text-xs text-blue-700 hover:underline"
-                        >
-                          {person.url}
-                        </a>
-                      </article>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {syncBravoRunMode !== "cast-only" && (
-                <div className="mb-4">
-                  <div className="mb-2 flex items-center justify-between gap-2">
-                    <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                      Fandom Cast Coverage
-                    </p>
-                    <p className="text-[11px] font-semibold text-zinc-500">
-                      tested {syncFandomProbeSummary.tested} / valid {syncFandomProbeSummary.valid} /
-                      missing {syncFandomProbeSummary.missing} / error {syncFandomProbeSummary.errors}
-                    </p>
-                  </div>
-                  {syncFandomDomainsUsed.length > 0 && (
-                    <p className="mb-2 text-xs text-zinc-500">
-                      Domains used: {syncFandomDomainsUsed.join(", ")}
-                    </p>
-                  )}
-                  {syncFandomValidProfileCards.length === 0 ? (
-                    <p className="text-sm text-zinc-500">No valid Fandom cast profiles found in this preview.</p>
-                  ) : (
-                    <div className="space-y-2">
-                      {syncFandomValidProfileCards.map((person) => (
-                        <article
-                          key={`full-fandom-${person.url}`}
-                          className="rounded-lg border border-zinc-200 bg-zinc-50 p-3"
-                        >
-                          <p className="text-sm font-semibold text-zinc-900">
-                            {person.name || "Unresolved cast member"}
-                          </p>
-                          <a
-                            href={person.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="mt-1 block break-all text-xs text-blue-700 hover:underline"
-                          >
-                            {person.url}
-                          </a>
-                          {person.bio && (
-                            <p className="mt-2 line-clamp-2 text-xs text-zinc-600">{person.bio}</p>
-                          )}
-                        </article>
-                      ))}
-                    </div>
-                  )}
-                  {syncFandomCandidateIssues.length > 0 && (
-                    <div className="mt-2 rounded-lg border border-zinc-200 bg-white p-3">
-                      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                        Fandom Missing / Error Profiles
-                      </p>
-                      <div className="mt-2 space-y-1">
-                        {syncFandomCandidateIssues.map((result) => (
-                          <p key={`full-fandom-issue-${result.url}`} className="text-xs text-zinc-600">
-                            {result.status.toUpperCase()}: {result.url}
-                            {result.reason ? ` (${result.reason})` : ""}
-                          </p>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {syncBravoRunMode !== "cast-only" && (
-                <>
-                  <div className="mb-4">
-                    <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                      News
-                    </p>
-                    {syncBravoPreviewNews.length === 0 ? (
-                      <p className="text-sm text-zinc-500">No news items found in this preview.</p>
-                    ) : (
-                      <div className="space-y-2">
-                        {syncBravoPreviewNews.map((item) => (
-                          <article
-                            key={`${item.article_url}-${item.published_at ?? "unknown"}`}
-                            className="rounded-lg border border-zinc-200 bg-zinc-50 p-3"
-                          >
-                            <div className="flex gap-3">
-                              <div className="relative h-16 w-24 shrink-0 overflow-hidden rounded bg-zinc-100">
-                                {item.image_url ? (
-                                  <GalleryImage
-                                    src={item.image_url}
-                                    alt={item.headline || "Bravo news"}
-                                    sizes="120px"
-                                  />
-                                ) : (
-                                  <div className="flex h-full items-center justify-center text-xs text-zinc-400">
-                                    No image
-                                  </div>
-                                )}
-                              </div>
-                              <div className="min-w-0 flex-1">
-                                <a
-                                  href={item.article_url}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="line-clamp-2 text-sm font-semibold text-zinc-900 hover:text-blue-700"
-                                >
-                                  {item.headline || "Untitled story"}
-                                </a>
-                                {formatBravoPublishedDate(item.published_at) && (
-                                  <p className="mt-1 text-xs text-zinc-500">
-                                    Posted {formatBravoPublishedDate(item.published_at)}
-                                  </p>
-                                )}
-                              </div>
-                            </div>
-                          </article>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="mb-4">
-                    <div className="mb-2 flex items-center justify-between gap-3">
-                      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                        Videos
-                      </p>
-                      {syncBravoPreviewSeasonOptions.length > 0 && (
-                        <label className="flex items-center gap-2 text-xs text-zinc-600">
-                          <span>Season</span>
-                          <select
-                            value={syncBravoPreviewSeasonFilter}
-                            onChange={(event) => {
-                              const nextValue = event.target.value;
-                              setSyncBravoPreviewSeasonFilter(
-                                nextValue === "all" ? "all" : Number.parseInt(nextValue, 10)
-                              );
-                            }}
-                            className="rounded border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-700"
-                          >
-                            <option value="all">All</option>
-                            {syncBravoPreviewSeasonOptions.map((season) => (
-                              <option key={season} value={season}>
-                                Season {season}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                      )}
-                    </div>
-                    {syncBravoFilteredPreviewVideos.length === 0 ? (
-                      <p className="text-sm text-zinc-500">No videos found for this preview/season filter.</p>
-                    ) : (
-                      <div className="space-y-2">
-                        {syncBravoFilteredPreviewVideos.map((video) => (
-                          <article
-                            key={`${video.clip_url}-${video.published_at ?? "unknown"}`}
-                            className="rounded-lg border border-zinc-200 bg-zinc-50 p-3"
-                          >
-                            <div className="flex gap-3">
-                              <div className="relative h-16 w-24 shrink-0 overflow-hidden rounded bg-zinc-100">
-                                {video.image_url ? (
-                                  <GalleryImage
-                                    src={video.image_url}
-                                    alt={video.title || "Bravo video"}
-                                    sizes="120px"
-                                  />
-                                ) : (
-                                  <div className="flex h-full items-center justify-center text-xs text-zinc-400">
-                                    No image
-                                  </div>
-                                )}
-                              </div>
-                              <div className="min-w-0 flex-1">
-                                <a
-                                  href={video.clip_url}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="line-clamp-2 text-sm font-semibold text-zinc-900 hover:text-blue-700"
-                                >
-                                  {video.title || "Untitled video"}
-                                </a>
-                                <div className="mt-1 flex flex-wrap gap-2 text-xs text-zinc-500">
-                                  {video.runtime && <span>{video.runtime}</span>}
-                                  {typeof video.season_number === "number" && (
-                                    <span>Season {video.season_number}</span>
-                                  )}
-                                  {formatBravoPublishedDate(video.published_at) && (
-                                    <span>Posted {formatBravoPublishedDate(video.published_at)}</span>
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-                          </article>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </>
-              )}
-                </>
-              ) : (
-                <div className="space-y-4">
-                  <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
-                    <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                      Show Name
-                    </p>
-                    <p className="mt-1 text-sm font-semibold text-zinc-800">{show.name}</p>
-                    <p className="mt-3 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                      Bravo Show URL
-                    </p>
-                    {autoGeneratedBravoUrl ? (
-                      <a
-                        href={autoGeneratedBravoUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="mt-1 block break-all text-xs text-blue-700 hover:underline"
-                      >
-                        {autoGeneratedBravoUrl}
-                      </a>
-                    ) : (
-                      <p className="mt-1 text-xs text-zinc-500">Could not infer URL yet.</p>
-                    )}
-                    {syncBravoRunMode !== "cast-only" && syncBravoDescription.trim() && (
-                      <>
-                        <p className="mt-3 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                          Description
-                        </p>
-                        <p className="mt-1 text-sm text-zinc-700">{syncBravoDescription.trim()}</p>
-                        <p className="mt-1 text-xs text-zinc-500">
-                          {syncBravoApplyDescriptionToShow
-                            ? "Will be applied to show profile."
-                            : "Will not overwrite show profile unless enabled in preview step."}
-                        </p>
-                      </>
-                    )}
-                    {syncBravoRunMode !== "cast-only" && syncBravoAirs.trim() && (
-                      <>
-                        <p className="mt-3 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                          Airs / Tune-In
-                        </p>
-                        <p className="mt-1 text-sm text-zinc-700">{syncBravoAirs.trim()}</p>
-                      </>
-                    )}
-                  </div>
-
-                  <div>
-                    <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                      Cast Members Being Synced ({syncBravoCastSyncCount})
-                    </p>
-                    {syncBravoRunMode === "cast-only" && (
-                      <>
-                        <p className="mb-1 text-xs text-zinc-500">
-                          Bravo summary: tested {syncBravoProbeSummary.tested}, valid{" "}
-                          {syncBravoProbeSummary.valid}, missing {syncBravoProbeSummary.missing},
-                          errors {syncBravoProbeSummary.errors}.
-                        </p>
-                        <p className="mb-2 text-xs text-zinc-500">
-                          Fandom summary: tested {syncFandomProbeSummary.tested}, valid{" "}
-                          {syncFandomProbeSummary.valid}, missing {syncFandomProbeSummary.missing},
-                          errors {syncFandomProbeSummary.errors}.
-                        </p>
-                        {syncFandomDomainsUsed.length > 0 && (
-                          <p className="mb-2 text-xs text-zinc-500">
-                            Fandom domains used: {syncFandomDomainsUsed.join(", ")}
-                          </p>
-                        )}
-                      </>
-                    )}
-                    {syncBravoRunMode === "cast-only" ? (
-                      <div className="space-y-3">
-                        <div>
-                          <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                            Bravo Profiles ({syncBravoValidProfileCards.length})
-                          </p>
-                          {syncBravoValidProfileCards.length === 0 ? (
-                            <p className="text-sm text-zinc-500">
-                              No valid Bravo cast profile URLs were detected in this preview.
-                            </p>
-                          ) : (
-                            <div className="space-y-2">
-                              {syncBravoValidProfileCards.map((person) => (
-                                <article
-                                  key={person.url}
-                                  className="rounded-lg border border-zinc-200 bg-zinc-50 p-3"
-                                >
-                                  <p className="text-sm font-semibold text-zinc-900">
-                                    {person.name || "Unresolved cast member"}
-                                  </p>
-                                  <p className="mt-1 break-all text-xs text-zinc-600">{person.url}</p>
-                                </article>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                        <div>
-                          <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                            Fandom Profiles ({syncFandomValidProfileCards.length})
-                          </p>
-                          {syncFandomValidProfileCards.length === 0 ? (
-                            <p className="text-sm text-zinc-500">
-                              No valid Fandom cast profile URLs were detected in this preview.
-                            </p>
-                          ) : (
-                            <div className="space-y-2">
-                              {syncFandomValidProfileCards.map((person) => (
-                                <article
-                                  key={`confirm-fandom-${person.url}`}
-                                  className="rounded-lg border border-zinc-200 bg-zinc-50 p-3"
-                                >
-                                  <p className="text-sm font-semibold text-zinc-900">
-                                    {person.name || "Unresolved cast member"}
-                                  </p>
-                                  <p className="mt-1 break-all text-xs text-zinc-600">{person.url}</p>
-                                </article>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    ) : syncBravoPreviewCastLinks.length === 0 ? (
-                      <p className="text-sm text-zinc-500">No cast member URLs found in this preview.</p>
-                    ) : (
-                      <div className="space-y-2">
-                        {syncBravoPreviewCastLinks.map((person) => (
-                          <article
-                            key={person.url}
-                            className="rounded-lg border border-zinc-200 bg-zinc-50 p-3"
-                          >
-                            <p className="text-sm font-semibold text-zinc-900">
-                              {person.name || "Unresolved cast member"}
-                            </p>
-                            <p className="mt-1 break-all text-xs text-zinc-600">{person.url}</p>
-                          </article>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                  {syncBravoRunMode !== "cast-only" && (
-                    <div>
-                      <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                        Show Images Being Synced ({syncBravoSelectedImageSummaries.length})
-                      </p>
-                      {syncBravoSelectedImageSummaries.length === 0 ? (
-                        <p className="text-sm text-zinc-500">No show images selected for sync.</p>
-                      ) : (
-                        <div className="space-y-2">
-                          {syncBravoSelectedImageSummaries.map((image) => (
-                            <article
-                              key={image.url}
-                              className="flex items-start gap-3 rounded-lg border border-zinc-200 bg-zinc-50 p-3"
-                            >
-                              <div className="relative h-16 w-24 shrink-0 overflow-hidden rounded bg-zinc-100">
-                                <GalleryImage src={image.url} alt={image.alt || "Selected show image"} sizes="120px" />
-                              </div>
-                              <div className="min-w-0">
-                                <p className="line-clamp-2 text-sm font-semibold text-zinc-900">
-                                  {image.alt || "Show image"}
-                                </p>
-                                <p className="mt-1 text-xs uppercase tracking-[0.16em] text-zinc-500">
-                                  Type: {image.kind}
-                                </p>
-                                <p className="mt-1 break-all text-xs text-zinc-600">{image.url}</p>
-                              </div>
-                            </article>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {syncBravoStep === "confirm" && (syncBravoError || syncBravoNotice) && (
-                <p className={`mb-4 text-sm ${syncBravoError ? "text-red-600" : "text-zinc-600"}`}>
-                  {syncBravoError || syncBravoNotice}
-                </p>
-              )}
-
-              <div className="flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (syncBravoStep === "confirm") {
-                      setSyncBravoStep("preview");
-                      return;
-                    }
-                    setSyncBravoOpen(false);
-                    setSyncBravoStep("preview");
-                  }}
-                  disabled={syncBravoLoading}
-                  className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50"
-                >
-                  {syncBravoStep === "confirm" ? "Back" : "Cancel"}
-                </button>
-                <button
-                  type="button"
-                  onClick={syncBravoStep === "confirm" ? commitSyncByBravo : openSyncBravoConfirmStep}
-                  disabled={syncBravoLoading}
-                  className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white hover:bg-zinc-800 disabled:opacity-50"
-                >
-                  {syncBravoStep === "confirm"
-                    ? syncBravoCommitLoading
-                      ? "Syncing..."
-                      : syncBravoRunMode === "cast-only"
-                        ? "Sync Cast Info only"
-                        : "Sync All Info"
-                    : "Next"}
-                </button>
-              </div>
-        </AdminModal>
-
-        <AdminModal
-          isOpen={batchJobsOpen}
-          onClose={() => setBatchJobsOpen(false)}
-          disableClose={batchJobsRunning}
-          closeLabel="Close batch jobs dialog"
-          ariaLabel="Run image batch jobs"
-          panelClassName="max-w-2xl p-5"
-        >
-          <div className="mb-4 flex items-start justify-between gap-4">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                Batch Jobs
-              </p>
-              <h4 className="text-lg font-semibold text-zinc-900">Run Image Jobs</h4>
-              <p className="mt-1 text-xs text-zinc-500">
-                Select one or more operations and content types. Jobs run on the currently visible gallery assets.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => {
-                if (!batchJobsRunning) setBatchJobsOpen(false);
-              }}
-              className="rounded-lg border border-zinc-200 px-3 py-1 text-xs font-semibold text-zinc-600 hover:bg-zinc-50"
-              disabled={batchJobsRunning}
-            >
-              Close
-            </button>
-          </div>
-
-          <div className="space-y-4">
-            <div>
-              <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                Operations
-              </p>
-              <div className="flex flex-wrap gap-2">
-                {(Object.keys(BATCH_JOB_OPERATION_LABELS) as BatchJobOperation[]).map((operation) => (
-                  <label
-                    key={operation}
-                    className="inline-flex items-center gap-2 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-700"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={batchJobOperations.includes(operation)}
-                      onChange={() => toggleBatchJobOperation(operation)}
-                      disabled={batchJobsRunning}
-                    />
-                    {BATCH_JOB_OPERATION_LABELS[operation]}
-                  </label>
-                ))}
-              </div>
-            </div>
-
-            <div>
-              <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                Content Types
-              </p>
-              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                {SHOW_GALLERY_ALLOWED_SECTIONS.map((section) => (
-                  <label
-                    key={section}
-                    className="inline-flex items-center gap-2 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-700"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={batchJobContentSections.includes(section)}
-                      onChange={() => toggleBatchJobContentSection(section)}
-                      disabled={batchJobsRunning}
-                    />
-                    {ASSET_SECTION_LABELS[section]}
-                  </label>
-                ))}
-              </div>
-            </div>
-            <p className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-600">
-              {showBatchPreflightSummary}
-            </p>
-          </div>
-
-          <div className="mt-5 flex justify-end gap-2">
-            <button
-              type="button"
-              onClick={() => setBatchJobsOpen(false)}
-              className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
-              disabled={batchJobsRunning}
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={runBatchJobs}
-              className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white hover:bg-zinc-800 disabled:opacity-50"
-              disabled={batchJobsRunning}
-            >
-              {batchJobsRunning ? "Running..." : "Run Batch Jobs"}
-            </button>
-          </div>
-        </AdminModal>
-
-        <AdminModal
-          isOpen={Boolean(roleRenameDraft)}
-          onClose={cancelRoleRename}
-          disableClose={roleRenameSaving}
-          closeLabel="Close role rename dialog"
-          ariaLabel="Rename role"
-          panelClassName="max-w-md"
-        >
-          {roleRenameDraft && (
-            <>
-              <h4 className="text-lg font-semibold text-zinc-900">Rename Role</h4>
-              <p className="mt-1 text-sm text-zinc-500">Current: {roleRenameDraft.originalName}</p>
-              <label className="mt-4 block text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">
-                New Name
-                <input
-                  value={roleRenameDraft.nextName}
-                  onChange={(event) =>
-                    setRoleRenameDraft((prev) =>
-                      prev ? { ...prev, nextName: event.target.value } : prev,
-                    )
-                  }
-                  className="mt-1 block w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-700"
-                  placeholder="Housewife"
-                  required
-                />
-              </label>
-              <div className="mt-5 flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={cancelRoleRename}
-                  disabled={roleRenameSaving}
-                  className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void saveRenamedShowRole()}
-                  disabled={roleRenameSaving}
-                  className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white hover:bg-zinc-800 disabled:opacity-50"
-                >
-                  {roleRenameSaving ? "Saving..." : "Save Role"}
-                </button>
-              </div>
-            </>
-          )}
-        </AdminModal>
-
-        <AdminModal
-          isOpen={Boolean(castRoleEditDraft)}
-          onClose={cancelCastRoleEditor}
-          disableClose={castRoleEditSaving}
-          closeLabel="Close cast role editor"
-          ariaLabel="Assign cast roles"
-          panelClassName="max-w-xl"
-        >
-          {castRoleEditDraft && (
-            <>
-              <h4 className="text-lg font-semibold text-zinc-900">
-                Assign Roles for {castRoleEditDraft.personName}
-              </h4>
-              <p className="mt-1 text-sm text-zinc-500">
-                Enter comma-separated role names. Missing roles will be created automatically.
-              </p>
-              <label className="mt-4 block text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">
-                Roles
-                <textarea
-                  value={castRoleEditDraft.roleCsv}
-                  onChange={(event) =>
-                    setCastRoleEditDraft((prev) =>
-                      prev ? { ...prev, roleCsv: event.target.value } : prev,
-                    )
-                  }
-                  className="mt-1 block w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-700"
-                  rows={4}
-                  placeholder="Housewife, Friend Of"
-                />
-              </label>
-              <div className="mt-5 flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={cancelCastRoleEditor}
-                  disabled={castRoleEditSaving}
-                  className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void saveCastRoleAssignments()}
-                  disabled={castRoleEditSaving}
-                  className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white hover:bg-zinc-800 disabled:opacity-50"
-                >
-                  {castRoleEditSaving ? "Saving..." : "Save Roles"}
-                </button>
-              </div>
-            </>
-          )}
-        </AdminModal>
+        <ShowBatchRoleModals
+          batchJobs={{
+            open: batchJobsOpen,
+            running: batchJobsRunning,
+            operationOptions: (Object.keys(BATCH_JOB_OPERATION_LABELS) as BatchJobOperation[]).map(
+              (operation) => ({
+                key: operation,
+                label: BATCH_JOB_OPERATION_LABELS[operation],
+                checked: batchJobOperations.includes(operation),
+                onToggle: () => toggleBatchJobOperation(operation),
+              }),
+            ),
+            contentSectionOptions: SHOW_GALLERY_ALLOWED_SECTIONS.map((section) => ({
+              key: section,
+              label: ASSET_SECTION_LABELS[section],
+              checked: batchJobContentSections.includes(section),
+              onToggle: () => toggleBatchJobContentSection(section),
+            })),
+            preflightSummary: showBatchPreflightSummary,
+            onClose: () => {
+              if (!batchJobsRunning) setBatchJobsOpen(false);
+            },
+            onRun: () => void runBatchJobs(),
+          }}
+          roleRename={{
+            draft: roleRenameDraft,
+            saving: roleRenameSaving,
+            onClose: cancelRoleRename,
+            onNameChange: (nextName) =>
+              setRoleRenameDraft((prev) => (prev ? { ...prev, nextName } : prev)),
+            onSave: () => void saveRenamedShowRole(),
+          }}
+          castRoles={{
+            draft: castRoleEditDraft,
+            saving: castRoleEditSaving,
+            onClose: cancelCastRoleEditor,
+            onRoleCsvChange: (roleCsv) =>
+              setCastRoleEditDraft((prev) => (prev ? { ...prev, roleCsv } : prev)),
+            onSave: () => void saveCastRoleAssignments(),
+          }}
+        />
 
         <AdvancedFilterDrawer
           isOpen={advancedFiltersOpen}

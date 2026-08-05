@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/server/auth";
+import { requireAdmin, toVerifiedAdminContext } from "@/lib/server/auth";
 import {
   deleteImage,
   getImage,
   type ImageType,
 } from "@/lib/server/admin/images-repository";
+import { buildAdminProxyErrorResponse } from "@/lib/server/trr-api/admin-read-proxy";
 
 export const dynamic = "force-dynamic";
 
@@ -21,7 +22,7 @@ const VALID_TYPES = ["cast", "episode", "season"];
  */
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
-    await requireAdmin(request);
+    const user = await requireAdmin(request);
     const { imageType, imageId } = await params;
 
     if (!VALID_TYPES.includes(imageType)) {
@@ -31,7 +32,9 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       );
     }
 
-    const image = await getImage(imageType as ImageType, imageId);
+    const image = await getImage(imageType as ImageType, imageId, {
+      adminContext: toVerifiedAdminContext(user),
+    });
 
     if (!image) {
       return NextResponse.json({ error: "Image not found" }, { status: 404 });
@@ -40,10 +43,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     return NextResponse.json({ image });
   } catch (error) {
     console.error("[api] Failed to get image", error);
-    const message = error instanceof Error ? error.message : "failed";
-    const status =
-      message === "unauthorized" ? 401 : message === "forbidden" ? 403 : 500;
-    return NextResponse.json({ error: message }, { status });
+    return buildAdminProxyErrorResponse(error);
   }
 }
 
@@ -68,15 +68,12 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
     await deleteImage({
       imageType: imageType as ImageType,
       imageId,
-      adminUid: user.uid,
+      adminContext: toVerifiedAdminContext(user),
     });
 
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error("[api] Failed to delete image", error);
-    const message = error instanceof Error ? error.message : "failed";
-    const status =
-      message === "unauthorized" ? 401 : message === "forbidden" ? 403 : 500;
-    return NextResponse.json({ error: message }, { status });
+    return buildAdminProxyErrorResponse(error);
   }
 }

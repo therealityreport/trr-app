@@ -4,25 +4,33 @@ import {
   createFlashbackQuiz,
   listFlashbackQuizzes,
 } from "@/lib/server/admin/flashback-admin-repository";
-import { requireAdmin } from "@/lib/server/auth";
+import { requireAdmin, toVerifiedAdminContext } from "@/lib/server/auth";
+import { AdminReadProxyError } from "@/lib/server/trr-api/admin-read-proxy";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
   try {
-    await requireAdmin(request);
-    return NextResponse.json({ quizzes: await listFlashbackQuizzes() });
+    const adminContext = toVerifiedAdminContext(await requireAdmin(request));
+    return NextResponse.json({ quizzes: await listFlashbackQuizzes(adminContext) });
   } catch (error) {
     console.error("[api/admin/flashback/quizzes] Failed to list quizzes", error);
     const message = error instanceof Error ? error.message : "failed";
-    const status = message === "unauthorized" ? 401 : message === "forbidden" ? 403 : 500;
+    const status =
+      error instanceof AdminReadProxyError
+        ? error.status
+        : message === "unauthorized"
+          ? 401
+          : message === "forbidden"
+            ? 403
+            : 500;
     return NextResponse.json({ error: message }, { status });
   }
 }
 
 export async function POST(request: NextRequest) {
   try {
-    await requireAdmin(request);
+    const adminContext = toVerifiedAdminContext(await requireAdmin(request));
     const body = (await request.json().catch(() => ({}))) as {
       title?: string;
       publish_date?: string;
@@ -37,7 +45,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const quiz = await createFlashbackQuiz({
+    const quiz = await createFlashbackQuiz(adminContext, {
       title,
       publishDate,
       description: body.description ?? null,
@@ -46,7 +54,14 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error("[api/admin/flashback/quizzes] Failed to create quiz", error);
     const message = error instanceof Error ? error.message : "failed";
-    const status = message === "unauthorized" ? 401 : message === "forbidden" ? 403 : 500;
+    const status =
+      error instanceof AdminReadProxyError
+        ? error.status
+        : message === "unauthorized"
+          ? 401
+          : message === "forbidden"
+            ? 403
+            : 500;
     return NextResponse.json({ error: message }, { status });
   }
 }

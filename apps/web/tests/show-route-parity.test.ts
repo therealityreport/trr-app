@@ -3,23 +3,41 @@ import { NextRequest, NextResponse } from "next/server";
 
 process.env.TRR_ADMIN_ROUTE_CACHE_DISABLED = "1";
 
-const { requireAdminMock, fetchAdminBackendJsonMock, getShowByIdMock, resolveShowSlugMock } = vi.hoisted(() => ({
+const {
+  requireAdminMock,
+  fetchAdminBackendJsonMock,
+  getShowByIdMock,
+  updateShowByIdMock,
+  resolveShowSlugMock,
+} = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
   fetchAdminBackendJsonMock: vi.fn(),
   getShowByIdMock: vi.fn(),
+  updateShowByIdMock: vi.fn(),
   resolveShowSlugMock: vi.fn(),
 }));
 
 vi.mock("@/lib/server/auth", () => ({
   requireAdmin: requireAdminMock,
+  toVerifiedAdminContext: (user: { uid: string; email?: string }) => ({
+    uid: user.uid,
+    email: user.email ?? null,
+    verifiedAt: 42,
+  }),
 }));
 
 vi.mock("@/lib/server/trr-api/trr-shows-repository", () => ({
   getShowById: getShowByIdMock,
-  getShowByExactSlug: vi.fn(),
-  resolveShowSlug: resolveShowSlugMock,
-  updateShowById: vi.fn(),
+  updateShowById: updateShowByIdMock,
   validateShowImageForField: vi.fn(),
+}));
+
+vi.mock("@/lib/server/trr-api/admin-show-slug-reads", () => ({
+  getAdminShowByExactSlug: vi.fn(),
+}));
+
+vi.mock("@/lib/server/trr-api/public-identities", () => ({
+  resolveShowSlug: resolveShowSlugMock,
 }));
 
 vi.mock("@/lib/server/trr-api/admin-read-proxy", () => ({
@@ -32,7 +50,10 @@ vi.mock("@/lib/server/trr-api/admin-read-proxy", () => ({
 }));
 
 import { GET as getShowsRoute } from "@/app/api/admin/trr-api/shows/route";
-import { GET as getShowByIdRoute } from "@/app/api/admin/trr-api/shows/[showId]/route";
+import {
+  GET as getShowByIdRoute,
+  PUT as putShowByIdRoute,
+} from "@/app/api/admin/trr-api/shows/[showId]/route";
 import { GET as getShowResolveSlugRoute } from "@/app/api/admin/trr-api/shows/resolve-slug/route";
 
 describe("TRR show route parity", () => {
@@ -40,6 +61,7 @@ describe("TRR show route parity", () => {
     requireAdminMock.mockReset();
     fetchAdminBackendJsonMock.mockReset();
     getShowByIdMock.mockReset();
+    updateShowByIdMock.mockReset();
     resolveShowSlugMock.mockReset();
     requireAdminMock.mockResolvedValue({ uid: "admin-user" });
   });
@@ -107,6 +129,32 @@ describe("TRR show route parity", () => {
       slug: "the-real-housewives-of-salt-lake-city",
       canonical_slug: "the-real-housewives-of-salt-lake-city",
     });
+  });
+
+  it("forwards show writes through the verified-admin repository seam", async () => {
+    const showId = "7782652f-783a-488b-8860-41b97de32e75";
+    updateShowByIdMock.mockResolvedValue({
+      id: showId,
+      name: "Updated Show",
+      slug: "updated-show",
+      canonical_slug: "updated-show",
+    });
+
+    const response = await putShowByIdRoute(
+      new NextRequest(`http://localhost/api/admin/trr-api/shows/${showId}`, {
+        method: "PUT",
+        body: JSON.stringify({ name: "Updated Show" }),
+        headers: { "content-type": "application/json" },
+      }),
+      { params: Promise.resolve({ showId }) },
+    );
+
+    expect(response.status).toBe(200);
+    expect(updateShowByIdMock).toHaveBeenCalledWith(
+      showId,
+      { name: "Updated Show" },
+      { adminContext: { uid: "admin-user", email: null, verifiedAt: 42 } },
+    );
   });
 
   it("does not keep show detail responses in the in-memory route cache when caching is disabled", async () => {

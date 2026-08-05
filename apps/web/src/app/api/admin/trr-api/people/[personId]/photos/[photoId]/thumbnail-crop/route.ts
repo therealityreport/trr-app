@@ -4,14 +4,20 @@ import {
   parseThumbnailCrop,
   type ThumbnailCrop,
 } from "@/lib/thumbnail-crop";
-import { requireAdmin } from "@/lib/server/auth";
+import { requireAdmin, toVerifiedAdminContext } from "@/lib/server/auth";
 import {
   updateCastPhotoThumbnailCrop,
   updateMediaLinkThumbnailCrop,
   type ThumbnailCropOrigin,
 } from "@/lib/server/admin/person-thumbnail-crops-repository";
-import { invalidateRouteResponseCache } from "@/lib/server/admin/route-response-cache";
-import { invalidateAdminBackendCache } from "@/lib/server/trr-api/admin-read-proxy";
+import {
+  buildEntityScopedRouteCacheNamespace,
+  invalidateRouteResponseCache,
+} from "@/lib/server/admin/route-response-cache";
+import {
+  buildAdminProxyErrorResponse,
+  invalidateAdminBackendCache,
+} from "@/lib/server/trr-api/admin-read-proxy";
 
 export const dynamic = "force-dynamic";
 const PERSON_PHOTOS_CACHE_NAMESPACE = "admin-person-photos";
@@ -78,7 +84,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         { status: 400 },
       );
     }
-    const cacheKeyPrefix = `${user?.uid ?? "admin"}:${personId}:photos:`;
+    const adminContext = toVerifiedAdminContext(user);
 
     const body = await request.json().catch(() => ({}));
     const parsed = parseRequestBody(body);
@@ -105,11 +111,14 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         personId,
         linkId,
         crop: parsed.crop,
+        adminContext,
       });
       if (!result) {
         return NextResponse.json({ error: "Photo not found" }, { status: 404 });
       }
-      invalidateRouteResponseCache(PERSON_PHOTOS_CACHE_NAMESPACE, cacheKeyPrefix);
+      invalidateRouteResponseCache(
+        buildEntityScopedRouteCacheNamespace(PERSON_PHOTOS_CACHE_NAMESPACE, personId),
+      );
       await invalidateAdminBackendCache(`/admin/people/${personId}/cache/invalidate`, {
         routeName: "person-gallery",
       });
@@ -120,13 +129,16 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       personId,
       photoId,
       crop: parsed.crop,
+      adminContext,
     });
 
     if (!result) {
       return NextResponse.json({ error: "Photo not found" }, { status: 404 });
     }
 
-    invalidateRouteResponseCache(PERSON_PHOTOS_CACHE_NAMESPACE, cacheKeyPrefix);
+    invalidateRouteResponseCache(
+      buildEntityScopedRouteCacheNamespace(PERSON_PHOTOS_CACHE_NAMESPACE, personId),
+    );
     await invalidateAdminBackendCache(`/admin/people/${personId}/cache/invalidate`, {
       routeName: "person-gallery",
     });
@@ -134,9 +146,6 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     return NextResponse.json(result);
   } catch (error) {
     console.error("[api] Failed to update thumbnail crop", error);
-    const message = error instanceof Error ? error.message : "failed";
-    const status =
-      message === "unauthorized" ? 401 : message === "forbidden" ? 403 : 500;
-    return NextResponse.json({ error: message }, { status });
+    return buildAdminProxyErrorResponse(error);
   }
 }

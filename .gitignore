@@ -41,3 +41,4 @@ apps/vue-wordle/*.tsbuildinfo
 
 TRR App Brain/sessions/
 .loom-backup/
+/graphify-out/

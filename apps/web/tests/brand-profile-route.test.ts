@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { invalidateRouteResponseCache } from "@/lib/server/admin/route-response-cache";
 import { BRANDS_PROFILE_CACHE_NAMESPACE } from "@/lib/server/trr-api/brands-route-cache";
+import { AdminReadProxyError } from "@/lib/server/trr-api/admin-read-proxy";
 
 const {
   requireAdminMock,
@@ -15,6 +16,11 @@ const {
 
 vi.mock("@/lib/server/auth", () => ({
   requireAdmin: requireAdminMock,
+  toVerifiedAdminContext: (user: { uid: string; email?: string }) => ({
+    uid: user.uid,
+    email: user.email ?? null,
+    verifiedAt: 42,
+  }),
 }));
 
 vi.mock("@/lib/server/admin/brand-profile-repository", () => ({
@@ -103,7 +109,7 @@ describe("brand profile route", () => {
     requireAdminMock.mockReset();
     getBrandProfileBySlugMock.mockReset();
     getBrandProfileSuggestionsMock.mockReset();
-    requireAdminMock.mockResolvedValue({ uid: "admin-1" });
+    requireAdminMock.mockResolvedValue({ uid: "admin-1", email: "admin@example.test" });
     invalidateRouteResponseCache(BRANDS_PROFILE_CACHE_NAMESPACE);
   });
 
@@ -146,6 +152,13 @@ describe("brand profile route", () => {
     expect(payload.display_name).toBe("Bravo");
     expect(payload.categories).toEqual(["network"]);
     expect(payload.streaming_services).toEqual([]);
+    expect(getBrandProfileBySlugMock).toHaveBeenCalledWith("bravotv", {
+      adminContext: {
+        uid: "admin-1",
+        email: "admin@example.test",
+        verifiedAt: 42,
+      },
+    });
   });
 
   it("returns an exact publication or social profile payload", async () => {
@@ -242,6 +255,13 @@ describe("brand profile route", () => {
         href: "/brands/fandom",
       },
     ]);
+    expect(getBrandProfileSuggestionsMock).toHaveBeenCalledWith("fan-dom", {
+      adminContext: {
+        uid: "admin-1",
+        email: "admin@example.test",
+        verifiedAt: 42,
+      },
+    });
   });
 
   it("returns a clean other-brand payload when there are no related shows", async () => {
@@ -276,5 +296,26 @@ describe("brand profile route", () => {
     expect(response.status).toBe(200);
     expect(payload.counts.shows).toBe(0);
     expect(payload.shows).toEqual([]);
+  });
+
+  it("preserves typed backend failures from the summary adapter", async () => {
+    getBrandProfileBySlugMock.mockRejectedValue(
+      new AdminReadProxyError("Database temporarily unavailable", 503, {
+        code: "DATABASE_SERVICE_UNAVAILABLE",
+        retryable: true,
+      }),
+    );
+
+    const response = await GET(
+      new NextRequest("http://localhost/api/admin/brands/profile?slug=bravotv"),
+    );
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({
+      error: "Database temporarily unavailable",
+      code: "DATABASE_SERVICE_UNAVAILABLE",
+      retryable: true,
+    });
+    expect(getBrandProfileSuggestionsMock).not.toHaveBeenCalled();
   });
 });

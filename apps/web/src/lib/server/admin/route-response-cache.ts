@@ -9,6 +9,7 @@ type CacheEntry = {
 declare global {
   var __trrAdminRouteCache: Map<string, CacheEntry> | undefined;
   var __trrAdminRouteInFlight: Map<string, Promise<unknown>> | undefined;
+  var __trrAdminRouteCacheGeneration: Map<string, number> | undefined;
 }
 
 const CACHE_MAX_ENTRIES = 1_000;
@@ -19,6 +20,10 @@ if (!globalThis.__trrAdminRouteCache) {
 const IN_FLIGHT = globalThis.__trrAdminRouteInFlight ?? new Map<string, Promise<unknown>>();
 if (!globalThis.__trrAdminRouteInFlight) {
   globalThis.__trrAdminRouteInFlight = IN_FLIGHT;
+}
+const CACHE_GENERATION = globalThis.__trrAdminRouteCacheGeneration ?? new Map<string, number>();
+if (!globalThis.__trrAdminRouteCacheGeneration) {
+  globalThis.__trrAdminRouteCacheGeneration = CACHE_GENERATION;
 }
 
 export const DEFAULT_ADMIN_ROUTE_CACHE_TTL_MS = 10_000;
@@ -77,6 +82,11 @@ export const buildUserScopedRouteCacheKey = (
   return `${userId}:${scope}:${normalizedQuery}`;
 };
 
+export const buildEntityScopedRouteCacheNamespace = (
+  namespace: string,
+  entityId: string,
+): string => `${namespace}:${entityId}`;
+
 export function getRouteResponseCache<T>(namespace: string, key: string): T | null {
   if (CACHE_DISABLED) return null;
   const storeKey = makeStoreKey(namespace, key);
@@ -123,6 +133,23 @@ export function setRouteResponseCache<T>(
   pruneCache();
 }
 
+export const getRouteResponseCacheGeneration = (namespace: string): number => {
+  return CACHE_GENERATION.get(namespace) ?? 0;
+};
+
+export function setRouteResponseCacheIfGeneration<T>(
+  namespace: string,
+  key: string,
+  value: T,
+  generation: number,
+  ttlMs = DEFAULT_ADMIN_ROUTE_CACHE_TTL_MS,
+  staleTtlMs?: number,
+): boolean {
+  if (getRouteResponseCacheGeneration(namespace) !== generation) return false;
+  setRouteResponseCache(namespace, key, value, ttlMs, staleTtlMs);
+  return true;
+}
+
 export async function getOrCreateRouteResponsePromise<T>(
   namespace: string,
   key: string,
@@ -151,6 +178,7 @@ export async function getOrCreateRouteResponsePromise<T>(
 
 export function invalidateRouteResponseCache(namespace: string, keyPrefix?: string): void {
   if (CACHE_DISABLED) return;
+  CACHE_GENERATION.set(namespace, getRouteResponseCacheGeneration(namespace) + 1);
   const namespacePrefix = `${namespace}:`;
   const prefix = keyPrefix ? `${namespacePrefix}${keyPrefix}` : namespacePrefix;
   for (const key of CACHE.keys()) {
