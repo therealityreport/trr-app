@@ -1,8 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
-const { requireAdminMock, getBackendApiUrlMock, updateShowByIdMock, getInternalAdminBearerTokenMock } = vi.hoisted(() => ({
+const {
+  requireAdminMock,
+  toVerifiedAdminContextMock,
+  getBackendApiUrlMock,
+  updateShowByIdMock,
+  getInternalAdminBearerTokenMock,
+} = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
+  toVerifiedAdminContextMock: vi.fn(),
   getBackendApiUrlMock: vi.fn(),
   updateShowByIdMock: vi.fn(),
   getInternalAdminBearerTokenMock: vi.fn(),
@@ -10,6 +17,7 @@ const { requireAdminMock, getBackendApiUrlMock, updateShowByIdMock, getInternalA
 
 vi.mock("@/lib/server/auth", () => ({
   requireAdmin: requireAdminMock,
+  toVerifiedAdminContext: toVerifiedAdminContextMock,
 }));
 
 vi.mock("@/lib/server/trr-api/backend", () => ({
@@ -44,11 +52,13 @@ const buildRequest = (body: Record<string, unknown>) =>
 describe("show featured logo proxy route", () => {
   beforeEach(() => {
     requireAdminMock.mockReset();
+    toVerifiedAdminContextMock.mockReset();
     getBackendApiUrlMock.mockReset();
     updateShowByIdMock.mockReset();
     vi.restoreAllMocks();
 
-    requireAdminMock.mockResolvedValue(undefined);
+    requireAdminMock.mockResolvedValue({ uid: "firebase-admin" });
+    toVerifiedAdminContextMock.mockReturnValue({ uid: "firebase-admin", verifiedAt: 42 });
     getBackendApiUrlMock.mockReturnValue("http://backend.local/api/v1/admin/shows/logos/set-primary");
     updateShowByIdMock.mockResolvedValue(SHOW_RECORD);
     getInternalAdminBearerTokenMock.mockReset();
@@ -81,7 +91,7 @@ describe("show featured logo proxy route", () => {
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     expect(updateShowByIdMock).toHaveBeenCalledWith(SHOW_ID, {
       primaryLogoImageId: null,
-    });
+    }, { adminContext: { uid: "firebase-admin", verifiedAt: 42 } });
 
     const [url, init] = fetchSpy.mock.calls[0] ?? [];
     expect(url).toBe("http://backend.local/api/v1/admin/shows/logos/set-primary");
@@ -116,7 +126,7 @@ describe("show featured logo proxy route", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(updateShowByIdMock).toHaveBeenCalledWith(SHOW_ID, {
       primaryLogoImageId: SHOW_IMAGE_ID,
-    });
+    }, { adminContext: { uid: "firebase-admin", verifiedAt: 42 } });
     expect(payload).toEqual({
       status: "updated",
       show: {

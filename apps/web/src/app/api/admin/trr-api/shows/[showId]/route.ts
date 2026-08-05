@@ -2,11 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin, toVerifiedAdminContext } from "@/lib/server/auth";
 import {
   getShowById,
-  getShowByExactSlug,
-  resolveShowSlug,
   updateShowById,
   validateShowImageForField,
 } from "@/lib/server/trr-api/trr-shows-repository";
+import { getAdminShowByExactSlug } from "@/lib/server/trr-api/admin-show-slug-reads";
+import { resolveShowSlug } from "@/lib/server/trr-api/public-identities";
 import {
   ADMIN_READ_PROXY_PRIMARY_TIMEOUT_MS,
   buildAdminProxyErrorResponse,
@@ -567,7 +567,9 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     }
 
     if (slug !== undefined) {
-      const conflictingShow = await getShowByExactSlug(slug);
+      const conflictingShow = await getAdminShowByExactSlug(slug, {
+        adminContext,
+      });
       if (conflictingShow && conflictingShow.id !== showId) {
         return NextResponse.json(
           {

@@ -1,7 +1,7 @@
 {
   "schemaVersion": "2026-03-23.v2",
-  "inputHash": "1f81dd751bcbc0f0906a6818011421111fde8805a0ec43c7019b63192a0c601d",
-  "generatedAt": "2026-06-11T00:31:53.638Z",
+  "inputHash": "3d616bfb1885c4d009ee594fddb06e138bbf8495bb716b1f116782c7b30e9819",
+  "generatedAt": "2026-08-05T14:11:30.989Z",
   "scoringConfigVersion": "2026-03-23.score.v3",
   "data": [
     {
@@ -68,7 +68,7 @@
       ],
       "displayRisk": "low",
       "bodyRisk": "high",
-      "sourceUrl": "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/trr/Beton/Beton%20T%20Extended%20Bold.ttf"
+      "sourceUrl": "https://media.thereality.report/fonts/trr/Beton/Beton%20T%20Extended%20Bold.ttf"
     },
     {
       "familyName": "Biotif Pro",
@@ -97,7 +97,7 @@
       ],
       "displayRisk": "medium",
       "bodyRisk": "low",
-      "sourceUrl": "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/trr/Biotif%20Pro/BiotifProExtraLight-930829387.otf"
+      "sourceUrl": "https://media.thereality.report/fonts/trr/Biotif%20Pro/BiotifProExtraLight-930829387.otf"
     },
     {
       "familyName": "Cheltenham",
@@ -122,7 +122,7 @@
       ],
       "displayRisk": "low",
       "bodyRisk": "medium",
-      "sourceUrl": "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/trr/Cheltenham/Cheltenham%20Light.ttf"
+      "sourceUrl": "https://media.thereality.report/fonts/trr/Cheltenham/Cheltenham%20Light.ttf"
     },
     {
       "familyName": "Cheltenham Old Style Pro",
@@ -143,7 +143,7 @@
       ],
       "displayRisk": "medium",
       "bodyRisk": "medium",
-      "sourceUrl": "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/trr/Cheltenham%20Old%20Style%20Pro/CheltenhamOldStylePro-930124398.otf"
+      "sourceUrl": "https://media.thereality.report/fonts/trr/Cheltenham%20Old%20Style%20Pro/CheltenhamOldStylePro-930124398.otf"
     },
     {
       "familyName": "Chomsky",
@@ -163,7 +163,7 @@
       ],
       "displayRisk": "low",
       "bodyRisk": "high",
-      "sourceUrl": "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/trr/Chomsky/Chomsky-8MOa2.otf"
+      "sourceUrl": "https://media.thereality.report/fonts/trr/Chomsky/Chomsky-8MOa2.otf"
     },
     {
       "familyName": "Franklin Gothic",
@@ -189,7 +189,7 @@
       ],
       "displayRisk": "medium",
       "bodyRisk": "low",
-      "sourceUrl": "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/trr/Franklin%20Gothic/FranklinGothicBook-5515841.TTF"
+      "sourceUrl": "https://media.thereality.report/fonts/trr/Franklin%20Gothic/FranklinGothicBook-5515841.TTF"
     },
     {
       "familyName": "Franklin Gothic Raw",
@@ -217,7 +217,7 @@
       ],
       "displayRisk": "low",
       "bodyRisk": "medium",
-      "sourceUrl": "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/trr/Franklin%20Gothic%20Raw/FranklinGothicRawLight-1230518.otf"
+      "sourceUrl": "https://media.thereality.report/fonts/trr/Franklin%20Gothic%20Raw/FranklinGothicRawLight-1230518.otf"
     },
     {
       "familyName": "Futura Now",
@@ -243,7 +243,7 @@
       ],
       "displayRisk": "medium",
       "bodyRisk": "medium",
-      "sourceUrl": "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/trr/Futura%20Now/futura-pt-light-589a6e187563a.otf"
+      "sourceUrl": "https://media.thereality.report/fonts/trr/Futura%20Now/futura-pt-light-589a6e187563a.otf"
     },
     {
       "familyName": "Futura Now Display",
@@ -270,7 +270,7 @@
       ],
       "displayRisk": "low",
       "bodyRisk": "medium",
-      "sourceUrl": "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/trr/Futura%20Now/FuturaNowDisplayThin-6060309.ttf"
+      "sourceUrl": "https://media.thereality.report/fonts/trr/Futura%20Now/FuturaNowDisplayThin-6060309.ttf"
     },
     {
       "familyName": "Futura Now Headline",
@@ -300,7 +300,7 @@
       ],
       "displayRisk": "low",
       "bodyRisk": "medium",
-      "sourceUrl": "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/trr/Futura%20Now/FuturaNowHeadlineThin-6078050.ttf"
+      "sourceUrl": "https://media.thereality.report/fonts/trr/Futura%20Now/FuturaNowHeadlineThin-6078050.ttf"
     },
     {
       "familyName": "Futura Now Text",
@@ -329,7 +329,7 @@
       ],
       "displayRisk": "medium",
       "bodyRisk": "low",
-      "sourceUrl": "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/trr/Futura%20Now/FuturaNowTextThin-6078180.ttf"
+      "sourceUrl": "https://media.thereality.report/fonts/trr/Futura%20Now/FuturaNowTextThin-6078180.ttf"
     },
     {
       "familyName": "Geometric Slabserif 703",
@@ -354,7 +354,7 @@
       ],
       "displayRisk": "low",
       "bodyRisk": "medium",
-      "sourceUrl": "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/trr/Geometric%20Slabserif%20703/GeometricSlabserif703Light-1084320.ttf"
+      "sourceUrl": "https://media.thereality.report/fonts/trr/Geometric%20Slabserif%20703/GeometricSlabserif703Light-1084320.ttf"
     },
     {
       "familyName": "Geometric Slabserif 712",
@@ -379,7 +379,7 @@
       ],
       "displayRisk": "low",
       "bodyRisk": "medium",
-      "sourceUrl": "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/trr/Geometric%20Slabserif%20712/geometric-slabserif-712-medium.otf"
+      "sourceUrl": "https://media.thereality.report/fonts/trr/Geometric%20Slabserif%20712/geometric-slabserif-712-medium.otf"
     },
     {
       "familyName": "Gloucester",
@@ -402,7 +402,7 @@
       ],
       "displayRisk": "medium",
       "bodyRisk": "low",
-      "sourceUrl": "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/trr/Gloucester/GloucesterOldStyle-5735713.ttf"
+      "sourceUrl": "https://media.thereality.report/fonts/trr/Gloucester/GloucesterOldStyle-5735713.ttf"
     },
     {
       "familyName": "Goodall",
@@ -427,7 +427,7 @@
       ],
       "displayRisk": "medium",
       "bodyRisk": "low",
-      "sourceUrl": "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/trr/Goodall/GoodallRegular-930826308.otf"
+      "sourceUrl": "https://media.thereality.report/fonts/trr/Goodall/GoodallRegular-930826308.otf"
     },
     {
       "familyName": "Hamburg Serial",
@@ -456,7 +456,7 @@
       ],
       "displayRisk": "medium",
       "bodyRisk": "low",
-      "sourceUrl": "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/trr/Hamburg%20Serial/HamburgSerialExtraLight-930108095.otf"
+      "sourceUrl": "https://media.thereality.report/fonts/trr/Hamburg%20Serial/HamburgSerialExtraLight-930108095.otf"
     },
     {
       "familyName": "Hefring Slab",
@@ -508,7 +508,31 @@
       ],
       "displayRisk": "low",
       "bodyRisk": "medium",
-      "sourceUrl": "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/trr/ITC%20Cheltenham/CheltenhamStdLight.otf"
+      "sourceUrl": "https://media.thereality.report/fonts/trr/ITC%20Cheltenham%20Std/CheltenhamStdLight.otf"
+    },
+    {
+      "familyName": "ITC Cheltenham Pro",
+      "weightsNormalized": [
+        300,
+        400,
+        700,
+        900
+      ],
+      "styles": [
+        "normal",
+        "italic"
+      ],
+      "widthsNormalized": [
+        "normal"
+      ],
+      "classification": "serif",
+      "traitTokens": [
+        "editorial",
+        "traditional"
+      ],
+      "displayRisk": "low",
+      "bodyRisk": "medium",
+      "sourceUrl": "https://media.thereality.report/fonts/trr/ITC%20Cheltenham%20Pro/ITCCheltenhamLight-657071.otf"
     },
     {
       "familyName": "ITC Franklin Gothic LT",
@@ -534,7 +558,7 @@
       ],
       "displayRisk": "medium",
       "bodyRisk": "low",
-      "sourceUrl": "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/trr/ITC%20Franklin%20Gothic%20LT/ITCFranklinGothicLTBook-5739946.ttf"
+      "sourceUrl": "https://media.thereality.report/fonts/trr/ITC%20Franklin%20Gothic%20LT/ITCFranklinGothicLTBook-5739946.ttf"
     },
     {
       "familyName": "Madriz",
@@ -582,7 +606,7 @@
       ],
       "displayRisk": "low",
       "bodyRisk": "high",
-      "sourceUrl": "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/trr/Magnus/MagnusBold-5438313.ttf"
+      "sourceUrl": "https://media.thereality.report/fonts/trr/Magnus/MagnusBold-5438313.ttf"
     },
     {
       "familyName": "Malden Sans",
@@ -610,7 +634,7 @@
       ],
       "displayRisk": "medium",
       "bodyRisk": "low",
-      "sourceUrl": "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/trr/Malden%20Sans/MaldenSansThin-5698440.otf"
+      "sourceUrl": "https://media.thereality.report/fonts/trr/Malden%20Sans/MaldenSansThin-5698440.otf"
     },
     {
       "familyName": "Malden Sans Condensed",
@@ -638,7 +662,7 @@
       ],
       "displayRisk": "low",
       "bodyRisk": "high",
-      "sourceUrl": "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/trr/Malden%20Sans/MaldenSansCondensedThin-5698416.otf"
+      "sourceUrl": "https://media.thereality.report/fonts/trr/Malden%20Sans/MaldenSansCondensedThin-5698416.otf"
     },
     {
       "familyName": "News Gothic",
@@ -665,7 +689,7 @@
       ],
       "displayRisk": "medium",
       "bodyRisk": "low",
-      "sourceUrl": "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/trr/News%20Gothic/NewsGothicStd.otf"
+      "sourceUrl": "https://media.thereality.report/fonts/trr/News%20Gothic/NewsGothicStd.otf"
     },
     {
       "familyName": "News Gothic No. 2",
@@ -693,7 +717,7 @@
       ],
       "displayRisk": "medium",
       "bodyRisk": "low",
-      "sourceUrl": "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/trr/News%20Gothic%20No.%202/News%20Gothic%20No2%20W02%20Light.ttf"
+      "sourceUrl": "https://media.thereality.report/fonts/trr/News%20Gothic%20No.%202/News%20Gothic%20No2%20W02%20Light.ttf"
     },
     {
       "familyName": "Newspaper Publisher JNL",
@@ -715,7 +739,7 @@
       ],
       "displayRisk": "low",
       "bodyRisk": "high",
-      "sourceUrl": "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/trr/Newspaper%20Publisher%20JNL/NewspaperPublisherJNLRegular-7696168.otf"
+      "sourceUrl": "https://media.thereality.report/fonts/trr/Newspaper%20Publisher%20JNL/NewspaperPublisherJNLRegular-7696168.otf"
     },
     {
       "familyName": "Newston",
@@ -736,7 +760,7 @@
       ],
       "displayRisk": "medium",
       "bodyRisk": "medium",
-      "sourceUrl": "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/trr/Newston/NewstonNormal-6509907.otf"
+      "sourceUrl": "https://media.thereality.report/fonts/trr/Newston/NewstonNormal-6509907.otf"
     },
     {
       "familyName": "Novecento Slab",
@@ -818,7 +842,7 @@
       ],
       "displayRisk": "low",
       "bodyRisk": "high",
-      "sourceUrl": "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/trr/Plymouth%20Serial/PlymouthSerialLight-10035287.otf"
+      "sourceUrl": "https://media.thereality.report/fonts/trr/Plymouth%20Serial/PlymouthSerialLight-10035287.otf"
     },
     {
       "familyName": "Publica Slab",
@@ -871,7 +895,7 @@
       ],
       "displayRisk": "medium",
       "bodyRisk": "medium",
-      "sourceUrl": "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/trr/Rockwell/rockwell-extra-bold.otf"
+      "sourceUrl": "https://media.thereality.report/fonts/trr/Rockwell/rockwell-extra-bold.otf"
     },
     {
       "familyName": "Rockwell Nova",
@@ -896,7 +920,7 @@
       ],
       "displayRisk": "medium",
       "bodyRisk": "medium",
-      "sourceUrl": "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/trr/Rockwell%20Nova/RockwellNovaLight-5368892.ttf"
+      "sourceUrl": "https://media.thereality.report/fonts/trr/Rockwell%20Nova/RockwellNovaLight-5368892.ttf"
     },
     {
       "familyName": "Rockwell Nova Condensed",
@@ -920,7 +944,7 @@
       ],
       "displayRisk": "low",
       "bodyRisk": "high",
-      "sourceUrl": "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/trr/Rockwell%20Nova/RockwellNovaCondensedLight-5368880.ttf"
+      "sourceUrl": "https://media.thereality.report/fonts/trr/Rockwell%20Nova/RockwellNovaCondensedLight-5368880.ttf"
     },
     {
       "familyName": "Rude Icons",
@@ -993,7 +1017,7 @@
       ],
       "displayRisk": "low",
       "bodyRisk": "high",
-      "sourceUrl": "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/trr/Rude%20Slab%20Condensed/RudeSlabCondensedCondensedThin-930861873.otf"
+      "sourceUrl": "https://media.thereality.report/fonts/trr/Rude%20Slab%20Condensed/RudeSlabCondensedCondensedThin-930861873.otf"
     },
     {
       "familyName": "Rude Slab ExtraCondensed",
@@ -1106,7 +1130,7 @@
       ],
       "displayRisk": "medium",
       "bodyRisk": "low",
-      "sourceUrl": "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/trr/Sofia%20Pro/SofiaProUltraLight-930940326.otf"
+      "sourceUrl": "https://media.thereality.report/fonts/trr/Sofia%20Pro/SofiaProUltraLight-930940326.otf"
     },
     {
       "familyName": "Stafford Serial",
@@ -1134,7 +1158,7 @@
       ],
       "displayRisk": "medium",
       "bodyRisk": "low",
-      "sourceUrl": "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/trr/Stafford%20Serial/StaffordSerialExtraLight-930109019.otf"
+      "sourceUrl": "https://media.thereality.report/fonts/trr/Stafford%20Serial/StaffordSerialExtraLight-930109019.otf"
     },
     {
       "familyName": "Stint Pro",
@@ -1185,7 +1209,7 @@
       ],
       "displayRisk": "low",
       "bodyRisk": "high",
-      "sourceUrl": "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/trr/Stymie/Stymie%20Medium.otf"
+      "sourceUrl": "https://media.thereality.report/fonts/trr/Stymie/Stymie%20Medium.otf"
     },
     {
       "familyName": "Stymie Extra Bold",
@@ -1205,7 +1229,7 @@
       ],
       "displayRisk": "low",
       "bodyRisk": "high",
-      "sourceUrl": "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/trr/Stymie%20Extra%20Bold/StymieExtraBold-5907011.otf"
+      "sourceUrl": "https://media.thereality.report/fonts/trr/Stymie%20Extra%20Bold/StymieExtraBold-5907011.otf"
     },
     {
       "familyName": "Tabac Big Slab",
@@ -1290,7 +1314,7 @@
       ],
       "displayRisk": "low",
       "bodyRisk": "high",
-      "sourceUrl": "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/trr/Velino%20Compressed%20Text/VelinoCompressedTextCompThin-930862136.otf"
+      "sourceUrl": "https://media.thereality.report/fonts/trr/Velino%20Compressed%20Text/VelinoCompressedTextCompThin-930862136.otf"
     },
     {
       "familyName": "Winner Sans",

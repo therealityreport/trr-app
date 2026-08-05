@@ -112,7 +112,7 @@ describe("survey detail route", () => {
     expect(getSurveyBySlugMock).toHaveBeenCalledTimes(1);
   });
 
-  it("passes the verified admin context to asset reads", async () => {
+  it("passes the verified admin context to season-role and asset reads", async () => {
     getLinkBySurveyIdMock.mockResolvedValue({
       survey_id: "survey-1",
       trr_show_id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
@@ -133,6 +133,13 @@ describe("survey detail route", () => {
     expect(listSeasonCastSurveyRolesMock).toHaveBeenCalledWith(
       "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
       3,
+      {
+        adminContext: {
+          uid: "admin-1",
+          email: null,
+          verifiedAt: 1_721_131_200_000,
+        },
+      },
     );
     expect(getAssetsByShowSeasonMock).toHaveBeenCalledWith(
       "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",

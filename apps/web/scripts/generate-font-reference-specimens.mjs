@@ -24,7 +24,7 @@ const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = resolve(SCRIPT_DIR, "..");
 const OUTPUT_DIR = join(PROJECT_ROOT, "tmp/font-specimens");
 
-const R2_BUCKET = "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev";
+const R2_BUCKET = "https://media.thereality.report";
 const R2_PREFIX = "fonts/references";
 
 const SPECIMEN_WIDTH = 800;

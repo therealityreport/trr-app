@@ -27,11 +27,17 @@ vi.mock("@/lib/server/auth", () => ({
 }));
 
 vi.mock("@/lib/server/trr-api/trr-shows-repository", () => ({
-  getShowByExactSlug: vi.fn(),
   getShowById: getShowByIdMock,
-  resolveShowSlug: resolveShowSlugMock,
   updateShowById: updateShowByIdMock,
   validateShowImageForField: vi.fn(),
+}));
+
+vi.mock("@/lib/server/trr-api/admin-show-slug-reads", () => ({
+  getAdminShowByExactSlug: vi.fn(),
+}));
+
+vi.mock("@/lib/server/trr-api/public-identities", () => ({
+  resolveShowSlug: resolveShowSlugMock,
 }));
 
 vi.mock("@/lib/server/trr-api/admin-read-proxy", () => ({

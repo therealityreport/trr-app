@@ -31,9 +31,12 @@ vi.mock("@/lib/server/auth", () => ({
 
 vi.mock("@/lib/server/trr-api/trr-shows-repository", () => ({
   getShowById: getShowByIdMock,
-  getShowByExactSlug: getShowByExactSlugMock,
   updateShowById: updateShowByIdMock,
   validateShowImageForField: validateShowImageForFieldMock,
+}));
+
+vi.mock("@/lib/server/trr-api/admin-show-slug-reads", () => ({
+  getAdminShowByExactSlug: getShowByExactSlugMock,
 }));
 
 vi.mock("@/lib/server/trr-api/admin-read-proxy", () => ({
@@ -53,6 +56,13 @@ import { PUT } from "@/app/api/admin/trr-api/shows/[showId]/route";
 const SHOW_ID = "11111111-1111-1111-1111-111111111111";
 const POSTER_ID = "22222222-2222-2222-2222-222222222222";
 const BACKDROP_ID = "33333333-3333-3333-3333-333333333333";
+const ADMIN_CONTEXT = {
+  adminContext: {
+    uid: "admin-user",
+    email: "admin@example.test",
+    verifiedAt: 42,
+  },
+};
 
 const buildRequest = (body: Record<string, unknown>) =>
   new NextRequest(`http://localhost/api/admin/trr-api/shows/${SHOW_ID}`, {
@@ -119,13 +129,7 @@ describe("show route featured image validation", () => {
     expect(updateShowByIdMock).toHaveBeenCalledWith(
       SHOW_ID,
       expect.objectContaining({ primaryPosterImageId: POSTER_ID }),
-      {
-        adminContext: {
-          uid: "admin-user",
-          email: "admin@example.test",
-          verifiedAt: 42,
-        },
-      },
+      ADMIN_CONTEXT,
     );
     expect(payload).toHaveProperty("show");
   });
@@ -153,13 +157,7 @@ describe("show route featured image validation", () => {
     expect(updateShowByIdMock).toHaveBeenCalledWith(
       SHOW_ID,
       expect.objectContaining({ primaryBackdropImageId: BACKDROP_ID }),
-      {
-        adminContext: {
-          uid: "admin-user",
-          email: "admin@example.test",
-          verifiedAt: 42,
-        },
-      },
+      ADMIN_CONTEXT,
     );
   });
 
@@ -223,13 +221,7 @@ describe("show route featured image validation", () => {
         primaryPosterImageId: null,
         primaryBackdropImageId: null,
       }),
-      {
-        adminContext: {
-          uid: "admin-user",
-          email: "admin@example.test",
-          verifiedAt: 42,
-        },
-      },
+      ADMIN_CONTEXT,
     );
   });
 
@@ -243,13 +235,7 @@ describe("show route featured image validation", () => {
     expect(updateShowByIdMock).toHaveBeenCalledWith(
       SHOW_ID,
       expect.objectContaining({ name: "Updated Name" }),
-      {
-        adminContext: {
-          uid: "admin-user",
-          email: "admin@example.test",
-          verifiedAt: 42,
-        },
-      },
+      ADMIN_CONTEXT,
     );
   });
 
@@ -302,13 +288,7 @@ describe("show route featured image validation", () => {
           instagram: "thetraitorsus",
         }),
       }),
-      {
-        adminContext: {
-          uid: "admin-user",
-          email: "admin@example.test",
-          verifiedAt: 42,
-        },
-      },
+      ADMIN_CONTEXT,
     );
     expect(fetchSocialBackendJsonMock).toHaveBeenNthCalledWith(
       1,
@@ -362,7 +342,13 @@ describe("show route featured image validation", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(getShowByExactSlugMock).toHaveBeenCalledWith("rhoslc");
+    expect(getShowByExactSlugMock).toHaveBeenCalledWith("rhoslc", {
+      adminContext: {
+        uid: "admin-user",
+        email: "admin@example.test",
+        verifiedAt: 42,
+      },
+    });
     expect(updateShowByIdMock).toHaveBeenCalledWith(
       SHOW_ID,
       expect.objectContaining({
@@ -370,13 +356,7 @@ describe("show route featured image validation", () => {
         slug: "rhoslc",
         alternativeNames: ["rhoslc", "Salt Lake"],
       }),
-      {
-        adminContext: {
-          uid: "admin-user",
-          email: "admin@example.test",
-          verifiedAt: 42,
-        },
-      },
+      ADMIN_CONTEXT,
     );
   });
 
@@ -421,13 +401,7 @@ describe("show route featured image validation", () => {
       expect.objectContaining({
         alternativeNames: ["test-show", "Bravo Alias"],
       }),
-      {
-        adminContext: {
-          uid: "admin-user",
-          email: "admin@example.test",
-          verifiedAt: 42,
-        },
-      },
+      ADMIN_CONTEXT,
     );
   });
 });

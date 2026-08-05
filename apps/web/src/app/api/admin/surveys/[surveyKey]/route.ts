@@ -141,7 +141,9 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
           const castPromise = includeCast
             ? Promise.all([
                 getCastByShowSeason(trrLink.trr_show_id, trrLink.season_number, { limit: 50 }),
-                listSeasonCastSurveyRoles(trrLink.trr_show_id, trrLink.season_number),
+                listSeasonCastSurveyRoles(trrLink.trr_show_id, trrLink.season_number, {
+                  adminContext,
+                }),
               ]).then(([seasonCast, seasonRoles]) => {
                 const roleMap = new Map<string, "main" | "friend_of">(
                   seasonRoles.map((row) => [row.person_id, row.role]),
@@ -266,6 +268,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
   try {
     const user = await requireAdmin(request);
     const authContext: AuthContext = { firebaseUid: user.uid, isAdmin: true };
+    const adminContext = toVerifiedAdminContext(user);
     const { surveyKey } = await params;
 
     // First get the survey to find its ID
@@ -305,7 +308,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         delete metadata.castTitlesByPersonId;
         if (trrLink && trrLink.season_number) {
           await replaceSeasonCastSurveyRoles(
-            authContext,
+            adminContext,
             trrLink.trr_show_id,
             trrLink.season_number,
             [],
@@ -328,7 +331,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         // This is the source of truth for auto-filled "Rank Cast Members" style questions.
         if (trrLink && trrLink.season_number) {
           await replaceSeasonCastSurveyRoles(
-            authContext,
+            adminContext,
             trrLink.trr_show_id,
             trrLink.season_number,
             Object.entries(sanitized)

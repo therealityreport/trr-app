@@ -1,6 +1,6 @@
 import "server-only";
 
-import { resolveShowSlug } from "@/lib/server/trr-api/trr-shows-repository";
+import { resolveShowSlug } from "@/lib/server/trr-api/public-identities";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

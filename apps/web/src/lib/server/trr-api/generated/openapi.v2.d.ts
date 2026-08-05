@@ -523,6 +523,43 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v2/admin/shows/{show_id}/seasons/{season_number}/cast-survey-roles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Roles */
+        get: operations["listAdminSeasonCastSurveyRolesV2"];
+        put?: never;
+        /** Upsert Role */
+        post: operations["upsertAdminSeasonCastSurveyRoleV2"];
+        /** Delete Role */
+        delete: operations["deleteAdminSeasonCastSurveyRoleV2"];
+        options?: never;
+        head?: never;
+        /** Replace Roles */
+        patch: operations["replaceAdminSeasonCastSurveyRolesV2"];
+        trace?: never;
+    };
+    "/api/v2/admin/shows/exact-slug/{slug}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get a show by its exact stored slug */
+        get: operations["getAdminShowByExactSlugV2"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v2/admin/shows/external-ids/batch": {
         parameters: {
             query?: never;
@@ -673,6 +710,66 @@ export interface paths {
         };
         /** Get a public core episode */
         get: operations["getPublicCoreEpisodeV2"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/identities/people/{slug}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Resolve a public person identity
+         * @description Resolves a canonical slug or direct alias. Optional show_id or show_slug context narrows collisions to people linked to that show's cast. The endpoint rejects requests that provide both contexts.
+         */
+        get: operations["resolvePublicPersonIdentityV2"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/identities/shows/{show_slug}/seasons/{season_number}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Resolve a public season identity
+         * @description Resolves the show alias first, then identifies a season by its non-negative season number. The canonical season path is derived from the canonical show alias and season number.
+         */
+        get: operations["resolvePublicSeasonIdentityV2"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/identities/shows/{slug}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Resolve a public show identity
+         * @description Resolves a canonical slug or direct alias. A canonical match wins over a colliding legacy alias; an unresolved alias collision returns HTTP 409. This endpoint is public and read-only.
+         */
+        get: operations["resolvePublicShowIdentityV2"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2122,6 +2219,32 @@ export interface components {
             /** Message */
             message: string;
         };
+        /** DeleteSeasonCastSurveyRoleResponseV2 */
+        DeleteSeasonCastSurveyRoleResponseV2: {
+            /** Removed */
+            removed: boolean;
+            /**
+             * Success
+             * @constant
+             */
+            success: true;
+        };
+        /** ExactShowSlugResponseV2 */
+        ExactShowSlugResponseV2: {
+            show: components["schemas"]["ExactShowSlugV2"];
+        };
+        /** ExactShowSlugV2 */
+        ExactShowSlugV2: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /** Slug */
+            slug: string;
+        };
         /** ExternalIdsProblemDetailV2 */
         ExternalIdsProblemDetailV2: {
             /** Code */
@@ -2250,6 +2373,38 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+        };
+        /**
+         * IdentityMatchKind
+         * @enum {string}
+         */
+        IdentityMatchKind: "canonical" | "alias";
+        /** IdentityProblemDetail */
+        IdentityProblemDetail: {
+            /** Code */
+            code: string;
+            /** Detail */
+            detail?: {
+                [key: string]: unknown;
+            } | null;
+            /** Message */
+            message: string;
+            /** Reason */
+            reason?: string | null;
+            /** Request Id */
+            request_id: string;
+            /** Retry After Ms */
+            retry_after_ms?: number | null;
+            /** Retryable */
+            retryable?: boolean | null;
+            /** Status */
+            status: number;
+            /** Trace Id */
+            trace_id: string;
+        };
+        /** IdentityProblemResponse */
+        IdentityProblemResponse: {
+            detail: components["schemas"]["IdentityProblemDetail"];
         };
         JsonValue: unknown;
         /** NetworkStreamingCompletionDetailV2 */
@@ -2910,6 +3065,29 @@ export interface components {
             /** Valid To */
             valid_to: string | null;
         };
+        /** PersonIdentityResponse */
+        PersonIdentityResponse: {
+            /** Canonical Path */
+            canonical_path: string;
+            /** Canonical Slug */
+            canonical_slug: string;
+            /** Full Name */
+            full_name: string;
+            match_kind: components["schemas"]["IdentityMatchKind"];
+            /**
+             * Person Id
+             * Format: uuid
+             */
+            person_id: string;
+            /** Requested Slug */
+            requested_slug: string;
+            /**
+             * Resource Type
+             * @constant
+             */
+            resource_type: "person";
+            show_context?: components["schemas"]["PersonShowContext"] | null;
+        };
         /** PersonMediaProblemDetailV2 */
         PersonMediaProblemDetailV2: {
             /** Code */
@@ -2936,6 +3114,18 @@ export interface components {
         /** PersonMediaProblemResponseV2 */
         PersonMediaProblemResponseV2: {
             detail: components["schemas"]["PersonMediaProblemDetailV2"];
+        };
+        /** PersonShowContext */
+        PersonShowContext: {
+            /** Canonical Slug */
+            canonical_slug: string;
+            /**
+             * Show Id
+             * Format: uuid
+             */
+            show_id: string;
+            /** Show Name */
+            show_name: string;
         };
         /** PersonThumbnailCropWriteResultV2 */
         PersonThumbnailCropWriteResultV2: {
@@ -3114,6 +3304,104 @@ export interface components {
              */
             view: "membership" | "episode_counts";
         };
+        /** SeasonCastSurveyRoleListResponseV2 */
+        SeasonCastSurveyRoleListResponseV2: {
+            /** Roles */
+            roles: components["schemas"]["SeasonCastSurveyRoleV2"][];
+        };
+        /** SeasonCastSurveyRoleProblemDetailV2 */
+        SeasonCastSurveyRoleProblemDetailV2: {
+            /** Code */
+            code: string;
+            /** Detail */
+            detail?: {
+                [key: string]: unknown;
+            } | null;
+            /** Message */
+            message: string;
+            /** Reason */
+            reason?: string | null;
+            /** Request Id */
+            request_id: string;
+            /** Retry After Ms */
+            retry_after_ms?: number | null;
+            /** Retryable */
+            retryable?: boolean | null;
+            /** Status */
+            status: number;
+            /** Trace Id */
+            trace_id: string;
+        };
+        /** SeasonCastSurveyRoleProblemResponseV2 */
+        SeasonCastSurveyRoleProblemResponseV2: {
+            detail: components["schemas"]["SeasonCastSurveyRoleProblemDetailV2"];
+        };
+        /** SeasonCastSurveyRoleV2 */
+        SeasonCastSurveyRoleV2: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Person Id
+             * Format: uuid
+             */
+            person_id: string;
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "main" | "friend_of";
+            /** Season Number */
+            season_number: number;
+            /**
+             * Trr Show Id
+             * Format: uuid
+             */
+            trr_show_id: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /** SeasonIdentityResponse */
+        SeasonIdentityResponse: {
+            /** Canonical Path */
+            canonical_path: string;
+            /** Canonical Show Slug */
+            canonical_show_slug: string;
+            /** Requested Show Slug */
+            requested_show_slug: string;
+            /**
+             * Resource Type
+             * @constant
+             */
+            resource_type: "season";
+            /**
+             * Season Id
+             * Format: uuid
+             */
+            season_id: string;
+            /** Season Number */
+            season_number: number;
+            /** Season Title */
+            season_title?: string | null;
+            /**
+             * Show Id
+             * Format: uuid
+             */
+            show_id: string;
+            show_match_kind: components["schemas"]["IdentityMatchKind"];
+            /** Show Name */
+            show_name: string;
+        };
         /** SharedAccountSourcesProblemDetailV2 */
         SharedAccountSourcesProblemDetailV2: {
             /** Code */
@@ -3255,6 +3543,55 @@ export interface components {
              */
             show_id: string;
         };
+        /** ShowIdentityResponse */
+        ShowIdentityResponse: {
+            /** Canonical Path */
+            canonical_path: string;
+            /** Canonical Slug */
+            canonical_slug: string;
+            match_kind: components["schemas"]["IdentityMatchKind"];
+            /** Requested Slug */
+            requested_slug: string;
+            /**
+             * Resource Type
+             * @constant
+             */
+            resource_type: "show";
+            /**
+             * Show Id
+             * Format: uuid
+             */
+            show_id: string;
+            /** Show Name */
+            show_name: string;
+        };
+        /** ShowSlugProblemDetailV2 */
+        ShowSlugProblemDetailV2: {
+            /** Code */
+            code: string;
+            /** Detail */
+            detail?: {
+                [key: string]: unknown;
+            } | null;
+            /** Message */
+            message: string;
+            /** Reason */
+            reason?: string | null;
+            /** Request Id */
+            request_id: string;
+            /** Retry After Ms */
+            retry_after_ms?: number | null;
+            /** Retryable */
+            retryable?: boolean | null;
+            /** Status */
+            status: number;
+            /** Trace Id */
+            trace_id: string;
+        };
+        /** ShowSlugProblemResponseV2 */
+        ShowSlugProblemResponseV2: {
+            detail: components["schemas"]["ShowSlugProblemDetailV2"];
+        };
         /** TypographyAssignmentResponseV2 */
         TypographyAssignmentResponseV2: {
             assignment: components["schemas"]["TypographyAssignmentV2"];
@@ -3338,6 +3675,10 @@ export interface components {
             slug: string;
             /** Updated At */
             updated_at: string | "";
+        };
+        /** UpsertSeasonCastSurveyRoleResponseV2 */
+        UpsertSeasonCastSurveyRoleResponseV2: {
+            role: components["schemas"]["SeasonCastSurveyRoleV2"];
         };
     };
     responses: never;
@@ -5548,6 +5889,292 @@ export interface operations {
             };
         };
     };
+    listAdminSeasonCastSurveyRolesV2: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                season_number: number;
+                show_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SeasonCastSurveyRoleListResponseV2"];
+                };
+            };
+            /** @description The role request is invalid. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SeasonCastSurveyRoleProblemResponseV2"];
+                };
+            };
+            /** @description The role request failed. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SeasonCastSurveyRoleProblemResponseV2"];
+                };
+            };
+            /** @description The role store is unavailable. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SeasonCastSurveyRoleProblemResponseV2"];
+                };
+            };
+        };
+    };
+    upsertAdminSeasonCastSurveyRoleV2: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                season_number: number;
+                show_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: uuid */
+                    person_id: string;
+                    /** @enum {string} */
+                    role: "main" | "friend_of";
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpsertSeasonCastSurveyRoleResponseV2"];
+                };
+            };
+            /** @description The role request is invalid. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SeasonCastSurveyRoleProblemResponseV2"];
+                };
+            };
+            /** @description The role request failed. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SeasonCastSurveyRoleProblemResponseV2"];
+                };
+            };
+            /** @description The role store is unavailable. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SeasonCastSurveyRoleProblemResponseV2"];
+                };
+            };
+        };
+    };
+    deleteAdminSeasonCastSurveyRoleV2: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                season_number: number;
+                show_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: uuid */
+                    person_id: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeleteSeasonCastSurveyRoleResponseV2"];
+                };
+            };
+            /** @description The role request is invalid. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SeasonCastSurveyRoleProblemResponseV2"];
+                };
+            };
+            /** @description The role request failed. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SeasonCastSurveyRoleProblemResponseV2"];
+                };
+            };
+            /** @description The role store is unavailable. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SeasonCastSurveyRoleProblemResponseV2"];
+                };
+            };
+        };
+    };
+    replaceAdminSeasonCastSurveyRolesV2: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                season_number: number;
+                show_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    roles: {
+                        /** Format: uuid */
+                        person_id: string;
+                        /** @enum {string} */
+                        role: "main" | "friend_of";
+                    }[];
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SeasonCastSurveyRoleListResponseV2"];
+                };
+            };
+            /** @description The role request is invalid. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SeasonCastSurveyRoleProblemResponseV2"];
+                };
+            };
+            /** @description The role request failed. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SeasonCastSurveyRoleProblemResponseV2"];
+                };
+            };
+            /** @description The role store is unavailable. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SeasonCastSurveyRoleProblemResponseV2"];
+                };
+            };
+        };
+    };
+    getAdminShowByExactSlugV2: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A show slug. Matching is exact after lowercase normalization. */
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExactShowSlugResponseV2"];
+                };
+            };
+            /** @description The show slug is invalid. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShowSlugProblemResponseV2"];
+                };
+            };
+            /** @description The show was not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShowSlugProblemResponseV2"];
+                };
+            };
+            /** @description The exact show-slug read failed. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShowSlugProblemResponseV2"];
+                };
+            };
+            /** @description The show store is unavailable. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShowSlugProblemResponseV2"];
+                };
+            };
+        };
+    };
     listAdminShowExternalIdsBatchV2: {
         parameters: {
             query?: never;
@@ -6155,6 +6782,213 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CoreShowReadProblemResponseV2"];
+                };
+            };
+        };
+    };
+    resolvePublicPersonIdentityV2: {
+        parameters: {
+            query?: {
+                /** @description Optional show UUID used to narrow person collisions. */
+                show_id?: string;
+                /** @description Optional show slug or direct alias used to narrow person collisions. */
+                show_slug?: string;
+            };
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PersonIdentityResponse"];
+                };
+            };
+            /** @description Invalid slug or conflicting show context. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdentityProblemResponse"];
+                };
+            };
+            /** @description No public identity matched the request. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdentityProblemResponse"];
+                };
+            };
+            /** @description A direct alias matched multiple identities. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdentityProblemResponse"];
+                };
+            };
+            /** @description The resolver could not complete the request. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdentityProblemResponse"];
+                };
+            };
+            /** @description The identity store is temporarily unavailable. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdentityProblemResponse"];
+                };
+            };
+        };
+    };
+    resolvePublicSeasonIdentityV2: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                season_number: number;
+                show_slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SeasonIdentityResponse"];
+                };
+            };
+            /** @description Invalid slug or conflicting show context. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdentityProblemResponse"];
+                };
+            };
+            /** @description No public identity matched the request. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdentityProblemResponse"];
+                };
+            };
+            /** @description A direct alias matched multiple identities. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdentityProblemResponse"];
+                };
+            };
+            /** @description The resolver could not complete the request. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdentityProblemResponse"];
+                };
+            };
+            /** @description The identity store is temporarily unavailable. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdentityProblemResponse"];
+                };
+            };
+        };
+    };
+    resolvePublicShowIdentityV2: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShowIdentityResponse"];
+                };
+            };
+            /** @description Invalid slug or conflicting show context. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdentityProblemResponse"];
+                };
+            };
+            /** @description No public identity matched the request. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdentityProblemResponse"];
+                };
+            };
+            /** @description A direct alias matched multiple identities. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdentityProblemResponse"];
+                };
+            };
+            /** @description The resolver could not complete the request. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdentityProblemResponse"];
+                };
+            };
+            /** @description The identity store is temporarily unavailable. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdentityProblemResponse"];
                 };
             };
         };

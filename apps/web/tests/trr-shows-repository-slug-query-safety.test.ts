@@ -159,39 +159,39 @@ describe("trr shows repository public core adapter", () => {
     });
   });
 
-  it("returns the complete updated show from the API v2 write response", async () => {
+  it("returns the complete updated show without a fallible backend reread", async () => {
     const showId = "00000000-0000-0000-0000-000000000001";
     fetchAdminBackendJsonMock.mockResolvedValueOnce({
       status: 200,
       data: {
         show: {
-          id: showId,
-          name: "Updated Show",
-          slug: "updated-show",
-          canonical_slug: "updated-show",
-          alternative_names: [],
-          imdb_id: "tt1234567",
-          tmdb_id: 123,
-          external_ids: {},
-          show_total_seasons: 2,
-          show_total_episodes: 24,
-          description: "Updated description",
-          premiere_date: "2024-01-01",
-          genres: ["Reality"],
-          networks: ["Bravo"],
-          streaming_providers: ["Peacock"],
-          tags: [],
-          primary_poster_image_id: "00000000-0000-0000-0000-000000000010",
-          primary_backdrop_image_id: "00000000-0000-0000-0000-000000000011",
-          primary_logo_image_id: "00000000-0000-0000-0000-000000000012",
-          poster_url: "https://cdn.example/poster.jpg",
-          backdrop_url: "https://cdn.example/backdrop.jpg",
-          logo_url: "https://cdn.example/logo.svg",
-          tmdb_status: "Returning Series",
-          tmdb_vote_average: 7.8,
-          imdb_rating_value: 6.2,
-          created_at: "2024-01-01T00:00:00Z",
-          updated_at: "2026-07-16T00:00:00Z",
+        id: showId,
+        name: "Updated Show",
+        slug: "updated-show",
+        canonical_slug: "updated-show",
+        alternative_names: [],
+        imdb_id: "tt1234567",
+        tmdb_id: 123,
+        external_ids: {},
+        show_total_seasons: 2,
+        show_total_episodes: 24,
+        description: "Updated description",
+        premiere_date: "2024-01-01",
+        genres: ["Reality"],
+        networks: ["Bravo"],
+        streaming_providers: ["Peacock"],
+        tags: [],
+        primary_poster_image_id: "00000000-0000-0000-0000-000000000010",
+        primary_backdrop_image_id: "00000000-0000-0000-0000-000000000011",
+        primary_logo_image_id: "00000000-0000-0000-0000-000000000012",
+        poster_url: "https://cdn.example/poster.jpg",
+        backdrop_url: "https://cdn.example/backdrop.jpg",
+        logo_url: "https://cdn.example/logo.svg",
+        tmdb_status: "Returning Series",
+        tmdb_vote_average: 7.8,
+        imdb_rating_value: 6.2,
+        created_at: "2024-01-01T00:00:00Z",
+        updated_at: "2026-07-16T00:00:00Z",
         },
       },
       durationMs: 1,
@@ -200,15 +200,16 @@ describe("trr shows repository public core adapter", () => {
     const updated = await updateShowById(showId, { name: "Updated Show" });
 
     expect(queryMock).not.toHaveBeenCalled();
-    expect(fetchAdminBackendJsonMock).toHaveBeenCalledWith(
-      `/admin/shows/${showId}`,
-      expect.objectContaining({
-        apiVersion: "v2",
-        method: "PATCH",
-        body: JSON.stringify({ name: "Updated Show" }),
-        routeName: "admin-show:update",
-      }),
-    );
+    expect(fetchAdminBackendJsonMock).toHaveBeenCalledWith(`/admin/shows/${showId}`, {
+      adminContext: undefined,
+      apiVersion: "v2",
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "Updated Show" }),
+      timeoutMs: expect.any(Number),
+      routeName: "admin-show:update",
+      requestRole: "primary",
+    });
     expect(updated).toMatchObject({
       id: showId,
       name: "Updated Show",

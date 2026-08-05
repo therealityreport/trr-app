@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { requireAdmin } from "@/lib/server/auth";
+import { requireAdmin, toVerifiedAdminContext } from "@/lib/server/auth";
 import {
   buildUserScopedRouteCacheKey,
   getOrCreateRouteResponsePromise,
@@ -13,6 +13,7 @@ import {
   SURVEY_SEASON_CAST_CACHE_TTL_MS,
 } from "@/lib/server/admin/survey-route-cache";
 import { getSeasonCastWithEpisodeCounts } from "@/lib/server/trr-api/trr-shows-repository";
+import { buildAdminProxyErrorResponse } from "@/lib/server/trr-api/admin-read-proxy";
 import {
   listSeasonCastSurveyRoles,
   replaceSeasonCastSurveyRoles,
@@ -20,7 +21,6 @@ import {
   deleteSeasonCastSurveyRole,
   type SeasonSurveyCastRole,
 } from "@/lib/server/admin/season-cast-survey-roles-repository";
-import type { AuthContext } from "@/lib/server/postgres";
 
 export const dynamic = "force-dynamic";
 
@@ -49,6 +49,7 @@ function isSeasonSurveyRole(value: unknown): value is SeasonSurveyCastRole {
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
     const user = await requireAdmin(request);
+    const adminContext = toVerifiedAdminContext(user);
 
     const { showId, seasonNumber } = await params;
     if (!showId) {
@@ -83,7 +84,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       async () => {
         const [cast, roles] = await Promise.all([
           getSeasonCastWithEpisodeCounts(showId, seasonNum, { limit: 500, offset: 0 }),
-          listSeasonCastSurveyRoles(showId, seasonNum),
+          listSeasonCastSurveyRoles(showId, seasonNum, { adminContext }),
         ]);
 
         const roleMap = new Map<string, SeasonSurveyCastRole>();
@@ -125,9 +126,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     return NextResponse.json(payload);
   } catch (error) {
     console.error("[api] Failed to get season survey cast", error);
-    const message = error instanceof Error ? error.message : "failed";
-    const status = message === "unauthorized" ? 401 : message === "forbidden" ? 403 : 500;
-    return NextResponse.json({ error: message }, { status });
+    return buildAdminProxyErrorResponse(error);
   }
 }
 
@@ -139,7 +138,7 @@ type PutBody = {
 export async function PUT(request: NextRequest, { params }: RouteParams) {
   try {
     const user = await requireAdmin(request);
-    const authContext: AuthContext = { firebaseUid: user.uid, isAdmin: true };
+    const adminContext = toVerifiedAdminContext(user);
 
     const { showId, seasonNumber } = await params;
     if (!showId) {
@@ -169,7 +168,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
 
     if (body.mode === "replace") {
       await replaceSeasonCastSurveyRoles(
-        authContext,
+        adminContext,
         showId,
         seasonNum,
         normalized
@@ -179,13 +178,13 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     } else {
       for (const entry of normalized) {
         if (entry.role === null) {
-          await deleteSeasonCastSurveyRole(authContext, {
+          await deleteSeasonCastSurveyRole(adminContext, {
             trrShowId: showId,
             seasonNumber: seasonNum,
             personId: entry.person_id,
           });
         } else {
-          await upsertSeasonCastSurveyRole(authContext, {
+          await upsertSeasonCastSurveyRole(adminContext, {
             trrShowId: showId,
             seasonNumber: seasonNum,
             personId: entry.person_id,
@@ -195,7 +194,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       }
     }
 
-    const roles = await listSeasonCastSurveyRoles(showId, seasonNum);
+    const roles = await listSeasonCastSurveyRoles(showId, seasonNum, { adminContext });
     invalidateRouteResponseCache(
       SURVEY_SEASON_CAST_CACHE_NAMESPACE,
       `${user.uid}:${showId}:${seasonNum}:`,
@@ -203,8 +202,6 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     return NextResponse.json({ roles });
   } catch (error) {
     console.error("[api] Failed to update season survey cast roles", error);
-    const message = error instanceof Error ? error.message : "failed";
-    const status = message === "unauthorized" ? 401 : message === "forbidden" ? 403 : 500;
-    return NextResponse.json({ error: message }, { status });
+    return buildAdminProxyErrorResponse(error);
   }
 }
