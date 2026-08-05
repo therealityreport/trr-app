@@ -22,7 +22,7 @@ describe("brand font ranking snapshots", () => {
         "canonicalCheltenham": [
           "ITC Cheltenham",
           "Cheltenham",
-          "Bernhard Modern",
+          "ITC Cheltenham Pro",
         ],
         "canonicalFranklin": [
           "Franklin Gothic",
