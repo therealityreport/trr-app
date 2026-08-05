@@ -44,11 +44,15 @@ import {
   getCoveredShows,
   type CoveredShow,
 } from "@/lib/server/admin/covered-shows-repository";
-import { loadSharedAccountSourcesFromLocalDb } from "@/lib/server/admin/shared-account-sources";
+import { loadSharedAccountSourcesFromBackend } from "@/lib/server/admin/shared-account-sources";
 import {
   ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
   fetchAdminBackendJson,
 } from "@/lib/server/trr-api/admin-read-proxy";
+import {
+  listPrimaryPersonExternalIdsByPersonIds,
+  listShowExternalIdsByIds,
+} from "@/lib/server/trr-api/admin-external-id-reads";
 import {
   fetchSocialBackendJson,
   SOCIAL_PROXY_DEFAULT_TIMEOUT_MS,
@@ -56,15 +60,9 @@ import {
 } from "@/lib/server/trr-api/social-admin-proxy";
 import type { VerifiedAdminContext } from "@/lib/server/trr-api/internal-admin-auth";
 import {
-  listPrimaryPersonExternalIdsByPersonIds,
   listEffectivePersonSocialHandlesByPersonIds,
-  listShowExternalIdsByIds,
   type PersonEffectiveSocialHandles,
 } from "@/lib/server/trr-api/trr-shows-repository";
-
-type SharedSourcesPayload = {
-  sources?: SharedAccountSourceSummary[];
-};
 
 type SharedReviewPayload = {
   items?: SharedReviewItemSummary[];
@@ -900,7 +898,7 @@ const readSharedSourceErrorMessage = (error: unknown): string | null =>
 
 const buildSharedSourcesBackendEndpoint = (
   sourceScope: SharedAccountSourceSetScope,
-): string => `/shared/sources?source_scope=${sourceScope}&include_inactive=true`;
+): string => `/admin/socials/shared-account-sources?source_scope=${sourceScope}&include_inactive=true`;
 
 const safeLoadSharedSources = async (
   adminContext?: VerifiedAdminContext,
@@ -908,32 +906,12 @@ const safeLoadSharedSources = async (
 ): Promise<SharedSourcesResult> => {
   const backendEndpoint = buildSharedSourcesBackendEndpoint(sourceScope);
   try {
-    const payload = await fetchSocialBackendJson("/shared/sources", {
-      adminContext,
-      queryString: `source_scope=${sourceScope}&include_inactive=true`,
-      fallbackError: "Failed to fetch shared social account sources",
-      retries: 0,
-      timeoutMs: SOCIAL_PROXY_DEFAULT_TIMEOUT_MS,
+    const payload = await loadSharedAccountSourcesFromBackend(adminContext as VerifiedAdminContext, {
+      sourceScope,
+      includeInactive: true,
     });
-    const sources = Array.isArray((payload as SharedSourcesPayload).sources)
-      ? ((payload as SharedSourcesPayload).sources ?? [])
-          .map((source) => {
-            const platform = normalizePlatform(source.platform);
-            if (!platform || typeof source.account_handle !== "string") return null;
-            return {
-              ...source,
-              platform,
-              account_handle:
-                toCanonicalInternalHandle(platform, source.account_handle) ??
-                source.account_handle.trim().replace(/^@+/, ""),
-            } satisfies SharedAccountSourceSummary;
-          })
-          .filter(
-            (source): source is SharedAccountSourceSummary => source !== null,
-          )
-      : [];
     return {
-      value: sources,
+      value: payload.sources,
       cacheable: true,
       status: {
         source_scope: sourceScope,
@@ -943,22 +921,15 @@ const safeLoadSharedSources = async (
       },
     };
   } catch (error) {
-    console.warn("[social-landing] Failed to load shared sources; using local fallback", error);
-    const sources = await loadSharedAccountSourcesFromLocalDb({
-      sourceScope,
-      includeInactive: true,
-    }).catch((fallbackError) => {
-      console.warn("[social-landing] Failed to load local shared sources fallback", fallbackError);
-      return [];
-    });
+    console.warn("[social-landing] Failed to load shared sources", error);
     return {
-      value: sources,
+      value: [],
       cacheable: false,
       status: {
         source_scope: sourceScope,
-        load_source: "local_db_fallback",
+        load_source: "backend",
         backend_endpoint: backendEndpoint,
-        warning: "TRR-Backend shared-source API is unavailable; showing saved Supabase rows.",
+        warning: "TRR-Backend shared-source API is unavailable; shared sources are temporarily unavailable.",
         error_code: readSharedSourceErrorCode(error),
         error_message: readSharedSourceErrorMessage(error),
       },
@@ -1082,7 +1053,7 @@ const safeLoadBackendLandingSummary = async (
   const loadLocalFallback = async (): Promise<LandingSummaryResult> => {
     try {
       const [coveredShows, redditDashboard] = await Promise.all([
-        getCoveredShows(),
+        getCoveredShows({ adminContext }),
         safeLoadRedditDashboardSummary(),
       ]);
       return { coveredShows, redditDashboard, cacheable: !adminContext };
@@ -1128,9 +1099,10 @@ const safeLoadBackendLandingSummary = async (
 
 const safeLoadShowExternalIdsMap = async (
   showIds: readonly string[],
+  adminContext?: VerifiedAdminContext,
 ): Promise<CacheableValue<ReadonlyMap<string, Record<string, unknown> | null>>> => {
   try {
-    return cacheableValue(await listShowExternalIdsByIds(showIds));
+    return cacheableValue(await listShowExternalIdsByIds(showIds, { adminContext }));
   } catch (error) {
     console.warn("[social-landing] Failed to load show external ids", { showIds, error });
     return uncacheableValue(new Map());
@@ -1186,9 +1158,10 @@ const safeLoadShowCastSummaryMap = async (
 
 const safeLoadPrimaryPersonExternalIdsMap = async (
   personIds: readonly string[],
+  adminContext?: VerifiedAdminContext,
 ): Promise<ReadonlyMap<string, PersonExternalIdRecord[]>> => {
   try {
-    return await listPrimaryPersonExternalIdsByPersonIds(personIds);
+    return await listPrimaryPersonExternalIdsByPersonIds(personIds, { adminContext });
   } catch (error) {
     console.warn("[social-landing] Failed to load person external ids", { personIds, error });
     return new Map();
@@ -1197,9 +1170,10 @@ const safeLoadPrimaryPersonExternalIdsMap = async (
 
 const safeLoadEffectivePersonSocialHandlesMap = async (
   personIds: readonly string[],
+  adminContext?: VerifiedAdminContext,
 ): Promise<ReadonlyMap<string, PersonEffectiveSocialHandles>> => {
   try {
-    return await listEffectivePersonSocialHandlesByPersonIds(personIds);
+    return await listEffectivePersonSocialHandlesByPersonIds(personIds, { adminContext });
   } catch (error) {
     console.warn("[social-landing] Failed to load fallback person social handles", {
       personIds,
@@ -1882,6 +1856,7 @@ const buildShowSets = (
 const buildPeopleProfiles = async (
   coveredShows: readonly CoveredShow[],
   castByShowId: ReadonlyMap<string, CastSummaryMember[]>,
+  adminContext?: VerifiedAdminContext,
 ): Promise<{
   peopleProfiles: PersonProfileSummary[];
   personTargets: PersonTargetSummary[];
@@ -1928,8 +1903,8 @@ const buildPeopleProfiles = async (
   const peopleList = [...people.values()];
   const personIds = peopleList.map((person) => person.person_id);
   const [externalIdsByPersonId, fallbackHandlesByPersonId] = await Promise.all([
-    safeLoadPrimaryPersonExternalIdsMap(personIds),
-    safeLoadEffectivePersonSocialHandlesMap(personIds),
+    safeLoadPrimaryPersonExternalIdsMap(personIds, adminContext),
+    safeLoadEffectivePersonSocialHandlesMap(personIds, adminContext),
   ]);
 
   const personTargets = peopleList
@@ -2308,7 +2283,7 @@ export async function getSocialLandingPayloadResult(
     ),
     withOptionalLandingTimeout(
       "show external IDs",
-      safeLoadShowExternalIdsMap(coveredShowIds),
+      safeLoadShowExternalIdsMap(coveredShowIds, adminContext),
       new Map(),
     ),
     withOptionalLandingTimeout(
@@ -2341,7 +2316,7 @@ export async function getSocialLandingPayloadResult(
     socialBladeRawHandleCandidatesByPersonId,
   } = await withSocialLandingTiming(
     "people profiles",
-    buildPeopleProfiles(coveredShows, castByShowId),
+    buildPeopleProfiles(coveredShows, castByShowId, adminContext),
   );
   const castSocialBladeShowsPromise = withOptionalLandingTimeout(
     "cast SocialBlade",

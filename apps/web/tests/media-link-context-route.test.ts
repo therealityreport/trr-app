@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
+import { AdminReadProxyError } from "@/lib/server/trr-api/admin-read-proxy";
 
 const { requireAdminMock, updateMediaLinkContextByIdMock } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
@@ -8,6 +9,11 @@ const { requireAdminMock, updateMediaLinkContextByIdMock } = vi.hoisted(() => ({
 
 vi.mock("@/lib/server/auth", () => ({
   requireAdmin: requireAdminMock,
+  toVerifiedAdminContext: (user: { uid: string; email?: string }) => ({
+    uid: user.uid,
+    email: user.email ?? null,
+    verifiedAt: 42,
+  }),
 }));
 
 vi.mock("@/lib/server/trr-api/media-links-repository", () => ({
@@ -27,17 +33,15 @@ describe("media-link context route", () => {
   beforeEach(() => {
     requireAdminMock.mockReset();
     updateMediaLinkContextByIdMock.mockReset();
-    requireAdminMock.mockResolvedValue(undefined);
+    requireAdminMock.mockResolvedValue({ uid: "admin-user", email: "admin@example.test" });
   });
 
   it("patches safe context fields and returns normalized payload", async () => {
     updateMediaLinkContextByIdMock.mockResolvedValue({
-      id: "link-1",
-      context: {
-        people_count: 3,
-        people_count_source: "manual",
-        thumbnail_crop: { x: 44, y: 31, zoom: 1.2, mode: "manual" },
-      },
+      link_id: "link-1",
+      people_count: 3,
+      people_count_source: "manual",
+      thumbnail_crop: { x: 44, y: 31, zoom: 1.2, mode: "manual" },
     });
 
     const response = await PATCH(
@@ -51,11 +55,21 @@ describe("media-link context route", () => {
     const payload = await response.json();
 
     expect(response.status).toBe(200);
-    expect(updateMediaLinkContextByIdMock).toHaveBeenCalledWith("link-1", {
-      people_count: 3,
-      people_count_source: "manual",
-      thumbnail_crop: { x: 44, y: 31, zoom: 1.2, mode: "manual" },
-    });
+    expect(updateMediaLinkContextByIdMock).toHaveBeenCalledWith(
+      "link-1",
+      {
+        people_count: 3,
+        people_count_source: "manual",
+        thumbnail_crop: { x: 44, y: 31, zoom: 1.2, mode: "manual" },
+      },
+      {
+        adminContext: {
+          uid: "admin-user",
+          email: "admin@example.test",
+          verifiedAt: 42,
+        },
+      },
+    );
     expect(payload.people_count).toBe(3);
     expect(payload.people_count_source).toBe("manual");
     expect(payload.thumbnail_crop).toEqual({ x: 44, y: 31, zoom: 1.2, mode: "manual" });
@@ -83,5 +97,24 @@ describe("media-link context route", () => {
 
     expect(response.status).toBe(404);
   });
-});
 
+  it("maps typed retryable proxy errors", async () => {
+    updateMediaLinkContextByIdMock.mockRejectedValue(
+      new AdminReadProxyError("Backend unavailable", 503, {
+        code: "BACKEND_UNAVAILABLE",
+        retryable: true,
+      }),
+    );
+
+    const response = await PATCH(makeRequest({ people_count: 2 }), {
+      params: Promise.resolve({ linkId: "link-1" }),
+    });
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({
+      error: "Backend unavailable",
+      code: "BACKEND_UNAVAILABLE",
+      retryable: true,
+    });
+  });
+});

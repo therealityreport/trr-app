@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { parseEntityType } from "@/lib/admin/networks-streaming-entity";
-import { requireAdmin } from "@/lib/server/auth";
+import { requireAdmin, toVerifiedAdminContext } from "@/lib/server/auth";
 import {
   buildUserScopedRouteCacheKey,
   getOrCreateRouteResponsePromise,
@@ -8,11 +8,14 @@ import {
   setRouteResponseCache,
 } from "@/lib/server/admin/route-response-cache";
 import {
-  ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
+  AdminReadProxyError,
   buildAdminProxyErrorResponse,
   buildAdminReadResponseHeaders,
-  fetchAdminBackendJson,
 } from "@/lib/server/trr-api/admin-read-proxy";
+import {
+  getNetworkStreamingDetail,
+  type NetworkStreamingDetail,
+} from "@/lib/server/trr-api/admin-networks-streaming-reads";
 import {
   NETWORKS_STREAMING_DETAIL_CACHE_NAMESPACE,
   NETWORKS_STREAMING_DETAIL_CACHE_TTL_MS,
@@ -20,12 +23,10 @@ import {
 
 export const dynamic = "force-dynamic";
 
-type CachedDetailPayload = Record<string, unknown> & { __trr_status?: number };
-
 export async function GET(request: NextRequest) {
   try {
-    const startedAt = performance.now();
     const user = await requireAdmin(request);
+    const adminContext = toVerifiedAdminContext(user);
 
     const searchParams = new URLSearchParams(request.nextUrl.searchParams);
     const forceRefresh = (searchParams.get("refresh") ?? "").trim().length > 0;
@@ -50,73 +51,56 @@ export async function GET(request: NextRequest) {
     const promiseKey = forceRefresh ? `${cacheKey}:refresh` : cacheKey;
 
     if (!forceRefresh) {
-      const cached = getRouteResponseCache<CachedDetailPayload>(
+      const cached = getRouteResponseCache<NetworkStreamingDetail>(
         NETWORKS_STREAMING_DETAIL_CACHE_NAMESPACE,
         cacheKey,
       );
       if (cached) {
-        const { __trr_status: cachedStatus, ...cachedBody } = cached;
-        return NextResponse.json(cachedBody, {
-          status: cachedStatus === 404 ? 404 : 200,
+        return NextResponse.json(cached, {
           headers: buildAdminReadResponseHeaders({ cacheStatus: "hit" }),
         });
       }
     }
 
-    let responseHeaders: Record<string, string> | undefined;
-    const payload = await getOrCreateRouteResponsePromise<CachedDetailPayload>(
+    const payload = await getOrCreateRouteResponsePromise<NetworkStreamingDetail>(
       NETWORKS_STREAMING_DETAIL_CACHE_NAMESPACE,
       promiseKey,
       async () => {
-        const upstream = await fetchAdminBackendJson(
-          `/admin/shows/networks-streaming/detail?${query.toString()}`,
+        const detail = await getNetworkStreamingDetail(
           {
-            timeoutMs: ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
-            routeName: "networks-streaming-detail",
+            entity_type: entityType,
+            entity_key: entityKey || undefined,
+            entity_slug: entitySlug || undefined,
+            show_scope: "added",
           },
+          { adminContext },
         );
-
-        if (upstream.status === 404) {
-          responseHeaders = buildAdminReadResponseHeaders({
-            cacheStatus: forceRefresh ? "refresh" : "miss",
-            upstreamMs: upstream.durationMs,
-            totalMs: performance.now() - startedAt,
-          });
-          return { ...upstream.data, __trr_status: 404 };
-        }
-        if (upstream.status !== 200) {
-          throw new Error(
-            typeof upstream.data.error === "string"
-              ? upstream.data.error
-              : typeof upstream.data.detail === "string"
-                ? upstream.data.detail
-                : "Failed to load networks/streaming detail",
-          );
-        }
-        responseHeaders = buildAdminReadResponseHeaders({
-          cacheStatus: forceRefresh ? "refresh" : "miss",
-          upstreamMs: upstream.durationMs,
-          totalMs: performance.now() - startedAt,
-        });
         setRouteResponseCache(
           NETWORKS_STREAMING_DETAIL_CACHE_NAMESPACE,
           cacheKey,
-          upstream.data,
+          detail,
           NETWORKS_STREAMING_DETAIL_CACHE_TTL_MS,
         );
-        return upstream.data;
+        return detail;
       },
     );
 
-    const { __trr_status: responseStatus, ...responseBody } = payload;
-    return NextResponse.json(responseBody, {
-      status: responseStatus === 404 ? 404 : 200,
-      headers:
-        responseHeaders ??
-        buildAdminReadResponseHeaders({ cacheStatus: forceRefresh ? "refresh" : "miss" }),
+    return NextResponse.json(payload, {
+      headers: buildAdminReadResponseHeaders({ cacheStatus: forceRefresh ? "refresh" : "miss" }),
     });
   } catch (error) {
     console.error("[api] Failed to load networks/streaming detail", error);
+    if (
+      error instanceof AdminReadProxyError &&
+      error.status === 404 &&
+      error.code === "NETWORKS_STREAMING_ENTITY_NOT_FOUND" &&
+      Array.isArray(error.detail?.suggestions)
+    ) {
+      return NextResponse.json(
+        { error: "not_found", suggestions: error.detail.suggestions },
+        { status: 404 },
+      );
+    }
     return buildAdminProxyErrorResponse(error);
   }
 }

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/server/auth";
+import { requireAdmin, toVerifiedAdminContext } from "@/lib/server/auth";
 import {
   updatePersonCanonicalProfileSourceOrder,
 } from "@/lib/server/trr-api/trr-shows-repository";
@@ -130,6 +130,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 export async function PATCH(request: NextRequest, { params }: RouteParams) {
   try {
     const user = await requireAdmin(request);
+    const adminContext = toVerifiedAdminContext(user);
 
     const { personId } = await params;
     if (!personId) {
@@ -154,7 +155,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       .map((value) => (typeof value === "string" ? value.trim().toLowerCase() : ""))
       .filter((value) => value.length > 0);
 
-    const person = await updatePersonCanonicalProfileSourceOrder(personId, sourceOrder);
+    const person = await updatePersonCanonicalProfileSourceOrder(personId, sourceOrder, { adminContext });
     if (!person) {
       return NextResponse.json(
         { error: "Person not found" },

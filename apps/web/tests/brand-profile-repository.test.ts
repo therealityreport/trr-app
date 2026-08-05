@@ -14,7 +14,7 @@ const {
   peekInternalAdminBearerTokenMock: vi.fn(),
 }));
 
-vi.mock("@/lib/server/admin/networks-streaming-repository", () => ({
+vi.mock("@/lib/server/trr-api/admin-networks-streaming-reads", () => ({
   getNetworksStreamingSummary: getNetworksStreamingSummaryMock,
   getNetworkStreamingDetail: getNetworkStreamingDetailMock,
 }));
@@ -32,6 +32,12 @@ vi.mock("@/lib/server/trr-api/internal-admin-auth", () => ({
 }));
 
 import { getBrandProfileBySlug } from "@/lib/server/admin/brand-profile-repository";
+
+const ADMIN_CONTEXT = {
+  uid: "signed-admin",
+  email: "admin@example.com",
+  verifiedAt: 1_721_100_000_000,
+};
 
 describe("brand profile repository", () => {
   beforeEach(() => {
@@ -258,7 +264,7 @@ describe("brand profile repository", () => {
       return null;
     });
 
-    const result = await getBrandProfileBySlug("bravo");
+    const result = await getBrandProfileBySlug("bravo", { adminContext: ADMIN_CONTEXT });
 
     expect(result).not.toBeNull();
     expect(result?.streaming_services).toEqual([
@@ -268,6 +274,17 @@ describe("brand profile repository", () => {
       "Peacock",
       "Prime Video",
     ]);
+    expect(getNetworksStreamingSummaryMock).toHaveBeenCalledWith({
+      adminContext: ADMIN_CONTEXT,
+    });
+    expect(getNetworkStreamingDetailMock).toHaveBeenCalledWith(
+      {
+        entity_type: "network",
+        entity_key: "bravo",
+        show_scope: "added",
+      },
+      { adminContext: ADMIN_CONTEXT },
+    );
     expect(result?.shows).toHaveLength(3);
     expect(getShowByIdMock).toHaveBeenCalledTimes(3);
   });

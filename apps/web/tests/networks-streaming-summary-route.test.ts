@@ -4,19 +4,21 @@ import { captureExpectedConsoleError } from "./helpers/expected-console";
 
 process.env.TRR_ADMIN_ROUTE_CACHE_DISABLED = "1";
 
-const { requireAdminMock, fetchAdminBackendJsonMock } = vi.hoisted(() => ({
+const { requireAdminMock, getNetworksStreamingSummaryMock } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
-  fetchAdminBackendJsonMock: vi.fn(),
+  getNetworksStreamingSummaryMock: vi.fn(),
 }));
 
 vi.mock("@/lib/server/auth", () => ({
   requireAdmin: requireAdminMock,
+  toVerifiedAdminContext: (user: { uid: string; email?: string }) => ({
+    uid: user.uid,
+    email: user.email ?? null,
+    verifiedAt: 42,
+  }),
 }));
 
 vi.mock("@/lib/server/trr-api/admin-read-proxy", () => ({
-  fetchAdminBackendJson: fetchAdminBackendJsonMock,
-  invalidateAdminBackendCache: vi.fn(),
-  ADMIN_READ_PROXY_SHORT_TIMEOUT_MS: 5_000,
   buildAdminProxyErrorResponse: (error: unknown) =>
     NextResponse.json(
       { error: error instanceof Error ? error.message : "failed" },
@@ -31,6 +33,10 @@ vi.mock("@/lib/server/trr-api/admin-read-proxy", () => ({
     ),
 }));
 
+vi.mock("@/lib/server/trr-api/admin-networks-streaming-reads", () => ({
+  getNetworksStreamingSummary: getNetworksStreamingSummaryMock,
+}));
+
 import { GET } from "@/app/api/admin/networks-streaming/summary/route";
 import { invalidateRouteResponseCache } from "@/lib/server/admin/route-response-cache";
 import { NETWORKS_STREAMING_SUMMARY_CACHE_NAMESPACE } from "@/lib/server/trr-api/networks-streaming-route-cache";
@@ -38,15 +44,13 @@ import { NETWORKS_STREAMING_SUMMARY_CACHE_NAMESPACE } from "@/lib/server/trr-api
 describe("networks-streaming summary route", () => {
   beforeEach(() => {
     requireAdminMock.mockReset();
-    fetchAdminBackendJsonMock.mockReset();
+    getNetworksStreamingSummaryMock.mockReset();
     invalidateRouteResponseCache(NETWORKS_STREAMING_SUMMARY_CACHE_NAMESPACE);
-    requireAdminMock.mockResolvedValue({ uid: "admin-user" });
+    requireAdminMock.mockResolvedValue({ uid: "admin-user", email: "admin@example.test" });
   });
 
   it("returns aggregated summary payload for admin", async () => {
-    fetchAdminBackendJsonMock.mockResolvedValue({
-      status: 200,
-      data: {
+    getNetworksStreamingSummaryMock.mockResolvedValue({
         totals: { total_available_shows: 10, total_added_shows: 4 },
         rows: [
           {
@@ -70,8 +74,6 @@ describe("networks-streaming summary route", () => {
           },
         ],
         generated_at: "2026-02-19T00:00:00.000Z",
-      },
-      durationMs: 6,
     });
 
     const response = await GET(new NextRequest("http://localhost/api/admin/networks-streaming/summary"));
@@ -83,16 +85,17 @@ describe("networks-streaming summary route", () => {
     expect(payload.rows[0].hosted_logo_black_url).toBe("https://cdn.example.com/bravo-black.png");
     expect(payload.rows[0].hosted_logo_white_url).toBe("https://cdn.example.com/bravo-white.png");
     expect(payload.rows[0].has_bw_variants).toBe(true);
-    expect(fetchAdminBackendJsonMock).toHaveBeenCalledWith(
-      "/admin/shows/networks-streaming/summary",
-      expect.objectContaining({ routeName: "networks-streaming-summary" }),
-    );
+    expect(getNetworksStreamingSummaryMock).toHaveBeenCalledWith({
+      adminContext: {
+        uid: "admin-user",
+        email: "admin@example.test",
+        verifiedAt: 42,
+      },
+    });
   });
 
   it("includes production company rows in summary", async () => {
-    fetchAdminBackendJsonMock.mockResolvedValue({
-      status: 200,
-      data: {
+    getNetworksStreamingSummaryMock.mockResolvedValue({
         totals: { total_available_shows: 20, total_added_shows: 8 },
         rows: [
           {
@@ -116,8 +119,6 @@ describe("networks-streaming summary route", () => {
           },
         ],
         generated_at: "2026-02-26T00:00:00.000Z",
-      },
-      durationMs: 4,
     });
 
     const response = await GET(new NextRequest("http://localhost/api/admin/networks-streaming/summary"));

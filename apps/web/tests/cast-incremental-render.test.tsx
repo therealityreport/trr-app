@@ -8,7 +8,11 @@ describe("cast incremental render wiring", () => {
     __dirname,
     "../src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx"
   );
-  const showContents = fs.readFileSync(showPath, "utf8");
+  const showCastPath = path.resolve(
+    __dirname,
+    "../src/components/admin/show-tabs/ShowCastTab.tsx"
+  );
+  const showContents = `${fs.readFileSync(showPath, "utf8")}\n${fs.readFileSync(showCastPath, "utf8")}`;
   const seasonContents = fs.readFileSync(seasonPath, "utf8");
 
   it("limits show cast render and appends in batches", () => {

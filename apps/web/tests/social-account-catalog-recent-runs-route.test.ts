@@ -1,22 +1,28 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
-const { requireAdminMock, queryMock, socialProxyErrorResponseMock } = vi.hoisted(() => ({
+const {
+  requireAdminMock,
+  toVerifiedAdminContextMock,
+  fetchAdminBackendJsonMock,
+  buildAdminBackendStatusErrorMock,
+} = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
-  queryMock: vi.fn(),
-  socialProxyErrorResponseMock: vi.fn(),
+  toVerifiedAdminContextMock: vi.fn(),
+  fetchAdminBackendJsonMock: vi.fn(),
+  buildAdminBackendStatusErrorMock: vi.fn(),
 }));
 
 vi.mock("@/lib/server/auth", () => ({
   requireAdmin: requireAdminMock,
+  toVerifiedAdminContext: toVerifiedAdminContextMock,
 }));
 
-vi.mock("@/lib/server/postgres", () => ({
-  query: queryMock,
-}));
-
-vi.mock("@/lib/server/trr-api/social-admin-proxy", () => ({
-  socialProxyErrorResponse: socialProxyErrorResponseMock,
+vi.mock("@/lib/server/trr-api/admin-read-proxy", () => ({
+  fetchAdminBackendJson: fetchAdminBackendJsonMock,
+  buildAdminBackendStatusError: buildAdminBackendStatusErrorMock,
+  buildAdminProxyErrorResponse: (error: Error) =>
+    Response.json({ error: error.message, code: "BACKEND_UNREACHABLE" }, { status: (error as Error & { status?: number }).status ?? 502 }),
 }));
 
 import { GET } from "@/app/api/admin/trr-api/social/profiles/[platform]/[handle]/catalog/runs/recent/route";
@@ -24,30 +30,34 @@ import { GET } from "@/app/api/admin/trr-api/social/profiles/[platform]/[handle]
 describe("social account catalog recent runs route", () => {
   beforeEach(() => {
     requireAdminMock.mockReset();
-    queryMock.mockReset();
-    socialProxyErrorResponseMock.mockReset();
+    toVerifiedAdminContextMock.mockReset();
+    fetchAdminBackendJsonMock.mockReset();
+    buildAdminBackendStatusErrorMock.mockReset();
 
     requireAdminMock.mockResolvedValue({ uid: "admin-1", provider: "firebase" });
-    socialProxyErrorResponseMock.mockImplementation((error: unknown) =>
-      Response.json({ error: String(error), code: "BACKEND_UNREACHABLE" }, { status: 502 }),
-    );
+    toVerifiedAdminContextMock.mockReturnValue({ authorization: "verified-admin" });
   });
 
-  it("returns recent catalog runs without loading the profile summary", async () => {
-    queryMock.mockResolvedValue({
-      rows: [
-        {
-          job_id: "job-running",
-          run_id: "run-running",
-          status: "running",
-          created_at: new Date("2026-07-01T14:00:00Z"),
-          started_at: new Date("2026-07-01T14:01:00Z"),
-          completed_at: null,
-          error_message: null,
-          run_config: {
+  it("forwards verified admin context to v2 and preserves the recent-runs envelope", async () => {
+    fetchAdminBackendJsonMock.mockResolvedValue({
+      status: 200,
+      durationMs: 12,
+      data: {
+        platform: "instagram",
+        handle: "bravotv",
+        catalog_recent_runs: [
+          {
+            job_id: "job-running",
+            run_id: "run-running",
+            status: "running",
+            created_at: "2026-07-01T14:00:00.000Z",
+            started_at: "2026-07-01T14:01:00.000Z",
+            completed_at: null,
+            error_message: null,
             catalog_action: "backfill",
             catalog_action_scope: "full_history",
             selected_tasks: ["post_details", "comments", "media"],
+            effective_selected_tasks: ["post_details", "comments", "media"],
             attached_followups: {
               comments: {
                 run_id: "comments-run-1",
@@ -57,8 +67,8 @@ describe("social account catalog recent runs route", () => {
               },
             },
           },
-        },
-      ],
+        ],
+      },
     });
 
     const response = await GET(
@@ -78,13 +88,16 @@ describe("social account catalog recent runs route", () => {
         selected_tasks: ["post_details", "comments", "media"],
       }),
     ]);
-    expect(queryMock).toHaveBeenCalledWith(expect.not.stringContaining("/summary"), [
-      "shared_account_catalog_backfill",
-      "instagram",
-      "bravotv",
-      expect.arrayContaining(["shared_account_posts", "analytics_refresh"]),
-      25,
-    ]);
+    expect(toVerifiedAdminContextMock).toHaveBeenCalledWith({ uid: "admin-1", provider: "firebase" });
+    expect(fetchAdminBackendJsonMock).toHaveBeenCalledWith(
+      "/admin/social/profiles/instagram/bravotv/catalog/runs/recent",
+      expect.objectContaining({
+        apiVersion: "v2",
+        adminContext: { authorization: "verified-admin" },
+        queryString: "limit=25",
+        routeName: "social-account-catalog-runs-recent",
+      }),
+    );
   });
 
   it("rejects malformed explicit limits before querying recent runs", async () => {
@@ -96,37 +109,41 @@ describe("social account catalog recent runs route", () => {
 
     expect(response.status).toBe(400);
     expect(body.error).toBe("limit must be an integer");
-    expect(queryMock).not.toHaveBeenCalled();
+    expect(fetchAdminBackendJsonMock).not.toHaveBeenCalled();
   });
 
-  it("mutes pending attached lanes when the parent run is cancelled", async () => {
-    queryMock.mockResolvedValue({
-      rows: [
-        {
-          job_id: null,
-          run_id: "run-cancelled",
-          status: "cancelled",
-          created_at: "2026-06-30T14:00:00.000Z",
-          started_at: null,
-          completed_at: "2026-06-30T14:30:00.000Z",
-          error_message: null,
-          run_config: {
+  it("preserves backend-normalized terminal attached followups", async () => {
+    fetchAdminBackendJsonMock.mockResolvedValue({
+      status: 200,
+      durationMs: 5,
+      data: {
+        platform: "instagram",
+        handle: "bravotv",
+        catalog_recent_runs: [
+          {
+            job_id: "",
+            run_id: "run-cancelled",
+            status: "cancelled",
+            created_at: "2026-06-30T14:00:00.000Z",
+            started_at: null,
+            completed_at: "2026-06-30T14:30:00.000Z",
+            error_message: null,
             attached_followups: {
               comments: {
-                status: "pending",
-                state: "pending",
+                status: "cancelled",
+                state: "cancelled",
                 source: "deferred_after_catalog",
               },
               media: {
-                status: "queued",
-                state: "pending",
+                status: "cancelled",
+                state: "cancelled",
                 source: "catalog_media_mirror",
                 enqueued_job_count: 0,
               },
             },
           },
-        },
-      ],
+        ],
+      },
     });
 
     const response = await GET(
@@ -161,12 +178,13 @@ describe("social account catalog recent runs route", () => {
 
     expect(response.status).toBe(400);
     expect(body.error).toBe("unsupported_profile");
-    expect(queryMock).not.toHaveBeenCalled();
+    expect(fetchAdminBackendJsonMock).not.toHaveBeenCalled();
   });
 
-  it("returns the shared proxy error response when recent runs cannot load", async () => {
-    const error = new Error("database timed out");
-    queryMock.mockRejectedValue(error);
+  it("returns the v2 proxy error envelope when recent runs cannot load", async () => {
+    const error = Object.assign(new Error("database timed out"), { status: 503 });
+    fetchAdminBackendJsonMock.mockResolvedValue({ status: 503, durationMs: 2, data: { detail: { code: "DATABASE_SERVICE_UNAVAILABLE" } } });
+    buildAdminBackendStatusErrorMock.mockReturnValue(error);
 
     const response = await GET(
       new NextRequest("http://localhost/api/admin/trr-api/social/profiles/instagram/bravotv/catalog/runs/recent"),
@@ -174,12 +192,14 @@ describe("social account catalog recent runs route", () => {
     );
     const body = (await response.json()) as { code?: string; error?: string };
 
-    expect(response.status).toBe(502);
+    expect(response.status).toBe(503);
     expect(body.code).toBe("BACKEND_UNREACHABLE");
     expect(body.error).toContain("database timed out");
-    expect(socialProxyErrorResponseMock).toHaveBeenCalledWith(
-      error,
-      "[api] Failed to load social account catalog recent runs",
+    expect(buildAdminBackendStatusErrorMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 503,
+        routeName: "social-account-catalog-runs-recent",
+      }),
     );
   });
 });

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/server/auth";
+import { requireAdmin, toVerifiedAdminContext } from "@/lib/server/auth";
 import { resolveRedditPostDetailBySlug } from "@/lib/server/admin/reddit-sources-repository";
 import {
   buildUserScopedRouteCacheKey,
@@ -7,7 +7,6 @@ import {
   REDDIT_STABLE_DETAIL_CACHE_NAMESPACE,
   REDDIT_STABLE_DETAIL_CACHE_TTL_MS,
 } from "@/lib/server/trr-api/reddit-stable-route-cache";
-import { loadStableRedditRead } from "@/lib/server/trr-api/reddit-stable-read";
 import { isValidUuid } from "@/lib/server/validation/identifiers";
 
 export const dynamic = "force-dynamic";
@@ -40,6 +39,7 @@ const normalizeDetailPart = (value: string | null): string | null => {
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
     const user = await requireAdmin(request);
+    const adminContext = toVerifiedAdminContext(user);
     const { communityId } = await params;
     if (!communityId || !isValidUuid(communityId)) {
       return NextResponse.json({ error: "communityId must be a valid UUID" }, { status: 400 });
@@ -75,44 +75,29 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       ttlMs: REDDIT_STABLE_DETAIL_CACHE_TTL_MS,
       forceRefresh,
       loader: async () => {
-        const query = new URLSearchParams();
-        query.set("season_id", seasonId);
-        query.set("window_key", searchParams.get("window_key") ?? "");
-        if (titleSlug) query.set("slug", titleSlug);
-        if (authorSlug) query.set("author", authorSlug);
-        if (redditPostId) query.set("post_id", redditPostId);
-
-        const resolved = await loadStableRedditRead<Record<string, unknown>>({
-          backendPath: `/admin/reddit/communities/${communityId}/posts/resolve`,
-          routeName: "reddit-post-resolve",
-          queryString: query.toString(),
-          allowFallbackStatusCodes: [501],
-          fallback: async () => {
-            const fallback = await resolveRedditPostDetailBySlug({
-              communityId,
-              seasonId,
-              containerKey,
-              titleSlug,
-              authorSlug,
-              redditPostId,
-            });
-            return fallback
-              ? {
-                  reddit_post_id: fallback.reddit_post_id,
-                  detail_slug: fallback.detail_slug,
-                  collision: fallback.collision,
-                  post: {
-                    title: fallback.title,
-                    author: fallback.author,
-                    posted_at: fallback.posted_at,
-                    url: fallback.url,
-                    permalink: fallback.permalink,
-                  },
-                }
-              : {};
-          },
+        const resolved = await resolveRedditPostDetailBySlug({
+          communityId,
+          seasonId,
+          windowKey: containerKey,
+          titleSlug,
+          authorSlug,
+          redditPostId,
+          adminContext,
         });
-        return resolved.payload;
+        return resolved
+          ? {
+              reddit_post_id: resolved.reddit_post_id,
+              detail_slug: resolved.detail_slug,
+              collision: resolved.collision,
+              post: {
+                title: resolved.title,
+                author: resolved.author,
+                posted_at: resolved.posted_at,
+                url: resolved.url,
+                permalink: resolved.permalink,
+              },
+            }
+          : {};
       },
     });
 

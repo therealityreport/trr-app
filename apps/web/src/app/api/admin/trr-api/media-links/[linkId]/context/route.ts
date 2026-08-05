@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { parseThumbnailCrop } from "@/lib/thumbnail-crop";
-import { requireAdmin } from "@/lib/server/auth";
+import { requireAdmin, toVerifiedAdminContext } from "@/lib/server/auth";
 import {
   updateMediaLinkContextById,
   type MediaLinkContextPatch,
 } from "@/lib/server/trr-api/media-links-repository";
+import { buildAdminProxyErrorResponse } from "@/lib/server/trr-api/admin-read-proxy";
 
 export const dynamic = "force-dynamic";
 
@@ -75,7 +76,7 @@ const parsePatchBody = (value: unknown): MediaLinkContextPatch | null => {
  */
 export async function PATCH(request: NextRequest, { params }: RouteParams) {
   try {
-    await requireAdmin(request);
+    const user = await requireAdmin(request);
     const { linkId } = await params;
     if (!linkId) {
       return NextResponse.json({ error: "linkId is required" }, { status: 400 });
@@ -93,34 +94,16 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       );
     }
 
-    const updated = await updateMediaLinkContextById(linkId, patch);
+    const updated = await updateMediaLinkContextById(linkId, patch, {
+      adminContext: toVerifiedAdminContext(user),
+    });
     if (!updated) {
       return NextResponse.json({ error: "Media link not found" }, { status: 404 });
     }
 
-    const context =
-      updated.context && typeof updated.context === "object"
-        ? (updated.context as Record<string, unknown>)
-        : {};
-    const peopleCount = parsePeopleCount(context.people_count) ?? null;
-    const peopleCountSource = parsePeopleCountSource(context.people_count_source) ?? null;
-    const thumbnailCrop =
-      context.thumbnail_crop === null
-        ? null
-        : parseThumbnailCrop(context.thumbnail_crop, { clamp: true });
-
-    return NextResponse.json({
-      link_id: updated.id,
-      people_count: peopleCount,
-      people_count_source: peopleCountSource,
-      thumbnail_crop: thumbnailCrop ?? null,
-    });
+    return NextResponse.json(updated);
   } catch (error) {
     console.error("[api] Failed to patch media-link context", error);
-    const message = error instanceof Error ? error.message : "failed";
-    const status =
-      message === "unauthorized" ? 401 : message === "forbidden" ? 403 : 500;
-    return NextResponse.json({ error: message }, { status });
+    return buildAdminProxyErrorResponse(error);
   }
 }
-

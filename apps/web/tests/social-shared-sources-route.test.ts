@@ -1,120 +1,118 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest, NextResponse } from "next/server";
-import { captureExpectedConsoleWarn } from "./helpers/expected-console";
 
 const {
   requireAdminMock,
-  fetchSocialBackendJsonMock,
-  socialProxyErrorResponseMock,
-  queryMock,
+  toVerifiedAdminContextMock,
+  loadSharedAccountSourcesFromBackendMock,
+  updateSharedAccountSourcesInBackendMock,
+  buildAdminProxyErrorResponseMock,
 } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
-  fetchSocialBackendJsonMock: vi.fn(),
-  socialProxyErrorResponseMock: vi.fn(),
-  queryMock: vi.fn(),
+  toVerifiedAdminContextMock: vi.fn(),
+  loadSharedAccountSourcesFromBackendMock: vi.fn(),
+  updateSharedAccountSourcesInBackendMock: vi.fn(),
+  buildAdminProxyErrorResponseMock: vi.fn(),
 }));
 
 vi.mock("@/lib/server/auth", () => ({
   requireAdmin: requireAdminMock,
+  toVerifiedAdminContext: toVerifiedAdminContextMock,
 }));
 
-vi.mock("@/lib/server/trr-api/social-admin-proxy", () => {
-  class SocialProxyError extends Error {
-    status: number;
-    code: string;
-    retryable: boolean;
-
-    constructor(
-      message: string,
-      options: { status: number; code: string; retryable?: boolean },
-    ) {
-      super(message);
-      this.status = options.status;
-      this.code = options.code;
-      this.retryable = Boolean(options.retryable);
-    }
-  }
-  return {
-    fetchSocialBackendJson: fetchSocialBackendJsonMock,
-    SocialProxyError,
-    socialProxyErrorResponse: socialProxyErrorResponseMock,
-  };
-});
-
-vi.mock("@/lib/server/postgres", () => ({
-  query: queryMock,
+vi.mock("@/lib/server/admin/shared-account-sources", () => ({
+  normalizeSharedAccountSourceScope: (value: string | null) => value || "network",
+  parseSharedAccountSourcePlatforms: (value: string | null) =>
+    value ? value.split(",") : null,
+  loadSharedAccountSourcesFromBackend: loadSharedAccountSourcesFromBackendMock,
+  updateSharedAccountSourcesInBackend: updateSharedAccountSourcesInBackendMock,
 }));
 
-import { GET } from "@/app/api/admin/trr-api/social/shared/sources/route";
+vi.mock("@/lib/server/trr-api/admin-read-proxy", () => ({
+  buildAdminProxyErrorResponse: buildAdminProxyErrorResponseMock,
+}));
+
+import { GET, PUT } from "@/app/api/admin/trr-api/social/shared/sources/route";
+
+const ADMIN_CONTEXT = { uid: "admin-1", email: "admin@example.com" };
 
 describe("shared social sources route", () => {
   beforeEach(() => {
     requireAdminMock.mockReset();
-    fetchSocialBackendJsonMock.mockReset();
-    socialProxyErrorResponseMock.mockReset();
-    queryMock.mockReset();
+    toVerifiedAdminContextMock.mockReset();
+    loadSharedAccountSourcesFromBackendMock.mockReset();
+    updateSharedAccountSourcesInBackendMock.mockReset();
+    buildAdminProxyErrorResponseMock.mockReset();
 
-    requireAdminMock.mockResolvedValue({ uid: "admin-1" });
-    fetchSocialBackendJsonMock.mockResolvedValue({ source_scope: "network", sources: [] });
-    socialProxyErrorResponseMock.mockImplementation((error: unknown) =>
+    requireAdminMock.mockResolvedValue({ uid: "firebase-admin-1" });
+    toVerifiedAdminContextMock.mockReturnValue(ADMIN_CONTEXT);
+    loadSharedAccountSourcesFromBackendMock.mockResolvedValue({
+      source_scope: "network",
+      sources: [],
+      using_defaults: false,
+    });
+    updateSharedAccountSourcesInBackendMock.mockResolvedValue({
+      source_scope: "network",
+      sources: [],
+      using_defaults: false,
+    });
+    buildAdminProxyErrorResponseMock.mockImplementation((error: unknown) =>
       NextResponse.json(
         { error: error instanceof Error ? error.message : "failed" },
         { status: 502 },
       ),
     );
-    queryMock.mockResolvedValue({ rows: [] });
   });
 
-  it("returns local Supabase shared-source rows when the backend proxy is unavailable", async () => {
-    const expectedWarn = captureExpectedConsoleWarn(
-      /^\[api\] Failed to fetch backend shared social account sources; using local fallback/,
-    );
-    fetchSocialBackendJsonMock.mockRejectedValue(new Error("fetch failed"));
-    queryMock.mockResolvedValue({
-      rows: [
-        {
-          id: "source-bravo",
-          platform: "instagram",
-          source_scope: "network",
-          account_handle: "bravotv",
-          is_active: true,
-          scrape_priority: 10,
-          metadata: {
-            network_key: "bravo-tv",
-            display_name: "Bravo TV",
-          },
-        },
-      ],
-    });
-
+  it("forwards verified admin context and normalized GET filters", async () => {
     const response = await GET(
       new NextRequest(
-        "http://localhost/api/admin/trr-api/social/shared/sources?source_scope=network&include_inactive=true",
+        "http://localhost/api/admin/trr-api/social/shared/sources" +
+          "?source_scope=network&include_inactive=false&platforms=instagram,tiktok",
       ),
     );
-    const payload = await response.json();
 
     expect(response.status).toBe(200);
-    expect(response.headers.get("x-trr-shared-sources-fallback")).toBe("local-db");
-    expect(payload).toEqual(
-      expect.objectContaining({
-        source_scope: "network",
-        using_local_fallback: true,
-        load_source: "local_db_fallback",
-        backend_endpoint:
-          "/shared/sources?source_scope=network&include_inactive=true",
-        sources: [
-          expect.objectContaining({
-            platform: "instagram",
-            account_handle: "bravotv",
-          }),
-        ],
+    expect(toVerifiedAdminContextMock).toHaveBeenCalledWith({ uid: "firebase-admin-1" });
+    expect(loadSharedAccountSourcesFromBackendMock).toHaveBeenCalledWith(
+      ADMIN_CONTEXT,
+      {
+        sourceScope: "network",
+        includeInactive: false,
+        platforms: ["instagram", "tiktok"],
+      },
+    );
+  });
+
+  it("forwards the exact PUT body with verified admin context", async () => {
+    const body = JSON.stringify({
+      source_scope: "network",
+      sources: [{ platform: "instagram", account_handle: "bravotv" }],
+    });
+    const response = await PUT(
+      new NextRequest("http://localhost/api/admin/trr-api/social/shared/sources", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body,
       }),
     );
-    expect(queryMock).toHaveBeenCalledWith(
-      expect.stringContaining("from social.shared_account_sources"),
-      ["network"],
+
+    expect(response.status).toBe(200);
+    expect(updateSharedAccountSourcesInBackendMock).toHaveBeenCalledWith(
+      ADMIN_CONTEXT,
+      body,
     );
-    expectedWarn.expectCalled();
+  });
+
+  it("returns the typed backend error and never uses a local SQL fallback", async () => {
+    const error = new Error("backend unavailable");
+    loadSharedAccountSourcesFromBackendMock.mockRejectedValue(error);
+
+    const response = await GET(
+      new NextRequest("http://localhost/api/admin/trr-api/social/shared/sources"),
+    );
+
+    expect(response.status).toBe(502);
+    expect(buildAdminProxyErrorResponseMock).toHaveBeenCalledWith(error);
   });
 });

@@ -8,6 +8,7 @@ const read = (relativePath: string): string =>
 describe("gallery fallback telemetry wiring", () => {
   it("tracks recovered/failed/attempted telemetry on show, season, and person pages", () => {
     const showContents = read("../src/app/admin/trr-shows/[showId]/page.tsx");
+    const showAssetsContents = read("../src/components/admin/show-tabs/ShowAssetsTab.tsx");
     const seasonContents = read("../src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx");
     const personContents = read("../src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx");
 
@@ -17,7 +18,7 @@ describe("gallery fallback telemetry wiring", () => {
       expect(contents).toContain("totalImageAttempts");
     }
 
-    expect(showContents).toContain("Fallback diagnostics:");
+    expect(`${showContents}\n${showAssetsContents}`).toContain("Fallback diagnostics:");
     expect(seasonContents).toContain("Fallback diagnostics:");
     expect(personContents).toContain("Fallback diagnostics:");
   });

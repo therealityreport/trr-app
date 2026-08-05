@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/server/auth";
+import { requireAdmin, toVerifiedAdminContext } from "@/lib/server/auth";
 import { upsertTypographyAssignment } from "@/lib/server/admin/typography-repository";
+import { AdminReadProxyError } from "@/lib/server/trr-api/admin-read-proxy";
 import { invalidateTypographyRouteCaches } from "@/lib/server/admin/typography-route-cache";
 import {
   parseOptionalString,
@@ -10,7 +11,9 @@ import {
 
 export const dynamic = "force-dynamic";
 
-function getTypographyRequestStatus(message: string): number {
+function getTypographyRequestStatus(error: unknown): number {
+  if (error instanceof AdminReadProxyError) return error.status;
+  const message = error instanceof Error ? error.message : "failed";
   if (message === "unauthorized") return 401;
   if (message === "forbidden") return 403;
   if (
@@ -26,7 +29,7 @@ function getTypographyRequestStatus(message: string): number {
 
 export async function PUT(request: NextRequest) {
   try {
-    await requireAdmin(request);
+    const user = await requireAdmin(request);
     const body = await request.json();
     const assignment = await upsertTypographyAssignment({
       area: parseTypographyArea(body?.area),
@@ -35,13 +38,13 @@ export async function PUT(request: NextRequest) {
       setId: parseRequiredString(body?.setId, "setId"),
       sourcePath: parseRequiredString(body?.sourcePath, "sourcePath"),
       notes: parseOptionalString(body?.notes),
-    });
+    }, { adminContext: toVerifiedAdminContext(user) });
     invalidateTypographyRouteCaches();
     return NextResponse.json({ assignment });
   } catch (error) {
     console.error("[api] Failed to upsert typography assignment", error);
     const message = error instanceof Error ? error.message : "failed";
-    const status = getTypographyRequestStatus(message);
+    const status = getTypographyRequestStatus(error);
     return NextResponse.json({ error: message }, { status });
   }
 }

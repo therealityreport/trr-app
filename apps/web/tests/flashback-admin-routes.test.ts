@@ -3,6 +3,7 @@ import { NextRequest } from "next/server";
 
 const {
   requireAdminMock,
+  toVerifiedAdminContextMock,
   listFlashbackQuizzesMock,
   createFlashbackQuizMock,
   setFlashbackQuizPublishedMock,
@@ -11,6 +12,7 @@ const {
   deleteFlashbackEventMock,
 } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
+  toVerifiedAdminContextMock: vi.fn(),
   listFlashbackQuizzesMock: vi.fn(),
   createFlashbackQuizMock: vi.fn(),
   setFlashbackQuizPublishedMock: vi.fn(),
@@ -21,6 +23,7 @@ const {
 
 vi.mock("@/lib/server/auth", () => ({
   requireAdmin: requireAdminMock,
+  toVerifiedAdminContext: toVerifiedAdminContextMock,
 }));
 
 vi.mock("@/lib/server/admin/flashback-admin-repository", () => ({
@@ -43,6 +46,7 @@ import { DELETE as deleteEvent } from "@/app/api/admin/flashback/events/[eventId
 describe("flashback admin routes", () => {
   beforeEach(() => {
     requireAdminMock.mockReset();
+    toVerifiedAdminContextMock.mockReset();
     listFlashbackQuizzesMock.mockReset();
     createFlashbackQuizMock.mockReset();
     setFlashbackQuizPublishedMock.mockReset();
@@ -50,6 +54,11 @@ describe("flashback admin routes", () => {
     createFlashbackEventMock.mockReset();
     deleteFlashbackEventMock.mockReset();
     requireAdminMock.mockResolvedValue({ uid: "firebase-admin-1" });
+    toVerifiedAdminContextMock.mockReturnValue({
+      uid: "firebase-admin-1",
+      email: null,
+      verifiedAt: 1_700_000_000_000,
+    });
   });
 
   it("lists quizzes through the server repository", async () => {
@@ -70,7 +79,9 @@ describe("flashback admin routes", () => {
 
     expect(response.status).toBe(200);
     expect(payload.quizzes).toHaveLength(1);
-    expect(listFlashbackQuizzesMock).toHaveBeenCalledTimes(1);
+    expect(listFlashbackQuizzesMock).toHaveBeenCalledWith(
+      expect.objectContaining({ uid: "firebase-admin-1" }),
+    );
   });
 
   it("creates quizzes through the server repository", async () => {
@@ -99,11 +110,14 @@ describe("flashback admin routes", () => {
 
     expect(response.status).toBe(201);
     expect(payload.quiz.id).toBe("quiz-2");
-    expect(createFlashbackQuizMock).toHaveBeenCalledWith({
-      title: "Bravo Origins",
-      publishDate: "2026-04-01",
-      description: "Debut season flashbacks",
-    });
+    expect(createFlashbackQuizMock).toHaveBeenCalledWith(
+      expect.objectContaining({ uid: "firebase-admin-1" }),
+      {
+        title: "Bravo Origins",
+        publishDate: "2026-04-01",
+        description: "Debut season flashbacks",
+      },
+    );
   });
 
   it("updates quiz publish state through the server repository", async () => {
@@ -129,7 +143,11 @@ describe("flashback admin routes", () => {
 
     expect(response.status).toBe(200);
     expect(payload.quiz.is_published).toBe(true);
-    expect(setFlashbackQuizPublishedMock).toHaveBeenCalledWith("quiz-1", true);
+    expect(setFlashbackQuizPublishedMock).toHaveBeenCalledWith(
+      expect.objectContaining({ uid: "firebase-admin-1" }),
+      "quiz-1",
+      true,
+    );
   });
 
   it("lists events for a quiz through the server repository", async () => {
@@ -153,7 +171,10 @@ describe("flashback admin routes", () => {
 
     expect(response.status).toBe(200);
     expect(payload.events).toHaveLength(1);
-    expect(listFlashbackEventsMock).toHaveBeenCalledWith("quiz-1");
+    expect(listFlashbackEventsMock).toHaveBeenCalledWith(
+      expect.objectContaining({ uid: "firebase-admin-1" }),
+      "quiz-1",
+    );
   });
 
   it("creates events through the server repository", async () => {
@@ -184,13 +205,16 @@ describe("flashback admin routes", () => {
 
     expect(response.status).toBe(201);
     expect(payload.event.sort_order).toBe(4);
-    expect(createFlashbackEventMock).toHaveBeenCalledWith({
-      quizId: "quiz-1",
-      description: "The table flip",
-      year: 2009,
-      imageUrl: null,
-      pointValue: 5,
-    });
+    expect(createFlashbackEventMock).toHaveBeenCalledWith(
+      expect.objectContaining({ uid: "firebase-admin-1" }),
+      {
+        quizId: "quiz-1",
+        description: "The table flip",
+        year: 2009,
+        imageUrl: null,
+        pointValue: 5,
+      },
+    );
   });
 
   it("deletes events through the server repository", async () => {
@@ -204,6 +228,9 @@ describe("flashback admin routes", () => {
     );
 
     expect(response.status).toBe(204);
-    expect(deleteFlashbackEventMock).toHaveBeenCalledWith("event-1");
+    expect(deleteFlashbackEventMock).toHaveBeenCalledWith(
+      expect.objectContaining({ uid: "firebase-admin-1" }),
+      "event-1",
+    );
   });
 });

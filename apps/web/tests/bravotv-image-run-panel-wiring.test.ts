@@ -16,13 +16,17 @@ describe("bravotv image run panel wiring", () => {
   });
 
   it("renders the shared panel on the show assets page", () => {
-    const contents = read("../src/app/admin/trr-shows/[showId]/page.tsx");
+    const routeContents = read("../src/app/admin/trr-shows/[showId]/page.tsx");
+    const tabContents = read("../src/components/admin/show-tabs/ShowAssetsTab.tsx");
 
-    expect(contents).toContain('import { BravotvImageRunPanel } from "@/components/admin/BravotvImageRunPanel"');
-    expect(contents).toContain("<BravotvImageRunPanel");
-    expect(contents).toContain('mode="show"');
-    expect(contents).toContain("loadGalleryAssets(selectedGallerySeason)");
-    expect(contents).toContain("gallerySeasonInitialized");
-    expect(contents).toContain("newestVisibleSeason");
+    expect(tabContents).toContain(
+      'import { BravotvImageRunPanel } from "@/components/admin/BravotvImageRunPanel"',
+    );
+    expect(tabContents).toContain("<BravotvImageRunPanel");
+    expect(tabContents).toContain('mode="show"');
+    expect(routeContents).toContain("onRunCompleted: async () => {");
+    expect(routeContents).toContain("loadGalleryAssets(selectedGallerySeason)");
+    expect(routeContents).toContain("gallerySeasonInitialized");
+    expect(routeContents).toContain("newestVisibleSeason");
   });
 });

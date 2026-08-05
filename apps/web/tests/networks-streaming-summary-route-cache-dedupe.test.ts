@@ -3,24 +3,30 @@ import { NextRequest, NextResponse } from "next/server";
 
 process.env.TRR_ADMIN_ROUTE_CACHE_DISABLED = "0";
 
-const { requireAdminMock, fetchAdminBackendJsonMock } = vi.hoisted(() => ({
+const { requireAdminMock, getNetworksStreamingSummaryMock } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
-  fetchAdminBackendJsonMock: vi.fn(),
+  getNetworksStreamingSummaryMock: vi.fn(),
 }));
 
 vi.mock("@/lib/server/auth", () => ({
   requireAdmin: requireAdminMock,
+  toVerifiedAdminContext: (user: { uid: string; email?: string }) => ({
+    uid: user.uid,
+    email: user.email ?? null,
+    verifiedAt: 42,
+  }),
 }));
 
 vi.mock("@/lib/server/trr-api/admin-read-proxy", () => ({
-  fetchAdminBackendJson: fetchAdminBackendJsonMock,
-  invalidateAdminBackendCache: vi.fn(),
-  ADMIN_READ_PROXY_SHORT_TIMEOUT_MS: 5_000,
   buildAdminProxyErrorResponse: (error: unknown) =>
     NextResponse.json(
       { error: error instanceof Error ? error.message : "failed" },
       { status: 500 },
     ),
+}));
+
+vi.mock("@/lib/server/trr-api/admin-networks-streaming-reads", () => ({
+  getNetworksStreamingSummary: getNetworksStreamingSummaryMock,
 }));
 
 import { GET } from "@/app/api/admin/networks-streaming/summary/route";
@@ -30,22 +36,18 @@ import { NETWORKS_STREAMING_SUMMARY_CACHE_NAMESPACE } from "@/lib/server/trr-api
 describe("networks-streaming summary route cache dedupe", () => {
   beforeEach(() => {
     requireAdminMock.mockReset();
-    fetchAdminBackendJsonMock.mockReset();
+    getNetworksStreamingSummaryMock.mockReset();
     invalidateRouteResponseCache(NETWORKS_STREAMING_SUMMARY_CACHE_NAMESPACE);
-    requireAdminMock.mockResolvedValue({ uid: "admin-user" });
+    requireAdminMock.mockResolvedValue({ uid: "admin-user", email: "admin@example.test" });
   });
 
   it("collapses concurrent cold misses into one backend summary load", async () => {
-    let resolvePayload:
-      | ((value: { status: number; data: Record<string, unknown>; durationMs: number }) => void)
-      | null = null;
-    fetchAdminBackendJsonMock.mockImplementation(
+    let resolvePayload: ((value: Record<string, unknown>) => void) | null = null;
+    getNetworksStreamingSummaryMock.mockImplementation(
       () =>
-        new Promise<{ status: number; data: Record<string, unknown>; durationMs: number }>(
-          (resolve) => {
-            resolvePayload = resolve;
-          },
-        ),
+        new Promise<Record<string, unknown>>((resolve) => {
+          resolvePayload = resolve;
+        }),
     );
 
     const request = new NextRequest("http://localhost/api/admin/networks-streaming/summary");
@@ -53,16 +55,12 @@ describe("networks-streaming summary route cache dedupe", () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(fetchAdminBackendJsonMock).toHaveBeenCalledTimes(1);
+    expect(getNetworksStreamingSummaryMock).toHaveBeenCalledTimes(1);
 
     resolvePayload?.({
-      status: 200,
-      data: {
-        totals: { total_available_shows: 18, total_added_shows: 7 },
-        rows: [],
-        generated_at: "2026-03-26T14:00:00.000Z",
-      },
-      durationMs: 4,
+      totals: { total_available_shows: 18, total_added_shows: 7 },
+      rows: [],
+      generated_at: "2026-03-26T14:00:00.000Z",
     });
 
     const [firstResponse, secondResponse] = await Promise.all(pendingResponses);
@@ -79,24 +77,16 @@ describe("networks-streaming summary route cache dedupe", () => {
   });
 
   it("bypasses a cached response when refresh is requested", async () => {
-    fetchAdminBackendJsonMock
+    getNetworksStreamingSummaryMock
       .mockResolvedValueOnce({
-        status: 200,
-        data: {
-          totals: { total_available_shows: 18, total_added_shows: 7 },
-          rows: [],
-          generated_at: "2026-03-26T14:00:00.000Z",
-        },
-        durationMs: 3,
+        totals: { total_available_shows: 18, total_added_shows: 7 },
+        rows: [],
+        generated_at: "2026-03-26T14:00:00.000Z",
       })
       .mockResolvedValueOnce({
-        status: 200,
-        data: {
-          totals: { total_available_shows: 18, total_added_shows: 8 },
-          rows: [],
-          generated_at: "2026-03-26T14:00:05.000Z",
-        },
-        durationMs: 3,
+        totals: { total_available_shows: 18, total_added_shows: 8 },
+        rows: [],
+        generated_at: "2026-03-26T14:00:05.000Z",
       });
 
     await GET(new NextRequest("http://localhost/api/admin/networks-streaming/summary"));
@@ -104,7 +94,7 @@ describe("networks-streaming summary route cache dedupe", () => {
       new NextRequest("http://localhost/api/admin/networks-streaming/summary?refresh=123"),
     );
 
-    expect(fetchAdminBackendJsonMock).toHaveBeenCalledTimes(2);
+    expect(getNetworksStreamingSummaryMock).toHaveBeenCalledTimes(2);
     await expect(refreshedResponse.json()).resolves.toEqual({
       totals: { total_available_shows: 18, total_added_shows: 8 },
       rows: [],

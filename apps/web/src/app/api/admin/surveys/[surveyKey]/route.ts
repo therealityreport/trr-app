@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/server/auth";
+import { requireAdmin, toVerifiedAdminContext } from "@/lib/server/auth";
 import type { AuthContext } from "@/lib/server/postgres";
 import {
   buildUserScopedRouteCacheKey,
@@ -24,7 +24,10 @@ import {
   listSeasonCastSurveyRoles,
   replaceSeasonCastSurveyRoles,
 } from "@/lib/server/admin/season-cast-survey-roles-repository";
-import { buildAdminReadResponseHeaders } from "@/lib/server/trr-api/admin-read-proxy";
+import {
+  buildAdminProxyErrorResponse,
+  buildAdminReadResponseHeaders,
+} from "@/lib/server/trr-api/admin-read-proxy";
 
 export const dynamic = "force-dynamic";
 interface RouteParams {
@@ -94,6 +97,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
     const startedAt = performance.now();
     const user = await requireAdmin(request);
+    const adminContext = toVerifiedAdminContext(user);
     const { surveyKey } = await params;
     const searchParams = new URLSearchParams(request.nextUrl.searchParams);
     const forceRefresh = (searchParams.get("refresh") ?? "").trim().length > 0;
@@ -182,7 +186,10 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
               )
             : Promise.resolve(null);
           const assetsPromise = includeAssets
-            ? getAssetsByShowSeason(trrLink.trr_show_id, trrLink.season_number, { limit: 200 })
+            ? getAssetsByShowSeason(trrLink.trr_show_id, trrLink.season_number, {
+                limit: 200,
+                adminContext,
+              })
             : Promise.resolve(null);
 
           const [cast, episodes, assets] = await Promise.all([
@@ -247,9 +254,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     });
   } catch (error) {
     console.error("[api] Failed to get survey", error);
-    const message = error instanceof Error ? error.message : "failed";
-    const status = message === "unauthorized" ? 401 : message === "forbidden" ? 403 : 500;
-    return NextResponse.json({ error: message }, { status });
+    return buildAdminProxyErrorResponse(error);
   }
 }
 

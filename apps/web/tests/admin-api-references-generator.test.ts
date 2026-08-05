@@ -53,6 +53,103 @@ describe("admin api references generator", () => {
     ).toBe(true);
   });
 
+  it("records explicit v2 covered-shows proxy edges without stale v1 edges", () => {
+    const expectedEdges = [
+      [
+        "route:GET:/api/admin/covered-shows",
+        "backend:GET:/api/v2/admin/covered-shows",
+      ],
+      [
+        "route:POST:/api/admin/covered-shows",
+        "backend:POST:/api/v2/admin/covered-shows",
+      ],
+      [
+        "route:GET:/api/admin/covered-shows/[showId]",
+        "backend:GET:/api/v2/admin/covered-shows/[showId]",
+      ],
+      [
+        "route:DELETE:/api/admin/covered-shows/[showId]",
+        "backend:DELETE:/api/v2/admin/covered-shows/[showId]",
+      ],
+    ];
+    for (const [from, to] of expectedEdges) {
+      expect(
+        GENERATED_ADMIN_API_REFERENCE_INVENTORY.edges.some(
+          (edge) => edge.from === from && edge.to === to,
+        ),
+      ).toBe(true);
+    }
+    expect(
+      GENERATED_ADMIN_API_REFERENCE_INVENTORY.nodes.some((node) =>
+        node.id.includes("/api/v1/admin/covered-shows"),
+      ),
+    ).toBe(false);
+  });
+
+  it("records explicit v2 recent-people proxy edges without stale v1 edges", () => {
+    const expectedEdges = [
+      [
+        "route:GET:/api/admin/recent-people",
+        "backend:GET:/api/v2/admin/recent-people",
+      ],
+      [
+        "route:POST:/api/admin/recent-people",
+        "backend:POST:/api/v2/admin/recent-people",
+      ],
+    ];
+    for (const [from, to] of expectedEdges) {
+      expect(
+        GENERATED_ADMIN_API_REFERENCE_INVENTORY.edges.some(
+          (edge) => edge.from === from && edge.to === to,
+        ),
+      ).toBe(true);
+    }
+    expect(
+      GENERATED_ADMIN_API_REFERENCE_INVENTORY.nodes.some((node) =>
+        node.id.includes("/api/v1/admin/recent-people"),
+      ),
+    ).toBe(false);
+  });
+
+  it("records the indirect v2 external-ID client edges", () => {
+    const expectedEdges = [
+      [
+        "route:GET:/api/admin/trr-api/people/[personId]/external-ids",
+        "backend:GET:/api/v2/admin/people/[personId]/external-ids",
+      ],
+      [
+        "route:POST:/api/admin/social/landing",
+        "backend:GET:/api/v2/admin/people/[personId]/external-ids",
+      ],
+      [
+        "route:GET:/api/admin/social/landing",
+        "backend:POST:/api/v2/admin/people/external-ids/batch",
+      ],
+      [
+        "route:POST:/api/admin/social/landing",
+        "backend:POST:/api/v2/admin/people/external-ids/batch",
+      ],
+      [
+        "route:GET:/api/admin/social/landing",
+        "backend:POST:/api/v2/admin/shows/external-ids/batch",
+      ],
+      [
+        "route:POST:/api/admin/social/landing",
+        "backend:POST:/api/v2/admin/shows/external-ids/batch",
+      ],
+    ];
+    for (const [from, to] of expectedEdges) {
+      expect(
+        GENERATED_ADMIN_API_REFERENCE_INVENTORY.edges.some(
+          (edge) =>
+            edge.from === from &&
+            edge.to === to &&
+            edge.verificationStatus === "verified",
+        ),
+      ).toBe(true);
+    }
+  });
+
   it("normalizes dynamic backend URL query templates without leaking template source", () => {
     expect(
       GENERATED_ADMIN_API_REFERENCE_INVENTORY.nodes.some(

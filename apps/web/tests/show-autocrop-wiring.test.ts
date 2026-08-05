@@ -8,12 +8,17 @@ describe("show auto-crop wiring", () => {
       __dirname,
       "../src/app/admin/trr-shows/[showId]/page.tsx",
     );
+    const utilitiesPath = path.resolve(
+      __dirname,
+      "../src/lib/admin/show-page/show-detail-utilities.ts",
+    );
     const contents = fs.readFileSync(filePath, "utf8");
+    const utilities = fs.readFileSync(utilitiesPath, "utf8");
 
     expect(contents).toMatch(/resize:\s*"Auto-Crop"/);
     expect(contents).toMatch(/Variants \(Auto-Crop\)/);
     expect(contents).toMatch(/buildAssetAutoCropPayloadWithFallback/);
-    expect(contents).toMatch(/strategy:\s*"resize_center_fallback_v1"/);
+    expect(utilities).toMatch(/strategy:\s*"resize_center_fallback_v1"/);
   });
 
   it("rebuilds preview auto-crop variants when star is toggled on", () => {

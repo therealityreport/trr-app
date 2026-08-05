@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/server/auth";
+import { requireAdmin, toVerifiedAdminContext } from "@/lib/server/auth";
 import { getStoredWindowPostsByCommunityAndSeason } from "@/lib/server/admin/reddit-sources-repository";
 import {
   buildUserScopedRouteCacheKey,
@@ -7,7 +7,6 @@ import {
   REDDIT_STABLE_DETAIL_CACHE_NAMESPACE,
   REDDIT_STABLE_DETAIL_CACHE_TTL_MS,
 } from "@/lib/server/trr-api/reddit-stable-route-cache";
-import { loadStableRedditRead } from "@/lib/server/trr-api/reddit-stable-read";
 import { isValidUuid } from "@/lib/server/validation/identifiers";
 
 export const dynamic = "force-dynamic";
@@ -19,6 +18,7 @@ interface RouteParams {
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
     const user = await requireAdmin(request);
+    const adminContext = toVerifiedAdminContext(user);
     const { communityId } = await params;
     if (!communityId || !isValidUuid(communityId)) {
       return NextResponse.json({ error: "communityId must be a valid UUID" }, { status: 400 });
@@ -52,28 +52,15 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       promiseKey: forceRefresh ? `${cacheKey}:refresh` : cacheKey,
       ttlMs: REDDIT_STABLE_DETAIL_CACHE_TTL_MS,
       forceRefresh,
-      loader: async () => {
-        const query = new URLSearchParams();
-        query.set("season_id", seasonId);
-        query.set("container_key", containerKey);
-        query.set("page", Number.isFinite(pageParam) ? String(pageParam) : "1");
-        query.set("per_page", Number.isFinite(perPageParam) ? String(perPageParam) : "200");
-
-        const resolved = await loadStableRedditRead<Record<string, unknown>>({
-          backendPath: `/admin/reddit/communities/${communityId}/stored-posts`,
-          routeName: "reddit-stored-posts",
-          queryString: query.toString(),
-          fallback: async () =>
-            getStoredWindowPostsByCommunityAndSeason(
-              communityId,
-              seasonId,
-              containerKey,
-              Number.isFinite(pageParam) ? pageParam : 1,
-              Number.isFinite(perPageParam) ? perPageParam : 200,
-            ) as unknown as Record<string, unknown>,
-        });
-        return resolved.payload;
-      },
+      loader: async () =>
+        getStoredWindowPostsByCommunityAndSeason(
+          communityId,
+          seasonId,
+          containerKey,
+          Number.isFinite(pageParam) ? pageParam : 1,
+          Number.isFinite(perPageParam) ? perPageParam : 200,
+          { adminContext },
+        ),
     });
 
     return NextResponse.json(payload, cacheHit ? { headers: { "x-trr-cache": "hit" } } : undefined);

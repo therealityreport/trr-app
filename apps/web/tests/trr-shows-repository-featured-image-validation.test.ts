@@ -1,53 +1,85 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { queryMock } = vi.hoisted(() => ({
-  queryMock: vi.fn(),
-}));
+const { fetchAdminBackendJsonMock, MockAdminReadProxyError } = vi.hoisted(() => {
+  class TestAdminReadProxyError extends Error {
+    status: number;
+    retryable?: boolean;
 
-vi.mock("@/lib/server/postgres", () => ({
-  query: queryMock,
+    constructor(message: string, status: number, options?: { retryable?: boolean }) {
+      super(message);
+      this.status = status;
+      this.retryable = options?.retryable;
+    }
+  }
+  return {
+    fetchAdminBackendJsonMock: vi.fn(),
+    MockAdminReadProxyError: TestAdminReadProxyError,
+  };
+});
+
+vi.mock("@/lib/server/trr-api/admin-read-proxy", () => ({
+  ADMIN_READ_PROXY_SHORT_TIMEOUT_MS: 5_000,
+  AdminReadProxyError: MockAdminReadProxyError,
+  fetchAdminBackendJson: fetchAdminBackendJsonMock,
+  buildAdminBackendStatusError: ({
+    status,
+    fallbackMessage,
+  }: {
+    status: number;
+    fallbackMessage: string;
+  }) => new MockAdminReadProxyError(fallbackMessage, status, { retryable: status >= 500 }),
 }));
 
 import { validateShowImageForField } from "@/lib/server/trr-api/trr-shows-repository";
 
 const SHOW_ID = "11111111-1111-1111-1111-111111111111";
 const IMAGE_ID = "22222222-2222-2222-2222-222222222222";
+const adminContext = {
+  uid: "admin-user",
+  email: "admin@example.test",
+  verifiedAt: 42,
+};
 
 describe("validateShowImageForField", () => {
   beforeEach(() => {
-    queryMock.mockReset();
+    fetchAdminBackendJsonMock.mockReset();
   });
 
-  it("returns true for same-show poster rows", async () => {
-    queryMock.mockResolvedValue({ rows: [{ kind: "poster", image_type: null }] });
+  it("uses the strict v2 validation contract with verified admin context", async () => {
+    fetchAdminBackendJsonMock.mockResolvedValue({ status: 200, data: { valid: true } });
 
-    const result = await validateShowImageForField(SHOW_ID, IMAGE_ID, "poster");
+    await expect(
+      validateShowImageForField(SHOW_ID, IMAGE_ID, "poster", { adminContext }),
+    ).resolves.toBe(true);
 
-    expect(result).toBe(true);
-    expect(queryMock).toHaveBeenCalledWith(expect.stringContaining("show_id = $2::uuid"), [IMAGE_ID, SHOW_ID]);
+    expect(fetchAdminBackendJsonMock).toHaveBeenCalledWith(
+      `/admin/shows/${SHOW_ID}/featured-image-validation`,
+      {
+        adminContext,
+        apiVersion: "v2",
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ image_id: IMAGE_ID, expected_kind: "poster" }),
+        timeoutMs: 5_000,
+        routeName: "admin-show-featured-image-validation",
+        requestRole: "primary",
+      },
+    );
   });
 
-  it("returns true for same-show backdrop rows with background alias", async () => {
-    queryMock.mockResolvedValue({ rows: [{ kind: null, image_type: "background" }] });
+  it("preserves a false validation result", async () => {
+    fetchAdminBackendJsonMock.mockResolvedValue({ status: 200, data: { valid: false } });
 
-    const result = await validateShowImageForField(SHOW_ID, IMAGE_ID, "backdrop");
-
-    expect(result).toBe(true);
+    await expect(
+      validateShowImageForField(SHOW_ID, IMAGE_ID, "backdrop", { adminContext }),
+    ).resolves.toBe(false);
   });
 
-  it("returns false when no row exists for show/image combination", async () => {
-    queryMock.mockResolvedValue({ rows: [] });
+  it("throws a typed retryable proxy error for an upstream failure", async () => {
+    fetchAdminBackendJsonMock.mockResolvedValue({ status: 503, data: {} });
 
-    const result = await validateShowImageForField(SHOW_ID, IMAGE_ID, "poster");
-
-    expect(result).toBe(false);
-  });
-
-  it("returns false when kind does not match expected field", async () => {
-    queryMock.mockResolvedValue({ rows: [{ kind: "poster", image_type: "poster" }] });
-
-    const result = await validateShowImageForField(SHOW_ID, IMAGE_ID, "backdrop");
-
-    expect(result).toBe(false);
+    await expect(
+      validateShowImageForField(SHOW_ID, IMAGE_ID, "poster", { adminContext }),
+    ).rejects.toMatchObject({ status: 503, retryable: true });
   });
 });

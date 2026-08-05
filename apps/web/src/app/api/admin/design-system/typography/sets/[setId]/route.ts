@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/server/auth";
+import { requireAdmin, toVerifiedAdminContext } from "@/lib/server/auth";
 import { invalidateTypographyRouteCaches } from "@/lib/server/admin/typography-route-cache";
 import {
   deleteTypographySet,
   updateTypographySet,
 } from "@/lib/server/admin/typography-repository";
+import { AdminReadProxyError } from "@/lib/server/trr-api/admin-read-proxy";
 import {
   parseRequiredString,
   parseTypographyArea,
@@ -13,7 +14,9 @@ import {
 
 export const dynamic = "force-dynamic";
 
-function getTypographyRequestStatus(message: string): number {
+function getTypographyRequestStatus(error: unknown): number {
+  if (error instanceof AdminReadProxyError) return error.status;
+  const message = error instanceof Error ? error.message : "failed";
   if (message === "unauthorized") return 401;
   if (message === "forbidden") return 403;
   if (
@@ -33,7 +36,7 @@ interface RouteParams {
 
 export async function PUT(request: NextRequest, { params }: RouteParams) {
   try {
-    await requireAdmin(request);
+    const user = await requireAdmin(request);
     const { setId } = await params;
     const body = await request.json();
     const updated = await updateTypographySet(parseRequiredString(setId, "setId"), {
@@ -41,7 +44,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       ...(body?.area !== undefined ? { area: parseTypographyArea(body.area) } : {}),
       ...(body?.seedSource !== undefined ? { seedSource: parseRequiredString(body.seedSource, "seedSource") } : {}),
       ...(body?.roles !== undefined ? { roles: parseTypographyRoles(body.roles) } : {}),
-    });
+    }, { adminContext: toVerifiedAdminContext(user) });
 
     if (!updated) {
       return NextResponse.json({ error: "Typography set not found" }, { status: 404 });
@@ -52,16 +55,19 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
   } catch (error) {
     console.error("[api] Failed to update typography set", error);
     const message = error instanceof Error ? error.message : "failed";
-    const status = getTypographyRequestStatus(message);
+    const status = getTypographyRequestStatus(error);
     return NextResponse.json({ error: message }, { status });
   }
 }
 
 export async function DELETE(request: NextRequest, { params }: RouteParams) {
   try {
-    await requireAdmin(request);
+    const user = await requireAdmin(request);
     const { setId } = await params;
-    const outcome = await deleteTypographySet(parseRequiredString(setId, "setId"));
+    const outcome = await deleteTypographySet(
+      parseRequiredString(setId, "setId"),
+      { adminContext: toVerifiedAdminContext(user) },
+    );
     if (outcome === "missing") {
       return NextResponse.json({ error: "Typography set not found" }, { status: 404 });
     }
@@ -73,7 +79,7 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
   } catch (error) {
     console.error("[api] Failed to delete typography set", error);
     const message = error instanceof Error ? error.message : "failed";
-    const status = getTypographyRequestStatus(message);
+    const status = getTypographyRequestStatus(error);
     return NextResponse.json({ error: message }, { status });
   }
 }

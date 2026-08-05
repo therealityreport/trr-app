@@ -6,12 +6,15 @@ import {
   getRouteResponseCache,
   setRouteResponseCache,
 } from "@/lib/server/admin/route-response-cache";
-import { requireAdmin } from "@/lib/server/auth";
+import { requireAdmin, toVerifiedAdminContext } from "@/lib/server/auth";
 import {
   BRANDS_PROFILE_CACHE_NAMESPACE,
   BRANDS_PROFILE_CACHE_TTL_MS,
 } from "@/lib/server/trr-api/brands-route-cache";
-import { buildAdminReadResponseHeaders } from "@/lib/server/trr-api/admin-read-proxy";
+import {
+  buildAdminProxyErrorResponse,
+  buildAdminReadResponseHeaders,
+} from "@/lib/server/trr-api/admin-read-proxy";
 
 export const dynamic = "force-dynamic";
 
@@ -19,6 +22,7 @@ export async function GET(request: NextRequest) {
   try {
     const startedAt = performance.now();
     const user = await requireAdmin(request);
+    const adminContext = toVerifiedAdminContext(user);
 
     const searchParams = new URLSearchParams(request.nextUrl.searchParams);
     const forceRefresh = (searchParams.get("refresh") ?? "").trim().length > 0;
@@ -47,7 +51,7 @@ export async function GET(request: NextRequest) {
       BRANDS_PROFILE_CACHE_NAMESPACE,
       promiseKey,
       async () => {
-        const loaded = await getBrandProfileBySlug(slug);
+        const loaded = await getBrandProfileBySlug(slug, { adminContext });
         if (!loaded) {
           return null;
         }
@@ -61,7 +65,7 @@ export async function GET(request: NextRequest) {
       },
     );
     if (!payload) {
-      const suggestions = await getBrandProfileSuggestions(slug);
+      const suggestions = await getBrandProfileSuggestions(slug, { adminContext });
       return NextResponse.json(
         { error: "not_found", suggestions },
         {
@@ -85,9 +89,6 @@ export async function GET(request: NextRequest) {
     });
   } catch (error) {
     console.error("[api] Failed to load brand profile", error);
-    const message = error instanceof Error ? error.message : "failed";
-    const status =
-      message === "unauthorized" ? 401 : message === "forbidden" ? 403 : 500;
-    return NextResponse.json({ error: message }, { status });
+    return buildAdminProxyErrorResponse(error);
   }
 }

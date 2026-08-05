@@ -3,6 +3,8 @@ import "server-only";
 const LOOPBACK_BACKEND_HOSTNAMES = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
 const warnedRemoteBackendBases = new Set<string>();
 
+export type BackendApiVersion = "v1" | "v2";
+
 const isLocalBackendHost = (hostname: string): boolean => {
   const normalized = hostname.trim().toLowerCase();
   return LOOPBACK_BACKEND_HOSTNAMES.has(normalized) || normalized.endsWith(".localhost");
@@ -32,7 +34,8 @@ const normalizeBackendRoot = (rawUrl: string): string => {
   } catch {
     normalized = trimmed;
   }
-  return normalized.endsWith("/api/v1") ? normalized.slice(0, -"/api/v1".length) : normalized;
+  const versionedSuffix = ["/api/v1", "/api/v2"].find((suffix) => normalized.endsWith(suffix));
+  return versionedSuffix ? normalized.slice(0, -versionedSuffix.length) : normalized;
 };
 
 export const getBackendRootBase = (): string | null => {
@@ -48,14 +51,17 @@ export const getBackendRootUrl = (path: string): string | null => {
   return `${base}${normalizedPath}`;
 };
 
-export const getBackendApiBase = (): string | null => {
+export const getBackendApiBase = (apiVersion: BackendApiVersion = "v1"): string | null => {
   const base = getBackendRootBase();
   if (!base) return null;
-  return `${base}/api/v1`;
+  return `${base}/api/${apiVersion}`;
 };
 
-export const getBackendApiUrl = (path: string): string | null => {
-  const base = getBackendApiBase();
+export const getBackendApiUrl = (
+  path: string,
+  apiVersion: BackendApiVersion = "v1",
+): string | null => {
+  const base = getBackendApiBase(apiVersion);
   if (!base) return null;
   const normalizedPath = path.startsWith("/") ? path : `/${path}`;
   return `${base}${normalizedPath}`;

@@ -60,7 +60,11 @@ describe("brands logo sync wiring", () => {
 
   it("wires show settings scoped sync on the show page", () => {
     const filePath = path.resolve(__dirname, "../src/app/admin/trr-shows/[showId]/page.tsx");
-    const contents = fs.readFileSync(filePath, "utf8");
+    const settingsPath = path.resolve(
+      __dirname,
+      "../src/components/admin/show-tabs/ShowSettingsTab.tsx"
+    );
+    const contents = `${fs.readFileSync(filePath, "utf8")}\n${fs.readFileSync(settingsPath, "utf8")}`;
 
     expect(contents).toMatch(/syncShowScopedBrandLogos/);
     expect(contents).toMatch(/scope:\s*"show"/);

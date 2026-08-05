@@ -34,6 +34,7 @@ type DiscoveredRequestTarget = {
   confidence: AdminApiReferenceConfidence;
   verificationStatus: AdminApiReferenceVerificationStatus;
   basis: string[];
+  routeMethod?: string;
 };
 
 type PollingMatch = {
@@ -543,10 +544,11 @@ function discoverRequestTargets(source: string): DiscoveredRequestTarget[] {
     const literal = backendPathMatch?.[1];
     const suffix = literal ? normalizeStringPathPattern(literal) : null;
     if (!suffix) continue;
+    const apiVersion = helperSource.match(/apiVersion\s*:\s*["'](v1|v2)["']/)?.[1] ?? "v1";
     addTarget({
       kind: "backend_endpoint",
       method,
-      pathPattern: normalizePathPattern(`/api/v1${suffix}`),
+      pathPattern: normalizePathPattern(`/api/${apiVersion}${suffix}`),
       sourceLocator: {
         line: lineFromIndex(source, (match.index ?? 0) + (backendPathMatch?.index ?? 0)),
         matchedText: literal,
@@ -555,6 +557,34 @@ function discoverRequestTargets(source: string): DiscoveredRequestTarget[] {
       confidence: "high",
       verificationStatus: "verified",
       basis: ["static_scan:createAdminBackendProxyRoute"],
+      routeMethod: exportedMethod,
+    });
+  }
+
+  for (const match of source.matchAll(
+    /fetchAdminBackendJson\s*\(\s*([`'"][\s\S]*?[`'"])\s*,\s*\{([\s\S]*?)\n\s*\}\s*\)/g,
+  )) {
+    const literal = match[1];
+    const suffix = literal ? normalizeStringPathPattern(literal) : null;
+    const optionsSource = match[2] ?? "";
+    const apiVersion = optionsSource.match(/apiVersion\s*:\s*["'](v1|v2)["']/)?.[1];
+    if (!suffix || apiVersion !== "v2") continue;
+    const method =
+      optionsSource.match(/method\s*:\s*["'](GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD)["']/i)?.[1]?.toUpperCase() ??
+      "GET";
+    addTarget({
+      kind: "backend_endpoint",
+      method,
+      pathPattern: normalizePathPattern(`/api/${apiVersion}${suffix}`),
+      sourceLocator: {
+        line: lineFromIndex(source, match.index ?? 0),
+        matchedText: literal,
+      },
+      provenance: "static_scan",
+      confidence: "high",
+      verificationStatus: "verified",
+      basis: ["static_scan:fetchAdminBackendJson:explicit_api_version"],
+      routeMethod: method,
     });
   }
 
@@ -1182,15 +1212,23 @@ export function buildAdminApiReferenceInventory(
     const pathPattern = toAppPath(routeFile);
     const methods = detectRouteMethods(record.content);
     const imports = parseImports(routeFile, record.content, knownFiles);
-    const backendMatches = [...record.content.matchAll(/getBackendApiUrl\s*\(\s*([`'"][\s\S]*?[`'"])\s*\)/g)]
+    const backendMatches = [
+      ...record.content.matchAll(
+        /getBackendApiUrl\s*\(\s*([`'"][\s\S]*?[`'"])(?:\s*,\s*["'](v1|v2)["'])?\s*\)/g,
+      ),
+    ]
       .map((match) => ({
         pathPattern: normalizeStringPathPattern(match[1] ?? ""),
+        apiVersion: match[2] ?? "v1",
         line: lineFromIndex(record.content, match.index ?? 0),
         literal: match[1] ?? "",
       }))
-      .filter((match): match is { pathPattern: string; line: number; literal: string } => Boolean(match.pathPattern))
+      .filter(
+        (match): match is { pathPattern: string; apiVersion: string; line: number; literal: string } =>
+          Boolean(match.pathPattern),
+      )
       .map((match) => ({
-        pathPattern: normalizePathPattern(`/api/v1${match.pathPattern}`),
+        pathPattern: normalizePathPattern(`/api/${match.apiVersion}${match.pathPattern}`),
         line: match.line,
         literal: match.literal,
       }));
@@ -1273,6 +1311,7 @@ export function buildAdminApiReferenceInventory(
       }
 
       for (const helperTarget of helperTargets) {
+        if (helperTarget.routeMethod && helperTarget.routeMethod !== methodRecord.method) continue;
         const backendId = buildBackendId(helperTarget.method, helperTarget.pathPattern);
         ensureNode(
           buildNode({

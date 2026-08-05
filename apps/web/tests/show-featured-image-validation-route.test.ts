@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { captureExpectedConsoleWarn } from "./helpers/expected-console";
 
 const {
@@ -9,6 +9,7 @@ const {
   updateShowByIdMock,
   validateShowImageForFieldMock,
   fetchSocialBackendJsonMock,
+  buildAdminProxyErrorResponseMock,
 } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
   getShowByIdMock: vi.fn(),
@@ -16,10 +17,16 @@ const {
   updateShowByIdMock: vi.fn(),
   validateShowImageForFieldMock: vi.fn(),
   fetchSocialBackendJsonMock: vi.fn(),
+  buildAdminProxyErrorResponseMock: vi.fn(),
 }));
 
 vi.mock("@/lib/server/auth", () => ({
   requireAdmin: requireAdminMock,
+  toVerifiedAdminContext: (user: { uid: string; email?: string }) => ({
+    uid: user.uid,
+    email: user.email ?? null,
+    verifiedAt: 42,
+  }),
 }));
 
 vi.mock("@/lib/server/trr-api/trr-shows-repository", () => ({
@@ -34,7 +41,7 @@ vi.mock("@/lib/server/trr-api/admin-read-proxy", () => ({
   invalidateAdminBackendCache: vi.fn(),
   ADMIN_READ_PROXY_SHORT_TIMEOUT_MS: 5_000,
   ADMIN_READ_PROXY_PRIMARY_TIMEOUT_MS: 12_000,
-  buildAdminProxyErrorResponse: vi.fn(),
+  buildAdminProxyErrorResponse: buildAdminProxyErrorResponseMock,
 }));
 
 vi.mock("@/lib/server/trr-api/social-admin-proxy", () => ({
@@ -62,8 +69,20 @@ describe("show route featured image validation", () => {
     updateShowByIdMock.mockReset();
     validateShowImageForFieldMock.mockReset();
     fetchSocialBackendJsonMock.mockReset();
+    buildAdminProxyErrorResponseMock.mockReset();
 
     requireAdminMock.mockResolvedValue({ uid: "admin-user", email: "admin@example.test" });
+    buildAdminProxyErrorResponseMock.mockImplementation(
+      (error: { message: string; status?: number; code?: string; retryable?: boolean }) =>
+        NextResponse.json(
+          {
+            error: error.message,
+            ...(error.code ? { code: error.code } : {}),
+            ...(typeof error.retryable === "boolean" ? { retryable: error.retryable } : {}),
+          },
+          { status: error.status ?? 500 },
+        ),
+    );
     getShowByIdMock.mockResolvedValue({
       id: SHOW_ID,
       name: "Test Show",
@@ -90,10 +109,23 @@ describe("show route featured image validation", () => {
     const payload = await response.json();
 
     expect(response.status).toBe(200);
-    expect(validateShowImageForFieldMock).toHaveBeenCalledWith(SHOW_ID, POSTER_ID, "poster");
+    expect(validateShowImageForFieldMock).toHaveBeenCalledWith(SHOW_ID, POSTER_ID, "poster", {
+      adminContext: {
+        uid: "admin-user",
+        email: "admin@example.test",
+        verifiedAt: 42,
+      },
+    });
     expect(updateShowByIdMock).toHaveBeenCalledWith(
       SHOW_ID,
-      expect.objectContaining({ primaryPosterImageId: POSTER_ID })
+      expect.objectContaining({ primaryPosterImageId: POSTER_ID }),
+      {
+        adminContext: {
+          uid: "admin-user",
+          email: "admin@example.test",
+          verifiedAt: 42,
+        },
+      },
     );
     expect(payload).toHaveProperty("show");
   });
@@ -106,10 +138,28 @@ describe("show route featured image validation", () => {
     });
 
     expect(response.status).toBe(200);
-    expect(validateShowImageForFieldMock).toHaveBeenCalledWith(SHOW_ID, BACKDROP_ID, "backdrop");
+    expect(validateShowImageForFieldMock).toHaveBeenCalledWith(
+      SHOW_ID,
+      BACKDROP_ID,
+      "backdrop",
+      {
+        adminContext: {
+          uid: "admin-user",
+          email: "admin@example.test",
+          verifiedAt: 42,
+        },
+      },
+    );
     expect(updateShowByIdMock).toHaveBeenCalledWith(
       SHOW_ID,
-      expect.objectContaining({ primaryBackdropImageId: BACKDROP_ID })
+      expect.objectContaining({ primaryBackdropImageId: BACKDROP_ID }),
+      {
+        adminContext: {
+          uid: "admin-user",
+          email: "admin@example.test",
+          verifiedAt: 42,
+        },
+      },
     );
   });
 
@@ -172,7 +222,14 @@ describe("show route featured image validation", () => {
       expect.objectContaining({
         primaryPosterImageId: null,
         primaryBackdropImageId: null,
-      })
+      }),
+      {
+        adminContext: {
+          uid: "admin-user",
+          email: "admin@example.test",
+          verifiedAt: 42,
+        },
+      },
     );
   });
 
@@ -185,8 +242,36 @@ describe("show route featured image validation", () => {
     expect(validateShowImageForFieldMock).not.toHaveBeenCalled();
     expect(updateShowByIdMock).toHaveBeenCalledWith(
       SHOW_ID,
-      expect.objectContaining({ name: "Updated Name" })
+      expect.objectContaining({ name: "Updated Name" }),
+      {
+        adminContext: {
+          uid: "admin-user",
+          email: "admin@example.test",
+          verifiedAt: 42,
+        },
+      },
     );
+  });
+
+  it("preserves typed retryable proxy errors from validation", async () => {
+    validateShowImageForFieldMock.mockRejectedValue(
+      Object.assign(new Error("Backend unavailable"), {
+        status: 503,
+        code: "BACKEND_UNAVAILABLE",
+        retryable: true,
+      }),
+    );
+
+    const response = await PUT(buildRequest({ primary_poster_image_id: POSTER_ID }), {
+      params: Promise.resolve({ showId: SHOW_ID }),
+    });
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      error: "Backend unavailable",
+      code: "BACKEND_UNAVAILABLE",
+      retryable: true,
+    });
   });
 
   it("syncs saved show handles into show-assigned shared account sources", async () => {
@@ -217,6 +302,13 @@ describe("show route featured image validation", () => {
           instagram: "thetraitorsus",
         }),
       }),
+      {
+        adminContext: {
+          uid: "admin-user",
+          email: "admin@example.test",
+          verifiedAt: 42,
+        },
+      },
     );
     expect(fetchSocialBackendJsonMock).toHaveBeenNthCalledWith(
       1,
@@ -277,7 +369,14 @@ describe("show route featured image validation", () => {
         name: "Test Show",
         slug: "rhoslc",
         alternativeNames: ["rhoslc", "Salt Lake"],
-      })
+      }),
+      {
+        adminContext: {
+          uid: "admin-user",
+          email: "admin@example.test",
+          verifiedAt: 42,
+        },
+      },
     );
   });
 
@@ -321,7 +420,14 @@ describe("show route featured image validation", () => {
       SHOW_ID,
       expect.objectContaining({
         alternativeNames: ["test-show", "Bravo Alias"],
-      })
+      }),
+      {
+        adminContext: {
+          uid: "admin-user",
+          email: "admin@example.test",
+          verifiedAt: 42,
+        },
+      },
     );
   });
 });

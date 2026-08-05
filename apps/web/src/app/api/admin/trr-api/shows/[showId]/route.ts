@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/server/auth";
+import { requireAdmin, toVerifiedAdminContext } from "@/lib/server/auth";
 import {
   getShowById,
   getShowByExactSlug,
@@ -459,6 +459,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 export async function PUT(request: NextRequest, { params }: RouteParams) {
   try {
     const user = await requireAdmin(request);
+    const adminContext = toVerifiedAdminContext(user);
     const { showId } = await params;
 
     if (!showId) {
@@ -581,7 +582,8 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       const isValidPoster = await validateShowImageForField(
         showId,
         primaryPosterImageId,
-        "poster"
+        "poster",
+        { adminContext },
       );
       if (!isValidPoster) {
         console.warn("[api] Rejected invalid featured poster image assignment", {
@@ -600,7 +602,8 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       const isValidBackdrop = await validateShowImageForField(
         showId,
         primaryBackdropImageId,
-        "backdrop"
+        "backdrop",
+        { adminContext },
       );
       if (!isValidBackdrop) {
         console.warn("[api] Rejected invalid featured backdrop image assignment", {
@@ -664,7 +667,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       ...(primaryPosterImageId !== undefined ? { primaryPosterImageId } : {}),
       ...(primaryBackdropImageId !== undefined ? { primaryBackdropImageId } : {}),
       ...(primaryLogoImageId !== undefined ? { primaryLogoImageId } : {}),
-    });
+    }, { adminContext });
 
     if (!show) {
       return NextResponse.json({ error: "Show not found" }, { status: 404 });
@@ -720,9 +723,6 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       );
     }
     console.error("[api] Failed to update TRR show", error);
-    const message = error instanceof Error ? error.message : "failed";
-    const status =
-      message === "unauthorized" ? 401 : message === "forbidden" ? 403 : 500;
-    return NextResponse.json({ error: message }, { status });
+    return buildAdminProxyErrorResponse(error);
   }
 }
