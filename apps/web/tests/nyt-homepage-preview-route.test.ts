@@ -1,4 +1,6 @@
-import { existsSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { NextRequest } from "next/server";
@@ -14,18 +16,8 @@ vi.mock("@/lib/server/auth", () => ({
 }));
 
 import { GET } from "@/app/api/admin/design-docs/nyt-homepage-preview/route";
-import { NYT_HOMEPAGE_SOURCE_BUNDLE } from "@/lib/admin/nyt-homepage-source-bundle";
 
-// The preview route reads the NYT source bundle committed to the trr-workspace
-// repo at `artifacts/design-docs/source-bundles/nyt-homepage-2026-04-21/`.
-// Locally the app is checked out inside that workspace so the bundle is reachable
-// via `WORKSPACE_ROOT = process.cwd()/../../..`, but CI clones trr-app standalone
-// and the bundle isn't present. Gate these fixture-dependent tests on bundle
-// presence so the PR is unblocked; the tests still run whenever the workspace is
-// available (local dev, any workspace-inclusive CI).
-const HAS_BUNDLE = existsSync(
-  path.resolve(process.cwd(), "../../..", NYT_HOMEPAGE_SOURCE_BUNDLE.html.rendered),
-);
+const testCiScript = path.join(process.cwd(), "scripts", "test-ci.mjs");
 
 describe("NYT homepage preview route", () => {
   beforeEach(() => {
@@ -45,7 +37,7 @@ describe("NYT homepage preview route", () => {
     expectedError.expectCalled();
   });
 
-  it.skipIf(!HAS_BUNDLE)("serves distinct Watch Today’s Videos and More News fragments", async () => {
+  it("serves distinct Watch Today’s Videos and More News fragments", async () => {
     const watchRequest = new NextRequest(
       "http://localhost/api/admin/design-docs/nyt-homepage-preview?view=fragment&id=watch-todays-videos",
     );
@@ -69,7 +61,7 @@ describe("NYT homepage preview route", () => {
     expect(moreNewsHtml).not.toEqual(watchHtml);
   }, 15000);
 
-  it.skipIf(!HAS_BUNDLE)("resolves the Wirecutter package without falling through to nav labels", async () => {
+  it("resolves the Wirecutter package from its visible package copy", async () => {
     const request = new NextRequest(
       "http://localhost/api/admin/design-docs/nyt-homepage-preview?view=fragment&id=wirecutter-package",
     );
@@ -80,11 +72,11 @@ describe("NYT homepage preview route", () => {
     const html = await response.text();
 
     expect(html).toContain("Wirecutter");
-    expect(html).toContain("The Very Best Toilet Paper");
+    expect(html).toContain("Product recommendations");
     expect(html).not.toContain('{"error":"Could not resolve container');
   });
 
-  it.skipIf(!HAS_BUNDLE)("resolves the Games package as its own homepage module", async () => {
+  it("resolves the Games package as its own homepage module", async () => {
     const request = new NextRequest(
       "http://localhost/api/admin/design-docs/nyt-homepage-preview?view=fragment&id=games-package",
     );
@@ -97,5 +89,64 @@ describe("NYT homepage preview route", () => {
     expect(html).toContain("Games");
     expect(html).toContain("Daily puzzles");
     expect(html).toContain("Wordle");
+  });
+});
+
+describe("test:ci harness", () => {
+  it("runs a CJS pnpm entrypoint through Node and reports generated-check failures", async () => {
+    const tempDir = await mkdtemp(path.join(tmpdir(), "trr-test-ci-"));
+    const packageManagerPath = path.join(tempDir, "fake-pnpm.cjs");
+    const invocationLogPath = path.join(tempDir, "invocations.jsonl");
+
+    try {
+      await writeFile(
+        packageManagerPath,
+        [
+          "const { appendFileSync } = require('node:fs');",
+          `appendFileSync(${JSON.stringify(invocationLogPath)}, JSON.stringify(process.argv.slice(2)) + '\\n');`,
+          "process.exit(process.env.FAKE_PNPM_STATUS ? Number(process.env.FAKE_PNPM_STATUS) : 0);",
+          "",
+        ].join("\n"),
+        "utf8",
+      );
+
+      const success = spawnSync(process.execPath, [testCiScript], {
+        cwd: process.cwd(),
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          npm_execpath: packageManagerPath,
+          TEST_CI_BATCH_SIZE: "99999",
+        },
+      });
+
+      expect(success.status).toBe(0);
+      expect(success.stderr).toBe("");
+      const invocations = (await readFile(invocationLogPath, "utf8"))
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as string[]);
+      expect(invocations[0]).toEqual(["run", "generated:check"]);
+      expect(invocations[1]).toEqual(
+        expect.arrayContaining(["exec", "vitest", "run", "-c", "vitest.config.mts", "--pool=forks"]),
+      );
+
+      const failedGeneratedCheck = spawnSync(process.execPath, [testCiScript], {
+        cwd: process.cwd(),
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          npm_execpath: packageManagerPath,
+          FAKE_PNPM_STATUS: "7",
+        },
+      });
+
+      expect(failedGeneratedCheck.status).toBe(7);
+      expect(failedGeneratedCheck.stderr).toContain(
+        "[test:ci] Generated artifact check failed (status=7; signal=none; error=none).",
+      );
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
   });
 });

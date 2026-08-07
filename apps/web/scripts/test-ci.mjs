@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { readdirSync } from 'node:fs';
+import { accessSync, constants, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
@@ -59,22 +59,68 @@ console.log(
 const nodeOptions = [`--max-old-space-size=${heapMb}`, process.env.NODE_OPTIONS]
   .filter(Boolean)
   .join(' ');
-const pnpmCommand =
-  process.env.npm_execpath && process.env.npm_execpath.includes('pnpm')
-    ? process.env.npm_execpath
-    : 'pnpm';
+function resolvePackageManagerInvocation() {
+  const npmExecPath = process.env.npm_execpath;
+  if (npmExecPath && /pnpm(?:\.[cm]?js)?$/i.test(path.basename(npmExecPath))) {
+    const extension = path.extname(npmExecPath).toLowerCase();
+    if (extension === '.js' || extension === '.cjs' || extension === '.mjs') {
+      return {
+        command: process.execPath,
+        args: [npmExecPath],
+        label: `${process.execPath} ${npmExecPath}`,
+      };
+    }
+
+    try {
+      accessSync(npmExecPath, constants.X_OK);
+      return { command: npmExecPath, args: [], label: npmExecPath };
+    } catch {
+      console.error(`[test:ci] npm_execpath is not executable: ${npmExecPath}`);
+      process.exit(1);
+    }
+  }
+
+  const executable = process.env.PATH?.split(path.delimiter)
+    .map((directory) => path.join(directory, 'pnpm'))
+    .find((candidate) => {
+      try {
+        accessSync(candidate, constants.X_OK);
+        return true;
+      } catch {
+        return false;
+      }
+    });
+
+  if (!executable) {
+    console.error('[test:ci] Could not find an executable pnpm binary on PATH.');
+    process.exit(1);
+  }
+
+  return { command: executable, args: [], label: executable };
+}
+
+function exitForSpawnResult(label, result) {
+  const status = result.status === null ? 'null' : String(result.status);
+  const signal = result.signal ?? 'none';
+  const error = result.error ? result.error.message : 'none';
+
+  if (result.error || result.signal || result.status !== 0) {
+    console.error(`[test:ci] ${label} failed (status=${status}; signal=${signal}; error=${error}).`);
+    process.exit(result.status ?? 1);
+  }
+}
+
+const packageManager = resolvePackageManagerInvocation();
 
 console.log('[test:ci] Checking generated artifacts before Vitest batches.');
 
-const generatedCheck = spawnSync(pnpmCommand, ['run', 'generated:check'], {
+const generatedCheck = spawnSync(packageManager.command, [...packageManager.args, 'run', 'generated:check'], {
   cwd: process.cwd(),
   stdio: 'inherit',
   env: process.env,
 });
 
-if (generatedCheck.status !== 0) {
-  process.exit(generatedCheck.status ?? 1);
-}
+exitForSpawnResult('Generated artifact check', generatedCheck);
 
 for (const [index, batch] of batches.entries()) {
   const batchNumber = index + 1;
@@ -85,8 +131,9 @@ for (const [index, batch] of batches.entries()) {
   console.log(`\n[test:ci] Batch ${batchNumber}/${batches.length} (${batch.length} files)`);
 
   const result = spawnSync(
-    pnpmCommand,
+    packageManager.command,
     [
+      ...packageManager.args,
       'exec',
       'vitest',
       'run',
@@ -106,7 +153,5 @@ for (const [index, batch] of batches.entries()) {
     },
   );
 
-  if (result.status !== 0) {
-    process.exit(result.status ?? 1);
-  }
+  exitForSpawnResult(`Vitest batch ${batchNumber}/${batches.length}`, result);
 }

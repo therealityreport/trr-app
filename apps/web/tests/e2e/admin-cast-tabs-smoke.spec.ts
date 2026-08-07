@@ -40,7 +40,7 @@ const showRoles = [
 
 test.describe("cast + season tabs smoke (mocked)", () => {
   const startAndWaitForCancel = async (page: Page, startButtonName: string) => {
-    const startButton = page.getByRole("button", { name: startButtonName });
+    const startButton = page.getByRole("button", { name: startButtonName }).first();
     await expect(startButton).toBeVisible({ timeout: 20_000 });
 
     // Hydration timing can swallow the first click in Next dev mode.
@@ -99,11 +99,7 @@ test.describe("cast + season tabs smoke (mocked)", () => {
     await waitForAdminReady(page);
 
     const firstRefreshButton = page.getByRole("button", { name: "Refresh Person" }).first();
-    await expect(firstRefreshButton).toBeVisible({ timeout: 20_000 });
-    await firstRefreshButton.click();
-
-    const cancelButton = page.getByRole("button", { name: "Cancel" }).first();
-    await expect(cancelButton).toBeVisible({ timeout: 5_000 });
+    const cancelButton = await startAndWaitForCancel(page, "Refresh Person");
     try {
       await cancelButton.click({ timeout: 2_000 });
     } catch {

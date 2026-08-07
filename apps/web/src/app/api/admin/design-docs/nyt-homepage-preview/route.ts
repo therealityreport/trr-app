@@ -1,4 +1,4 @@
-import { access, readFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 
 import { JSDOM, VirtualConsole } from "jsdom";
@@ -57,25 +57,21 @@ function resolveFilePath(filePath: string) {
   return path.isAbsolute(filePath) ? filePath : path.resolve(WORKSPACE_ROOT, filePath);
 }
 
-async function canReadFile(filePath: string) {
-  try {
-    await access(resolveFilePath(filePath));
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 async function getHomepageSource(): Promise<HomepageSource> {
-  const savedPageHtml = NYT_HOMEPAGE_SOURCE_BUNDLE.savedPage.html;
-  if (await canReadFile(savedPageHtml)) {
-    return {
-      mode: "saved-page",
-      htmlPath: savedPageHtml,
-      assetDirectory: NYT_HOMEPAGE_SOURCE_BUNDLE.savedPage.assetDirectory,
-    };
-  }
-
+  // Keep previews deterministic across developer environments and CI.
+  //
+  // The original saved-page capture may exist on a local external volume,
+  // but that volume is not part of the app contract. All preview fragments
+  // therefore resolve against the committed workspace bundle below.
+  //
+  // Its captured HTML and assets travel with the workspace, ensuring every
+  // admin preview uses the same snapshot whether or not a personal archive is
+  // mounted. The saved-page metadata remains historical provenance only.
+  //
+  // Do not add a runtime fallback to the external saved-page path.
+  //
+  // This also keeps the focused route tests self-contained.
+  //
   return {
     mode: "workspace-bundle",
     htmlPath: NYT_HOMEPAGE_SOURCE_BUNDLE.html.rendered,
@@ -368,6 +364,10 @@ async function extractClosestFromText(label: string, classToken: string) {
   return stripScriptsFromMarkup(container.outerHTML);
 }
 
+async function extractPackageFromVisibleText(label: string, classToken: string) {
+  return extractClosestFromText(label, classToken);
+}
+
 async function extractProgrammingNodeByIndex(index: number, hierarchy: "zone" | "container" | "feed") {
   const { document } = await loadHomepageDocument();
   const nodes = [...document.querySelectorAll(`[data-testid="programming-node"][data-hierarchy="${hierarchy}"]`)];
@@ -434,7 +434,7 @@ async function resolveFragmentMarkup(id: string): Promise<string> {
     case "cooking-package":
       return extractClosestFromSelector('[data-pers*="home-packages-cooking-addon"]', "css-1w1paqe");
     case "wirecutter-package":
-      return extractClosestFromSelector('[data-pers*="home-packages-wirecutter"]', "css-1w1paqe");
+      return extractPackageFromVisibleText("Product recommendations", "isPersonalizedPackage");
     case "games-package":
       return extractClosestFromText("Daily puzzles", "css-17jkqqy");
     default:
