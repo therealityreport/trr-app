@@ -14,8 +14,8 @@ function runSafeBuild(env: NodeJS.ProcessEnv, args: string[] = []) {
       ...process.env,
       CI: undefined,
       GITHUB_ACTIONS: undefined,
-      ...env,
       npm_execpath: undefined,
+      ...env,
     },
   });
 }
@@ -58,6 +58,16 @@ describe("safe-next-build", () => {
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("cpus=3");
     expect(result.stdout).toContain("nice=12");
+  });
+
+  it("runs a pinned pnpm JavaScript entrypoint through Node", () => {
+    const result = runSafeBuild({
+      TRR_BUILD_DRY_RUN: "1",
+      npm_execpath: "/tmp/pnpm.cjs",
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain(`${process.execPath} /tmp/pnpm.cjs exec next build --webpack`);
   });
 
   it("routes turbopack builds through the same safe build guard", () => {

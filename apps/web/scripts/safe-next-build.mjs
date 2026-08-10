@@ -63,6 +63,9 @@ const pnpmCommand =
   process.env.npm_execpath && process.env.npm_execpath.includes('pnpm')
     ? process.env.npm_execpath
     : 'pnpm';
+const pnpmInvocation = /\.[cm]?js$/i.test(pnpmCommand)
+  ? [process.execPath, pnpmCommand]
+  : [pnpmCommand];
 const cliArgs = process.argv.slice(2);
 const useTurbopack = cliArgs.includes('--turbopack');
 const forwardedCliArgs = cliArgs.filter((arg) => arg !== '--turbopack');
@@ -82,8 +85,11 @@ if (!isCi) {
   }
 }
 
-const command = !isCi && process.platform !== 'win32' ? 'nice' : pnpmCommand;
-const args = command === 'nice' ? ['-n', String(localNice), pnpmCommand, ...nextArgs] : nextArgs;
+const command = !isCi && process.platform !== 'win32' ? 'nice' : pnpmInvocation[0];
+const args =
+  command === 'nice'
+    ? ['-n', String(localNice), ...pnpmInvocation, ...nextArgs]
+    : [...pnpmInvocation.slice(1), ...nextArgs];
 const summary = [
   `free=${formatGib(freeGib)}`,
   swapUsedGib === null ? null : `swap=${formatGib(swapUsedGib)}`,
