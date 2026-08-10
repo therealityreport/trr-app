@@ -21,19 +21,18 @@ function runSafeBuild(env: NodeJS.ProcessEnv, args: string[] = []) {
 }
 
 describe("safe-next-build", () => {
-  it("refuses to start a local build when the configured free-memory floor is not met", () => {
+  it("does not block a local build on legacy free-memory and swap thresholds", () => {
     const result = runSafeBuild({
       TRR_BUILD_DRY_RUN: "1",
       TRR_BUILD_MIN_FREE_GB: "999",
-      TRR_BUILD_MAX_SWAP_USED_GB: "999",
+      TRR_BUILD_MAX_SWAP_USED_GB: "0.001",
     });
 
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain("Refusing to start local production build");
-    expect(result.stderr).toContain("free memory");
-    expect(result.stderr).toContain("Practical next steps");
-    expect(result.stderr).toContain("TRR_NEXT_BUILD_CPUS=1");
-    expect(result.stderr).not.toContain("next build --webpack");
+    expect(result.status).toBe(0);
+    expect(result.stderr).not.toContain("Refusing to start local production build");
+    expect(result.stdout).toContain("cpus=2");
+    expect(result.stdout).toContain("nice=10");
+    expect(result.stdout).toContain("next build --webpack");
   });
 
   it("prints the lowered-priority dry-run command with the default local worker cap", () => {
