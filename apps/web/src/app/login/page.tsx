@@ -58,17 +58,6 @@ function LoginContent() {
       const signInCred = await signInWithEmailAndPassword(auth, email.trim(), password);
       const user = signInCred.user;
 
-      // Establish server session cookie
-      try {
-        const idToken = await user.getIdToken();
-        await fetch("/api/session/login", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ idToken }),
-          credentials: "include",
-        });
-      } catch {}
-
       // Check if they have a complete profile
       try {
         const profile = await getUserProfile(user.uid);

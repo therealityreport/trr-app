@@ -41,20 +41,6 @@ function OAuthCallbackRedirectContent() {
             return;
           }
           
-          try {
-            const idToken = await u.getIdToken();
-            console.log("Auth complete: Got ID token, calling session login");
-            const sessionResponse = await fetch("/api/session/login", {
-              method: "POST",
-              headers: { "content-type": "application/json" },
-              body: JSON.stringify({ idToken }),
-              credentials: "include",
-            });
-            console.log("Auth complete: Session login response", sessionResponse.status);
-          } catch (error) {
-            console.error("Auth complete: Session login failed", error);
-          }
-          
           // Check if user has a complete profile
           try {
             console.log("Auth complete: Checking user profile for uid:", u.uid);
@@ -129,20 +115,6 @@ function OAuthCallbackRedirectContent() {
       }
       
       console.log("Auth complete: User found", { uid: u.uid, email: u.email });
-      
-      try {
-        const idToken = await u.getIdToken();
-        console.log("Auth complete: Got ID token, calling session login");
-        const sessionResponse = await fetch("/api/session/login", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ idToken }),
-          credentials: "include",
-        });
-        console.log("Auth complete: Session login response", sessionResponse.status);
-      } catch (error) {
-        console.error("Auth complete: Session login failed", error);
-      }
       
       // Check if user has a complete profile
       try {

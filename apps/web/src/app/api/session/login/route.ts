@@ -37,7 +37,10 @@ export async function POST(req: NextRequest) {
     const useEmulators = (process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATORS ?? "false").toLowerCase() === "true";
 
     if (!hasServiceAccount && !useEmulators) {
-      return NextResponse.json({ ok: true, warning: "no_session_cookie", provider: authProvider, shadowMode: authShadowMode });
+      return NextResponse.json(
+        { error: "session_cookie_unavailable", provider: authProvider, shadowMode: authShadowMode },
+        { status: 503 },
+      );
     }
 
     const expiresIn = 14 * 24 * 60 * 60 * 1000; // 14 days

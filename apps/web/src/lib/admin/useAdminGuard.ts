@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import type { User } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import { checkServerAdminAccess } from "./client-access";
+import { ensureFirebaseServerSession } from "@/lib/server-session-sync";
 import { isDevAdminBypassEnabledClient, isLocalDevHostname } from "./dev-admin-bypass";
 
 const TRANSIENT_UNAUTH_GRACE_MS = 2500;
@@ -244,18 +245,21 @@ export function useAdminGuard() {
       pendingHasAccess = false;
       setChecking(true);
 
-      void checkServerAdminAccess(currentUser).then((result) => {
-        if (!mounted || accessCheckId !== currentAccessCheckId || pendingUserKey !== nextUserKey) {
-          return;
-        }
-        accessCheckPending = false;
-        if (result === "unavailable") {
-          accessCheckUnavailable = true;
-          setChecking(false);
-          return;
-        }
-        applyResolvedAccess(nextUserKey, prevUserKey, result === "allowed");
-      });
+      void ensureFirebaseServerSession(auth, currentUser)
+        .then(() => checkServerAdminAccess(currentUser))
+        .catch(() => "unavailable" as const)
+        .then((result) => {
+          if (!mounted || accessCheckId !== currentAccessCheckId || pendingUserKey !== nextUserKey) {
+            return;
+          }
+          accessCheckPending = false;
+          if (result === "unavailable") {
+            accessCheckUnavailable = true;
+            setChecking(false);
+            return;
+          }
+          applyResolvedAccess(nextUserKey, prevUserKey, result === "allowed");
+        });
     };
 
     const markAuthReady = () => {

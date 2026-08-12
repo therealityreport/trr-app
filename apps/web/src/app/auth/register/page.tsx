@@ -145,17 +145,6 @@ function RegisterContent() {
         const signInCred = await signInWithEmailAndPassword(auth, email.trim(), password);
         const user = signInCred.user;
 
-        // Establish server session cookie
-        try {
-          const idToken = await user.getIdToken();
-          await fetch("/api/session/login", {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ idToken }),
-            credentials: "include",
-          });
-        } catch {}
-
         // Check if they have a complete profile
         try {
           const profile = await getUserProfile(user.uid);
@@ -198,16 +187,6 @@ function RegisterContent() {
       if (name.trim()) {
         try { await updateProfile(user, { displayName: name.trim() }); } catch {}
       }
-      // Establish server session cookie
-      try {
-        const idToken = await user.getIdToken();
-        await fetch("/api/session/login", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ idToken }),
-          credentials: "include",
-        });
-      } catch {}
       // Partial profile (finish later)
       await upsertUserProfile(user.uid, {
         uid: user.uid,
@@ -237,14 +216,7 @@ function RegisterContent() {
     setFormError(null);
     try {
       const provider = new OAuthProvider("apple.com");
-      const result = await signInWithPopup(auth, provider);
-      const idToken = await result.user.getIdToken();
-      await fetch("/api/session/login", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ idToken }),
-        credentials: "include",
-      });
+      await signInWithPopup(auth, provider);
       router.replace("/auth/complete");
     } catch (err: unknown) {
       const message = getFriendlyError(err);

@@ -230,22 +230,6 @@ function FinishProfileContent() {
       
       console.log("Finish: Current user", { uid: u.uid, email: u.email });
       
-      // Defensive: ensure server session cookie exists
-      try {
-        const idToken = await u.getIdToken();
-        console.log("Finish: Got ID token, calling session login");
-        const response = await fetch("/api/session/login", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ idToken }),
-          credentials: "include",
-        });
-        console.log("Finish: Session login response", response.status);
-      } catch (sessionError) {
-        console.warn("Finish: Session login failed", sessionError);
-        // Continue anyway - client auth should work
-      }
-      
       const provider = u.providerData?.[0]?.providerId ?? "password";
       const isUS = country.trim() === "United States";
       const payload: Partial<UserProfile> = {

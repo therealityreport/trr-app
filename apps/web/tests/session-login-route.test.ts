@@ -74,4 +74,25 @@ describe("session login route", () => {
       { authProvider: "supabase" },
     );
   });
+
+  it("returns a non-success status when Firebase cannot issue a durable cookie", async () => {
+    process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATORS = "false";
+    delete process.env.FIREBASE_SERVICE_ACCOUNT;
+
+    const { POST } = await import("@/app/api/session/login/route");
+    const response = await POST(
+      new NextRequest("http://localhost/api/session/login", {
+        method: "POST",
+        body: JSON.stringify({ idToken: "x".repeat(32) }),
+      }),
+    );
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({
+      error: "session_cookie_unavailable",
+      provider: "firebase",
+    });
+    expect(response.cookies.get("__session")).toBeUndefined();
+    expect(createSessionCookieMock).not.toHaveBeenCalled();
+  });
 });

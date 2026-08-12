@@ -14,6 +14,10 @@ import {
   assertValidFirebaseClientConfig,
   firebaseClientConfig,
 } from "@/lib/firebase-client-config";
+import {
+  ensureFirebaseServerSession,
+  registerFirebaseServerSessionSync,
+} from "@/lib/server-session-sync";
 
 // Initialize (or reuse) the Firebase app once per runtime
 assertValidFirebaseClientConfig();
@@ -24,6 +28,8 @@ export const auth = getAuth(app);
 
 // Optional: connect to local emulators for development/testing
 if (typeof window !== "undefined") {
+  registerFirebaseServerSessionSync(auth);
+
   if (FIREBASE_USE_EMULATORS) {
     try {
       connectAuthEmulator(auth, "http://localhost:9099", { disableWarnings: true });
@@ -87,30 +93,11 @@ export async function signInWithGoogle(): Promise<boolean> {
     // Don't request birthday scope to avoid 403 errors
     // provider.addScope("https://www.googleapis.com/auth/user.birthday.read");
     
-    const result = await signInWithPopup(auth, provider);
+    await signInWithPopup(auth, provider);
 
     // Skip Google People API call since it's causing 403 errors
     // The birthday field will be filled in the finish form instead
     
-    // Establish a server session cookie for SSR guards
-    const idToken = await result.user.getIdToken();
-    
-    if (idToken) {
-      const response = await fetch("/api/session/login", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ idToken }),
-        credentials: "include",
-      });
-      
-      if (!response.ok) {
-        // Avoid console.error here; in dev Next treats console.error as an overlay-level error.
-        console.warn("Session login failed:", response.status, await response.text());
-      }
-    } else {
-      console.warn("No ID token available");
-    }
-
     return true;
   } catch (err: unknown) {
     const { code, message } = normalizeAuthError(err);
@@ -143,10 +130,8 @@ export async function signInWithGoogle(): Promise<boolean> {
 }
 
 export async function logout(): Promise<void> {
-  try {
-    await fetch("/api/session/logout", { method: "POST", credentials: "include" });
-  } catch {}
   await signOut(auth);
+  await ensureFirebaseServerSession(auth, null);
 }
 
 // Analytics (no-op on unsupported envs like some SSR contexts)
