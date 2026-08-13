@@ -3,8 +3,8 @@ import type { AdminApiReferenceInventory } from "@/lib/admin/api-references/type
 export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
   "inventorySchemaVersion": "1.0.0",
   "generatorVersion": "1.0.0",
-  "generatedAt": "2026-08-13T06:58:11.233Z",
-  "sourceCommitSha": "fae044d86cf2716114acd0c667f96869bef5f735",
+  "generatedAt": "2026-08-13T09:14:32.034Z",
+  "sourceCommitSha": "7502d184448aeb7db3d3bef6101315adb017d666",
   "overrideDigest": "ab48dccad1d5b9faafd4ef40e8374574768e133192929e6264ff8727fbaf68e1",
   "nodes": [
     {
@@ -7567,7 +7567,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/design-docs/nyt-homepage-preview/route.ts",
       "sourceLocator": {
-        "line": 608,
+        "line": 296,
         "symbol": "GET"
       },
       "provenance": "static_scan",
@@ -7582,16 +7582,15 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "automatic": false,
       "loadsLargeDatasets": false,
       "usesPagination": false,
-      "returnsWideRowsOrBlobsOrRawJson": true,
+      "returnsWideRowsOrBlobsOrRawJson": false,
       "fansOutQueries": true,
       "postgresAccess": "none",
       "viewKinds": [
         "gallery",
-        "list",
-        "detail"
+        "list"
       ],
       "staticOnly": false,
-      "payloadRisk": "high",
+      "payloadRisk": "low",
       "fanoutRisk": "high"
     },
     {
