@@ -1,12 +1,15 @@
-import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { gunzip } from "node:zlib";
-import { promisify } from "node:util";
 
 import { NextRequest, NextResponse } from "next/server";
 
 import { NYT_HOMEPAGE_SOURCE_BUNDLE } from "@/lib/admin/nyt-homepage-source-bundle";
+import {
+  decodeGeneratedArtifact,
+  type GeneratedPreviewManifest,
+  MAX_UNCOMPRESSED_ARTIFACT_BYTES,
+  resolveFragmentArtifactIds,
+} from "@/lib/admin/nyt-homepage-preview-runtime";
 import { requireAdmin } from "@/lib/server/auth";
 
 export const dynamic = "force-dynamic";
@@ -19,67 +22,9 @@ const GENERATED_PREVIEW_ROOT = path.resolve(
   "data/nyt-homepage-2026-04-21/generated-preview",
 );
 const GENERATED_MANIFEST_PATH = path.join(GENERATED_PREVIEW_ROOT, "manifest.json");
-const gunzipAsync = promisify(gunzip);
 const LOCAL_ASSET_VIEW = "saved-asset";
-const MAX_UNCOMPRESSED_ARTIFACT_BYTES = 4 * 1024 * 1024;
 const PREVIEW_CACHE_CONTROL = "private, max-age=60";
 const PREVIEW_GENERATOR_VERSION = "1.0.0";
-const GENERATED_FRAGMENT_IDS = new Set([
-  "edition-rail",
-  "masthead",
-  "nested-nav",
-  "lead-programming",
-  "watch-todays-videos",
-  "more-news",
-  "site-index",
-  "footer",
-  "betamax-player",
-  "tip-strip",
-  "poetry-promo",
-  "weather-strip",
-  "opinion-label",
-  "well-package",
-  "culture-lifestyle-package",
-  "athletic-package",
-  "audio-package",
-  "cooking-package",
-  "wirecutter-package",
-  "games-package",
-]);
-const COMBINED_FRAGMENT_IDS: Record<string, string[]> = {
-  "inline-interactives": ["tip-strip", "poetry-promo", "weather-strip", "opinion-label"],
-  "product-rails": [
-    "well-package",
-    "culture-lifestyle-package",
-    "athletic-package",
-    "audio-package",
-    "cooking-package",
-    "wirecutter-package",
-    "games-package",
-  ],
-};
-
-type PreviewArtifact = {
-  path: string;
-  uncompressedBytes: number;
-  compressedBytes: number;
-  compressedSha256: string;
-  uncompressedSha256: string;
-};
-
-type GeneratedPreviewManifest = {
-  schemaVersion: number;
-  generatorVersion: string;
-  maximumUncompressedArtifactBytes: number;
-  source: {
-    path: string;
-    compressedBytes: number;
-    compressedSha256: string;
-    uncompressedBytes: number;
-    uncompressedSha256: string;
-  };
-  artifacts: Record<string, PreviewArtifact>;
-};
 
 function resolveFilePath(filePath: string) {
   if (path.isAbsolute(filePath)) return filePath;
@@ -89,18 +34,6 @@ function resolveFilePath(filePath: string) {
 
 async function readSourceBinary(filePath: string) {
   return readFile(resolveFilePath(filePath));
-}
-
-function sha256(value: Buffer) {
-  return createHash("sha256").update(value).digest("hex");
-}
-
-function isStaticArtifactPath(value: string) {
-  return (
-    value === "page.html.gz" ||
-    (/^fragments\/[a-z0-9-]+\.html\.gz$/.test(value) &&
-      path.posix.normalize(value) === value)
-  );
 }
 
 async function loadGeneratedManifest(): Promise<GeneratedPreviewManifest> {
@@ -120,48 +53,6 @@ async function loadGeneratedManifest(): Promise<GeneratedPreviewManifest> {
     throw new Error("Invalid generated NYT preview manifest");
   }
   return parsed as GeneratedPreviewManifest;
-}
-
-async function decodeGeneratedArtifact(
-  logicalId: string,
-  manifest: GeneratedPreviewManifest,
-  artifact: PreviewArtifact | undefined,
-  compressed: Buffer,
-) {
-  if (!artifact) {
-    throw new Error(`Unknown homepage fragment "${logicalId}"`);
-  }
-  if (
-    !isStaticArtifactPath(artifact.path) ||
-    !Number.isSafeInteger(artifact.compressedBytes) ||
-    !Number.isSafeInteger(artifact.uncompressedBytes) ||
-    artifact.compressedBytes < 1 ||
-    artifact.uncompressedBytes < 1 ||
-    artifact.uncompressedBytes > MAX_UNCOMPRESSED_ARTIFACT_BYTES ||
-    artifact.uncompressedBytes > manifest.maximumUncompressedArtifactBytes ||
-    !/^[a-f0-9]{64}$/.test(artifact.compressedSha256) ||
-    !/^[a-f0-9]{64}$/.test(artifact.uncompressedSha256)
-  ) {
-    throw new Error(`Invalid generated NYT preview artifact "${logicalId}"`);
-  }
-
-  if (
-    compressed.byteLength !== artifact.compressedBytes ||
-    sha256(compressed) !== artifact.compressedSha256
-  ) {
-    throw new Error(`Generated NYT preview artifact integrity check failed for "${logicalId}"`);
-  }
-
-  const uncompressed = await gunzipAsync(compressed, {
-    maxOutputLength: MAX_UNCOMPRESSED_ARTIFACT_BYTES,
-  });
-  if (
-    uncompressed.byteLength !== artifact.uncompressedBytes ||
-    sha256(uncompressed) !== artifact.uncompressedSha256
-  ) {
-    throw new Error(`Generated NYT preview artifact size check failed for "${logicalId}"`);
-  }
-  return uncompressed.toString("utf8");
 }
 
 async function readGeneratedArtifact(logicalId: string) {
@@ -274,17 +165,6 @@ async function renderFragmentDocument(request: NextRequest, id: string) {
   });
 }
 
-function resolveFragmentArtifactIds(id: string) {
-  if (!GENERATED_FRAGMENT_IDS.has(id) && !(id in COMBINED_FRAGMENT_IDS)) {
-    throw new Error(`Unknown homepage fragment "${id}"`);
-  }
-  return COMBINED_FRAGMENT_IDS[id] ?? [id];
-}
-
-export const NYT_HOMEPAGE_PREVIEW_TESTING = {
-  decodeGeneratedArtifact,
-  resolveFragmentArtifactIds,
-};
 
 function adminErrorStatus(error: unknown) {
   const message = error instanceof Error ? error.message : "failed";

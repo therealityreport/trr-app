@@ -17,10 +17,11 @@ vi.mock("@/lib/server/auth", () => ({
   requireAdmin: requireAdminMock,
 }));
 
+import { GET } from "@/app/api/admin/design-docs/nyt-homepage-preview/route";
 import {
-  GET,
-  NYT_HOMEPAGE_PREVIEW_TESTING,
-} from "@/app/api/admin/design-docs/nyt-homepage-preview/route";
+  decodeGeneratedArtifact,
+  resolveFragmentArtifactIds,
+} from "@/lib/admin/nyt-homepage-preview-runtime";
 
 const testCiScript = path.join(process.cwd(), "scripts", "test-ci.mjs");
 const gunzipAsync = promisify(gunzip);
@@ -180,16 +181,16 @@ describe("NYT homepage preview route", () => {
   });
 
   it("preserves exact composite order and one artifact per leaf request", () => {
-    expect(NYT_HOMEPAGE_PREVIEW_TESTING.resolveFragmentArtifactIds("wirecutter-package")).toEqual([
+    expect(resolveFragmentArtifactIds("wirecutter-package")).toEqual([
       "wirecutter-package",
     ]);
-    expect(NYT_HOMEPAGE_PREVIEW_TESTING.resolveFragmentArtifactIds("inline-interactives")).toEqual([
+    expect(resolveFragmentArtifactIds("inline-interactives")).toEqual([
       "tip-strip",
       "poetry-promo",
       "weather-strip",
       "opinion-label",
     ]);
-    expect(NYT_HOMEPAGE_PREVIEW_TESTING.resolveFragmentArtifactIds("product-rails")).toEqual([
+    expect(resolveFragmentArtifactIds("product-rails")).toEqual([
       "well-package",
       "culture-lifestyle-package",
       "athletic-package",
@@ -213,7 +214,7 @@ describe("NYT homepage preview route", () => {
     );
 
     await expect(
-      NYT_HOMEPAGE_PREVIEW_TESTING.decodeGeneratedArtifact(
+      decodeGeneratedArtifact(
         "wirecutter-package",
         manifest,
         { ...artifact, compressedSha256: "0".repeat(64) },
@@ -221,7 +222,7 @@ describe("NYT homepage preview route", () => {
       ),
     ).rejects.toThrow("integrity check failed");
     await expect(
-      NYT_HOMEPAGE_PREVIEW_TESTING.decodeGeneratedArtifact(
+      decodeGeneratedArtifact(
         "wirecutter-package",
         manifest,
         { ...artifact, uncompressedBytes: 4 * 1024 * 1024 + 1 },
