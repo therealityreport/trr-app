@@ -56,6 +56,11 @@ const nextConfig: NextConfig = {
   reactStrictMode: true,
   typedRoutes: TYPED_ROUTES_ENABLED,
   distDir: DIST_DIR,
+  outputFileTracingIncludes: {
+    "/api/admin/design-docs/nyt-homepage-preview": [
+      "./data/nyt-homepage-2026-04-21/index.html.gz",
+    ],
+  },
   allowedDevOrigins: IS_DEV
     ? ["admin.trr.localhost", "trr.localhost", "api.trr.localhost", "localhost"]
     : undefined,

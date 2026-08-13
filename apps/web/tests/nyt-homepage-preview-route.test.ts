@@ -2,6 +2,8 @@ import { spawnSync } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { gunzip } from "node:zlib";
+import { promisify } from "node:util";
 
 import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -18,6 +20,30 @@ vi.mock("@/lib/server/auth", () => ({
 import { GET } from "@/app/api/admin/design-docs/nyt-homepage-preview/route";
 
 const testCiScript = path.join(process.cwd(), "scripts", "test-ci.mjs");
+const gunzipAsync = promisify(gunzip);
+
+const IMMUTABLE_VC_FRAGMENT_EXPECTATIONS = [
+  ["VC-01", "wirecutter-package", "Product recommendations"],
+  ["VC-02", "product-rails", "preview-stack"],
+  ["VC-03", "games-package", "Daily puzzles"],
+  ["VC-04", "watch-todays-videos", "Watch Today’s Videos"],
+  ["VC-05", "more-news", "More News"],
+  ["VC-06", "edition-rail"],
+  ["VC-07", "masthead"],
+  ["VC-08", "nested-nav"],
+  ["VC-09", "lead-programming"],
+  ["VC-10", "site-index"],
+  ["VC-11", "footer"],
+  ["VC-12", "tip-strip"],
+  ["VC-13", "poetry-promo"],
+  ["VC-14", "weather-strip"],
+  ["VC-15", "opinion-label"],
+  ["VC-16", "well-package"],
+  ["VC-17", "culture-lifestyle-package"],
+  ["VC-18", "athletic-package"],
+  ["VC-19", "audio-package"],
+  ["VC-20", "cooking-package"],
+] as const;
 
 describe("NYT homepage preview route", () => {
   beforeEach(() => {
@@ -36,6 +62,23 @@ describe("NYT homepage preview route", () => {
     expect(response.status).toBe(401);
     expectedError.expectCalled();
   });
+
+  it("resolves every immutable VC-01 through VC-20 fragment request", async () => {
+    for (const [requestId, fragmentId, expectedBody] of IMMUTABLE_VC_FRAGMENT_EXPECTATIONS) {
+      const response = await GET(
+        new NextRequest(
+          `http://localhost/api/admin/design-docs/nyt-homepage-preview?view=fragment&id=${fragmentId}`,
+          { headers: { accept: "text/html" } },
+        ),
+      );
+
+      expect(response.status, requestId).toBe(200);
+      expect(response.headers.get("content-type"), requestId).toMatch(/^text\/html\b/);
+      if (expectedBody) {
+        expect(await response.text(), requestId).toContain(expectedBody);
+      }
+    }
+  }, 30000);
 
   it("serves distinct Watch Today’s Videos and More News fragments", async () => {
     const watchRequest = new NextRequest(
@@ -74,6 +117,22 @@ describe("NYT homepage preview route", () => {
     expect(html).toContain("Wirecutter");
     expect(html).toContain("Product recommendations");
     expect(html).not.toContain('{"error":"Could not resolve container');
+  });
+
+  it("uses a readable app-owned compressed snapshot shipped with the server route", async () => {
+    const snapshotPath = path.join(
+      process.cwd(),
+      "data",
+      "nyt-homepage-2026-04-21",
+      "index.html.gz",
+    );
+
+    const compressedSnapshot = await readFile(snapshotPath);
+    const snapshotHtml = (await gunzipAsync(compressedSnapshot)).toString("utf8");
+
+    expect(compressedSnapshot.byteLength).toBeGreaterThan(0);
+    expect(snapshotHtml).toContain("Product recommendations");
+    expect(snapshotHtml).toContain("Daily puzzles");
   });
 
   it("resolves the Games package as its own homepage module", async () => {

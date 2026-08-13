@@ -1,5 +1,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { gunzip } from "node:zlib";
+import { promisify } from "node:util";
 
 import { JSDOM, VirtualConsole } from "jsdom";
 import { NextRequest, NextResponse } from "next/server";
@@ -11,6 +13,8 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 const WORKSPACE_ROOT = path.resolve(process.cwd(), "../../..");
+const APP_ROOT = process.cwd();
+const gunzipAsync = promisify(gunzip);
 const LOCAL_ASSET_VIEW = "saved-asset";
 const REWRITABLE_ATTRIBUTES = ["src", "href", "poster"] as const;
 const REWRITABLE_STYLE_ATTRIBUTES = ["style"] as const;
@@ -54,7 +58,9 @@ interface HomepageSource {
 }
 
 function resolveFilePath(filePath: string) {
-  return path.isAbsolute(filePath) ? filePath : path.resolve(WORKSPACE_ROOT, filePath);
+  if (path.isAbsolute(filePath)) return filePath;
+  if (filePath.endsWith(".html.gz")) return path.resolve(APP_ROOT, filePath);
+  return path.resolve(WORKSPACE_ROOT, filePath);
 }
 
 async function getHomepageSource(): Promise<HomepageSource> {
@@ -80,7 +86,11 @@ async function getHomepageSource(): Promise<HomepageSource> {
 }
 
 async function readSourceText(filePath: string) {
-  return readFile(resolveFilePath(filePath), "utf8");
+  const resolvedPath = resolveFilePath(filePath);
+  if (resolvedPath.endsWith(".gz")) {
+    return (await gunzipAsync(await readFile(resolvedPath))).toString("utf8");
+  }
+  return readFile(resolvedPath, "utf8");
 }
 
 async function readSourceBinary(filePath: string) {
@@ -338,17 +348,20 @@ async function extractFirstBySelector(selector: string) {
   return stripScriptsFromMarkup(element.outerHTML);
 }
 
-async function extractClosestFromSelector(selector: string, classToken: string) {
+async function extractClosestFromSelectorOrText(selector: string, label: string, classToken: string) {
   const { document } = await loadHomepageDocument();
-  const element = requireElement(
-    document.querySelector(selector),
-    `Could not find homepage selector "${selector}"`,
+  const candidates = [document.querySelector(selector), findExactTextElement(document, label)];
+
+  for (const element of candidates) {
+    const container = climbByClassToken(element, classToken);
+    if (container) {
+      return stripScriptsFromMarkup(container.outerHTML);
+    }
+  }
+
+  throw new Error(
+    `Could not resolve ancestor "${classToken}" for selector "${selector}" or homepage text "${label}"`,
   );
-  const container = requireElement(
-    climbByClassToken(element, classToken),
-    `Could not resolve ancestor "${classToken}" for selector "${selector}"`,
-  );
-  return stripScriptsFromMarkup(container.outerHTML);
 }
 
 async function extractClosestFromText(label: string, classToken: string) {
@@ -424,15 +437,23 @@ async function resolveFragmentMarkup(id: string): Promise<string> {
     case "opinion-label":
       return extractInteractiveById("large-opinion-label");
     case "well-package":
-      return extractClosestFromSelector('[data-pers*="home-packages-well"]', "css-17jkqqy");
+      return extractClosestFromSelectorOrText('[data-pers*="home-packages-well"]', "Well", "css-17jkqqy");
     case "culture-lifestyle-package":
-      return extractClosestFromSelector('[data-pers*="home-packages-culturelifestyle-primary"]', "css-1w1paqe");
+      return extractClosestFromSelectorOrText(
+        '[data-pers*="home-packages-culturelifestyle-primary"]',
+        "Culture and Lifestyle",
+        "css-1w1paqe",
+      );
     case "athletic-package":
-      return extractClosestFromSelector('[data-pers*="home-packages-athletic-primary"]', "css-17jkqqy");
+      return extractClosestFromSelectorOrText(
+        '[data-pers*="home-packages-athletic-primary"]',
+        "The Athletic",
+        "css-17jkqqy",
+      );
     case "audio-package":
-      return extractClosestFromSelector('[data-pers*="home-packages-audio"]', "css-1w1paqe");
+      return extractClosestFromSelectorOrText('[data-pers*="home-packages-audio"]', "Audio", "css-1w1paqe");
     case "cooking-package":
-      return extractClosestFromSelector('[data-pers*="home-packages-cooking-addon"]', "css-1w1paqe");
+      return extractClosestFromSelectorOrText('[data-pers*="home-packages-cooking-addon"]', "Cooking", "css-1w1paqe");
     case "wirecutter-package":
       return extractPackageFromVisibleText("Product recommendations", "isPersonalizedPackage");
     case "games-package":

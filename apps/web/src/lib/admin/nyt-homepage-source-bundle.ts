@@ -6,7 +6,7 @@ export const NYT_HOMEPAGE_SOURCE_BUNDLE = {
       "/Volumes/HardDrive/SAVED PAGES/NEW YORK TIMES/HOME PAGE/The New York Times - Breaking News, US News, World News and Videos_files",
   },
   html: {
-    rendered: "artifacts/design-docs/source-bundles/nyt-homepage-2026-04-21/index.html",
+    rendered: "data/nyt-homepage-2026-04-21/index.html.gz",
   },
   css: [
     "artifacts/design-docs/source-bundles/nyt-homepage-2026-04-21/assets/css/global-bf55b3b62e74478ad488922130f07a8e.css",
