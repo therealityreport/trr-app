@@ -85,11 +85,6 @@ import { fetchAdminWithAuth as fetchAdminWithAuthBase } from "@/lib/admin/client
 import { useSharedPollingResource } from "@/lib/admin/shared-live-resource";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 import {
-  selectDisplayThumbnail,
-  type DisplayThumbnailSelection,
-  type DisplayThumbnailVariants,
-} from "./social-week/social-media-thumbnails";
-import {
   buildCatalogProgressDiagnosticRows,
   buildInstagramCatalogCapacityQuery,
   buildLocalCatalogCommand,
@@ -113,6 +108,26 @@ import {
   waitForCatalogRetry,
   type InstagramCatalogCapacitySnapshot,
 } from "./social-account-profile/catalog-operations";
+import {
+  HASHTAG_WINDOW_OPTIONS,
+  buildCatalogDetailUrlGroups,
+  formatCatalogRunWindow,
+  formatDateTime,
+  formatDashboardFreshnessAge,
+  formatDetailMetricValue,
+  formatHashtagWindowLabel,
+  formatInstagramPostsAuthMode,
+  formatInteger,
+  formatMirrorStatusLabel,
+  formatMonthYear,
+  formatRouteDuration,
+  getCatalogPostMediaUrls,
+  getCatalogPostMetricSummary,
+  getCatalogPostPreviewImage,
+  isLikelyVideoUrl,
+  shouldUseSummaryTopHashtagsPreview,
+  type HashtagAssignmentStatus,
+} from "./social-account-profile/profile-presentation";
 
 export {
   buildCatalogProgressDiagnosticRows,
@@ -125,6 +140,8 @@ export {
   waitForCatalogRetry,
   type InstagramCatalogCapacitySnapshot,
 } from "./social-account-profile/catalog-operations";
+
+export { shouldUseSummaryTopHashtagsPreview } from "./social-account-profile/profile-presentation";
 
 type Props = {
   platform: SocialPlatformSlug;
@@ -270,8 +287,6 @@ const formatPostsSortMode = (mode: string | null | undefined): string => {
       return "Unknown";
   }
 };
-
-type HashtagAssignmentStatus = "all" | "assigned" | "unassigned";
 
 type HashtagsResponse = {
   items: SocialAccountProfileHashtag[];
@@ -497,7 +512,6 @@ const withSocialProfileRequestDedup = <T,>(key: string, loader: () => Promise<T>
   return promise;
 };
 
-const INTEGER_FORMATTER = new Intl.NumberFormat("en-US");
 const ACTIVE_CATALOG_RUN_STATUSES = new Set(["queued", "pending", "retrying", "running", "cancelling"]);
 const ACTIVE_CATALOG_RECOVERY_STATUSES = new Set(["queued", "running", "fallback_enqueued", "blocked"]);
 const TERMINAL_CATALOG_RUN_STATUSES = new Set(["completed", "failed", "cancelled"]);
@@ -538,12 +552,6 @@ const CATALOG_PROGRESS_POLL_INTERVAL_MS = 5_000;
 const CATALOG_PROGRESS_RUN_STORAGE_PREFIX = "trr-social-catalog-progress-run";
 const COMMENTS_PROGRESS_RUN_STORAGE_PREFIX = "trr-social-comments-progress-run";
 const CATALOG_GAP_ANALYSIS_POLL_INTERVAL_MS = 4_000;
-const HASHTAG_WINDOW_OPTIONS = [
-  { value: "all", label: "All Time" },
-  { value: "7d", label: "This Week" },
-  { value: "30d", label: "This Month" },
-  { value: "365d", label: "This Year" },
-] as const;
 const HASHTAG_ASSIGNMENT_STATUS_OPTIONS: ReadonlyArray<{ value: HashtagAssignmentStatus; label: string }> = [
   { value: "all", label: "All Hashtags" },
   { value: "assigned", label: "Assigned" },
@@ -637,10 +645,6 @@ const storeCatalogProgressRunId = (storageKey: string, runId: string | null | un
   }
 };
 
-const formatInteger = (value: number | null | undefined): string => {
-  return INTEGER_FORMATTER.format(Number.isFinite(Number(value)) ? Number(value) : 0);
-};
-
 const readFiniteNumber = (value: unknown): number | null => {
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : null;
@@ -731,13 +735,6 @@ const socialPlatformLabel = (value: string | null | undefined): string => {
   return SOCIAL_ACCOUNT_PLATFORM_LABELS[normalized as SocialPlatformSlug] ?? (readString(value) || "Social");
 };
 
-const formatDateTime = (value?: string | null): string => {
-  if (!value) return "Never";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return value;
-  return parsed.toLocaleString();
-};
-
 const buildInstagramBackfillMonthDefaults = (now = new Date()): { monthStart: string; monthEnd: string } => {
   const year = now.getUTCFullYear();
   return {
@@ -761,48 +758,6 @@ const monthInputToWindowBoundaryIso = (value: string, boundary: "start" | "end")
 };
 
 const buildInstagramApplyConfirmation = (runId: string): string => `APPLY INSTAGRAM 2025 BACKFILL ${runId}`;
-
-const formatMonthYear = (value: string): string => {
-  const match = /^(\d{4})-(\d{2})$/.exec(String(value || "").trim());
-  return match ? `${match[2]}-${match[1]}` : value;
-};
-
-const formatCatalogRunWindow = (progress?: SocialAccountCatalogRunProgressSnapshot | null): string | null => {
-  const dateStart = readString(progress?.date_start);
-  const dateEnd = readString(progress?.date_end);
-  if (!dateStart && !dateEnd) return null;
-  return `Window ${dateStart ? formatDateTime(dateStart) : "open start"} to ${dateEnd ? formatDateTime(dateEnd) : "open end"}`;
-};
-
-const formatInstagramPostsAuthMode = (progress?: SocialAccountCatalogRunProgressSnapshot | null): string | null => {
-  const mode = normalizeComparable(progress?.instagram_posts_auth_mode || progress?.posts_auth_mode);
-  if (mode === "anonymous") return "Posts auth anonymous";
-  if (mode === "authenticated") return "Posts auth authenticated";
-  return null;
-};
-
-const formatDashboardFreshnessAge = (ageSeconds: number | null | undefined): string => {
-  if (ageSeconds == null || !Number.isFinite(Number(ageSeconds))) {
-    return "moments ago";
-  }
-  const normalizedSeconds = Math.max(0, Math.round(Number(ageSeconds)));
-  if (normalizedSeconds < 60) {
-    return `${normalizedSeconds} second${normalizedSeconds === 1 ? "" : "s"} ago`;
-  }
-  const minutes = Math.round(normalizedSeconds / 60);
-  return `${minutes} minute${minutes === 1 ? "" : "s"} ago`;
-};
-
-const formatRouteDuration = (durationMs: number | null | undefined): string => {
-  if (durationMs == null || !Number.isFinite(Number(durationMs))) {
-    return "unknown";
-  }
-  const normalizedMs = Math.max(0, Math.round(Number(durationMs)));
-  if (normalizedMs < 1000) {
-    return `${normalizedMs} ms`;
-  }
-  return `${(normalizedMs / 1000).toFixed(normalizedMs < 10_000 ? 1 : 0)} s`;
-};
 
 const normalizeInstagramCommentsGapDisplayRow = (value: unknown): InstagramCommentsGapDisplayRow | null => {
   const record = asRecord(value);
@@ -996,120 +951,6 @@ const getCommentsShardAttentionRecommendation = (
     return "Continue with Incomplete Fill so unfinished posts are targeted without rerunning completed posts.";
   }
   return "Cancel only a shard that is stale or no longer moving; failed or retrying shards do not mean the whole comments run is dead.";
-};
-
-const formatDetailMetricValue = (value: unknown): string => {
-  return typeof value === "number" && Number.isFinite(value) ? formatInteger(value) : "0";
-};
-
-const formatMirrorStatusLabel = (value: unknown): string => {
-  if (typeof value === "string" && value.trim()) {
-    return value.trim().replace(/_/g, " ");
-  }
-  if (value && typeof value === "object" && "status" in value) {
-    return String((value as { status?: unknown }).status || "")
-      .trim()
-      .replace(/_/g, " ");
-  }
-  return "Unknown";
-};
-
-const isLikelyVideoUrl = (value?: string | null): boolean => {
-  const normalized = String(value || "").trim().toLowerCase();
-  return normalized.endsWith(".mp4") || normalized.endsWith(".mov") || normalized.endsWith(".webm") || normalized.includes(".mp4?");
-};
-
-const getUniqueMediaUrls = (values: Array<string | null | undefined>): string[] => {
-  const seen = new Set<string>();
-  const urls: string[] = [];
-  for (const value of values) {
-    const url = String(value || "").trim();
-    if (!url) continue;
-    const key = url.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    urls.push(url);
-  }
-  return urls;
-};
-
-const getDisplayThumbnailVariants = (value: unknown): DisplayThumbnailVariants => {
-  return value && typeof value === "object" && !Array.isArray(value) ? (value as DisplayThumbnailVariants) : null;
-};
-
-const getCatalogPostMediaUrls = (item: SocialAccountCatalogPost | SocialAccountCatalogPostDetail): string[] => {
-  return getUniqueMediaUrls([
-    item.display_thumbnail_url,
-    item.hosted_thumbnail_url,
-    item.thumbnail_url,
-    item.source_thumbnail_url,
-    ...(item.hosted_media_urls ?? []),
-    ...(item.media_urls ?? []),
-    ...(item.source_media_urls ?? []),
-  ]);
-};
-
-const buildCatalogDetailUrlGroups = (item: SocialAccountCatalogPostDetail): Array<{ label: string; urls: string[] }> => [
-  {
-    label: "Hosted",
-    urls: getUniqueMediaUrls([item.hosted_thumbnail_url, ...(item.hosted_media_urls ?? [])]),
-  },
-  {
-    label: "Saved",
-    urls: getUniqueMediaUrls([item.display_thumbnail_url, item.thumbnail_url, ...(item.media_urls ?? [])]),
-  },
-  {
-    label: "Source",
-    urls: getUniqueMediaUrls([item.source_thumbnail_url, ...(item.source_media_urls ?? [])]),
-  },
-];
-
-const getCatalogPostPreviewImage = (
-  item: SocialAccountCatalogPost | SocialAccountCatalogPostDetail,
-): DisplayThumbnailSelection => {
-  return selectDisplayThumbnail({
-    displayThumbnail: item.display_thumbnail_url,
-    displayThumbnailSrcSet: item.display_thumbnail_srcset,
-    displayThumbnailVariants: getDisplayThumbnailVariants(item.display_thumbnail_variants),
-    fallbackUrls: getCatalogPostMediaUrls(item),
-  });
-};
-
-const getCatalogPostMetricSummary = (item: SocialAccountCatalogPost): string | null => {
-  const metrics = item.metrics ?? {};
-  const pieces = [
-    typeof metrics.likes === "number" ? `${formatInteger(metrics.likes)} likes` : null,
-    typeof metrics.comments_count === "number" ? `${formatInteger(metrics.comments_count)} comments` : null,
-    typeof metrics.reposts === "number" && metrics.reposts > 0 ? `${formatInteger(metrics.reposts)} reposts` : null,
-    typeof metrics.views === "number" && metrics.views > 0 ? `${formatInteger(metrics.views)} views` : null,
-    typeof metrics.video_views === "number" && metrics.video_views > 0
-      ? `${formatInteger(metrics.video_views)} video views`
-      : null,
-  ].filter(Boolean);
-  if (pieces.length > 0) return pieces.join(" · ");
-  return typeof metrics.engagement === "number" && metrics.engagement > 0
-    ? `${formatInteger(metrics.engagement)} engagement`
-    : null;
-};
-
-const formatHashtagWindowLabel = (value: (typeof HASHTAG_WINDOW_OPTIONS)[number]["value"]): string => {
-  return HASHTAG_WINDOW_OPTIONS.find((option) => option.value === value)?.label ?? "All Time";
-};
-
-export const shouldUseSummaryTopHashtagsPreview = (options: {
-  activeTab: SocialAccountProfileTab;
-  hashtagWindow: (typeof HASHTAG_WINDOW_OPTIONS)[number]["value"];
-  hashtagAssignmentStatus: HashtagAssignmentStatus;
-  summaryTopHashtags: ReadonlyArray<SocialAccountProfileHashtag> | null | undefined;
-  hasLoadedExactWindow: boolean;
-}): boolean => {
-  return (
-    options.activeTab === "stats" &&
-    options.hashtagWindow === "all" &&
-    options.hashtagAssignmentStatus === "all" &&
-    !options.hasLoadedExactWindow &&
-    (options.summaryTopHashtags?.length ?? 0) > 0
-  );
 };
 
 const buildEmptySocialAccountProfileSummary = (

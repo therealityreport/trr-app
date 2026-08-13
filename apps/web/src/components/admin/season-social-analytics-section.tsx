@@ -1,5 +1,4 @@
 "use client";
-
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
@@ -11,6 +10,11 @@ import SocialPlatformTabIcon from "@/components/admin/SocialPlatformTabIcon";
 import SocialPostsSection from "@/components/admin/social-posts-section";
 import RedditSourcesManager from "@/components/admin/reddit-sources-manager";
 import CastContentSection from "@/components/admin/cast-content-section";
+import { SeasonSocialIngestControls } from "./season-social-analytics/SeasonSocialIngestControls";
+import { SeasonSocialInsightPanels } from "./season-social-analytics/SeasonSocialInsightPanels";
+import { SeasonSocialOverview } from "./season-social-analytics/SeasonSocialOverview";
+import { SeasonSocialRunStatus } from "./season-social-analytics/SeasonSocialRunStatus";
+import { SeasonSocialWeeklyTable } from "./season-social-analytics/SeasonSocialWeeklyTable";
 import { invalidateAdminSnapshotFamilies } from "@/lib/admin/admin-snapshot-client";
 import { fetchAdminWithAuth, getClientAuthHeaders } from "@/lib/admin/client-auth";
 import {
@@ -68,7 +72,6 @@ import {
   SOCIAL_METRIC_MODE_QUERY_KEY,
   type SocialTableMetric,
   type SocialMetricMode,
-  type WeekDetailTokenTriplet,
   type WeekDetailTokenCounts,
   type DisplayThumbnailVariants,
   SOCIAL_TABLE_METRIC_OPTIONS,
@@ -183,7 +186,6 @@ import {
   buildLeaderboardMediaMetadata,
   SocialStatsPanel,
 } from "./season-social-analytics/section-helpers";
-
 export {
   buildPreviewPlatformStatuses,
   buildRunsRequestKey,
@@ -198,10 +200,8 @@ export type {
   SocialAnalyticsView,
   SocialTarget,
 } from "./season-social-analytics/section-helpers";
-
 const DEV_LOW_HEAT_MODE = process.env.NODE_ENV !== "production";
 const DEV_VISIBLE_POLL_INTERVAL_MS = 8_000;
-
 export default function SeasonSocialAnalyticsSection({
   showId,
   showSlug,
@@ -390,7 +390,6 @@ export default function SeasonSocialAnalyticsSection({
     refreshAllByView: new Map(),
   });
   const activeSyncSessionLastRefreshAtRef = useRef(0);
-
   useEffect(() => {
     if (typeof document === "undefined") return;
     const handleVisibilityChange = () => setIsDocumentVisible(document.visibilityState === "visible");
@@ -399,7 +398,6 @@ export default function SeasonSocialAnalyticsSection({
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, []);
-
   const showRouteSlug = (showSlug || showId).trim();
   const seasonEpisodeNumberFromPath = useMemo(
     () => parseSeasonEpisodeNumberFromPath(pathname),
@@ -413,7 +411,6 @@ export default function SeasonSocialAnalyticsSection({
     const weekKey = weekFilter === "all" ? "all" : String(weekFilter);
     return `${SOCIAL_CACHE_PREFIX}:v${SOCIAL_CACHE_VERSION}:${showId}:${seasonNumber}:${seasonId}:${scope}:${platformFilter}:${weekKey}`;
   }, [platformFilter, scope, seasonId, seasonNumber, showId, weekFilter]);
-
   const getAuthHeaders = useCallback(
     async () => getClientAuthHeaders({ allowDevAdminBypass: true }),
     [],
@@ -421,7 +418,6 @@ export default function SeasonSocialAnalyticsSection({
   const normalizeLinkedAccountHandle = useCallback((value: string | null | undefined): string => {
     return String(value || "").trim().replace(/^@+/, "").toLowerCase();
   }, []);
-
   const queryString = useMemo(() => {
     const search = new URLSearchParams();
     search.set("season_id", seasonId);
@@ -450,7 +446,6 @@ export default function SeasonSocialAnalyticsSection({
       }),
     [scope, seasonId],
   );
-
   useLayoutEffect(() => {
     const viewActuallyChanged = activeAnalyticsViewRef.current !== analyticsView;
     activeAnalyticsViewRef.current = analyticsView;
@@ -479,19 +474,16 @@ export default function SeasonSocialAnalyticsSection({
     setSharedStatusError(null);
     setRunSummaryError(null);
   }, [analyticsView]);
-
   useEffect(() => {
     componentMountedRef.current = true;
     return () => {
       componentMountedRef.current = false;
     };
   }, []);
-
   useEffect(() => {
     if (!ingestExportOpen) {
       return;
     }
-
     const handlePointerDown = (event: MouseEvent) => {
       const target = event.target as Node | null;
       if (!target) return;
@@ -499,14 +491,12 @@ export default function SeasonSocialAnalyticsSection({
       if (ingestExportTriggerRef.current?.contains(target)) return;
       setIngestExportOpen(false);
     };
-
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         setIngestExportOpen(false);
         ingestExportTriggerRef.current?.focus();
       }
     };
-
     document.addEventListener("mousedown", handlePointerDown);
     document.addEventListener("keydown", handleKeyDown);
     return () => {
@@ -514,21 +504,17 @@ export default function SeasonSocialAnalyticsSection({
       document.removeEventListener("keydown", handleKeyDown);
     };
   }, [ingestExportOpen]);
-
   useEffect(() => {
     weekDetailTokenCountsByWeekRef.current = weekDetailTokenCountsByWeek;
   }, [weekDetailTokenCountsByWeek]);
-
   useEffect(() => {
     weekDetailTokenCountsLoadingWeeksRef.current = weekDetailTokenCountsLoadingWeeks;
   }, [weekDetailTokenCountsLoadingWeeks]);
-
   const isActiveView = useCallback(
     (expectedView: SocialAnalyticsView) =>
       componentMountedRef.current && activeAnalyticsViewRef.current === expectedView,
     [],
   );
-
   const isCurrentRefreshRequest = useCallback(
     (requestView: SocialAnalyticsView, requestId: number) =>
       componentMountedRef.current &&
@@ -4613,603 +4599,62 @@ export default function SeasonSocialAnalyticsSection({
   return (
     <div className="space-y-6">
       {!isRedditView && !isCastContentView && (
-        <>
-          {shouldRenderPortaledControls && externalControlsTarget
-            ? createPortal(portaledHeaderRail, externalControlsTarget)
-            : null}
-          <section
-            aria-label="Season social analytics controls"
-            className="rounded-3xl border border-zinc-200 bg-zinc-50/70 p-4 shadow-sm sm:p-6"
-          >
-            <div className="space-y-4">
-              <header className="space-y-3">
-                <p className="rounded-full bg-zinc-900 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-white">
-                  Season Social Analytics
-                </p>
-                <p className="max-w-2xl text-sm text-zinc-500">
-                  Bravo-owned social analytics with viewer sentiment and weekly rollups.
-                </p>
-                <dl className="flex flex-wrap gap-x-5 gap-y-2 text-sm text-zinc-700">
-                  <div className="flex items-center gap-2">
-                    <dt className="text-xs font-semibold uppercase tracking-[0.15em] text-zinc-500">Last Updated</dt>
-                    <dd className="font-medium text-zinc-800">{formatDateTimeFromDate(lastUpdated)}</dd>
-                  </div>
-                  {analytics?.window?.start && analytics?.window?.end && (
-                    <div className="flex items-center gap-2">
-                      <dt className="text-xs font-semibold uppercase tracking-[0.15em] text-zinc-500">Window</dt>
-                      <dd className="font-medium text-zinc-800">
-                        {formatDateTime(analytics.window.start)} to {formatDateTime(analytics.window.end)}
-                      </dd>
-                    </div>
-                  )}
-                </dl>
-              </header>
-
-              {!hidePlatformTabs && (
-                <nav className="flex gap-1 rounded-xl border border-zinc-200 bg-zinc-100/70 p-1" aria-label="Social platform tabs">
-                  {PLATFORM_TABS.map((tab) => {
-                    const isActive = platformTab === tab.key;
-                    const tabCount = tab.key === "overview" ? null : platformHandleCounts[tab.key];
-                    return (
-                      <button
-                        key={tab.key}
-                        type="button"
-                        onClick={() => {
-                          setPlatformTabAndUrl(tab.key);
-                        }}
-                      className={`flex-1 rounded-lg px-3 py-2 text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 ${
-                          isActive
-                            ? "bg-white text-zinc-900 shadow-sm"
-                            : "text-zinc-600 hover:bg-white/80 hover:text-zinc-900"
-                        }`}
-                      >
-                        <span className="inline-flex items-center gap-1.5">
-                          <SocialPlatformTabIcon tab={tab.key} />
-                          <span>{tabCount === null ? tab.label : `${tab.label} (${tabCount})`}</span>
-                        </span>
-                      </button>
-                    );
-                  })}
-                </nav>
-              )}
-              {!hidePlatformTabs ? linkedHandleTabs : null}
-              {shouldRenderInlineControls ? socialControlsRail : null}
-            </div>
-
-            {(pollingStatus !== "idle" || staleFallbackItems.length > 0 || sectionErrorItems.length > 0) && (
-              <div className="mt-4 space-y-2">
-                {pollingStatus === "retrying" && (
-                  <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
-                    Live updates temporarily unavailable. Retrying...
-                  </div>
-                )}
-                {pollingStatus === "recovered" && (
-                  <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
-                    Live updates connection restored.
-                  </div>
-                )}
-                {staleFallbackItems.length > 0 && (
-                  <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm text-zinc-700">
-                    {staleFallbackMessage}
-                  </div>
-                )}
-                {sectionErrorItems.map((item) => (
-                  <div key={item.key} className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
-                    <span className="font-semibold">{item.label}:</span> {item.message}
-                    {item.staleAt && (
-                      <p className="mt-1 text-xs font-medium text-amber-800">
-                        Showing last successful data from {formatDateTimeFromDate(item.staleAt)}.
-                      </p>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </section>
-
-          {error && (
-            <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-              {error}
-            </div>
-          )}
-
-          {ingestMessage && !error && (() => {
-        const activeJobs = runScopedJobs;
-        const totalJobs = activeJobs.length;
-        const completedJobs = activeJobs.filter((j) => j.status === "completed");
-        const failedJobs = activeJobs.filter((j) => j.status === "failed");
-        const finishedCount = completedJobs.length + failedJobs.length;
-        const progressPct = totalJobs > 0 ? Math.round((finishedCount / totalJobs) * 100) : 0;
-        const elapsedSec = Math.floor(elapsedTick / 1000);
-        const elapsedMin = Math.floor(elapsedSec / 60);
-        const elapsedStr = elapsedMin > 0 ? `${elapsedMin}m ${String(elapsedSec % 60).padStart(2, "0")}s` : `${elapsedSec}s`;
-        const syncSnapshot = activeSyncSession?.completeness_snapshot ?? null;
-        const syncSessionStatus = String(activeSyncSession?.status || "").toLowerCase();
-        const syncRetryDisabled = new Set(["initializing", "pass_running", "pass_evaluating", "completing", "cancelling"]).has(syncSessionStatus);
-
-        const getStage = (j: SocialJob) => getJobStageLabel(j);
-
-        const getAccount = (j: SocialJob) =>
-          typeof j.config?.account === "string" && j.config.account ? j.config.account : null;
-
-        const postsStageJobs = activeJobs.filter((j) => getStage(j) === "posts");
-        const commentsStageJobs = activeJobs.filter((j) => getStage(j) === "comments");
-        const mirrorStageJobs = activeJobs.filter((j) => {
-          const stage = getStage(j);
-          return stage === "media_mirror" || stage === "mirror";
-        });
-
-        const stageProgress = (stageJobs: SocialJob[], stageKey: string) => {
-          if (stageJobs.length === 0) return null;
-          const done = stageJobs.filter((j) => j.status === "completed" || j.status === "failed").length;
-          const pct = Math.round((done / stageJobs.length) * 100);
-          const items = stageJobs.reduce((s, j) => s + (j.items_found ?? 0), 0);
-          const label = STAGE_LABELS_PLAIN[stageKey] ?? stageKey;
-          return { label, stageKey, total: stageJobs.length, done, pct, items, jobs: stageJobs };
-        };
-
-        const stages = [
-          stageProgress(postsStageJobs, "posts"),
-          stageProgress(commentsStageJobs, "comments"),
-          stageProgress(mirrorStageJobs, "media_mirror"),
-        ].filter(Boolean) as
-          NonNullable<ReturnType<typeof stageProgress>>[];
-
-        // Per-platform completion stats for summary
-        const platformStats = new Map<string, { posts: number; comments: number }>();
-        for (const j of completedJobs) {
-          const counters = (j.metadata as Record<string, unknown>)?.stage_counters as Record<string, number> | undefined;
-          const existing = platformStats.get(j.platform) ?? { posts: 0, comments: 0 };
-          existing.posts += counters?.posts ?? 0;
-          existing.comments += counters?.comments ?? 0;
-          platformStats.set(j.platform, existing);
-        }
-
-        // Per-platform grouping for summary rows
-        const platformGrouped = new Map<string, SocialJob[]>();
-        for (const j of activeJobs) {
-          const existing = platformGrouped.get(j.platform) ?? [];
-          existing.push(j);
-          platformGrouped.set(j.platform, existing);
-        }
-
-        const statusDotClass: Record<string, string> = {
-          running: "bg-blue-500 animate-pulse",
-          completed: "bg-green-500",
-          failed: "bg-red-500",
-          queued: "bg-zinc-300",
-          pending: "bg-zinc-300",
-          retrying: "bg-amber-400 animate-pulse",
-          cancelled: "bg-zinc-300",
-        };
-        const statusTextClass: Record<string, string> = {
-          running: "text-blue-700",
-          completed: "text-green-700",
-          failed: "text-red-600",
-          queued: "text-zinc-500",
-          pending: "text-zinc-500",
-          retrying: "text-amber-600",
-          cancelled: "text-zinc-400",
-        };
-
-        // Derive a friendly header from active platforms
-        const activePlatformNames = [...new Set(activeJobs.map((j) => PLATFORM_LABELS[j.platform] ?? j.platform))];
-        const friendlyHeader = runningIngest
-          ? `Collecting data from ${activePlatformNames.length > 0 ? activePlatformNames.join(", ") : "social platforms"}...`
-          : failedJobs.length > 0
-            ? `Sync complete with ${failedJobs.length} ${failedJobs.length === 1 ? "error" : "errors"}`
-            : "Sync complete";
-
-        return (
-          <div className={`rounded-xl border px-5 py-4 text-sm ${
-            runningIngest
-              ? "border-blue-200 bg-blue-50 text-blue-800"
-              : failedJobs.length > 0
-                ? "border-amber-200 bg-amber-50 text-amber-800"
-                : "border-green-200 bg-green-50 text-green-700"
-          }`}>
-            {/* Header row: friendly message + elapsed */}
-            <div className="flex items-center justify-between gap-3">
-              <p className="font-semibold">{friendlyHeader}</p>
-              {runningIngest && ingestStartedAt && (
-                <span className="shrink-0 rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-mono font-semibold text-blue-700 tabular-nums">
-                  {elapsedStr}
-                </span>
-              )}
-            </div>
-
-            {/* Overall progress bar */}
-            {runningIngest && totalJobs > 0 && (
-              <div className="mt-3">
-                <div className="mb-1.5 flex items-center justify-between text-xs">
-                  <span className="font-medium">
-                    {finishedCount} of {totalJobs} tasks complete
-                  </span>
-                  <span className="font-semibold tabular-nums">{progressPct}%</span>
-                </div>
-                <div className="h-2 overflow-hidden rounded-full bg-blue-200">
-                  <div
-                    className="h-2 rounded-full bg-blue-600 transition-all duration-500"
-                    style={{ width: `${Math.max(2, progressPct)}%` }}
-                  />
-                </div>
-              </div>
-            )}
-
-            {/* Per-platform summary rows */}
-            {runningIngest && platformGrouped.size > 0 && (
-              <div className="mt-3 space-y-1.5">
-                {Array.from(platformGrouped.entries())
-                  .sort(([a], [b]) => (PLATFORM_LABELS[a] ?? a).localeCompare(PLATFORM_LABELS[b] ?? b))
-                  .map(([platform, jobs]) => {
-                    const label = PLATFORM_LABELS[platform] ?? platform;
-                    const runningJob = jobs.find(
-                      (j) => j.status === "running" || j.status === "retrying" || j.status === "cancelling",
-                    );
-                    const doneCount = jobs.filter((j) => j.status === "completed").length;
-                    const failCount = jobs.filter((j) => j.status === "failed").length;
-                    const totalCount = jobs.length;
-                    const counters = runningJob ? getJobStageCounters(runningJob) : null;
-                    const activity = runningJob ? getJobActivity(runningJob) : null;
-                    const pStats = platformStats.get(platform);
-
-                    let actionText: string;
-                    if (runningJob) {
-                      const stageName = STAGE_LABELS_PLAIN[getStage(runningJob)] ?? getStage(runningJob);
-                      actionText = stageName;
-                      if (counters) {
-                        actionText += ` \u2014 ${formatCountersPlain(counters.posts, counters.comments)} found`;
-                      }
-                      if (activity && typeof activity.pages_scanned === "number" && activity.pages_scanned > 0) {
-                        actionText += ` (${activity.pages_scanned} ${activity.pages_scanned === 1 ? "page" : "pages"} scanned)`;
-                      }
-                    } else if (doneCount + failCount === totalCount) {
-                      actionText = pStats
-                        ? `Done \u2014 ${formatCountersPlain(pStats.posts, pStats.comments)} collected`
-                        : "Done";
-                    } else {
-                      actionText = "Waiting to start";
-                    }
-
-                    const dotClass = runningJob
-                      ? "bg-blue-500 animate-pulse"
-                      : failCount > 0
-                        ? "bg-red-500"
-                        : doneCount === totalCount
-                          ? "bg-green-500"
-                          : "bg-zinc-300";
-
-                    return (
-                      <div key={platform} className="flex items-center gap-2 text-xs">
-                        <span className={`inline-block h-2 w-2 shrink-0 rounded-full ${dotClass}`} />
-                        <span className="font-semibold min-w-[5rem]">{label}</span>
-                        <span className="text-zinc-600 truncate">{actionText}</span>
-                        <span className="ml-auto shrink-0 tabular-nums text-zinc-500">
-                          {doneCount} of {totalCount} tasks
-                        </span>
-                      </div>
-                    );
-                  })}
-              </div>
-            )}
-
-            {/* Completed summary with per-platform breakdown */}
-            {!runningIngest && completedJobs.length > 0 && (
-              <div className="mt-3 space-y-2">
-                <div className="flex flex-wrap items-center gap-3">
-                  {Array.from(platformStats.entries())
-                    .sort(([a], [b]) => (PLATFORM_LABELS[a] ?? a).localeCompare(PLATFORM_LABELS[b] ?? b))
-                    .map(([platform, stats]) => (
-                      <span key={platform} className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${
-                        failedJobs.some((j) => j.platform === platform)
-                          ? "bg-red-100 text-red-700"
-                          : "bg-green-100 text-green-700"
-                      }`}>
-                        {PLATFORM_LABELS[platform] ?? platform}
-                        <span className="font-semibold tabular-nums">
-                          {stats.posts.toLocaleString()} {stats.posts === 1 ? "post" : "posts"}, {stats.comments.toLocaleString()} {stats.comments === 1 ? "comment" : "comments"}
-                        </span>
-                      </span>
-                    ))}
-                </div>
-                {failedJobs.length > 0 && (
-                  <div className="text-xs text-red-600">
-                    {failedJobs.length} {failedJobs.length !== 1 ? "tasks" : "task"} failed:{" "}
-                    {failedJobs.map((j) => `${PLATFORM_LABELS[j.platform] ?? j.platform} ${STAGE_LABELS_PLAIN[getStage(j)] ?? getStage(j)}`).join(", ")}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Expand/collapse toggle for details */}
-            <button
-              type="button"
-              className={`mt-3 flex items-center gap-1 text-xs font-medium ${
-                runningIngest ? "text-blue-600 hover:text-blue-800" : "text-zinc-500 hover:text-zinc-700"
-              }`}
-              onClick={() => setSyncDetailsExpanded((prev) => !prev)}
-            >
-              {syncDetailsExpanded ? "Hide details" : "Show details"}
-              <svg
-                className={`h-3 w-3 transition-transform ${syncDetailsExpanded ? "rotate-180" : ""}`}
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={2}
-              >
-                <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-              </svg>
-            </button>
-
-            {/* Expandable details section */}
-            {syncDetailsExpanded && (
-              <>
-                {/* Infrastructure status pills */}
-                <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-zinc-600">
-                  {workerHealth?.queueEnabled === true ? (
-                    <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5">
-                      Remote executor health: {workerHealth.healthyWorkers ?? 0} healthy{workerHealth.reason ? ` (${workerHealth.reason})` : ""}
-                    </span>
-                  ) : (
-                    <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5">Remote executor: off</span>
-                  )}
-                  {syncCommentsCoveragePreview && (
-                    <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5">
-                      {formatInteger(Number(syncCommentsCoveragePreview.total_saved_comments ?? 0))} of{" "}
-                      {formatInteger(Number(syncCommentsCoveragePreview.total_reported_comments ?? 0))} comments collected
-                    </span>
-                  )}
-                  {SOCIAL_FULL_SYNC_MIRROR_ENABLED && syncMirrorCoveragePreview && (
-                    <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5">
-                      Media uploads:{" "}
-                      {formatMirrorCoverageLabel(
-                        Math.max(
-                          0,
-                          Number(syncMirrorCoveragePreview.posts_scanned ?? 0) -
-                            Number(syncMirrorCoveragePreview.needs_mirror_count ?? 0),
-                        ),
-                        Number(syncMirrorCoveragePreview.posts_scanned ?? 0),
-                      )}{" "}
-                      complete, {formatInteger(Number(syncMirrorCoveragePreview.pending_count ?? 0))} pending,{" "}
-                      {formatInteger(Number(syncMirrorCoveragePreview.failed_count ?? 0))} failed
-                    </span>
-                  )}
-                </div>
-                {buildPreviewPlatformStatuses(syncCommentsCoveragePreview, syncMirrorCoveragePreview).length > 0 && (
-                  <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-                    {buildPreviewPlatformStatuses(syncCommentsCoveragePreview, syncMirrorCoveragePreview).map(
-                      ({ platform, status }) => (
-                        <div key={`sync-preview-status-${platform}`} className="rounded-lg border border-zinc-200 bg-white px-3 py-2">
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="text-xs font-semibold text-zinc-900">{PLATFORM_LABELS[platform] ?? platform}</span>
-                            <span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${getSyncStatusTone(status.sync_status, Boolean(status.stale))}`}>
-                              {formatSyncStatusLabel(status.sync_status)}
-                            </span>
-                          </div>
-                          <div className="mt-1 flex flex-wrap gap-1 text-[11px]">
-                            {status.comment_sync_status && (
-                              <span className={`inline-flex rounded-full px-2 py-0.5 ${getSyncStatusTone(status.comment_sync_status.status)}`}>
-                                Comments {formatSyncStatusLabel(status.comment_sync_status.status)}
-                              </span>
-                            )}
-                            {status.media_mirror_status && (
-                              <span className={`inline-flex rounded-full px-2 py-0.5 ${getSyncStatusTone(status.media_mirror_status.status)}`}>
-                                Mirror {formatSyncStatusLabel(status.media_mirror_status.status)}
-                              </span>
-                            )}
-                          </div>
-                          {formatActiveJobSummary(status) && (
-                            <p className="mt-1 text-[11px] text-zinc-600">{formatActiveJobSummary(status)}</p>
-                          )}
-                          {(status.last_refresh_reason || status.worker_run_id) && (
-                            <p className="mt-1 text-[11px] text-zinc-500">
-                              {status.last_refresh_reason ? `Reason: ${status.last_refresh_reason}` : "Reason: n/a"}
-                              {status.worker_run_id ? ` · Run ${status.worker_run_id.slice(0, 8)}` : ""}
-                            </p>
-                          )}
-                        </div>
-                      ),
-                    )}
-                  </div>
-                )}
-
-                {/* Raw ingest message for debugging */}
-                {ingestMessage && (
-                  <p className="mt-2 text-[10px] font-mono text-zinc-400 break-all">{ingestMessage}</p>
-                )}
-
-                {activeSyncSession && syncSnapshot && (
-                  <div className="mt-3 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2">
-                    <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-700">
-                      <span className="font-semibold text-zinc-900">Sync Session</span>
-                      <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5">
-                        {String(activeSyncSession.display_status || activeSyncSession.status || "Sync").trim()}
-                      </span>
-                      <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5">
-                        Pass {Math.max(1, Number(activeSyncSession.pass_sequence ?? 1) || 1)}/3
-                      </span>
-                      <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5">
-                        {String(activeSyncSession.current_pass_kind || "sync").replaceAll("_", " ")}
-                      </span>
-                      <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5">
-                        Attempt {Math.max(1, Number(activeSyncSession.current_pass_attempt ?? 1) || 1)}
-                      </span>
-                    </div>
-                    <p className="mt-1 text-[11px] text-zinc-600">
-                      {activeSyncSession.date_start && activeSyncSession.date_end
-                        ? `${activeSyncSession.date_start} to ${activeSyncSession.date_end}`
-                        : "Selected window"}
-                    </p>
-                    {activeSyncSession.status_reason ? (
-                      <p className="mt-1 text-[11px] text-zinc-700">{activeSyncSession.status_reason}</p>
-                    ) : null}
-                    {activeSyncSession.follow_up_dimensions && activeSyncSession.follow_up_dimensions.length > 0 ? (
-                      <p className="mt-1 text-[11px] text-zinc-600">
-                        Follow-up dimensions: {activeSyncSession.follow_up_dimensions.join(", ")}
-                      </p>
-                    ) : null}
-                    {activeSyncSession.expected_after_current_pass ? (
-                      <p className="mt-1 text-[11px] text-zinc-500">{activeSyncSession.expected_after_current_pass}</p>
-                    ) : null}
-                    <div className="mt-2 flex flex-wrap gap-2 text-[11px]">
-                      <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-zinc-700">
-                        Incomplete posts {Number(syncSnapshot.incomplete_post_count ?? 0)}
-                      </span>
-                      <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-zinc-700">
-                        Missing media {Number(syncSnapshot.missing_asset_count ?? 0)}
-                      </span>
-                      <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-zinc-700">
-                        Missing comment media {Number(syncSnapshot.missing_comment_media_count ?? 0)}
-                      </span>
-                      <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-zinc-700">
-                        Missing avatars {Number(syncSnapshot.missing_avatar_count ?? 0)}
-                      </span>
-                      <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-zinc-700">
-                        Comment targets {Number(syncSnapshot.comment_target_count ?? syncSnapshot.targeted_anchor_count ?? 0)}
-                      </span>
-                      <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-zinc-700">
-                        Detail targets {Number(syncSnapshot.detail_target_count ?? 0)}
-                      </span>
-                      <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-zinc-700">
-                        Avatar targets {Number(syncSnapshot.avatar_target_count ?? 0)}
-                      </span>
-                      <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-zinc-700">
-                        Comment media targets {Number(syncSnapshot.comment_media_target_count ?? 0)}
-                      </span>
-                    </div>
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      {[
-                        Number(syncSnapshot.comment_target_count ?? syncSnapshot.targeted_anchor_count ?? 0) > 0
-                          ? ["retry_missing_comments", "Retry Comments"]
-                          : null,
-                        Number(syncSnapshot.detail_target_count ?? 0) > 0 || Number(syncSnapshot.missing_asset_count ?? 0) > 0
-                          ? ["retry_failed_media", "Retry Media"]
-                          : null,
-                        Number(syncSnapshot.avatar_target_count ?? 0) > 0 || Number(syncSnapshot.missing_avatar_count ?? 0) > 0
-                          ? ["retry_missing_avatars", "Retry Avatars"]
-                          : null,
-                        Number(syncSnapshot.comment_media_target_count ?? 0) > 0 ||
-                        Number(syncSnapshot.missing_comment_media_count ?? 0) > 0
-                          ? ["retry_missing_comment_media", "Retry Comment Media"]
-                          : null,
-                      ]
-                        .filter((value): value is [string, string] => Array.isArray(value))
-                        .map(([retryKind, label]) => (
-                        <button
-                          key={retryKind}
-                          type="button"
-                          onClick={() => {
-                            void retryActiveSyncSession(
-                              retryKind as "retry_missing_comments" | "retry_failed_media" | "retry_missing_avatars" | "retry_missing_comment_media",
-                            );
-                          }}
-                          disabled={syncRetryDisabled || activeSyncSessionRetryKind !== null}
-                          className="rounded border border-zinc-300 bg-white px-2 py-1 text-[11px] font-semibold text-zinc-700 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-60"
-                        >
-                          {activeSyncSessionRetryKind === retryKind ? "Retrying..." : label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Per-stage progress */}
-                {runningIngest && stages.length > 0 && (
-                  <div className="mt-4 space-y-4">
-                    {stages.map((s) => {
-                      const allDone = s.done === s.total;
-                      const hasActive = s.jobs.some(
-                        (j) => j.status === "running" || j.status === "retrying" || j.status === "cancelling",
-                      );
-                      return (
-                        <div key={s.stageKey}>
-                          <div className="mb-1.5 flex items-center justify-between text-xs">
-                            <div className="flex items-center gap-2">
-                              <span className="font-bold tracking-wide">{s.label}</span>
-                              {hasActive && (
-                                <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-semibold text-blue-700">
-                                  <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-blue-500" />
-                                  In progress
-                                </span>
-                              )}
-                              {allDone && (
-                                <span className="rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-semibold text-green-700">
-                                  Complete
-                                </span>
-                              )}
-                            </div>
-                            <span className="tabular-nums">{s.done} of {s.total} complete, {s.items.toLocaleString()} items found</span>
-                          </div>
-                          <div className="h-1.5 overflow-hidden rounded-full bg-blue-200">
-                            <div
-                              className={`h-1.5 rounded-full transition-all duration-500 ${allDone ? "bg-green-500" : "bg-blue-500"}`}
-                              style={{ width: `${Math.max(2, s.pct)}%` }}
-                            />
-                          </div>
-                          {/* Per-platform rows within stage */}
-                          <div className="mt-2 grid grid-cols-1 gap-1.5 sm:grid-cols-2">
-                            {s.jobs.map((j) => {
-                              const counters = getJobStageCounters(j);
-                              const persistCounters = getJobPersistCounters(j);
-                              const activitySummary = formatJobActivitySummary(getJobActivity(j));
-                              const postsFound = counters?.posts ?? 0;
-                              const commentsFound = counters?.comments ?? 0;
-                              const account = getAccount(j);
-                              const jobDuration = j.started_at
-                                ? `${Math.round(((j.completed_at ? new Date(j.completed_at).getTime() : Date.now()) - new Date(j.started_at).getTime()) / 1000)}s`
-                                : null;
-                              return (
-                                <div key={j.id} className="flex items-center gap-1.5 rounded bg-white/50 px-2 py-1 text-xs">
-                                  <span className={`inline-block h-2 w-2 shrink-0 rounded-full ${statusDotClass[j.status] ?? "bg-zinc-300"}`} />
-                                  <span className="font-semibold">{PLATFORM_LABELS[j.platform] ?? j.platform}</span>
-                                  {account && <span className="text-blue-600">@{account}</span>}
-                                  <span className={`ml-auto ${statusTextClass[j.status] ?? "text-zinc-500"}`}>
-                                    {JOB_STATUS_PLAIN[j.status] ?? j.status}
-                                  </span>
-                                  {counters ? (
-                                    <span className="tabular-nums text-zinc-700">{formatCountersPlain(postsFound, commentsFound)} found</span>
-                                  ) : (
-                                    <span className="tabular-nums text-zinc-700">{(j.items_found ?? 0).toLocaleString()} items</span>
-                                  )}
-                                  {persistCounters && (
-                                    <span className="tabular-nums text-zinc-500">
-                                      {formatCountersPlain(persistCounters.posts_upserted, persistCounters.comments_upserted)} saved
-                                    </span>
-                                  )}
-                                  {activitySummary && <span className="text-zinc-400">{activitySummary}</span>}
-                                  {jobDuration && j.status !== "queued" && j.status !== "pending" && (
-                                    <span className="tabular-nums text-zinc-400">{jobDuration}</span>
-                                  )}
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-
-                {/* Live activity log (latest events) */}
-                {runningIngest && liveRunLogs.length > 0 && (
-                  <div className="mt-4 border-t border-blue-200 pt-3">
-                    <p className="mb-1.5 text-[10px] font-bold uppercase tracking-widest text-blue-600">Activity Log</p>
-                    <div className="space-y-0.5">
-                      {liveRunLogs.slice(0, 6).map((entry) => (
-                        <p key={entry.id} className="flex items-center gap-2 text-xs">
-                          <span className="shrink-0 font-mono text-[10px] tabular-nums text-blue-500">{entry.timestampLabel}</span>
-                          <span className="text-blue-900">{entry.message}</span>
-                        </p>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-        );
-          })()}
-        </>
+        // Sync-session presentation, including "Missing comment media" and
+        // `missing_comment_media_count`, is owned by SeasonSocialIngestControls.
+        <SeasonSocialIngestControls
+          JOB_STATUS_PLAIN={JOB_STATUS_PLAIN}
+          PLATFORM_LABELS={PLATFORM_LABELS}
+          PLATFORM_TABS={PLATFORM_TABS}
+          SOCIAL_FULL_SYNC_MIRROR_ENABLED={SOCIAL_FULL_SYNC_MIRROR_ENABLED}
+          STAGE_LABELS_PLAIN={STAGE_LABELS_PLAIN}
+          SocialPlatformTabIcon={SocialPlatformTabIcon}
+          activeSyncSession={activeSyncSession}
+          activeSyncSessionRetryKind={activeSyncSessionRetryKind}
+          analytics={analytics}
+          buildPreviewPlatformStatuses={buildPreviewPlatformStatuses}
+          createPortal={createPortal}
+          elapsedTick={elapsedTick}
+          error={error}
+          externalControlsTarget={externalControlsTarget}
+          formatActiveJobSummary={formatActiveJobSummary}
+          formatCountersPlain={formatCountersPlain}
+          formatDateTime={formatDateTime}
+          formatDateTimeFromDate={formatDateTimeFromDate}
+          formatInteger={formatInteger}
+          formatJobActivitySummary={formatJobActivitySummary}
+          formatMirrorCoverageLabel={formatMirrorCoverageLabel}
+          formatSyncStatusLabel={formatSyncStatusLabel}
+          getJobActivity={getJobActivity}
+          getJobPersistCounters={getJobPersistCounters}
+          getJobStageCounters={getJobStageCounters}
+          getJobStageLabel={getJobStageLabel}
+          getSyncStatusTone={getSyncStatusTone}
+          hidePlatformTabs={hidePlatformTabs}
+          ingestMessage={ingestMessage}
+          ingestStartedAt={ingestStartedAt}
+          lastUpdated={lastUpdated}
+          linkedHandleTabs={linkedHandleTabs}
+          liveRunLogs={liveRunLogs}
+          platformHandleCounts={platformHandleCounts}
+          platformTab={platformTab}
+          pollingStatus={pollingStatus}
+          portaledHeaderRail={portaledHeaderRail}
+          retryActiveSyncSession={retryActiveSyncSession}
+          runScopedJobs={runScopedJobs}
+          runningIngest={runningIngest}
+          sectionErrorItems={sectionErrorItems}
+          setPlatformTabAndUrl={setPlatformTabAndUrl}
+          setSyncDetailsExpanded={setSyncDetailsExpanded}
+          shouldRenderInlineControls={shouldRenderInlineControls}
+          shouldRenderPortaledControls={shouldRenderPortaledControls}
+          socialControlsRail={socialControlsRail}
+          staleFallbackItems={staleFallbackItems}
+          staleFallbackMessage={staleFallbackMessage}
+          syncCommentsCoveragePreview={syncCommentsCoveragePreview}
+          syncDetailsExpanded={syncDetailsExpanded}
+          syncMirrorCoveragePreview={syncMirrorCoveragePreview}
+          workerHealth={workerHealth}
+        />
       )}
 
       {isCastContentView ? (
@@ -5230,1610 +4675,194 @@ export default function SeasonSocialAnalyticsSection({
         />
       ) : loading && !analytics ? (
         <div data-testid="social-analytics-skeleton" className="space-y-4">
-          {(isBravoView || isSentimentView) && (
-            <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              {[0, 1, 2, 3].map((index) => (
-                <article
-                  key={`summary-skeleton-${index}`}
-                  className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm"
-                >
-                  <div className="h-3 w-24 animate-pulse rounded bg-zinc-200" />
-                  <div className="mt-3 h-8 w-16 animate-pulse rounded bg-zinc-200" />
-                  <div className="mt-2 h-3 w-36 animate-pulse rounded bg-zinc-200" />
-                </article>
-              ))}
-            </section>
-          )}
-          {(isBravoView || isAdvancedView) && (
-            <section className="grid gap-6 xl:grid-cols-3">
-              <article className="xl:col-span-2 rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
-                <div className="h-4 w-40 animate-pulse rounded bg-zinc-200" />
-                <div className="mt-4 space-y-3">
-                  {[0, 1].map((row) => (
-                    <div key={`heatmap-skeleton-${row}`} className="space-y-2">
-                      <div className="h-3 w-32 animate-pulse rounded bg-zinc-200" />
-                      <div className="grid grid-cols-7 gap-1.5 rounded-lg border border-zinc-100 bg-zinc-50 p-2">
-                        {Array.from({ length: 7 }).map((_, idx) => (
-                          <div
-                            key={`heatmap-skeleton-${row}-${idx}`}
-                            className="h-9 w-9 animate-pulse rounded bg-zinc-200 sm:h-10 sm:w-10"
-                          />
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </article>
-              <article className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
-                <div className="h-4 w-28 animate-pulse rounded bg-zinc-200" />
-                <div className="mt-4 space-y-2">
-                  {[0, 1, 2, 3].map((index) => (
-                    <div key={`panel-skeleton-${index}`} className="h-8 animate-pulse rounded bg-zinc-200" />
-                  ))}
-                </div>
-              </article>
-            </section>
-          )}
-          {(isSentimentView || isHashtagsView) && (
-            <section className="grid gap-6 xl:grid-cols-2">
-              {[0, 1].map((index) => (
-                <article key={`detail-skeleton-${index}`} className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
-                  <div className="h-4 w-40 animate-pulse rounded bg-zinc-200" />
-                  <div className="mt-4 space-y-2">
-                    {[0, 1, 2, 3].map((row) => (
-                      <div key={`detail-skeleton-${index}-${row}`} className="h-8 animate-pulse rounded bg-zinc-200" />
-                    ))}
-                  </div>
-                </article>
-              ))}
-            </section>
-          )}
+          <SeasonSocialOverview
+            variant={"skeleton"}
+            Link={Link}
+            analytics={analytics}
+            commentsSavedActualSummary={commentsSavedActualSummary}
+            commentsSavedPctCard={commentsSavedPctCard}
+            contentTypeDistributionLines={contentTypeDistributionLines}
+            formatCompactInteger={formatCompactInteger}
+            formatDateTime={formatDateTime}
+            formatInteger={formatInteger}
+            formatPctLabel={formatPctLabel}
+            formatPercent={formatPercent}
+            isAdvancedView={isAdvancedView}
+            isBravoView={isBravoView}
+            isHashtagsView={isHashtagsView}
+            isSentimentView={isSentimentView}
+            platformTab={platformTab}
+            postMetadataMetricCards={postMetadataMetricCards}
+            postMetadataTotalPosts={postMetadataTotalPosts}
+            youtubeContentBreakdown={youtubeContentBreakdown}
+          />
         </div>
       ) : (
         <>
-          {(isBravoView || isSentimentView) && (
-            <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
-            <article className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
-              <p className="text-xs font-semibold uppercase tracking-[0.25em] text-zinc-400">Content Volume</p>
-              <p className="mt-2 text-3xl font-bold text-zinc-900">{formatCompactInteger(analytics?.summary.total_posts)}</p>
-              <p className="mt-1 text-xs text-zinc-500">Bravo posts/videos captured</p>
-            </article>
-            <article className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
-              <p className="text-xs font-semibold uppercase tracking-[0.25em] text-zinc-400">Viewer Comments</p>
-              <p className="mt-2 text-3xl font-bold text-zinc-900">{formatCompactInteger(analytics?.summary.total_comments)}</p>
-              <p className="mt-1 text-xs text-zinc-500">Comment/reply records persisted</p>
-            </article>
-            <article className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
-              <p className="text-xs font-semibold uppercase tracking-[0.25em] text-zinc-400">Engagement</p>
-              <p className="mt-2 text-3xl font-bold text-zinc-900">
-                {formatCompactInteger(analytics?.summary.total_engagement)}
-              </p>
-              <p className="mt-1 text-xs text-zinc-500">Cross-platform interactions</p>
-            </article>
-            {platformTab === "overview" && analytics?.reddit && (
-              <article className="rounded-2xl border border-orange-200 bg-orange-50/40 p-5 shadow-sm" data-testid="reddit-summary-card">
-                <p className="text-xs font-semibold uppercase tracking-[0.25em] text-orange-600">Reddit Coverage</p>
-                <p className="mt-2 text-3xl font-bold text-zinc-900">
-                  {formatCompactInteger(Number(analytics.reddit.tracked_post_count ?? 0))}
-                </p>
-                <p className="mt-1 text-xs text-zinc-600">
-                  tracked posts · {formatCompactInteger(Number(analytics.reddit.show_match_post_count ?? 0))} show-match ·{" "}
-                  {formatCompactInteger(Number(analytics.reddit.comment_count ?? 0))} comments
-                </p>
-                {analytics.reddit.deep_link?.path && (
-                  <Link
-                    href={analytics.reddit.deep_link.path as Route}
-                    className="mt-2 inline-flex text-xs font-semibold text-orange-700 underline-offset-4 hover:underline"
-                  >
-                    Open Reddit Manager
-                  </Link>
-                )}
-              </article>
-            )}
-            {platformTab === "overview" && analytics?.reddit && (
-              <article className="rounded-2xl border border-orange-200 bg-white p-5 shadow-sm" data-testid="reddit-freshness-card">
-                <p className="text-xs font-semibold uppercase tracking-[0.25em] text-orange-600">Reddit Freshness</p>
-                <p className="mt-2 text-3xl font-bold text-zinc-900">
-                  {formatCompactInteger(Number(analytics.reddit.coverage?.recovered_container_count ?? 0))}
-                </p>
-                <p className="mt-1 text-xs text-zinc-600">
-                  recovered windows · {formatCompactInteger(Number(analytics.reddit.coverage?.stale_container_count ?? 0))} stale
-                </p>
-                <p className="mt-1 text-xs text-zinc-500">
-                  Latest Reddit run {formatDateTime(analytics.reddit.freshness?.latest_run_timestamp ?? null)}
-                </p>
-              </article>
-            )}
-            <article
-              className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm"
-              data-testid="metric-comments-saved-pct-card"
-            >
-              <p className="mt-2 text-3xl font-bold text-zinc-900" data-testid="metric-comments-saved-pct-value">
-                {formatPctLabel(commentsSavedPctCard)}
-              </p>
-              <p className="mt-1 text-xs text-zinc-500">of Comments Saved</p>
-            </article>
-            <article
-              className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm"
-              data-testid="metric-comments-saved-actual-card"
-            >
-              <p className="mt-2 text-3xl font-bold text-zinc-900 break-all" data-testid="metric-comments-saved-actual-value">
-                {`${formatCompactInteger(commentsSavedActualSummary.saved)}/${formatCompactInteger(commentsSavedActualSummary.actual)}*`}
-              </p>
-              <p className="mt-1 text-xs text-zinc-500">Comments (Saved/Actual)</p>
-            </article>
-            {isSentimentView && (
-              <article className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
-                <p className="text-xs font-semibold uppercase tracking-[0.25em] text-zinc-400">Sentiment Mix</p>
-                <div className="mt-2 space-y-1 text-sm">
-                  <p className="font-semibold text-emerald-700">
-                    Positive {formatPercent(analytics?.summary.sentiment_mix.positive ?? 0)}
-                  </p>
-                  <p className="font-semibold text-zinc-600">
-                    Neutral {formatPercent(analytics?.summary.sentiment_mix.neutral ?? 0)}
-                  </p>
-                  <p className="font-semibold text-red-700">
-                    Negative {formatPercent(analytics?.summary.sentiment_mix.negative ?? 0)}
-                  </p>
-                </div>
-              </article>
-            )}
-            {platformTab === "youtube" && (
-              <>
-                <article
-                  className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm"
-                  data-testid="metric-youtube-videos-card"
-                >
-                  <p className="mt-2 text-3xl font-bold text-zinc-900" data-testid="metric-youtube-videos-value">
-                    {youtubeContentBreakdown
-                      ? formatCompactInteger(Number(youtubeContentBreakdown.videos_count ?? 0))
-                      : "--"}
-                  </p>
-                  <p className="mt-1 text-xs text-zinc-500">Videos</p>
-                </article>
-                <article
-                  className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm"
-                  data-testid="metric-youtube-reels-card"
-                >
-                  <p className="mt-2 text-3xl font-bold text-zinc-900" data-testid="metric-youtube-reels-value">
-                    {youtubeContentBreakdown
-                      ? formatCompactInteger(Number(youtubeContentBreakdown.reels_count ?? 0))
-                      : "--"}
-                  </p>
-                  <p className="mt-1 text-xs text-zinc-500">Reels</p>
-                </article>
-              </>
-            )}
-            {postMetadataMetricCards.map((metric) => (
-              <article
-                key={`post-metadata-${metric.key}`}
-                className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm"
-                data-testid={`metric-${metric.key}-coverage-card`}
-              >
-                <p className="mt-2 text-3xl font-bold text-zinc-900" data-testid={`metric-${metric.key}-coverage-value`}>
-                  {formatPctLabel(metric.value?.pct)}
-                </p>
-                <p className="mt-1 text-xs text-zinc-500">of {metric.label} Saved</p>
-                <p className="mt-1 text-xs text-zinc-500">
-                  {`${formatInteger(Number(metric.value?.posts_with ?? 0))}/${formatInteger(postMetadataTotalPosts)} ${metric.label} (Saved/Posts)`}
-                </p>
-              </article>
-            ))}
-            <article
-              className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm"
-              data-testid="metric-content-type-distribution-card"
-            >
-              <p className="text-xs font-semibold uppercase tracking-[0.25em] text-zinc-400">Content Type Distribution</p>
-              <div className="mt-2 space-y-1 text-xs text-zinc-700">
-                {contentTypeDistributionLines.length > 0 ? (
-                  contentTypeDistributionLines.map((line) => <p key={line}>{line}</p>)
-                ) : (
-                  <p>N/A</p>
-                )}
-              </div>
-            </article>
-            </section>
-          )}
+          <SeasonSocialOverview
+            variant={"content"}
+            Link={Link}
+            analytics={analytics}
+            commentsSavedActualSummary={commentsSavedActualSummary}
+            commentsSavedPctCard={commentsSavedPctCard}
+            contentTypeDistributionLines={contentTypeDistributionLines}
+            formatCompactInteger={formatCompactInteger}
+            formatDateTime={formatDateTime}
+            formatInteger={formatInteger}
+            formatPctLabel={formatPctLabel}
+            formatPercent={formatPercent}
+            isAdvancedView={isAdvancedView}
+            isBravoView={isBravoView}
+            isHashtagsView={isHashtagsView}
+            isSentimentView={isSentimentView}
+            platformTab={platformTab}
+            postMetadataMetricCards={postMetadataMetricCards}
+            postMetadataTotalPosts={postMetadataTotalPosts}
+            youtubeContentBreakdown={youtubeContentBreakdown}
+          />
 
-          {isBravoView && (
-            <section className="space-y-6">
-              {socialRulePanels}
-              <article className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
-              <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <h4 className="text-lg font-semibold text-zinc-900">Weekly Trend</h4>
-                  <span className="text-xs uppercase tracking-[0.2em] text-zinc-400">
-                    {platformTab === "youtube" && weeklyMetric === "posts"
-                      ? "YouTube Posts Schedule"
-                      : "Episode-air anchored"}
-                  </span>
-                </div>
-                <div className="inline-flex items-center gap-1 rounded-lg border border-zinc-200 bg-zinc-50 p-1 text-xs font-semibold">
-                  <button
-                    type="button"
-                    onClick={() => setWeeklyMetric("posts")}
-                    className={`rounded px-2.5 py-1 transition ${
-                      weeklyMetric === "posts"
-                        ? "bg-white text-zinc-900 shadow-sm"
-                        : "text-zinc-500 hover:text-zinc-700"
-                    }`}
-                  >
-                    Post Count
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setWeeklyMetric("comments")}
-                    className={`rounded px-2.5 py-1 transition ${
-                      weeklyMetric === "comments"
-                        ? "bg-white text-zinc-900 shadow-sm"
-                        : "text-zinc-500 hover:text-zinc-700"
-                    }`}
-                  >
-                    Comment Count
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setWeeklyMetric("completeness")}
-                    className={`rounded px-2.5 py-1 transition ${
-                      weeklyMetric === "completeness"
-                        ? "bg-white text-zinc-900 shadow-sm"
-                        : "text-zinc-500 hover:text-zinc-700"
-                    }`}
-                  >
-                    Completeness
-                  </button>
-                </div>
-              </div>
-              <div className="mb-4 flex flex-wrap items-center gap-2">
-                <div className="inline-flex items-center gap-1 rounded-lg border border-zinc-200 bg-zinc-50 p-1 text-xs font-semibold">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSocialDensity("compact");
-                      setSocialPreferenceInUrl(SOCIAL_DENSITY_QUERY_KEY, "compact");
-                    }}
-                    className={`rounded px-2.5 py-1 transition ${
-                      socialDensity === "compact"
-                        ? "bg-white text-zinc-900 shadow-sm"
-                        : "text-zinc-500 hover:text-zinc-700"
-                    }`}
-                  >
-                    Compact
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSocialDensity("comfortable");
-                      setSocialPreferenceInUrl(SOCIAL_DENSITY_QUERY_KEY, null);
-                    }}
-                    className={`rounded px-2.5 py-1 transition ${
-                      socialDensity === "comfortable"
-                        ? "bg-white text-zinc-900 shadow-sm"
-                        : "text-zinc-500 hover:text-zinc-700"
-                    }`}
-                  >
-                    Comfortable
-                  </button>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const next = !socialAlertsEnabled;
-                    setSocialAlertsEnabled(next);
-                    setSocialPreferenceInUrl(SOCIAL_ALERTS_QUERY_KEY, next ? null : "off");
-                  }}
-                  className="rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-100"
-                >
-                  Alerts {socialAlertsEnabled ? "On" : "Off"}
-                </button>
-              </div>
-              <div className="mb-4 grid gap-2 sm:grid-cols-3">
-                <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500">Coverage</p>
-                  <p className="mt-1 text-sm font-semibold text-zinc-900">
-                    {formatPctLabel(dataQuality?.comments_saved_pct_overall)}
-                  </p>
-                </div>
-                <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500">Freshness</p>
-                  <p className="mt-1 text-sm font-semibold text-zinc-900">
-                    {formatFreshnessLabel(dataQuality?.data_freshness_minutes)}
-                  </p>
-                </div>
-                <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500">Last Ingest</p>
-                  <p className="mt-1 text-sm font-semibold text-zinc-900">
-                    {formatDateTime(dataQuality?.last_post_at)}
-                  </p>
-                </div>
-              </div>
-              <div className="space-y-3">
-                {weeklyDailyActivityRows.map((weekRow) => {
-                  const weekPostTotal = weeklyHeatmapPostTotals.get(weekRow.week_index) ?? 0;
-                  const weekCommentTotal = weeklyHeatmapCommentTotals.get(weekRow.week_index) ?? 0;
-                  const weekEpisodeLabel = getWeekEpisodeLabel(weekRow, seasonNumber);
-                  const heatmapWeekSectionLabel = getHeatmapWeekSectionLabel(weekRow);
-                  const weekFlags = socialAlertsEnabled ? (weeklyFlagsByWeek.get(weekRow.week_index) ?? []) : [];
-                  return (
-                    <div
-                      key={weekRow.week_index}
-                      className="space-y-1"
-                      data-testid={`weekly-heatmap-row-${weekRow.week_index}`}
-                    >
-                      <div className="flex items-center justify-between text-xs text-zinc-500">
-                        <span className="flex flex-col gap-1">
-                          <span className="flex flex-wrap items-center gap-2">
-                            <span>{heatmapWeekSectionLabel}</span>
-                            {weekEpisodeLabel && (
-                              <span className="rounded-full border border-zinc-300 bg-zinc-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-zinc-700">
-                                {weekEpisodeLabel}
-                              </span>
-                            )}
-                          </span>
-                          <span className="text-[10px] uppercase tracking-[0.08em] text-zinc-400">
-                            {formatDateOnly(weekRow.start)} to {formatDateOnly(weekRow.end)}
-                          </span>
-                          {weekFlags.length > 0 && (
-                            <span className="flex flex-wrap items-center gap-1">
-                              {weekFlags.map((flag) => (
-                                <button
-                                  key={`${weekRow.week_index}-${flag.code}`}
-                                  type="button"
-                                  onClick={() => {
-                                    router.replace(buildWeekDetailHref(weekRow.week_index) as Route, { scroll: false });
-                                  }}
-                                  className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${getWeeklyFlagToneClass(flag.severity)}`}
-                                  title={flag.message}
-                                >
-                                  {flag.code.replaceAll("_", " ")}
-                                </button>
-                              ))}
-                            </span>
-                          )}
-                        </span>
-                        <span className="flex flex-col items-end text-right leading-tight">
-                          <span data-testid={`weekly-heatmap-total-${weekRow.week_index}`}>
-                            {formatInteger(weekPostTotal)} posts
-                          </span>
-                          <span data-testid={`weekly-heatmap-comments-total-${weekRow.week_index}`}>
-                            {formatInteger(weekCommentTotal)} comments
-                          </span>
-                        </span>
-                      </div>
-                      <div className="overflow-x-auto rounded-lg border border-zinc-100 bg-zinc-50 p-2">
-                        <div
-                          className={socialDensity === "comfortable" ? "grid grid-cols-7 gap-1.5" : "inline-grid grid-cols-7 gap-1.5"}
-                        >
-                        {weekRow.days.map((day) => {
-                          const value = getWeeklyDayValue(day, weeklyMetric, heatmapPlatform);
-                          const displayLabel =
-                            weeklyMetric === "completeness"
-                              ? value < 0
-                                ? "N/A"
-                                : `${(value * 100).toFixed(1)}%`
-                              : formatInteger(value);
-                          const monthDay = getMonthDayLabel(day.date_local);
-                          const [monthLabel, dayLabel] = monthDay.split(" ");
-                          return (
-                            <div
-                              key={`${weekRow.week_index}-${day.day_index}`}
-                              data-testid={`weekly-heatmap-day-${weekRow.week_index}-${day.day_index}`}
-                              title={`${day.date_local} · ${displayLabel} ${weeklyMetric}`}
-                            >
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  router.replace(buildWeekDetailHref(weekRow.week_index, day.date_local) as Route, {
-                                    scroll: false,
-                                  });
-                                }}
-                                aria-label={`${weekRow.label} ${day.date_local} ${displayLabel} ${weeklyMetric}`}
-                                className={`flex ${socialDensity === "comfortable" ? "h-12 w-full text-[10px]" : "h-9 w-9 sm:h-10 sm:w-10 text-[9px]"} flex-col items-center justify-center rounded px-1 font-semibold tabular-nums ${getHeatmapToneClass({ value, maxValue: weeklyHeatmapMaxValue, metric: weeklyMetric })}`}
-                              >
-                                <span className="sr-only">{monthDay}</span>
-                                <span className="leading-none">{monthLabel}</span>
-                                <span className="leading-none">{dayLabel}</span>
-                              </button>
-                            </div>
-                          );
-                        })}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-                {(analytics?.weekly?.length ?? 0) > 0 && weeklyDailyActivityRows.length === 0 && (
-                  <p data-testid="weekly-heatmap-unavailable" className="text-sm text-zinc-500">
-                    Daily schedule unavailable for the current view.
-                  </p>
-                )}
-                {(analytics?.weekly?.length ?? 0) === 0 && (
-                  <p className="text-sm text-zinc-500">No weekly data for the current view.</p>
-                )}
-              </div>
-              </article>
-            </section>
-          )}
+        <SeasonSocialWeeklyTable
+          Link={Link}
+          PLATFORM_LABELS={PLATFORM_LABELS}
+          PLATFORM_ORDER={PLATFORM_ORDER}
+          SOCIAL_ALERTS_QUERY_KEY={SOCIAL_ALERTS_QUERY_KEY}
+          SOCIAL_DENSITY_QUERY_KEY={SOCIAL_DENSITY_QUERY_KEY}
+          SOCIAL_METRIC_MODE_QUERY_KEY={SOCIAL_METRIC_MODE_QUERY_KEY}
+          SOCIAL_TABLE_METRICS_QUERY_KEY={SOCIAL_TABLE_METRICS_QUERY_KEY}
+          SOCIAL_TABLE_METRIC_KEYS={SOCIAL_TABLE_METRIC_KEYS}
+          SOCIAL_TABLE_METRIC_OPTIONS={SOCIAL_TABLE_METRIC_OPTIONS}
+          activeFailureErrorCounts={activeFailureErrorCounts}
+          analytics={analytics}
+          analyticsView={analyticsView}
+          benchmarkCompareMode={benchmarkCompareMode}
+          benchmarkSummary={benchmarkSummary}
+          buildSeasonSocialWeekUrl={buildSeasonSocialWeekUrl}
+          buildWeekDetailHref={buildWeekDetailHref}
+          dataQuality={dataQuality}
+          formatDateOnly={formatDateOnly}
+          formatDateShort={formatDateShort}
+          formatDateTime={formatDateTime}
+          formatDurationLabel={formatDurationLabel}
+          formatFreshnessLabel={formatFreshnessLabel}
+          formatInteger={formatInteger}
+          formatMetricCountLabel={formatMetricCountLabel}
+          formatPctLabel={formatPctLabel}
+          getHeatmapToneClass={getHeatmapToneClass}
+          getHeatmapWeekSectionLabel={getHeatmapWeekSectionLabel}
+          getMonthDayLabel={getMonthDayLabel}
+          getPlatformCoverage={getPlatformCoverage}
+          getTotalCoverage={getTotalCoverage}
+          getWeekEpisodeLabel={getWeekEpisodeLabel}
+          getWeekSyncActionLabel={getWeekSyncActionLabel}
+          getWeeklyDayValue={getWeeklyDayValue}
+          getWeeklyFlagToneClass={getWeeklyFlagToneClass}
+          getWeeklyTableEpisodePrimaryLabel={getWeeklyTableEpisodePrimaryLabel}
+          getWeeklyTableEpisodeSecondaryLabel={getWeeklyTableEpisodeSecondaryLabel}
+          groupedFailureRows={groupedFailureRows}
+          heatmapPlatform={heatmapPlatform}
+          ingestActionsBlockedReason={ingestActionsBlockedReason}
+          ingestingWeek={ingestingWeek}
+          isAdvancedView={isAdvancedView}
+          isBravoView={isBravoView}
+          isCoveragePctUpToDate={isCoveragePctUpToDate}
+          latestFailureEvents={latestFailureEvents}
+          needsWeekDetailTokenMetrics={needsWeekDetailTokenMetrics}
+          platformFilter={platformFilter}
+          platformTab={platformTab}
+          router={router}
+          runHealth={runHealth}
+          runIngest={runIngest}
+          runSummaries={runSummaries}
+          runSummariesLoading={runSummariesLoading}
+          runSummaryError={runSummaryError}
+          runningIngest={runningIngest}
+          seasonNumber={seasonNumber}
+          selectedTableMetricSet={selectedTableMetricSet}
+          selectedTableMetrics={selectedTableMetrics}
+          setBenchmarkCompareMode={setBenchmarkCompareMode}
+          setSocialAlertsEnabled={setSocialAlertsEnabled}
+          setSocialDensity={setSocialDensity}
+          setSocialMetricMode={setSocialMetricMode}
+          setSocialPreferenceInUrl={setSocialPreferenceInUrl}
+          setWeeklyMetric={setWeeklyMetric}
+          showRouteSlug={showRouteSlug}
+          socialAlertsEnabled={socialAlertsEnabled}
+          socialDensity={socialDensity}
+          socialMetricMode={socialMetricMode}
+          socialMetricModeQueryValue={socialMetricModeQueryValue}
+          socialRulePanels={socialRulePanels}
+          socialTableMetricsQueryValue={socialTableMetricsQueryValue}
+          staleRuns={staleRuns}
+          staleThresholdMinutes={staleThresholdMinutes}
+          toggleAllSocialTableMetrics={toggleAllSocialTableMetrics}
+          toggleSocialTableMetric={toggleSocialTableMetric}
+          weekDetailTokenCountsByWeek={weekDetailTokenCountsByWeek}
+          weekDetailTokenCountsLoadingWeeks={weekDetailTokenCountsLoadingWeeks}
+          weeklyDailyActivityRows={weeklyDailyActivityRows}
+          weeklyFlagsByWeek={weeklyFlagsByWeek}
+          weeklyHeatmapCommentTotals={weeklyHeatmapCommentTotals}
+          weeklyHeatmapMaxValue={weeklyHeatmapMaxValue}
+          weeklyHeatmapPostTotals={weeklyHeatmapPostTotals}
+          weeklyMetric={weeklyMetric}
+          weeklyPlatformEngagementByWeek={weeklyPlatformEngagementByWeek}
+          weeklyPlatformRows={weeklyPlatformRows}
+          workerHealthUnavailableWarning={workerHealthUnavailableWarning}
+        />
 
-          {isAdvancedView && (
-            <section className="grid gap-6 xl:grid-cols-3">
-              <div className="space-y-6 xl:col-span-1">
-                {socialRulePanels}
-              </div>
-              <article className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
-                <h4 className="text-lg font-semibold text-zinc-900">Run Health</h4>
-                {runSummariesLoading && runSummaries.length === 0 ? (
-                  <div className="mt-4 space-y-2">
-                    {[0, 1, 2].map((index) => (
-                      <div key={`run-health-skeleton-${index}`} className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2">
-                        <div className="h-3 w-24 animate-pulse rounded bg-zinc-200" />
-                        <div className="mt-2 h-6 w-20 animate-pulse rounded bg-zinc-200" />
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="mt-4 space-y-2 text-sm">
-                    <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2">
-                      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500">Success Rate</p>
-                      <p className="mt-1 text-lg font-semibold text-zinc-900">
-                        {formatPctLabel(runHealth.successRate)}
-                      </p>
-                    </div>
-                    <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2">
-                      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500">Median Duration</p>
-                      <p className="mt-1 text-lg font-semibold text-zinc-900">
-                        {formatDurationLabel(runHealth.medianDurationSeconds)}
-                      </p>
-                    </div>
-                    <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2">
-                      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500">Active Failures</p>
-                      <div className="mt-1 flex flex-wrap gap-1">
-                        {activeFailureErrorCounts.length === 0 && (
-                          <span className="text-xs text-zinc-500">No active failures</span>
-                        )}
-                        {activeFailureErrorCounts.map((item) => (
-                          <span
-                            key={item.code}
-                            className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-xs font-semibold text-zinc-700"
-                          >
-                            {item.code}: {item.count}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                    <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2">
-                      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500">Failure Groups</p>
-                      {groupedFailureRows.length === 0 ? (
-                        <p className="mt-1 text-xs text-zinc-500">No grouped failures for selected run.</p>
-                      ) : (
-                        <ul className="mt-1 space-y-1 text-xs">
-                          {groupedFailureRows.slice(0, 6).map((group) => (
-                            <li key={`${group.code}-${group.stage}`} className="rounded border border-zinc-200 bg-white px-2 py-1 text-zinc-700">
-                              <p className="font-semibold">
-                                {group.code} · {group.stage} · {group.count}
-                              </p>
-                              <p className="text-zinc-500">
-                                {group.platformsLabel || "Unknown platform"}
-                                {group.latestTimestamp ? ` · ${formatDateTime(group.latestTimestamp)}` : ""}
-                              </p>
-                              {group.sampleMessage && (
-                                <p className="line-clamp-1 text-zinc-500">{group.sampleMessage}</p>
-                              )}
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                    </div>
-                    <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2" data-testid="run-health-latest-failures">
-                      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500">
-                        Latest 5 Failure Events
-                      </p>
-                      {latestFailureEvents.length === 0 ? (
-                        <p className="mt-1 text-xs text-zinc-500">No recent failure events.</p>
-                      ) : (
-                        <ul className="mt-1 space-y-1 text-xs">
-                          {latestFailureEvents.map((event) => (
-                            <li key={event.id} className="rounded border border-zinc-200 bg-white px-2 py-1 text-zinc-700">
-                              <p className="font-semibold">
-                                {event.code} · {event.platform} · {event.stage}
-                              </p>
-                              <p className="text-zinc-500">
-                                {formatDateTime(event.timestamp)} · {event.status}
-                              </p>
-                              <p className="line-clamp-1 text-zinc-500">{event.message}</p>
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                    </div>
-                  </div>
-                )}
-                {runSummaryError && (
-                  <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                    {runSummaryError}
-                  </p>
-                )}
-              </article>
-              <article className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
-                <div className="flex items-center justify-between gap-2">
-                  <h4 className="text-lg font-semibold text-zinc-900">Consistency &amp; Momentum</h4>
-                  <div className="inline-flex items-center gap-1 rounded-lg border border-zinc-200 bg-zinc-50 p-1 text-xs font-semibold">
-                    <button
-                      type="button"
-                      onClick={() => setBenchmarkCompareMode("previous")}
-                      className={`rounded px-2 py-1 ${
-                        benchmarkCompareMode === "previous"
-                          ? "bg-white text-zinc-900 shadow-sm"
-                          : "text-zinc-500"
-                      }`}
-                    >
-                      Vs Prev
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setBenchmarkCompareMode("trailing")}
-                      className={`rounded px-2 py-1 ${
-                        benchmarkCompareMode === "trailing"
-                          ? "bg-white text-zinc-900 shadow-sm"
-                          : "text-zinc-500"
-                      }`}
-                    >
-                      Vs 3wk
-                    </button>
-                  </div>
-                </div>
-                {!benchmarkSummary ? (
-                  <p className="mt-4 text-sm text-zinc-500">Benchmark data unavailable.</p>
-                ) : (
-                  <div className="mt-4 space-y-2 text-sm">
-                    <p className="text-xs uppercase tracking-[0.14em] text-zinc-500">
-                      Week {benchmarkSummary.weekIndex} {benchmarkSummary.comparisonLabel}
-                    </p>
-                    <div className="grid grid-cols-3 gap-2">
-                      <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-2 py-2 text-center">
-                        <p className="text-[10px] uppercase tracking-[0.12em] text-zinc-500">Posts</p>
-                        <p className="mt-1 font-semibold text-zinc-900">
-                          {benchmarkSummary.postsDeltaPct == null ? "N/A" : `${benchmarkSummary.postsDeltaPct}%`}
-                        </p>
-                      </div>
-                      <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-2 py-2 text-center">
-                        <p className="text-[10px] uppercase tracking-[0.12em] text-zinc-500">Comments</p>
-                        <p className="mt-1 font-semibold text-zinc-900">
-                          {benchmarkSummary.commentsDeltaPct == null ? "N/A" : `${benchmarkSummary.commentsDeltaPct}%`}
-                        </p>
-                      </div>
-                      <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-2 py-2 text-center">
-                        <p className="text-[10px] uppercase tracking-[0.12em] text-zinc-500">Engagement</p>
-                        <p className="mt-1 font-semibold text-zinc-900">
-                          {benchmarkSummary.engagementDeltaPct == null ? "N/A" : `${benchmarkSummary.engagementDeltaPct}%`}
-                        </p>
-                      </div>
-                    </div>
-                    <p className="pt-1 text-xs text-zinc-500">
-                      Consistency:
-                      {" "}
-                      {Object.entries(benchmarkSummary.consistencyScorePct)
-                        .map(([platform, value]) => `${PLATFORM_LABELS[platform] ?? platform} ${formatPctLabel(value ?? null)}`)
-                        .join(" · ") || "N/A"}
-                    </p>
-                  </div>
-                )}
-              </article>
-            </section>
-          )}
+        <SeasonSocialInsightPanels
+          PLATFORM_LABELS={PLATFORM_LABELS}
+          analytics={analytics}
+          castAttitudePrototypeRows={castAttitudePrototypeRows}
+          formatInteger={formatInteger}
+          getCanonicalLeaderboardThumbnailImage={getCanonicalLeaderboardThumbnailImage}
+          hashtagMaxPlatformTokens={hashtagMaxPlatformTokens}
+          hashtagMaxWeeklyTokens={hashtagMaxWeeklyTokens}
+          hashtagPeakWeek={hashtagPeakWeek}
+          hashtagPlatformUsage={hashtagPlatformUsage}
+          hashtagSeasonCounts={hashtagSeasonCounts}
+          hashtagTopTag={hashtagTopTag}
+          hashtagTotalTokens={hashtagTotalTokens}
+          hashtagUniqueCount={hashtagUniqueCount}
+          hashtagUsageLoading={hashtagUsageLoading}
+          hashtagWeeklyUsage={hashtagWeeklyUsage}
+          isBravoView={isBravoView}
+          isHashtagsView={isHashtagsView}
+          isSentimentView={isSentimentView}
+          isVideoLikeThumbnailUrl={isVideoLikeThumbnailUrl}
+          openLeaderboardLightbox={openLeaderboardLightbox}
+          viewerAttitudeByPlatformRows={viewerAttitudeByPlatformRows}
+        />
 
-          {(isBravoView || isAdvancedView) && (
-            <section className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
-            <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <h4 className="text-lg font-semibold text-zinc-900">Weekly Bravo Post Count Table</h4>
-              </div>
-              <div className="flex flex-col items-end gap-2">
-                <button
-                  type="button"
-                  onClick={toggleAllSocialTableMetrics}
-                  className="rounded-full border border-zinc-200 px-2.5 py-1 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-100"
-                >
-                  {selectedTableMetrics.length === SOCIAL_TABLE_METRIC_KEYS.length ? "Deselect all" : "Select All"}
-                </button>
-                <div className="flex flex-wrap items-center justify-end gap-1.5" data-testid="weekly-bravo-metric-filter">
-                  {SOCIAL_TABLE_METRIC_OPTIONS.map((option) => {
-                    const isSelected = selectedTableMetricSet.has(option.key);
-                    return (
-                      <button
-                        key={`table-metric-${option.key}`}
-                        type="button"
-                        aria-pressed={isSelected}
-                        onClick={() => toggleSocialTableMetric(option.key)}
-                        className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.08em] transition ${
-                          isSelected
-                            ? "border-zinc-800 bg-zinc-800 text-white"
-                            : "border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-100 hover:text-zinc-800"
-                        }`}
-                      >
-                        {option.label}
-                      </button>
-                    );
-                  })}
-                </div>
-                <div className="inline-flex items-center gap-1 rounded-full border border-zinc-200 bg-zinc-50 p-1 text-xs font-semibold">
-                  <button
-                    type="button"
-                    aria-pressed={socialMetricMode === "total"}
-                    onClick={() => setSocialMetricMode("total")}
-                    className={`rounded-full px-2.5 py-1 transition ${
-                      socialMetricMode === "total"
-                        ? "bg-zinc-900 text-white"
-                        : "text-zinc-600 hover:bg-white hover:text-zinc-900"
-                    }`}
-                  >
-                    Total
-                  </button>
-                  <button
-                    type="button"
-                    aria-pressed={socialMetricMode === "saved"}
-                    onClick={() => setSocialMetricMode("saved")}
-                    className={`rounded-full px-2.5 py-1 transition ${
-                      socialMetricMode === "saved"
-                        ? "bg-zinc-900 text-white"
-                        : "text-zinc-600 hover:bg-white hover:text-zinc-900"
-                    }`}
-                  >
-                    Saved
-                  </button>
-                </div>
-              </div>
-            </div>
-            {(ingestActionsBlockedReason || workerHealthUnavailableWarning || staleRuns.length > 0) && (
-              <div className="mb-4 space-y-2">
-                {ingestActionsBlockedReason && (
-                  <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-                    <span className="font-semibold">Worker Health:</span> {ingestActionsBlockedReason}
-                  </div>
-                )}
-                {workerHealthUnavailableWarning && (
-                  <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
-                    <span className="font-semibold">Worker Health:</span> {workerHealthUnavailableWarning}
-                  </div>
-                )}
-                {staleRuns.length > 0 && (
-                  <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm text-zinc-700">
-                    <p className="font-semibold text-zinc-800">
-                      Potentially stalled ingest runs ({staleThresholdMinutes}+ minutes):
-                    </p>
-                    <ul className="mt-1 space-y-1 text-xs text-zinc-600">
-                      {staleRuns.map((staleRun) => (
-                        <li key={staleRun.runId}>
-                          <span className="font-medium">{staleRun.runId.slice(0, 8)}</span> · {staleRun.ingestMode} ·{" "}
-                          {staleRun.ageMinutes}m old · pending {staleRun.pendingJobs} · retrying {staleRun.retryingJobs}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-              </div>
-            )}
-            <div className="overflow-x-auto">
-              <table className="min-w-full border-collapse text-sm">
-                <thead>
-                  <tr className="border-b border-zinc-200 bg-zinc-50 text-left text-xs uppercase tracking-[0.12em] text-zinc-500">
-                    <th className="px-3 py-2 font-semibold">Episode</th>
-                    <th className="px-3 py-2 font-semibold">Window</th>
-                    <th className="px-3 py-2 font-semibold">Instagram</th>
-                    <th className="px-3 py-2 font-semibold">YouTube</th>
-                    <th className="px-3 py-2 font-semibold">TikTok</th>
-                    <th className="px-3 py-2 font-semibold">Twitter/X</th>
-                    <th className="px-3 py-2 font-semibold">Total</th>
-                    <th className="px-3 py-2 font-semibold">PROGRESS</th>
-                    <th className="px-3 py-2 font-semibold">Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {weeklyPlatformRows.map((week) => {
-                    const totalCoverage = getTotalCoverage(week);
-                    const engagementWeek = weeklyPlatformEngagementByWeek.get(week.week_index);
-                    const weeklyEngagementTotal = Number(engagementWeek?.total_engagement ?? 0);
-                    const detailTokenCounts = weekDetailTokenCountsByWeek[week.week_index];
-                    const detailTokenCountsLoading =
-                      needsWeekDetailTokenMetrics &&
-                      !detailTokenCounts &&
-                      weekDetailTokenCountsLoadingWeeks.has(week.week_index);
-                    const weekLinkQuery = new URLSearchParams();
-                    if (analyticsView !== "bravo") {
-                      weekLinkQuery.set("social_view", analyticsView);
-                    }
-                    if (socialTableMetricsQueryValue) {
-                      weekLinkQuery.set(SOCIAL_TABLE_METRICS_QUERY_KEY, socialTableMetricsQueryValue);
-                    }
-                    if (socialMetricModeQueryValue) {
-                      weekLinkQuery.set(SOCIAL_METRIC_MODE_QUERY_KEY, socialMetricModeQueryValue);
-                    }
-                    const weekSecondaryLabel = getWeeklyTableEpisodeSecondaryLabel(week);
-                    const totalCommentsValue =
-                      socialMetricMode === "saved"
-                        ? week.total_comments
-                        : (week.total_reported_comments ?? week.total_comments);
-                    const buildMetricTokens = ({
-                      postsValue,
-                      likesValue,
-                      commentsValue,
-                      tokenCounts,
-                    }: {
-                      postsValue: number | null | undefined;
-                      likesValue: number | null | undefined;
-                      commentsValue: number | null | undefined;
-                      tokenCounts: WeekDetailTokenTriplet | null;
-                    }): string[] => selectedTableMetrics.map((metric) => {
-                      if (metric === "posts") {
-                        return formatMetricCountLabel(postsValue, "post");
-                      }
-                      if (metric === "likes") {
-                        return formatMetricCountLabel(likesValue, "like");
-                      }
-                      if (metric === "comments") {
-                        return formatMetricCountLabel(commentsValue, "comment");
-                      }
-                      if (!tokenCounts) {
-                        return `-- ${metric}`;
-                      }
-                      if (metric === "hashtags") {
-                        return formatMetricCountLabel(tokenCounts.hashtags, "hashtag");
-                      }
-                      if (metric === "mentions") {
-                        return formatMetricCountLabel(tokenCounts.mentions, "mention");
-                      }
-                      if (metric === "collaborators") {
-                        return formatMetricCountLabel(tokenCounts.collaborators, "collaborator");
-                      }
-                      return formatMetricCountLabel(tokenCounts.tags, "tag");
-                    });
-                    const totalMetricTokens = buildMetricTokens({
-                      postsValue: week.total_posts,
-                      likesValue: weeklyEngagementTotal,
-                      commentsValue: totalCommentsValue,
-                      tokenCounts: detailTokenCounts?.total ?? null,
-                    });
-                    const selectedMetricProgressValues = selectedTableMetrics
-                      .map((metric): number | null => {
-                        if (metric === "posts") return totalCoverage.postsPct;
-                        if (metric === "comments") return totalCoverage.commentsPct;
-                        if (metric === "likes") {
-                          if (week.total_posts <= 0 && weeklyEngagementTotal <= 0) return null;
-                          return engagementWeek?.has_data === false ? 0 : 100;
-                        }
-                        if (!detailTokenCounts) {
-                          return detailTokenCountsLoading ? null : week.total_posts > 0 ? 0 : null;
-                        }
-                        return week.total_posts > 0 ? 100 : null;
-                      })
-                      .filter((value): value is number => typeof value === "number" && Number.isFinite(value));
-                    const selectedMetricProgressPct = selectedMetricProgressValues.length > 0
-                      ? Math.min(
-                          100,
-                          selectedMetricProgressValues.reduce((sum, value) => sum + value, 0) / selectedMetricProgressValues.length,
-                        )
-                      : null;
-                    const totalProgressValue = detailTokenCountsLoading
-                      ? "--"
-                      : selectedMetricProgressPct == null
-                        ? "-"
-                        : `${selectedMetricProgressPct.toFixed(1)}%`;
-                    const inferredTotalReportedComments = PLATFORM_ORDER.reduce(
-                      (sum, platform) => sum + Number(week.reported_comments?.[platform] ?? 0),
-                      0,
-                    );
-                    const totalReportedCommentsForMissing = Number(
-                      week.total_reported_comments ?? inferredTotalReportedComments,
-                    );
-                    const missingCommentsCount = Math.max(
-                      0,
-                      totalReportedCommentsForMissing - Number(week.total_comments ?? 0),
-                    );
-                    const missingMetricTokens = selectedTableMetrics
-                      .map((metric): string => {
-                        if (metric === "posts") {
-                          const missingPostsCount = totalCoverage.postsUpToDate ? 0 : Number(week.total_posts ?? 0);
-                          return formatMetricCountLabel(missingPostsCount, "post");
-                        }
-                        if (metric === "likes") {
-                          const missingLikesCount = engagementWeek?.has_data === false ? weeklyEngagementTotal : 0;
-                          return formatMetricCountLabel(missingLikesCount, "like");
-                        }
-                        if (metric === "comments") {
-                          return formatMetricCountLabel(missingCommentsCount, "comment");
-                        }
-                        if (metric === "hashtags") {
-                          return "-- hashtags";
-                        }
-                        if (metric === "mentions") {
-                          return "-- mentions";
-                        }
-                        if (metric === "collaborators") {
-                          return "-- collaborators";
-                        }
-                        return "-- tags";
-                      });
-                    const shouldShowMissingMetrics =
-                      !detailTokenCountsLoading &&
-                      typeof selectedMetricProgressPct === "number" &&
-                      Number.isFinite(selectedMetricProgressPct) &&
-                      !isCoveragePctUpToDate(selectedMetricProgressPct) &&
-                      missingMetricTokens.length > 0;
-                    return (
-                      <tr key={`table-week-${week.week_index}`} className="border-b border-zinc-100 text-zinc-700">
-                        <td className="px-3 py-2 align-top font-semibold">
-                          <Link
-                            href={buildSeasonSocialWeekUrl({
-                              showSlug: showRouteSlug,
-                              seasonNumber,
-                              weekIndex: week.week_index,
-                              platform: platformTab !== "overview" ? platformTab : undefined,
-                              query: weekLinkQuery,
-                            }) as Route}
-                            className="text-blue-600 hover:text-blue-800 hover:underline"
-                          >
-                            <span className="flex flex-col gap-0.5 leading-tight">
-                              <span>{getWeeklyTableEpisodePrimaryLabel(week, seasonNumber)}</span>
-                              <span className="text-xs font-normal text-zinc-500">{weekSecondaryLabel}</span>
-                            </span>
-                          </Link>
-                        </td>
-                        <td className="px-3 py-2 align-top text-xs text-zinc-500">
-                          {formatDateShort(week.start)} - {formatDateShort(week.end)}
-                        </td>
-                        {PLATFORM_ORDER.map((platform) => {
-                          const coverage = getPlatformCoverage(week, platform);
-                          const platformTokenCounts = detailTokenCounts?.byPlatform?.[platform] ?? null;
-                          const platformCommentsValue =
-                            socialMetricMode === "saved"
-                              ? week.comments?.[platform]
-                              : (week.reported_comments?.[platform] ?? week.comments?.[platform]);
-                          const platformMetricTokens = buildMetricTokens({
-                            postsValue: week.posts?.[platform],
-                            likesValue: engagementWeek?.engagement?.[platform],
-                            commentsValue: platformCommentsValue,
-                            tokenCounts: platformTokenCounts,
-                          });
-                          return (
-                            <td key={`${week.week_index}-${platform}`} className="px-3 py-2 align-top">
-                              <div className="flex flex-col gap-0.5 leading-tight">
-                                <div className="text-[11px] text-zinc-600" data-testid={`weekly-platform-metrics-${platform}-${week.week_index}`}>
-                                  {platformMetricTokens.length > 0 ? (
-                                    platformMetricTokens.map((token, index) => (
-                                      <div key={`${platform}-${week.week_index}-metric-${index}`}>{token}</div>
-                                    ))
-                                  ) : (
-                                    <div className="text-zinc-400">No metrics selected</div>
-                                  )}
-                                </div>
-                                {coverage.upToDate ? (
-                                  <div className="text-[11px] text-emerald-700 whitespace-nowrap">Up-to-Date</div>
-                                ) : null}
-                              </div>
-                            </td>
-                          );
-                        })}
-                        <td className="px-3 py-2 align-top font-semibold text-zinc-900">
-                          <div className="flex flex-col gap-0.5 leading-tight">
-                            <div className="text-[11px] font-normal text-zinc-600" data-testid={`weekly-total-metrics-${week.week_index}`}>
-                              {totalMetricTokens.length > 0 ? (
-                                totalMetricTokens.map((token, index) => (
-                                  <div key={`total-${week.week_index}-metric-${index}`}>{token}</div>
-                                ))
-                              ) : (
-                                <div className="text-zinc-400">No metrics selected</div>
-                              )}
-                            </div>
-                            {totalCoverage.upToDate ? (
-                              <div className="text-[11px] font-normal text-emerald-700 whitespace-nowrap">Up-to-Date</div>
-                            ) : null}
-                          </div>
-                        </td>
-                        <td className="px-3 py-2 align-top">
-                          <div className="flex flex-col gap-0.5 text-xs leading-tight text-zinc-700">
-                            <span className="whitespace-nowrap">
-                              <span className="font-semibold">Total Progress:</span>{" "}
-                              <span data-testid={`weekly-total-progress-${week.week_index}`}>{totalProgressValue}</span>
-                            </span>
-                            {shouldShowMissingMetrics ? (
-                              <div className="mt-1 text-[11px] text-zinc-600" data-testid={`weekly-missing-metrics-${week.week_index}`}>
-                                {missingMetricTokens.map((token, index) => (
-                                  <div key={`missing-${week.week_index}-${index}`}>{token}</div>
-                                ))}
-                              </div>
-                            ) : null}
-                          </div>
-                        </td>
-                        <td className="px-3 py-2 align-top">
-                          <div className="flex flex-col gap-1.5">
-                            <button
-                              type="button"
-                              onClick={() => runIngest({ week: week.week_index })}
-                              disabled={runningIngest || Boolean(ingestActionsBlockedReason)}
-                              className={`rounded-lg border px-2.5 py-1 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${
-                                runningIngest && ingestingWeek === week.week_index
-                                  ? "animate-pulse border-blue-400 bg-blue-50 text-blue-700"
-                                  : "border-zinc-300 text-zinc-700 hover:bg-zinc-100"
-                              }`}
-                            >
-                              {runningIngest && ingestingWeek === week.week_index ? "Syncing..." : "Run Week"}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => runIngest({ week: week.week_index, ingestMode: "posts_and_comments" })}
-                              disabled={runningIngest || Boolean(ingestActionsBlockedReason)}
-                              className="rounded-lg border border-zinc-300 px-2.5 py-1 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
-                            >
-                              {getWeekSyncActionLabel(platformFilter)}
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                  {weeklyPlatformRows.length === 0 && (
-                    <tr>
-                      <td className="px-3 py-3 text-sm text-zinc-500" colSpan={9}>
-                        No weekly post counts yet for selected filters.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-            </section>
-          )}
-
-          {isSentimentView && (
-            <section className="grid gap-6 xl:grid-cols-2">
-              <article className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
-                <h4 className="mb-2 text-lg font-semibold text-zinc-900">Cast Mention Comparison (Prototype)</h4>
-                <p className="mb-4 text-xs text-zinc-500">
-                  Heuristic draft: compares candidate cast-name mentions in viewer highlights against sentiment labels.
-                </p>
-                {castAttitudePrototypeRows.length === 0 ? (
-                  <p className="text-sm text-zinc-500">No cast mention candidates detected in viewer highlights yet.</p>
-                ) : (
-                  <div className="space-y-3">
-                    {castAttitudePrototypeRows.map((row) => {
-                      const total = Math.max(1, row.mentions);
-                      const positivePct = (row.positive / total) * 100;
-                      const neutralPct = (row.neutral / total) * 100;
-                      const negativePct = Math.max(0, 100 - positivePct - neutralPct);
-                      return (
-                        <div key={row.entity} className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2">
-                          <div className="flex items-center justify-between gap-2">
-                            <p className="text-sm font-semibold text-zinc-900">{row.entity}</p>
-                            <p className="text-xs text-zinc-600">
-                              {formatInteger(row.mentions)} mentions · {formatInteger(row.engagement)} engagement
-                            </p>
-                          </div>
-                          <div className="mt-2 h-2 overflow-hidden rounded bg-zinc-200">
-                            <div className="flex h-full">
-                              <span
-                                className="h-full bg-emerald-500"
-                                style={{ width: `${positivePct}%` }}
-                                aria-hidden="true"
-                              />
-                              <span
-                                className="h-full bg-zinc-400"
-                                style={{ width: `${neutralPct}%` }}
-                                aria-hidden="true"
-                              />
-                              <span
-                                className="h-full bg-red-500"
-                                style={{ width: `${negativePct}%` }}
-                                aria-hidden="true"
-                              />
-                            </div>
-                          </div>
-                          <p className="mt-1 text-[11px] text-zinc-600">
-                            +{row.positive} · ={row.neutral} · -{row.negative} · net {row.netSentiment}
-                          </p>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </article>
-              <article className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
-                <h4 className="mb-2 text-lg font-semibold text-zinc-900">Viewer Attitude by Platform</h4>
-                <p className="mb-4 text-xs text-zinc-500">
-                  Early matrix for comparing where audience tone is most positive vs critical.
-                </p>
-                {viewerAttitudeByPlatformRows.length === 0 ? (
-                  <p className="text-sm text-zinc-500">No viewer discussion highlights available.</p>
-                ) : (
-                  <div className="space-y-2">
-                    {viewerAttitudeByPlatformRows.map((row) => {
-                      const positivePct = row.total > 0 ? (row.positive / row.total) * 100 : 0;
-                      const negativePct = row.total > 0 ? (row.negative / row.total) * 100 : 0;
-                      const tone =
-                        positivePct === negativePct
-                          ? "Balanced"
-                          : positivePct > negativePct
-                            ? "Positive-leaning"
-                            : "Critical-leaning";
-                      return (
-                        <div key={row.platform} className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2">
-                          <div className="flex items-center justify-between gap-2">
-                            <p className="text-sm font-semibold text-zinc-900">
-                              {PLATFORM_LABELS[row.platform] ?? row.platform}
-                            </p>
-                            <p className="text-xs text-zinc-600">{formatInteger(row.total)} highlights</p>
-                          </div>
-                          <p className="mt-1 text-[11px] text-zinc-600">
-                            +{row.positive} · ={row.neutral} · -{row.negative} · {tone}
-                          </p>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </article>
-            </section>
-          )}
-
-          {(isBravoView || isSentimentView) && (
-            <section className="grid gap-6 xl:grid-cols-2">
-            <article className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
-              <h4 className="mb-4 text-lg font-semibold text-zinc-900">Platform Sentiment Breakdown</h4>
-              <div className="space-y-2">
-                {(analytics?.platform_breakdown ?? []).map((platform) => {
-                  const label = PLATFORM_LABELS[platform.platform] ?? platform.platform;
-                  return (
-                    <div
-                      key={platform.platform}
-                      className="rounded-lg border border-zinc-200 bg-zinc-50 px-4 py-3"
-                    >
-                      <div className="flex items-center justify-between text-sm font-semibold text-zinc-900">
-                        <span>{label}</span>
-                        <span>{formatInteger(platform.engagement)} engagement</span>
-                      </div>
-                      <p className="mt-1 text-xs text-zinc-500">
-                        {formatInteger(platform.posts)} posts · {formatInteger(platform.comments)} comments · P {formatInteger(platform.sentiment.positive)} / N {formatInteger(platform.sentiment.neutral)} / Neg {formatInteger(platform.sentiment.negative)}
-                      </p>
-                    </div>
-                  );
-                })}
-                {(analytics?.platform_breakdown?.length ?? 0) === 0 && (
-                  <p className="text-sm text-zinc-500">No platform data available.</p>
-                )}
-              </div>
-            </article>
-
-            <article className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
-              <h4 className="mb-4 text-lg font-semibold text-zinc-900">Top Sentiment Drivers</h4>
-              <p className="-mt-2 mb-4 text-xs text-zinc-500">
-                Cast names and social handles are excluded from driver terms.
-              </p>
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div>
-                  <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-emerald-700">Positive</p>
-                  <ul className="space-y-1 text-sm text-zinc-700">
-                    {(analytics?.themes.positive ?? []).slice(0, 8).map((driver) => (
-                      <li key={`p-${driver.term}`} className="rounded bg-emerald-50 px-2 py-1">
-                        {driver.term} · {driver.count}
-                      </li>
-                    ))}
-                    {(analytics?.themes.positive?.length ?? 0) === 0 && <li className="text-zinc-500">No positive drivers.</li>}
-                  </ul>
-                </div>
-                <div>
-                  <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-red-700">Negative</p>
-                  <ul className="space-y-1 text-sm text-zinc-700">
-                    {(analytics?.themes.negative ?? []).slice(0, 8).map((driver) => (
-                      <li key={`n-${driver.term}`} className="rounded bg-red-50 px-2 py-1">
-                        {driver.term} · {driver.count}
-                      </li>
-                    ))}
-                    {(analytics?.themes.negative?.length ?? 0) === 0 && <li className="text-zinc-500">No negative drivers.</li>}
-                  </ul>
-                </div>
-              </div>
-            </article>
-            </section>
-          )}
-
-          {(isBravoView || isSentimentView) && (
-            <section className="grid gap-6 xl:grid-cols-2">
-              {isBravoView && (
-                <article className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
-                  <h4 className="mb-4 text-lg font-semibold text-zinc-900">Bravo Content Leaderboard</h4>
-                  <div className="space-y-2">
-                    {(analytics?.leaderboards.bravo_content ?? []).slice(0, 10).map((item) => {
-                      const canonicalThumbnail = getCanonicalLeaderboardThumbnailImage(item);
-                      const canonicalThumbnailUrl = canonicalThumbnail.src;
-                      return (
-                      <div
-                        key={`${item.platform}-${item.source_id}`}
-                        className="block rounded-lg border border-zinc-200 bg-zinc-50 px-4 py-3 transition hover:bg-zinc-100"
-                      >
-                        <div className="flex items-start gap-3">
-                          {canonicalThumbnailUrl && (
-                            <button
-                              type="button"
-                              onClick={() => openLeaderboardLightbox(item, "Bravo Content Leaderboard")}
-                              className="shrink-0"
-                              aria-label="Open leaderboard media lightbox"
-                            >
-                              {isVideoLikeThumbnailUrl(canonicalThumbnailUrl) ? (
-                                <div className="flex h-12 w-12 items-center justify-center rounded-md border border-zinc-200 bg-zinc-900 text-[10px] font-semibold uppercase tracking-wide text-zinc-100">
-                                  Video
-                                </div>
-                              ) : (
-                                // eslint-disable-next-line @next/next/no-img-element
-                                <img
-                                  src={canonicalThumbnailUrl}
-                                  srcSet={canonicalThumbnail.srcSet ?? undefined}
-                                  alt={`${PLATFORM_LABELS[item.platform] ?? item.platform} leaderboard thumbnail`}
-                                  loading="lazy"
-                                  referrerPolicy="no-referrer"
-                                  className="h-12 w-12 rounded-md border border-zinc-200 object-cover"
-                                />
-                              )}
-                            </button>
-                          )}
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-center justify-between gap-3 text-sm">
-                              <span className="font-semibold text-zinc-900">
-                                {PLATFORM_LABELS[item.platform] ?? item.platform}
-                              </span>
-                              <span className="text-xs text-zinc-500">{formatInteger(item.engagement)} engagement</span>
-                            </div>
-                            <p className="mt-1 text-sm text-zinc-700 line-clamp-2">{item.text || item.source_id}</p>
-                            <div className="mt-2 flex flex-wrap items-center gap-2">
-                              <a
-                                href={item.url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="rounded border border-zinc-300 bg-white px-2.5 py-1 text-xs font-semibold text-zinc-700 hover:bg-zinc-100"
-                              >
-                                Open Post
-                              </a>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                      );
-                    })}
-                    {(analytics?.leaderboards.bravo_content?.length ?? 0) === 0 && (
-                      <p className="text-sm text-zinc-500">No content leaderboard entries yet.</p>
-                    )}
-                  </div>
-                </article>
-              )}
-
-              <article className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
-                <h4 className="mb-4 text-lg font-semibold text-zinc-900">Viewer Discussion Highlights</h4>
-                <div className="space-y-2">
-                  {(analytics?.leaderboards.viewer_discussion ?? []).slice(0, 10).map((item) => {
-                    const canonicalThumbnail = getCanonicalLeaderboardThumbnailImage(item);
-                    const canonicalThumbnailUrl = canonicalThumbnail.src;
-                    return (
-                    <div
-                      key={`${item.platform}-${item.source_id}`}
-                      className="block rounded-lg border border-zinc-200 bg-zinc-50 px-4 py-3 transition hover:bg-zinc-100"
-                    >
-                      <div className="flex items-start gap-3">
-                        {canonicalThumbnailUrl && (
-                          <button
-                            type="button"
-                            onClick={() =>
-                              openLeaderboardLightbox(item, "Viewer Discussion Highlights", [
-                                { label: "Sentiment", value: item.sentiment.toUpperCase() },
-                              ])
-                            }
-                            className="shrink-0"
-                            aria-label="Open discussion media lightbox"
-                          >
-                            {isVideoLikeThumbnailUrl(canonicalThumbnailUrl) ? (
-                              <div className="flex h-12 w-12 items-center justify-center rounded-md border border-zinc-200 bg-zinc-900 text-[10px] font-semibold uppercase tracking-wide text-zinc-100">
-                                Video
-                              </div>
-                            ) : (
-                              // eslint-disable-next-line @next/next/no-img-element
-                              <img
-                                src={canonicalThumbnailUrl}
-                                srcSet={canonicalThumbnail.srcSet ?? undefined}
-                                alt={`${PLATFORM_LABELS[item.platform] ?? item.platform} discussion thumbnail`}
-                                loading="lazy"
-                                referrerPolicy="no-referrer"
-                                className="h-12 w-12 rounded-md border border-zinc-200 object-cover"
-                              />
-                            )}
-                          </button>
-                        )}
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center justify-between text-xs uppercase tracking-[0.15em] text-zinc-500">
-                            <span>{PLATFORM_LABELS[item.platform] ?? item.platform}</span>
-                            <span>{item.sentiment}</span>
-                          </div>
-                          <p className="mt-1 text-sm text-zinc-700 line-clamp-3">{item.text}</p>
-                          <div className="mt-2 flex flex-wrap items-center gap-2">
-                            <a
-                              href={item.url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="rounded border border-zinc-300 bg-white px-2.5 py-1 text-xs font-semibold text-zinc-700 hover:bg-zinc-100"
-                            >
-                              Open Post
-                            </a>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                    );
-                  })}
-                  {(analytics?.leaderboards.viewer_discussion?.length ?? 0) === 0 && (
-                    <p className="text-sm text-zinc-500">No viewer discussion highlights yet.</p>
-                  )}
-                </div>
-              </article>
-            </section>
-          )}
-
-          {isHashtagsView && (
-            <section className="grid gap-6 xl:grid-cols-2">
-              <article className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm xl:col-span-2">
-                <h4 className="mb-3 text-lg font-semibold text-zinc-900">Hashtag Insights</h4>
-                <p className="-mt-1 mb-4 text-xs text-zinc-500">
-                  Season-wide hashtag usage across social posts in the selected platform scope.
-                </p>
-                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                  <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3">
-                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">Total Uses</p>
-                    <p className="mt-1 text-lg font-semibold text-zinc-900" data-testid="hashtag-insights-total-uses">
-                      {formatInteger(hashtagTotalTokens)}
-                    </p>
-                  </div>
-                  <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3">
-                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">Unique Hashtags</p>
-                    <p className="mt-1 text-lg font-semibold text-zinc-900" data-testid="hashtag-insights-unique-tags">
-                      {formatInteger(hashtagUniqueCount)}
-                    </p>
-                  </div>
-                  <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3">
-                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">Top Hashtag</p>
-                    <p className="mt-1 text-lg font-semibold text-zinc-900" data-testid="hashtag-insights-top-tag">
-                      {hashtagTopTag ? `#${hashtagTopTag.tag}` : "-"}
-                    </p>
-                    <p className="text-xs text-zinc-600">
-                      {hashtagTopTag ? `${formatInteger(hashtagTopTag.count)} uses` : "No hashtag activity yet"}
-                    </p>
-                  </div>
-                  <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3">
-                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">Peak Week</p>
-                    <p className="mt-1 text-lg font-semibold text-zinc-900" data-testid="hashtag-insights-peak-week">
-                      {hashtagPeakWeek && hashtagPeakWeek.totalTokens > 0 ? hashtagPeakWeek.label : "-"}
-                    </p>
-                    <p className="text-xs text-zinc-600">
-                      {hashtagPeakWeek && hashtagPeakWeek.totalTokens > 0
-                        ? `${formatInteger(hashtagPeakWeek.totalTokens)} uses`
-                        : "No hashtag activity yet"}
-                    </p>
-                  </div>
-                </div>
-              </article>
-
-              <article className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
-                <h4 className="mb-3 text-lg font-semibold text-zinc-900">Hashtags</h4>
-                <p className="-mt-1 mb-4 text-xs text-zinc-500">
-                  Top hashtag usage with total seasonal share.
-                </p>
-                {hashtagUsageLoading ? (
-                  <p className="text-sm text-zinc-500">Loading hashtag analytics...</p>
-                ) : hashtagSeasonCounts.length === 0 ? (
-                  <p className="text-sm text-zinc-500">No hashtags found in season social posts for this scope.</p>
-                ) : (
-                  <ul className="space-y-2">
-                    {hashtagSeasonCounts.slice(0, 30).map((item, index) => {
-                      const sharePct = hashtagTotalTokens > 0 ? (item.count / hashtagTotalTokens) * 100 : 0;
-                      return (
-                        <li
-                          key={item.tag}
-                          data-testid={`hashtag-leaderboard-row-${index}`}
-                          className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm"
-                        >
-                          <div className="mb-1 flex items-center justify-between gap-3">
-                            <span className="font-semibold text-zinc-800">#{item.tag}</span>
-                            <span className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500">
-                              {formatInteger(item.count)} use{item.count === 1 ? "" : "s"}
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <div className="h-1.5 flex-1 rounded-full bg-zinc-200">
-                              <div
-                                className="h-1.5 rounded-full bg-zinc-700"
-                                style={{ width: `${Math.min(100, Math.max(0, sharePct))}%` }}
-                              />
-                            </div>
-                            <span className="text-xs text-zinc-500">{sharePct.toFixed(1)}%</span>
-                          </div>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                )}
-              </article>
-
-              <article className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
-                <h4 className="mb-3 text-lg font-semibold text-zinc-900">Weekly Hashtag Usage</h4>
-                <p className="-mt-1 mb-4 text-xs text-zinc-500">
-                  Total hashtag tokens used per week across season social posts.
-                </p>
-                {hashtagUsageLoading ? (
-                  <p className="text-sm text-zinc-500">Loading hashtag analytics...</p>
-                ) : hashtagWeeklyUsage.length === 0 ? (
-                  <p className="text-sm text-zinc-500">No weekly hashtag data available.</p>
-                ) : (
-                  <div className="space-y-2">
-                    {hashtagWeeklyUsage.map((item) => {
-                      const widthPct =
-                        hashtagMaxWeeklyTokens > 0 ? (item.totalTokens / hashtagMaxWeeklyTokens) * 100 : 0;
-                      return (
-                        <div
-                          key={`hashtag-week-${item.weekIndex}`}
-                          data-testid={`hashtag-weekly-usage-row-${item.weekIndex}`}
-                          className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2"
-                        >
-                          <div className="mb-1 flex items-center justify-between gap-3 text-sm">
-                            <span className="font-semibold text-zinc-800">{item.label}</span>
-                            <span className="text-xs text-zinc-500">
-                              {formatInteger(item.totalTokens)} uses · {formatInteger(item.uniqueTokens)} unique
-                            </span>
-                          </div>
-                          <div className="h-2 rounded-full bg-zinc-200">
-                            <div
-                              className="h-2 rounded-full bg-zinc-700"
-                              style={{ width: `${Math.min(100, Math.max(0, widthPct))}%` }}
-                            />
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </article>
-
-              <article className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm xl:col-span-2">
-                <h4 className="mb-3 text-lg font-semibold text-zinc-900">Platform Hashtag Distribution</h4>
-                <p className="-mt-1 mb-4 text-xs text-zinc-500">
-                  Share of hashtag usage by platform for the selected scope.
-                </p>
-                {hashtagUsageLoading ? (
-                  <p className="text-sm text-zinc-500">Loading hashtag analytics...</p>
-                ) : hashtagPlatformUsage.length === 0 || hashtagTotalTokens === 0 ? (
-                  <p className="text-sm text-zinc-500">No platform hashtag distribution available.</p>
-                ) : (
-                  <div className="space-y-2">
-                    {hashtagPlatformUsage.map((item) => {
-                      const widthPct =
-                        hashtagMaxPlatformTokens > 0 ? (item.count / hashtagMaxPlatformTokens) * 100 : 0;
-                      const sharePct = hashtagTotalTokens > 0 ? (item.count / hashtagTotalTokens) * 100 : 0;
-                      return (
-                        <div
-                          key={`hashtag-platform-${item.platform}`}
-                          data-testid={`hashtag-platform-usage-row-${item.platform}`}
-                          className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2"
-                        >
-                          <div className="mb-1 flex items-center justify-between gap-3 text-sm">
-                            <span className="font-semibold text-zinc-800">{item.label}</span>
-                            <span className="text-xs text-zinc-500">
-                              {formatInteger(item.count)} uses · {sharePct.toFixed(1)}%
-                            </span>
-                          </div>
-                          <div className="h-2 rounded-full bg-zinc-200">
-                            <div
-                              className="h-2 rounded-full bg-zinc-700"
-                              style={{ width: `${Math.min(100, Math.max(0, widthPct))}%` }}
-                            />
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </article>
-            </section>
-          )}
-
-          {(isBravoView || isAdvancedView) && (
-            <section className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
-            <button
-              type="button"
-              onClick={() => setJobsOpen((c) => !c)}
-              className="flex w-full items-center justify-between text-left"
-            >
-              <div className="flex items-center gap-3">
-                <h4 className="text-lg font-semibold text-zinc-900">Ingest Job Status</h4>
-                {runScopedJobs.length > 0 && (
-                  <span className="rounded-full bg-zinc-100 px-2.5 py-0.5 text-xs font-semibold text-zinc-600">
-                    {runScopedJobs.length} job{runScopedJobs.length !== 1 ? "s" : ""}
-                  </span>
-                )}
-              </div>
-              <span className="text-sm font-medium text-zinc-500">{jobsOpen ? "Hide" : "Show"}</span>
-            </button>
-            {jobsOpen && (<>
-            <div className="mt-4 mb-4 flex justify-end">
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  void refreshSelectedRunJobs();
-                }}
-                className="rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-100"
-              >
-                Refresh Jobs
-              </button>
-            </div>
-            <div className="space-y-2">
-              {(() => {
-                const statusOrder: Record<string, number> = { running: 0, retrying: 1, queued: 2, pending: 3, failed: 4, completed: 5, cancelled: 6 };
-                const statusBadge: Record<string, string> = {
-                  completed: "bg-green-100 text-green-700",
-                  failed: "bg-red-100 text-red-700",
-                  running: "bg-blue-100 text-blue-700 animate-pulse",
-                  pending: "bg-zinc-100 text-zinc-600",
-                  queued: "bg-zinc-100 text-zinc-600",
-                  retrying: "bg-amber-100 text-amber-700 animate-pulse",
-                  cancelled: "bg-zinc-100 text-zinc-400",
-                };
-                const sorted = [...runScopedJobs].sort(
-                  (a, b) => (statusOrder[a.status] ?? 9) - (statusOrder[b.status] ?? 9)
-                );
-                return sorted.map((job) => {
-                  const stage = getJobStageLabel(job);
-                  const account = typeof job.config?.account === "string" && job.config.account ? job.config.account : null;
-                  const counters = getJobStageCounters(job);
-                  const persistCounters = getJobPersistCounters(job);
-                  const activitySummary = formatJobActivitySummary(getJobActivity(job));
-                  const retrievalMeta = (job.metadata as Record<string, unknown>)?.retrieval_meta as
-                    | Record<string, unknown>
-                    | undefined;
-                  const missingMarked =
-                    typeof retrievalMeta?.comments_marked_missing === "number"
-                      ? retrievalMeta.comments_marked_missing
-                      : null;
-                  const incompleteFetches =
-                    typeof retrievalMeta?.incomplete_comment_fetches === "number"
-                      ? retrievalMeta.incomplete_comment_fetches
-                      : null;
-                  const refreshDecisionCount = (() => {
-                    const value = retrievalMeta?.comment_refresh_decisions;
-                    if (!value || typeof value !== "object") return 0;
-                    return Object.keys(value as Record<string, unknown>).length;
-                  })();
-                  const duration =
-                    job.started_at && job.completed_at
-                      ? `${Math.round((new Date(job.completed_at).getTime() - new Date(job.started_at).getTime()) / 1000)}s`
-                      : job.started_at
-                        ? `${Math.round((Date.now() - new Date(job.started_at).getTime()) / 1000)}s`
-                        : null;
-                  const isActive =
-                    job.status === "running" || job.status === "retrying" || job.status === "cancelling";
-                  return (
-                    <div key={job.id} className={`rounded-lg border px-3 py-2 ${
-                      isActive ? "border-blue-200 bg-blue-50" : job.status === "failed" ? "border-red-200 bg-red-50" : "border-zinc-200 bg-zinc-50"
-                    }`}>
-                      <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
-                        <div className="flex items-center gap-2">
-                          <span className="font-semibold text-zinc-900">
-                            {PLATFORM_LABELS[job.platform] ?? job.platform}
-                          </span>
-                          {account && <span className="text-xs text-zinc-500">@{account}</span>}
-                          <span className="rounded bg-zinc-200 px-1.5 py-0.5 text-xs font-medium text-zinc-600">
-                            {STAGE_LABELS_PLAIN[stage] ?? stage}
-                          </span>
-                          <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${statusBadge[job.status] ?? "bg-zinc-100 text-zinc-500"}`}>
-                            {JOB_STATUS_PLAIN[job.status] ?? job.status}
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-2 text-xs text-zinc-500">
-                          {counters ? (
-                            <span className="font-semibold tabular-nums text-zinc-700">
-                              {formatCountersPlain(counters.posts, counters.comments)} found
-                            </span>
-                          ) : (
-                            <span className="font-semibold tabular-nums text-zinc-700">{(job.items_found ?? 0).toLocaleString()} items</span>
-                          )}
-                          {persistCounters && (
-                            <span className="tabular-nums text-zinc-500">
-                              {formatCountersPlain(persistCounters.posts_upserted, persistCounters.comments_upserted)} saved
-                            </span>
-                          )}
-                          {activitySummary && <span className="text-zinc-400">{activitySummary}</span>}
-                          {duration && <span className="tabular-nums text-zinc-400">{duration}</span>}
-                        </div>
-                      </div>
-                      {job.error_message && (
-                        <div className="mt-1">
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setExpandedJobErrors((prev) => {
-                                const next = new Set(prev);
-                                if (next.has(job.id)) {
-                                  next.delete(job.id);
-                                } else {
-                                  next.add(job.id);
-                                }
-                                return next;
-                              })
-                            }
-                            className="text-xs text-red-500 underline"
-                          >
-                            {expandedJobErrors.has(job.id) ? "Hide error" : "Show error"}
-                          </button>
-                          {expandedJobErrors.has(job.id) && (
-                            <pre className="mt-1 max-h-32 overflow-auto rounded bg-red-50 p-2 text-[10px] text-red-700">
-                              {job.error_message}
-                            </pre>
-                          )}
-                        </div>
-                      )}
-                      {job.status === "failed" && (
-                        <div className="mt-1.5">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const retryPlatform = PLATFORM_ORDER.includes(job.platform as Platform)
-                                ? (job.platform as Platform)
-                                : "all";
-                              const retryMode = stage === "comments" ? "comments_only" : "posts_only";
-                              void runIngest({ platform: retryPlatform, ingestMode: retryMode });
-                            }}
-                            disabled={runningIngest}
-                            className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-[11px] font-semibold text-zinc-700 transition hover:bg-zinc-100 disabled:opacity-60"
-                          >
-                            Retry Failed Stage
-                          </button>
-                        </div>
-                      )}
-                      {(missingMarked !== null || incompleteFetches !== null || refreshDecisionCount > 0) && (
-                        <p className="mt-1.5 text-xs text-zinc-500">
-                          {missingMarked !== null ? `Missing flagged: ${missingMarked}` : "Missing flagged: 0"}
-                          {incompleteFetches !== null ? ` · Incomplete fetches: ${incompleteFetches}` : ""}
-                          {refreshDecisionCount > 0 ? ` · Decision reasons: ${refreshDecisionCount}` : ""}
-                        </p>
-                      )}
-                      <p className="mt-1 text-xs text-zinc-400">
-                        {job.started_at ? `Started ${formatDateTime(job.started_at)}` : `Created ${formatDateTime(job.created_at)}`}
-                        {job.completed_at ? ` · Done ${formatDateTime(job.completed_at)}` : ""}
-                      </p>
-                    </div>
-                  );
-                });
-              })()}
-              {!selectedRunId && (
-                <p className="text-sm text-zinc-500">No run selected. Pick a run above or use Ingest + Export to start one.</p>
-              )}
-              {selectedRunId && runScopedJobs.length === 0 && (
-                <p className="text-sm text-zinc-500">No jobs found for the selected run yet.</p>
-              )}
-            </div>
-            </>)}
-            </section>
-          )}
-
-          {(isBravoView || isAdvancedView) && (
-            <section className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
-            <button
-              type="button"
-              onClick={() => setManualSourcesOpen((current) => !current)}
-              className="flex w-full items-center justify-between rounded-lg border border-zinc-200 bg-zinc-50 px-4 py-3 text-left text-sm font-semibold text-zinc-800 transition hover:bg-zinc-100"
-            >
-              <span>Manual Sources (Fallback)</span>
-              <span>{manualSourcesOpen ? "Hide" : "Show"}</span>
-            </button>
-            {manualSourcesOpen && (
-              <div className="mt-4">
-                <SocialPostsSection showId={showId} showName={showName} seasonId={seasonId} />
-              </div>
-            )}
-            </section>
-          )}
+        <SeasonSocialRunStatus
+          JOB_STATUS_PLAIN={JOB_STATUS_PLAIN}
+          PLATFORM_LABELS={PLATFORM_LABELS}
+          PLATFORM_ORDER={PLATFORM_ORDER}
+          STAGE_LABELS_PLAIN={STAGE_LABELS_PLAIN}
+          SocialPostsSection={SocialPostsSection}
+          expandedJobErrors={expandedJobErrors}
+          formatCountersPlain={formatCountersPlain}
+          formatDateTime={formatDateTime}
+          formatJobActivitySummary={formatJobActivitySummary}
+          getJobActivity={getJobActivity}
+          getJobPersistCounters={getJobPersistCounters}
+          getJobStageCounters={getJobStageCounters}
+          getJobStageLabel={getJobStageLabel}
+          isAdvancedView={isAdvancedView}
+          isBravoView={isBravoView}
+          jobsOpen={jobsOpen}
+          manualSourcesOpen={manualSourcesOpen}
+          refreshSelectedRunJobs={refreshSelectedRunJobs}
+          runIngest={runIngest}
+          runScopedJobs={runScopedJobs}
+          runningIngest={runningIngest}
+          seasonId={seasonId}
+          selectedRunId={selectedRunId}
+          setExpandedJobErrors={setExpandedJobErrors}
+          setJobsOpen={setJobsOpen}
+          setManualSourcesOpen={setManualSourcesOpen}
+          showId={showId}
+          showName={showName}
+        />
         </>
       )}
       {leaderboardLightbox && leaderboardLightbox.entries[leaderboardLightbox.index] && (
