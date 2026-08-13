@@ -3,8 +3,8 @@ import type { AdminApiReferenceInventory } from "@/lib/admin/api-references/type
 export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
   "inventorySchemaVersion": "1.0.0",
   "generatorVersion": "1.0.0",
-  "generatedAt": "2026-08-05T14:11:51.877Z",
-  "sourceCommitSha": "f3dd4cce57d2fd7df9c4f9a9ddac35719473d8ff",
+  "generatedAt": "2026-08-13T06:58:11.233Z",
+  "sourceCommitSha": "fae044d86cf2716114acd0c667f96869bef5f735",
   "overrideDigest": "ab48dccad1d5b9faafd4ef40e8374574768e133192929e6264ff8727fbaf68e1",
   "nodes": [
     {
@@ -7567,7 +7567,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/design-docs/nyt-homepage-preview/route.ts",
       "sourceLocator": {
-        "line": 587,
+        "line": 608,
         "symbol": "GET"
       },
       "provenance": "static_scan",
