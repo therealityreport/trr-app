@@ -58,7 +58,7 @@ const nextConfig: NextConfig = {
   distDir: DIST_DIR,
   outputFileTracingIncludes: {
     "/api/admin/design-docs/nyt-homepage-preview": [
-      "./data/nyt-homepage-2026-04-21/index.html.gz",
+      "./data/nyt-homepage-2026-04-21/generated-preview/**/*",
     ],
   },
   allowedDevOrigins: IS_DEV

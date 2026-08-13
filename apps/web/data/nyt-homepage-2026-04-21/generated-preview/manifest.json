@@ -1,0 +1,161 @@
+{
+  "schemaVersion": 1,
+  "generatorVersion": "1.0.0",
+  "source": {
+    "path": "data/nyt-homepage-2026-04-21/index.html.gz",
+    "compressedBytes": 189404,
+    "compressedSha256": "f717dbd657d53b48f885bd20083b2c96e36be9ab411d7420c27c8abfe6f966e2",
+    "uncompressedBytes": 1185524,
+    "uncompressedSha256": "a15659138d3e026febba5badbda2d4d0cfe6bf5f7986a1b8eb3803490d218838"
+  },
+  "maximumUncompressedArtifactBytes": 177091,
+  "artifacts": {
+    "page": {
+      "path": "page.html.gz",
+      "compressedBytes": 22480,
+      "compressedSha256": "89c17ffe63e469dfdc09815c3a6f87e2ed3743545f33fd801be9429de1bebff4",
+      "uncompressedBytes": 177091,
+      "uncompressedSha256": "33c811b06608d1d60152712a71a09b6bf54b73ead9570a035241d1625486d98d"
+    },
+    "edition-rail": {
+      "path": "fragments/edition-rail.html.gz",
+      "compressedBytes": 287,
+      "compressedSha256": "76c126a50239beb6dd5547857e7512f1beed16e84d1f6833dfe68481ae6ddce0",
+      "uncompressedBytes": 738,
+      "uncompressedSha256": "16bed3f030c0dea42d6801efd08fae6c15555c281d9cc757a8fc24c6a1961388"
+    },
+    "masthead": {
+      "path": "fragments/masthead.html.gz",
+      "compressedBytes": 3312,
+      "compressedSha256": "f4e673fb2c23482b6e5bd8b029fc922913c08ee39c83357f8d701a945e5f8eb7",
+      "uncompressedBytes": 14342,
+      "uncompressedSha256": "7d66d18a6c6d653b2b081cbf740040b9015b926b641f260fe87a4f7eb785b710"
+    },
+    "nested-nav": {
+      "path": "fragments/nested-nav.html.gz",
+      "compressedBytes": 107,
+      "compressedSha256": "14e8da0b83a58eae06e65d4e83f2e887cd187c54560a4cb2b0266bdfd408a3e4",
+      "uncompressedBytes": 100,
+      "uncompressedSha256": "596dbf875664c166f8ee5e53e5098dbf1b6d7f56fbf65593633874a6e98ede06"
+    },
+    "lead-programming": {
+      "path": "fragments/lead-programming.html.gz",
+      "compressedBytes": 2642,
+      "compressedSha256": "6d115a2d676080048d676f5bc86362ab637694d0d6a3e80e0194b0f5fb2dc7db",
+      "uncompressedBytes": 17845,
+      "uncompressedSha256": "e6cb47d9f8c7b17a9bb96fea868d6e38c95eedcc1d6d42d4dc6983a8ed2d46ed"
+    },
+    "watch-todays-videos": {
+      "path": "fragments/watch-todays-videos.html.gz",
+      "compressedBytes": 1799,
+      "compressedSha256": "66f4bae35d64f5b97b6c10e900e6744e153c54ed8b66e04cbae0f62abc5ac85a",
+      "uncompressedBytes": 15252,
+      "uncompressedSha256": "3901a82d2307d75644f0caa90f3ef7ce1ec73f34c0bc90572100fb0dfdc7209d"
+    },
+    "more-news": {
+      "path": "fragments/more-news.html.gz",
+      "compressedBytes": 1734,
+      "compressedSha256": "dc945c5c189f545b9e2f8c84dcb367d0a747fa75c2421f32ed039e8b97aa5b5e",
+      "uncompressedBytes": 8289,
+      "uncompressedSha256": "f8302146c2035f109d4917e3e76678dd53dc4c4e97f50aa51d126ecab53983a2"
+    },
+    "site-index": {
+      "path": "fragments/site-index.html.gz",
+      "compressedBytes": 139,
+      "compressedSha256": "d86f3c0eaf90c498bdd0d42588e1842c86dbbedeb5c759eef1a70ad46c876180",
+      "uncompressedBytes": 198,
+      "uncompressedSha256": "094f13e703d8627f480f4994f2bb1acde059e39678dcdf954871b54ce6500f03"
+    },
+    "footer": {
+      "path": "fragments/footer.html.gz",
+      "compressedBytes": 692,
+      "compressedSha256": "1132e7fc67929c21e463e6db4678cb1c2fa7f2730328b38889c8f5a2fc35ddd5",
+      "uncompressedBytes": 3025,
+      "uncompressedSha256": "bcec4c4d2f48601b377848d8270ba49d54f930c7b07d966ec06b7ec6b30ebf31"
+    },
+    "betamax-player": {
+      "path": "fragments/betamax-player.html.gz",
+      "compressedBytes": 1799,
+      "compressedSha256": "66f4bae35d64f5b97b6c10e900e6744e153c54ed8b66e04cbae0f62abc5ac85a",
+      "uncompressedBytes": 15252,
+      "uncompressedSha256": "3901a82d2307d75644f0caa90f3ef7ce1ec73f34c0bc90572100fb0dfdc7209d"
+    },
+    "tip-strip": {
+      "path": "fragments/tip-strip.html.gz",
+      "compressedBytes": 348,
+      "compressedSha256": "0c3d3a7e0ee6a06b8f9fa008aab5e906c5f58672782da5697dbfc534ac0da32d",
+      "uncompressedBytes": 566,
+      "uncompressedSha256": "c64d256cb42684389329c13a26fbed9f4c85f8f963f98e8860e76a3955f19e94"
+    },
+    "poetry-promo": {
+      "path": "fragments/poetry-promo.html.gz",
+      "compressedBytes": 2192,
+      "compressedSha256": "df1f6527ec91751c5b67186112fd043bf7865baf8a7064dbf7850253d1da6e5a",
+      "uncompressedBytes": 8833,
+      "uncompressedSha256": "9ca747c705ad736c78f3eb51bb897f725d4391024964e9c1012108b35b5d9ffa"
+    },
+    "weather-strip": {
+      "path": "fragments/weather-strip.html.gz",
+      "compressedBytes": 726,
+      "compressedSha256": "2af458f7976ca1784b8145fd5fc752e0f453302750ac35260521b0a26a657b06",
+      "uncompressedBytes": 2899,
+      "uncompressedSha256": "f5f83decca73288791360c2f5d026a29dc120f6d61f7e6feba2e8e2332c67b06"
+    },
+    "opinion-label": {
+      "path": "fragments/opinion-label.html.gz",
+      "compressedBytes": 274,
+      "compressedSha256": "066024e1e6aaa0298e9a96e9b15cc7c2fda1e3689eb602bda89de70c2e5d18b7",
+      "uncompressedBytes": 502,
+      "uncompressedSha256": "b009e975ca7c52759b897125fc8b1eff4628ce53d7533e3e1799e8f00a83b7ad"
+    },
+    "well-package": {
+      "path": "fragments/well-package.html.gz",
+      "compressedBytes": 719,
+      "compressedSha256": "9a3447e28c6df5d1e8356eda0bb9cbe4483ca026dce04f99ab580494d1533122",
+      "uncompressedBytes": 4408,
+      "uncompressedSha256": "6702a728f704fdb170b82245a900858901ef934cff5145a96812ee7db5759455"
+    },
+    "culture-lifestyle-package": {
+      "path": "fragments/culture-lifestyle-package.html.gz",
+      "compressedBytes": 558,
+      "compressedSha256": "ddfdbf00cbddbeb19428406e41a2bdd7d58b9b4be5a9280cfaa102882f9fedfe",
+      "uncompressedBytes": 3172,
+      "uncompressedSha256": "60bbc36a696c6e4b86e5c29e07aa8aff1c1769fccf970dca6631719af03c3817"
+    },
+    "athletic-package": {
+      "path": "fragments/athletic-package.html.gz",
+      "compressedBytes": 974,
+      "compressedSha256": "cb161a82e74698a7db60c2199783c37af3291469b7c9d75fa4f6814fcdf97996",
+      "uncompressedBytes": 5058,
+      "uncompressedSha256": "c64034cb9a1da402d403da62da9306271d6aab58d350856df1f8996d872cdf5a"
+    },
+    "audio-package": {
+      "path": "fragments/audio-package.html.gz",
+      "compressedBytes": 826,
+      "compressedSha256": "50e8f9dd651ccc49061d179f1c889d4fb4f163aa8e55c304e993046dce384350",
+      "uncompressedBytes": 10855,
+      "uncompressedSha256": "1953dda64940382f881f041acc96724254362e36b82de08343566425384be49e"
+    },
+    "cooking-package": {
+      "path": "fragments/cooking-package.html.gz",
+      "compressedBytes": 871,
+      "compressedSha256": "c19ff380203fa4033ea28c64543c00f175b5964971ebb72347eaaf6e78881e04",
+      "uncompressedBytes": 10939,
+      "uncompressedSha256": "e3df7cd84a48a99b3ed6d2a1dfe1de6f63955a5e51ed98d71abed7a980988d84"
+    },
+    "wirecutter-package": {
+      "path": "fragments/wirecutter-package.html.gz",
+      "compressedBytes": 551,
+      "compressedSha256": "e9552895b4f6d2879b853fdac88555fef12a05319bc6b419fb7b81438faa07c5",
+      "uncompressedBytes": 3393,
+      "uncompressedSha256": "ebc572c91f6d80c8a7015dfe803fd0da6486cc5a4b6f3dcee52ed208ae445667"
+    },
+    "games-package": {
+      "path": "fragments/games-package.html.gz",
+      "compressedBytes": 1409,
+      "compressedSha256": "b95532e0042660accc955c611108956f050c1f9847deab1ddfa189ed82107315",
+      "uncompressedBytes": 9226,
+      "uncompressedSha256": "ed36d296f8b04d9113d586547a31ce413de7f9ad67a1451deab2af6bcd6f2540"
+    }
+  }
+}

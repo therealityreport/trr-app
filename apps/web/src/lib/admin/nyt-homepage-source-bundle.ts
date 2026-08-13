@@ -7,6 +7,7 @@ export const NYT_HOMEPAGE_SOURCE_BUNDLE = {
   },
   html: {
     rendered: "data/nyt-homepage-2026-04-21/index.html.gz",
+    generatedPreview: "data/nyt-homepage-2026-04-21/generated-preview/manifest.json",
   },
   css: [
     "artifacts/design-docs/source-bundles/nyt-homepage-2026-04-21/assets/css/global-bf55b3b62e74478ad488922130f07a8e.css",

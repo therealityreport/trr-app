@@ -17,7 +17,10 @@ vi.mock("@/lib/server/auth", () => ({
   requireAdmin: requireAdminMock,
 }));
 
-import { GET } from "@/app/api/admin/design-docs/nyt-homepage-preview/route";
+import {
+  GET,
+  NYT_HOMEPAGE_PREVIEW_TESTING,
+} from "@/app/api/admin/design-docs/nyt-homepage-preview/route";
 
 const testCiScript = path.join(process.cwd(), "scripts", "test-ci.mjs");
 const gunzipAsync = promisify(gunzip);
@@ -56,11 +59,23 @@ describe("NYT homepage preview route", () => {
     requireAdminMock.mockRejectedValue(new Error("unauthorized"));
 
     const response = await GET(
-      new NextRequest("http://localhost/api/admin/design-docs/nyt-homepage-preview?view=fragment&id=games-package"),
+      new NextRequest("http://localhost/api/admin/design-docs/nyt-homepage-preview?view=fragment&id=not-a-fragment"),
     );
 
     expect(response.status).toBe(401);
     expectedError.expectCalled();
+  });
+
+  it("renders the precomputed script-free page view", async () => {
+    const response = await GET(
+      new NextRequest("http://localhost/api/admin/design-docs/nyt-homepage-preview?view=page"),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toMatch(/^text\/html\b/);
+    const html = await response.text();
+    expect(html).toContain("The New York Times Homepage Snapshot");
+    expect(html).not.toMatch(/<script\b/i);
   });
 
   it("resolves every immutable VC-01 through VC-20 fragment request", async () => {
@@ -124,7 +139,9 @@ describe("NYT homepage preview route", () => {
       process.cwd(),
       "data",
       "nyt-homepage-2026-04-21",
-      "index.html.gz",
+      "generated-preview",
+      "fragments",
+      "wirecutter-package.html.gz",
     );
 
     const compressedSnapshot = await readFile(snapshotPath);
@@ -132,7 +149,104 @@ describe("NYT homepage preview route", () => {
 
     expect(compressedSnapshot.byteLength).toBeGreaterThan(0);
     expect(snapshotHtml).toContain("Product recommendations");
-    expect(snapshotHtml).toContain("Daily puzzles");
+    expect(snapshotHtml).not.toContain("<script");
+  });
+
+  it("keeps generated preview artifacts deterministic", () => {
+    const result = spawnSync(
+      process.execPath,
+      [path.join(process.cwd(), "scripts", "generate-nyt-homepage-preview-fragments.mjs"), "--check"],
+      { cwd: process.cwd(), encoding: "utf8" },
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("NYT homepage preview fragments are up to date.");
+    expect(result.stderr).toBe("");
+  });
+
+  it.each(["page", "not-a-fragment"])("rejects %s as a fragment id", async (id) => {
+    const expectedError = captureExpectedConsoleError(
+      new RegExp(`^\\[api\\] Failed to render NYT homepage preview .*Unknown homepage fragment "${id}"`),
+    );
+    const response = await GET(
+      new NextRequest(
+        `http://localhost/api/admin/design-docs/nyt-homepage-preview?view=fragment&id=${id}`,
+      ),
+    );
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({ error: `Unknown homepage fragment "${id}"` });
+    expectedError.expectCalled();
+  });
+
+  it("preserves exact composite order and one artifact per leaf request", () => {
+    expect(NYT_HOMEPAGE_PREVIEW_TESTING.resolveFragmentArtifactIds("wirecutter-package")).toEqual([
+      "wirecutter-package",
+    ]);
+    expect(NYT_HOMEPAGE_PREVIEW_TESTING.resolveFragmentArtifactIds("inline-interactives")).toEqual([
+      "tip-strip",
+      "poetry-promo",
+      "weather-strip",
+      "opinion-label",
+    ]);
+    expect(NYT_HOMEPAGE_PREVIEW_TESTING.resolveFragmentArtifactIds("product-rails")).toEqual([
+      "well-package",
+      "culture-lifestyle-package",
+      "athletic-package",
+      "audio-package",
+      "cooking-package",
+      "wirecutter-package",
+      "games-package",
+    ]);
+  });
+
+  it("fails closed on corrupt artifact bytes and decompression ceilings", async () => {
+    const manifest = JSON.parse(
+      await readFile(
+        path.join(process.cwd(), "data", "nyt-homepage-2026-04-21", "generated-preview", "manifest.json"),
+        "utf8",
+      ),
+    );
+    const artifact = manifest.artifacts["wirecutter-package"];
+    const compressed = await readFile(
+      path.join(process.cwd(), "data", "nyt-homepage-2026-04-21", "generated-preview", artifact.path),
+    );
+
+    await expect(
+      NYT_HOMEPAGE_PREVIEW_TESTING.decodeGeneratedArtifact(
+        "wirecutter-package",
+        manifest,
+        { ...artifact, compressedSha256: "0".repeat(64) },
+        compressed,
+      ),
+    ).rejects.toThrow("integrity check failed");
+    await expect(
+      NYT_HOMEPAGE_PREVIEW_TESTING.decodeGeneratedArtifact(
+        "wirecutter-package",
+        manifest,
+        { ...artifact, uncompressedBytes: 4 * 1024 * 1024 + 1 },
+        compressed,
+      ),
+    ).rejects.toThrow("Invalid generated NYT preview artifact");
+  });
+
+  it("keeps jsdom and the full snapshot out of the production route module", async () => {
+    const source = await readFile(
+      path.join(
+        process.cwd(),
+        "src",
+        "app",
+        "api",
+        "admin",
+        "design-docs",
+        "nyt-homepage-preview",
+        "route.ts",
+      ),
+      "utf8",
+    );
+
+    expect(source).not.toContain('from "jsdom"');
+    expect(source).not.toContain("index.html.gz");
   });
 
   it("resolves the Games package as its own homepage module", async () => {

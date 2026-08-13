@@ -1,9 +1,9 @@
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { gunzip } from "node:zlib";
 import { promisify } from "node:util";
 
-import { JSDOM, VirtualConsole } from "jsdom";
 import { NextRequest, NextResponse } from "next/server";
 
 import { NYT_HOMEPAGE_SOURCE_BUNDLE } from "@/lib/admin/nyt-homepage-source-bundle";
@@ -14,48 +14,72 @@ export const runtime = "nodejs";
 
 const WORKSPACE_ROOT = path.resolve(process.cwd(), "../../..");
 const APP_ROOT = process.cwd();
+const GENERATED_PREVIEW_ROOT = path.resolve(
+  APP_ROOT,
+  "data/nyt-homepage-2026-04-21/generated-preview",
+);
+const GENERATED_MANIFEST_PATH = path.join(GENERATED_PREVIEW_ROOT, "manifest.json");
 const gunzipAsync = promisify(gunzip);
 const LOCAL_ASSET_VIEW = "saved-asset";
-const REWRITABLE_ATTRIBUTES = ["src", "href", "poster"] as const;
-const REWRITABLE_STYLE_ATTRIBUTES = ["style"] as const;
-const URL_PROTOCOL_PATTERN = /^(?:[a-z]+:)?\/\//i;
-const SKIP_ASSET_PATTERN = /^(?:#|data:|blob:|mailto:|javascript:|tel:)/i;
-const CSS_URL_PATTERN = /url\((['"]?)([^'")]+)\1\)/g;
-
-const MIME_TYPES: Record<string, string> = {
-  ".css": "text/css; charset=utf-8",
-  ".gif": "image/gif",
-  ".htm": "text/html; charset=utf-8",
-  ".html": "text/html; charset=utf-8",
-  ".ico": "image/x-icon",
-  ".jpeg": "image/jpeg",
-  ".jpg": "image/jpeg",
-  ".js": "application/javascript; charset=utf-8",
-  ".json": "application/json; charset=utf-8",
-  ".mjs": "application/javascript; charset=utf-8",
-  ".otf": "font/otf",
-  ".png": "image/png",
-  ".svg": "image/svg+xml",
-  ".ttf": "font/ttf",
-  ".txt": "text/plain; charset=utf-8",
-  ".webm": "video/webm",
-  ".webp": "image/webp",
-  ".woff": "font/woff",
-  ".woff2": "font/woff2",
+const MAX_UNCOMPRESSED_ARTIFACT_BYTES = 4 * 1024 * 1024;
+const PREVIEW_CACHE_CONTROL = "private, max-age=60";
+const PREVIEW_GENERATOR_VERSION = "1.0.0";
+const GENERATED_FRAGMENT_IDS = new Set([
+  "edition-rail",
+  "masthead",
+  "nested-nav",
+  "lead-programming",
+  "watch-todays-videos",
+  "more-news",
+  "site-index",
+  "footer",
+  "betamax-player",
+  "tip-strip",
+  "poetry-promo",
+  "weather-strip",
+  "opinion-label",
+  "well-package",
+  "culture-lifestyle-package",
+  "athletic-package",
+  "audio-package",
+  "cooking-package",
+  "wirecutter-package",
+  "games-package",
+]);
+const COMBINED_FRAGMENT_IDS: Record<string, string[]> = {
+  "inline-interactives": ["tip-strip", "poetry-promo", "weather-strip", "opinion-label"],
+  "product-rails": [
+    "well-package",
+    "culture-lifestyle-package",
+    "athletic-package",
+    "audio-package",
+    "cooking-package",
+    "wirecutter-package",
+    "games-package",
+  ],
 };
-const HOMEPAGE_HTML_CACHE = new Map<string, string>();
-const HOMEPAGE_STYLESHEET_CACHE = new Map<string, string[]>();
-const HOMEPAGE_DOM_VIRTUAL_CONSOLE = new VirtualConsole().forwardTo(console, {
-  jsdomErrors: ["unhandled-exception", "not-implemented"],
-});
 
-type HomepageSourceMode = "saved-page" | "workspace-bundle";
+type PreviewArtifact = {
+  path: string;
+  uncompressedBytes: number;
+  compressedBytes: number;
+  compressedSha256: string;
+  uncompressedSha256: string;
+};
 
-interface HomepageSource {
-  mode: HomepageSourceMode;
-  htmlPath: string;
-  assetDirectory: string | null;
-}
+type GeneratedPreviewManifest = {
+  schemaVersion: number;
+  generatorVersion: string;
+  maximumUncompressedArtifactBytes: number;
+  source: {
+    path: string;
+    compressedBytes: number;
+    compressedSha256: string;
+    uncompressedBytes: number;
+    uncompressedSha256: string;
+  };
+  artifacts: Record<string, PreviewArtifact>;
+};
 
 function resolveFilePath(filePath: string) {
   if (path.isAbsolute(filePath)) return filePath;
@@ -63,431 +87,95 @@ function resolveFilePath(filePath: string) {
   return path.resolve(WORKSPACE_ROOT, filePath);
 }
 
-async function getHomepageSource(): Promise<HomepageSource> {
-  // Keep previews deterministic across developer environments and CI.
-  //
-  // The original saved-page capture may exist on a local external volume,
-  // but that volume is not part of the app contract. All preview fragments
-  // therefore resolve against the committed workspace bundle below.
-  //
-  // Its captured HTML and assets travel with the workspace, ensuring every
-  // admin preview uses the same snapshot whether or not a personal archive is
-  // mounted. The saved-page metadata remains historical provenance only.
-  //
-  // Do not add a runtime fallback to the external saved-page path.
-  //
-  // This also keeps the focused route tests self-contained.
-  //
-  return {
-    mode: "workspace-bundle",
-    htmlPath: NYT_HOMEPAGE_SOURCE_BUNDLE.html.rendered,
-    assetDirectory: null,
-  };
-}
-
-async function readSourceText(filePath: string) {
-  const resolvedPath = resolveFilePath(filePath);
-  if (resolvedPath.endsWith(".gz")) {
-    return (await gunzipAsync(await readFile(resolvedPath))).toString("utf8");
-  }
-  return readFile(resolvedPath, "utf8");
-}
-
 async function readSourceBinary(filePath: string) {
   return readFile(resolveFilePath(filePath));
 }
 
-async function loadHomepageHtmlSource() {
-  const source = await getHomepageSource();
-  const cacheKey = source.htmlPath;
-  let html = HOMEPAGE_HTML_CACHE.get(cacheKey);
-  if (!html) {
-    html = await readSourceText(source.htmlPath);
-    HOMEPAGE_HTML_CACHE.set(cacheKey, html);
-  }
-  return { source, html };
+function sha256(value: Buffer) {
+  return createHash("sha256").update(value).digest("hex");
 }
 
-async function loadHomepageDocument() {
-  const { source, html } = await loadHomepageHtmlSource();
-  return {
-    source,
-    document: new JSDOM(html, { virtualConsole: HOMEPAGE_DOM_VIRTUAL_CONSOLE }).window.document,
-  };
-}
-
-function stripScriptsFromMarkup(markup: string) {
-  const dom = new JSDOM(`<!doctype html><body>${markup}</body>`, {
-    virtualConsole: HOMEPAGE_DOM_VIRTUAL_CONSOLE,
-  });
-  dom.window.document.querySelectorAll("script").forEach((node) => node.remove());
-  return dom.window.document.body.innerHTML.trim();
-}
-
-function findExactTextElement(document: Document, label: string) {
-  const selectors = ["h2 span", "p span", "p", "a", "div"];
-  for (const selector of selectors) {
-    const match = [...document.querySelectorAll(selector)].find(
-      (node) => node.textContent?.trim() === label,
-    );
-    if (match) {
-      return match;
-    }
-  }
-  return null;
-}
-
-function climbByClassToken(element: Element | null, token: string) {
-  let current: Element | null = element;
-  while (current) {
-    if (current.classList.contains(token)) {
-      return current;
-    }
-    current = current.parentElement;
-  }
-  return null;
-}
-
-function requireElement<T>(value: T | null | undefined, message: string): T {
-  if (!value) {
-    throw new Error(message);
-  }
-  return value;
-}
-
-function buildLocalAssetUrl(request: NextRequest, relativeAssetPath: string) {
-  const url = new URL(request.url);
-  url.search = "";
-  url.searchParams.set("view", LOCAL_ASSET_VIEW);
-  url.searchParams.set("path", relativeAssetPath);
-  return url.toString();
-}
-
-function toCanonicalUrl(value: string) {
-  return new URL(value, NYT_HOMEPAGE_SOURCE_BUNDLE.canonicalSourceUrl).toString();
-}
-
-function normalizeSavedPageAssetPath(value: string) {
-  const trimmed = value.trim();
-  return trimmed
-    .replace(/^\.\//, "")
-    .replace(/^\/+/, "")
-    .replace(/^The New York Times - Breaking News, US News, World News and Videos_files\//, "");
-}
-
-function rewriteAssetReference({
-  request,
-  source,
-  value,
-  cssContext = false,
-}: {
-  request: NextRequest;
-  source: HomepageSource;
-  value: string;
-  cssContext?: boolean;
-}) {
-  const trimmed = value.trim();
-  if (!trimmed || SKIP_ASSET_PATTERN.test(trimmed) || URL_PROTOCOL_PATTERN.test(trimmed)) {
-    return trimmed;
-  }
-
-  if (trimmed.startsWith("/")) {
-    return cssContext ? toCanonicalUrl(trimmed) : trimmed;
-  }
-
-  if (source.mode !== "saved-page" || !source.assetDirectory) {
-    return trimmed;
-  }
-
-  return buildLocalAssetUrl(request, normalizeSavedPageAssetPath(trimmed));
-}
-
-function rewriteCssAssetUrls({
-  css,
-  request,
-  source,
-}: {
-  css: string;
-  request: NextRequest;
-  source: HomepageSource;
-}) {
-  return css.replace(CSS_URL_PATTERN, (match, quote = "", rawUrl = "") => {
-    const rewritten = rewriteAssetReference({
-      request,
-      source,
-      value: String(rawUrl),
-      cssContext: true,
-    });
-    return `url(${quote}${rewritten}${quote})`;
-  });
-}
-
-function rewriteSrcSet({
-  srcSet,
-  request,
-  source,
-}: {
-  srcSet: string;
-  request: NextRequest;
-  source: HomepageSource;
-}) {
-  return srcSet
-    .split(",")
-    .map((entry) => {
-      const [rawUrl, ...descriptorParts] = entry.trim().split(/\s+/);
-      if (!rawUrl) return "";
-      const rewrittenUrl = rewriteAssetReference({
-        request,
-        source,
-        value: rawUrl,
-      });
-      return [rewrittenUrl, ...descriptorParts].join(" ").trim();
-    })
-    .filter(Boolean)
-    .join(", ");
-}
-
-function rewriteTemplateTree({
-  root,
-  request,
-  source,
-}: {
-  root: ParentNode;
-  request: NextRequest;
-  source: HomepageSource;
-}) {
-  root.querySelectorAll("style").forEach((styleNode) => {
-    styleNode.textContent = rewriteCssAssetUrls({
-      css: styleNode.textContent ?? "",
-      request,
-      source,
-    });
-  });
-
-  root.querySelectorAll("*").forEach((element) => {
-    REWRITABLE_ATTRIBUTES.forEach((attribute) => {
-      const value = element.getAttribute(attribute);
-      if (!value) return;
-      element.setAttribute(
-        attribute,
-        rewriteAssetReference({
-          request,
-          source,
-          value,
-        }),
-      );
-    });
-
-    const srcSet = element.getAttribute("srcset");
-    if (srcSet) {
-      element.setAttribute(
-        "srcset",
-        rewriteSrcSet({
-          srcSet,
-          request,
-          source,
-        }),
-      );
-    }
-
-    REWRITABLE_STYLE_ATTRIBUTES.forEach((attribute) => {
-      const value = element.getAttribute(attribute);
-      if (!value) return;
-      element.setAttribute(
-        attribute,
-        rewriteCssAssetUrls({
-          css: value,
-          request,
-          source,
-        }),
-      );
-    });
-
-    if (element.tagName === "TEMPLATE") {
-      rewriteTemplateTree({
-        root: (element as HTMLTemplateElement).content,
-        request,
-        source,
-      });
-    }
-  });
-}
-
-function rewriteFragmentMarkup({
-  markup,
-  request,
-  source,
-}: {
-  markup: string;
-  request: NextRequest;
-  source: HomepageSource;
-}) {
-  const dom = new JSDOM(`<!doctype html><body>${markup}</body>`, {
-    virtualConsole: HOMEPAGE_DOM_VIRTUAL_CONSOLE,
-  });
-  rewriteTemplateTree({
-    root: dom.window.document.body,
-    request,
-    source,
-  });
-  return dom.window.document.body.innerHTML.trim();
-}
-
-async function extractInteractiveById(id: string) {
-  const { document } = await loadHomepageDocument();
-  const element = requireElement(document.getElementById(id), `Could not find interactive "${id}"`);
-  return stripScriptsFromMarkup(element.outerHTML);
-}
-
-async function extractFirstBySelector(selector: string) {
-  const { document } = await loadHomepageDocument();
-  const element = requireElement(
-    document.querySelector(selector),
-    `Could not find homepage selector "${selector}"`,
-  );
-  return stripScriptsFromMarkup(element.outerHTML);
-}
-
-async function extractClosestFromSelectorOrText(selector: string, label: string, classToken: string) {
-  const { document } = await loadHomepageDocument();
-  const candidates = [document.querySelector(selector), findExactTextElement(document, label)];
-
-  for (const element of candidates) {
-    const container = climbByClassToken(element, classToken);
-    if (container) {
-      return stripScriptsFromMarkup(container.outerHTML);
-    }
-  }
-
-  throw new Error(
-    `Could not resolve ancestor "${classToken}" for selector "${selector}" or homepage text "${label}"`,
+function isStaticArtifactPath(value: string) {
+  return (
+    value === "page.html.gz" ||
+    (/^fragments\/[a-z0-9-]+\.html\.gz$/.test(value) &&
+      path.posix.normalize(value) === value)
   );
 }
 
-async function extractClosestFromText(label: string, classToken: string) {
-  const { document } = await loadHomepageDocument();
-  const element = requireElement(
-    findExactTextElement(document, label),
-    `Could not find homepage text "${label}"`,
-  );
-  const container = requireElement(
-    climbByClassToken(element, classToken),
-    `Could not resolve ancestor "${classToken}" for "${label}"`,
-  );
-  return stripScriptsFromMarkup(container.outerHTML);
-}
-
-async function extractPackageFromVisibleText(label: string, classToken: string) {
-  return extractClosestFromText(label, classToken);
-}
-
-async function extractProgrammingNodeByIndex(index: number, hierarchy: "zone" | "container" | "feed") {
-  const { document } = await loadHomepageDocument();
-  const nodes = [...document.querySelectorAll(`[data-testid="programming-node"][data-hierarchy="${hierarchy}"]`)];
-  const element = requireElement(
-    nodes[index],
-    `Could not find programming node index ${index} for hierarchy "${hierarchy}"`,
-  );
-  return stripScriptsFromMarkup(element.outerHTML);
-}
-
-async function extractCombinedFragments(fragmentIds: string[]) {
-  const fragments = await Promise.all(fragmentIds.map((id) => resolveFragmentMarkup(id)));
-  return `<div class="preview-stack">${fragments.join("")}</div>`;
-}
-
-async function resolveFragmentMarkup(id: string): Promise<string> {
-  switch (id) {
-    case "edition-rail":
-      return extractFirstBySelector("[data-testid='masthead-edition-menu']");
-    case "masthead":
-      return extractFirstBySelector("[data-testid='masthead-container']");
-    case "nested-nav":
-      return extractFirstBySelector("[data-testid='floating-desktop-nested-nav']");
-    case "lead-programming":
-      return extractProgrammingNodeByIndex(1, "zone");
-    case "inline-interactives":
-      return extractCombinedFragments(["tip-strip", "poetry-promo", "weather-strip", "opinion-label"]);
-    case "watch-todays-videos":
-      return extractClosestFromText("Watch Today’s Videos", "css-1w1paqe");
-    case "more-news":
-      return extractClosestFromText("More News", "css-1w1paqe");
-    case "product-rails":
-      return extractCombinedFragments([
-        "well-package",
-        "culture-lifestyle-package",
-        "athletic-package",
-        "audio-package",
-        "cooking-package",
-        "wirecutter-package",
-        "games-package",
-      ]);
-    case "site-index":
-      return extractFirstBySelector("[data-testid='site-index']");
-    case "footer":
-      return extractFirstBySelector("[data-testid='footer']");
-    case "betamax-player":
-      return extractClosestFromText("Watch Today’s Videos", "css-1w1paqe");
-    case "tip-strip":
-      return extractInteractiveById("2025-hp-tip-strip");
-    case "poetry-promo":
-      return extractInteractiveById("poetry-week-hp-promo-day-2");
-    case "weather-strip":
-      return extractInteractiveById("weather-hp-strip");
-    case "opinion-label":
-      return extractInteractiveById("large-opinion-label");
-    case "well-package":
-      return extractClosestFromSelectorOrText('[data-pers*="home-packages-well"]', "Well", "css-17jkqqy");
-    case "culture-lifestyle-package":
-      return extractClosestFromSelectorOrText(
-        '[data-pers*="home-packages-culturelifestyle-primary"]',
-        "Culture and Lifestyle",
-        "css-1w1paqe",
-      );
-    case "athletic-package":
-      return extractClosestFromSelectorOrText(
-        '[data-pers*="home-packages-athletic-primary"]',
-        "The Athletic",
-        "css-17jkqqy",
-      );
-    case "audio-package":
-      return extractClosestFromSelectorOrText('[data-pers*="home-packages-audio"]', "Audio", "css-1w1paqe");
-    case "cooking-package":
-      return extractClosestFromSelectorOrText('[data-pers*="home-packages-cooking-addon"]', "Cooking", "css-1w1paqe");
-    case "wirecutter-package":
-      return extractPackageFromVisibleText("Product recommendations", "isPersonalizedPackage");
-    case "games-package":
-      return extractClosestFromText("Daily puzzles", "css-17jkqqy");
-    default:
-      throw new Error(`Unknown homepage fragment "${id}"`);
+async function loadGeneratedManifest(): Promise<GeneratedPreviewManifest> {
+  const parsed: unknown = JSON.parse(await readFile(GENERATED_MANIFEST_PATH, "utf8"));
+  if (
+    !parsed ||
+    typeof parsed !== "object" ||
+    !Object.hasOwn(parsed, "artifacts") ||
+    typeof (parsed as GeneratedPreviewManifest).artifacts !== "object" ||
+    (parsed as GeneratedPreviewManifest).schemaVersion !== 1 ||
+    (parsed as GeneratedPreviewManifest).generatorVersion !== PREVIEW_GENERATOR_VERSION ||
+    !Number.isSafeInteger((parsed as GeneratedPreviewManifest).maximumUncompressedArtifactBytes) ||
+    (parsed as GeneratedPreviewManifest).maximumUncompressedArtifactBytes < 1 ||
+    (parsed as GeneratedPreviewManifest).maximumUncompressedArtifactBytes >
+      MAX_UNCOMPRESSED_ARTIFACT_BYTES
+  ) {
+    throw new Error("Invalid generated NYT preview manifest");
   }
+  return parsed as GeneratedPreviewManifest;
 }
 
-async function previewStylesheetHrefs(request: NextRequest, source: HomepageSource) {
-  if (source.mode === "saved-page") {
-    const cacheKey = source.htmlPath;
-    let stylesheetRefs = HOMEPAGE_STYLESHEET_CACHE.get(cacheKey);
-    if (!stylesheetRefs) {
-      const { html } = await loadHomepageHtmlSource();
-      stylesheetRefs = [...html.matchAll(/<link[^>]+rel=["']stylesheet["'][^>]+href=["']([^"']+)["']/gi)]
-        .map((match) => match[1])
-        .filter(Boolean);
-      HOMEPAGE_STYLESHEET_CACHE.set(cacheKey, stylesheetRefs);
-    }
-
-    const stylesheets = stylesheetRefs.map((href) =>
-      rewriteAssetReference({
-        request,
-        source,
-        value: href,
-        cssContext: true,
-      }),
-    );
-    if (stylesheets.length > 0) {
-      return stylesheets;
-    }
+async function decodeGeneratedArtifact(
+  logicalId: string,
+  manifest: GeneratedPreviewManifest,
+  artifact: PreviewArtifact | undefined,
+  compressed: Buffer,
+) {
+  if (!artifact) {
+    throw new Error(`Unknown homepage fragment "${logicalId}"`);
+  }
+  if (
+    !isStaticArtifactPath(artifact.path) ||
+    !Number.isSafeInteger(artifact.compressedBytes) ||
+    !Number.isSafeInteger(artifact.uncompressedBytes) ||
+    artifact.compressedBytes < 1 ||
+    artifact.uncompressedBytes < 1 ||
+    artifact.uncompressedBytes > MAX_UNCOMPRESSED_ARTIFACT_BYTES ||
+    artifact.uncompressedBytes > manifest.maximumUncompressedArtifactBytes ||
+    !/^[a-f0-9]{64}$/.test(artifact.compressedSha256) ||
+    !/^[a-f0-9]{64}$/.test(artifact.uncompressedSha256)
+  ) {
+    throw new Error(`Invalid generated NYT preview artifact "${logicalId}"`);
   }
 
+  if (
+    compressed.byteLength !== artifact.compressedBytes ||
+    sha256(compressed) !== artifact.compressedSha256
+  ) {
+    throw new Error(`Generated NYT preview artifact integrity check failed for "${logicalId}"`);
+  }
+
+  const uncompressed = await gunzipAsync(compressed, {
+    maxOutputLength: MAX_UNCOMPRESSED_ARTIFACT_BYTES,
+  });
+  if (
+    uncompressed.byteLength !== artifact.uncompressedBytes ||
+    sha256(uncompressed) !== artifact.uncompressedSha256
+  ) {
+    throw new Error(`Generated NYT preview artifact size check failed for "${logicalId}"`);
+  }
+  return uncompressed.toString("utf8");
+}
+
+async function readGeneratedArtifact(logicalId: string) {
+  const manifest = await loadGeneratedManifest();
+  const artifact = manifest.artifacts[logicalId];
+  if (!artifact) throw new Error(`Unknown homepage fragment "${logicalId}"`);
+  const artifactPath = path.resolve(GENERATED_PREVIEW_ROOT, artifact.path);
+  if (!artifactPath.startsWith(`${GENERATED_PREVIEW_ROOT}${path.sep}`)) {
+    throw new Error(`Invalid generated NYT preview artifact "${logicalId}"`);
+  }
+  return decodeGeneratedArtifact(logicalId, manifest, artifact, await readFile(artifactPath));
+}
+
+async function previewStylesheetHrefs(request: NextRequest) {
   const localStyles = NYT_HOMEPAGE_SOURCE_BUNDLE.css.map((_, index) => {
     const url = new URL(request.url);
     url.search = "";
@@ -502,18 +190,16 @@ async function previewStylesheetHrefs(request: NextRequest, source: HomepageSour
 
 async function buildPreviewDocument({
   request,
-  source,
   title,
   bodyMarkup,
   pageMode = false,
 }: {
   request: NextRequest;
-  source: HomepageSource;
   title: string;
   bodyMarkup: string;
   pageMode?: boolean;
 }) {
-  const stylesheets = (await previewStylesheetHrefs(request, source))
+  const stylesheets = (await previewStylesheetHrefs(request))
     .map((href) => `<link rel="stylesheet" href="${href}" crossorigin="anonymous">`)
     .join("");
 
@@ -567,36 +253,38 @@ async function buildPreviewDocument({
 }
 
 async function renderFullPageDocument(request: NextRequest) {
-  const { source, document } = await loadHomepageDocument();
-  document.querySelectorAll("script").forEach((node) => node.remove());
-  const bodyMarkup = rewriteFragmentMarkup({
-    markup: document.body.innerHTML,
-    request,
-    source,
-  });
   return buildPreviewDocument({
     request,
-    source,
     title: "The New York Times Homepage Snapshot",
-    bodyMarkup,
+    bodyMarkup: await readGeneratedArtifact("page"),
     pageMode: true,
   });
 }
 
 async function renderFragmentDocument(request: NextRequest, id: string) {
-  const source = await getHomepageSource();
-  const fragmentMarkup = rewriteFragmentMarkup({
-    markup: await resolveFragmentMarkup(id),
-    request,
-    source,
-  });
+  const fragmentIds = resolveFragmentArtifactIds(id);
+  const fragments = await Promise.all(fragmentIds.map((fragmentId) => readGeneratedArtifact(fragmentId)));
+  const bodyMarkup = fragmentIds.length > 1
+    ? `<div class="preview-stack">${fragments.join("")}</div>`
+    : fragments[0];
   return buildPreviewDocument({
     request,
-    source,
     title: `NYT Homepage Preview: ${id}`,
-    bodyMarkup: fragmentMarkup,
+    bodyMarkup,
   });
 }
+
+function resolveFragmentArtifactIds(id: string) {
+  if (!GENERATED_FRAGMENT_IDS.has(id) && !(id in COMBINED_FRAGMENT_IDS)) {
+    throw new Error(`Unknown homepage fragment "${id}"`);
+  }
+  return COMBINED_FRAGMENT_IDS[id] ?? [id];
+}
+
+export const NYT_HOMEPAGE_PREVIEW_TESTING = {
+  decodeGeneratedArtifact,
+  resolveFragmentArtifactIds,
+};
 
 function adminErrorStatus(error: unknown) {
   const message = error instanceof Error ? error.message : "failed";
@@ -638,8 +326,7 @@ export async function GET(request: NextRequest) {
         return NextResponse.json({ error: "Invalid asset request" }, { status: 400 });
       }
 
-      const assetPath = sourceList[index];
-      const asset = await readSourceBinary(assetPath);
+      const asset = await readSourceBinary(sourceList[index]);
       return new NextResponse(asset, {
         status: 200,
         headers: {
@@ -650,49 +337,7 @@ export async function GET(request: NextRequest) {
     }
 
     if (view === LOCAL_ASSET_VIEW) {
-      const source = await getHomepageSource();
-      if (source.mode !== "saved-page" || !source.assetDirectory) {
-        return NextResponse.json({ error: "Local saved-page assets are unavailable" }, { status: 404 });
-      }
-
-      const relativePath = request.nextUrl.searchParams.get("path")?.trim();
-      if (!relativePath) {
-        return NextResponse.json({ error: "path is required for saved-page asset previews" }, { status: 400 });
-      }
-
-      const normalizedRelativePath = normalizeSavedPageAssetPath(relativePath);
-      const assetPath = path.resolve(source.assetDirectory, normalizedRelativePath);
-      const assetRoot = path.resolve(source.assetDirectory);
-      if (!assetPath.startsWith(`${assetRoot}${path.sep}`) && assetPath !== assetRoot) {
-        return NextResponse.json({ error: "Invalid saved-page asset path" }, { status: 400 });
-      }
-
-      const extension = path.extname(assetPath).toLowerCase();
-      const contentType = MIME_TYPES[extension] ?? "application/octet-stream";
-      if (contentType.startsWith("text/css")) {
-        const asset = await readSourceText(assetPath);
-        const rewrittenCss = rewriteCssAssetUrls({
-          css: asset,
-          request,
-          source,
-        });
-        return new NextResponse(rewrittenCss, {
-          status: 200,
-          headers: {
-            "content-type": contentType,
-            "cache-control": "private, max-age=300",
-          },
-        });
-      }
-
-      const asset = await readSourceBinary(assetPath);
-      return new NextResponse(asset, {
-        status: 200,
-        headers: {
-          "content-type": contentType,
-          "cache-control": "private, max-age=300",
-        },
-      });
+      return NextResponse.json({ error: "Local saved-page assets are unavailable" }, { status: 404 });
     }
 
     if (view === "page") {
@@ -701,7 +346,7 @@ export async function GET(request: NextRequest) {
         status: 200,
         headers: {
           "content-type": "text/html; charset=utf-8",
-          "cache-control": "private, max-age=60",
+          "cache-control": PREVIEW_CACHE_CONTROL,
         },
       });
     }
@@ -716,7 +361,7 @@ export async function GET(request: NextRequest) {
       status: 200,
       headers: {
         "content-type": "text/html; charset=utf-8",
-        "cache-control": "private, max-age=60",
+        "cache-control": PREVIEW_CACHE_CONTROL,
       },
     });
   } catch (error) {
