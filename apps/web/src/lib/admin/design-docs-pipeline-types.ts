@@ -269,6 +269,10 @@ export interface SourceFidelityResult {
   legacyMode: boolean;
   blockingFindings: SourceFidelityFinding[];
   degradedFindings: SourceFidelityFinding[];
+  /** Scored degradation budget (design-docs-agent 2.0): 0-100, higher is closer to source. */
+  fidelityScore?: number;
+  /** Per-dimension degradation counts backing fidelityScore. */
+  degradedByDimension?: Record<string, number>;
 }
 
 export interface A11yAuditFinding {
