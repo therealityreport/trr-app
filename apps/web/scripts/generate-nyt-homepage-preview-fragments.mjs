@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { gunzipSync, gzipSync } from "node:zlib";
 
 import { JSDOM } from "jsdom";
@@ -147,6 +147,7 @@ function artifactRecord(relativePath, markup) {
   const compressed = gzipSync(uncompressed, { level: 9 });
   return {
     relativePath,
+    uncompressed,
     compressed,
     manifest: {
       path: relativePath,
@@ -156,6 +157,64 @@ function artifactRecord(relativePath, markup) {
       uncompressedSha256: sha256(uncompressed),
     },
   };
+}
+
+export function verifyCheckedArtifact(
+  logicalId,
+  existingEntry,
+  expectedEntry,
+  compressed,
+  expectedUncompressed,
+) {
+  if (existingEntry.path !== expectedEntry.path) {
+    throw new Error(`Generated preview manifest path is stale: ${logicalId}`);
+  }
+
+  if (
+    compressed.byteLength !== existingEntry.compressedBytes ||
+    sha256(compressed) !== existingEntry.compressedSha256
+  ) {
+    throw new Error(`Generated artifact compressed integrity failed: ${logicalId}`);
+  }
+
+  const uncompressed = gunzipSync(compressed);
+  if (
+    uncompressed.byteLength !== existingEntry.uncompressedBytes ||
+    sha256(uncompressed) !== existingEntry.uncompressedSha256
+  ) {
+    throw new Error(`Generated artifact uncompressed integrity failed: ${logicalId}`);
+  }
+  if (
+    existingEntry.uncompressedBytes !== expectedEntry.uncompressedBytes ||
+    existingEntry.uncompressedSha256 !== expectedEntry.uncompressedSha256 ||
+    !uncompressed.equals(expectedUncompressed)
+  ) {
+    throw new Error(`Generated artifact semantic content is stale: ${logicalId}`);
+  }
+}
+
+function verifyCheckedManifest(existingManifest, expectedManifest) {
+  if (existingManifest.schemaVersion !== expectedManifest.schemaVersion) {
+    throw new Error("Generated preview manifest schema is stale");
+  }
+  if (existingManifest.generatorVersion !== expectedManifest.generatorVersion) {
+    throw new Error("Generated preview manifest generator version is stale");
+  }
+  if (JSON.stringify(existingManifest.source) !== JSON.stringify(expectedManifest.source)) {
+    throw new Error("Generated preview source metadata is stale");
+  }
+  if (
+    existingManifest.maximumUncompressedArtifactBytes !==
+    expectedManifest.maximumUncompressedArtifactBytes
+  ) {
+    throw new Error("Generated preview maximum artifact size is stale");
+  }
+
+  const expectedIds = Object.keys(expectedManifest.artifacts).sort();
+  const existingIds = Object.keys(existingManifest.artifacts ?? {}).sort();
+  if (JSON.stringify(existingIds) !== JSON.stringify(expectedIds)) {
+    throw new Error("Generated preview manifest artifacts are stale");
+  }
 }
 
 async function main() {
@@ -193,12 +252,28 @@ async function main() {
   const manifestText = `${JSON.stringify(manifest, null, 2)}\n`;
 
   if (CHECK_ONLY) {
-    for (const { relativePath, compressed } of Object.values(artifacts)) {
-      const existing = await readFile(path.join(OUTPUT_ROOT, relativePath));
-      if (!existing.equals(compressed)) throw new Error(`Generated artifact is stale: ${relativePath}`);
+    let existingManifest;
+    try {
+      existingManifest = JSON.parse(
+        await readFile(path.join(OUTPUT_ROOT, "manifest.json"), "utf8"),
+      );
+    } catch (error) {
+      throw new Error(
+        `Generated preview manifest is unreadable: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
-    const existingManifest = await readFile(path.join(OUTPUT_ROOT, "manifest.json"), "utf8");
-    if (existingManifest !== manifestText) throw new Error("Generated preview manifest is stale");
+    verifyCheckedManifest(existingManifest, manifest);
+
+    for (const [logicalId, { relativePath, uncompressed, manifest: expectedEntry }] of Object.entries(artifacts)) {
+      const existing = await readFile(path.join(OUTPUT_ROOT, relativePath));
+      verifyCheckedArtifact(
+        logicalId,
+        existingManifest.artifacts[logicalId],
+        expectedEntry,
+        existing,
+        uncompressed,
+      );
+    }
     console.log("NYT homepage preview fragments are up to date.");
     return;
   }
@@ -211,4 +286,9 @@ async function main() {
   console.log(`Generated ${Object.keys(artifacts).length} deterministic preview artifacts.`);
 }
 
-await main();
+if (
+  process.argv[1] &&
+  pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url
+) {
+  await main();
+}

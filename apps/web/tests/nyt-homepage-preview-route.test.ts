@@ -8,6 +8,7 @@ import { promisify } from "node:util";
 import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { captureExpectedConsoleError } from "./helpers/expected-console";
+import { verifyCheckedArtifact } from "../scripts/generate-nyt-homepage-preview-fragments.mjs";
 
 const { requireAdminMock } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
@@ -212,6 +213,29 @@ describe("NYT homepage preview route", () => {
     const compressed = await readFile(
       path.join(process.cwd(), "data", "nyt-homepage-2026-04-21", "generated-preview", artifact.path),
     );
+
+    const uncompressed = await gunzipAsync(compressed);
+    expect(() =>
+      verifyCheckedArtifact(
+        "wirecutter-package",
+        artifact,
+        { ...artifact, compressedBytes: artifact.compressedBytes + 1, compressedSha256: "0".repeat(64) },
+        compressed,
+        uncompressed,
+      ),
+    ).not.toThrow();
+
+    const corruptedCompressed = Buffer.from(compressed);
+    corruptedCompressed[corruptedCompressed.length - 1] ^= 1;
+    expect(() =>
+      verifyCheckedArtifact(
+        "wirecutter-package",
+        artifact,
+        artifact,
+        corruptedCompressed,
+        uncompressed,
+      ),
+    ).toThrow("compressed integrity");
 
     await expect(
       decodeGeneratedArtifact(
