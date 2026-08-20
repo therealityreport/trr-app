@@ -1,8 +1,15 @@
 import { redirect } from "next/navigation";
 import type { Route } from "next";
+import {
+  parsePublicSeasonNumber,
+  redirectToCanonicalPublicPath,
+  requestedPublicRoutePath,
+  resolvePublicIdentityForRoute,
+} from "@/app/_lib/public-identity-route";
 import PublicRouteShell, { formatRouteValue } from "@/components/public/PublicRouteShell";
 import PrefixedPathValue from "@/components/public/PrefixedPathValue";
 import { resolvePrefixedRouteParam } from "@/lib/public/prefixed-route-params";
+import { resolvePublicSeasonIdentity } from "@/lib/server/trr-api/public-identities";
 
 export const dynamic = "force-dynamic";
 
@@ -72,25 +79,14 @@ export default async function RootShowSeasonAliasPage({
   const rest = resolvedParams.rest;
   const normalizedSeasonNumber = resolvePrefixedRouteParam(resolvedParams, "seasonNumber", "s") ?? "";
 
-  if (isStrictSeasonNumber(normalizedSeasonNumber)) {
-    return (
-      <PublicRouteShell
-        eyebrow="Season Alias"
-        title={`Season ${formatRouteValue(normalizedSeasonNumber)}`}
-        description="This season alias route is publicly reachable and no longer imports the admin season editor."
-        details={[
-          { label: "Show", value: formatRouteValue(showId) },
-          {
-            label: "Season",
-            value: <PrefixedPathValue fallback={normalizedSeasonNumber} prefix="s" segmentIndex={1} />,
-          },
-          { label: "Subroute", value: formatRouteValue(rest) },
-        ]}
-        links={[
-          { href: `/${showId}`, label: "Show page" },
-          { href: `/${showId}/s${normalizedSeasonNumber}/social`, label: "Season social" },
-        ]}
-      />
+  if (isStrictSeasonNumber(normalizedSeasonNumber) && !rest?.length) {
+    const seasonNumber = parsePublicSeasonNumber(normalizedSeasonNumber);
+    const identity = await resolvePublicIdentityForRoute(() =>
+      resolvePublicSeasonIdentity(showId, seasonNumber),
+    );
+    redirectToCanonicalPublicPath(
+      requestedPublicRoutePath([showId, `s${normalizedSeasonNumber}`]),
+      identity.canonical_path,
     );
   }
 
@@ -143,6 +139,28 @@ export default async function RootShowSeasonAliasPage({
         links={[
           { href: `/${showId}/social/reddit/${ctx.communitySlug}/${ctx.windowKey}`, label: "Window route" },
           { href: `/${showId}/social/reddit/${ctx.communitySlug}`, label: "Community route" },
+        ]}
+      />
+    );
+  }
+
+  if (isStrictSeasonNumber(normalizedSeasonNumber)) {
+    return (
+      <PublicRouteShell
+        eyebrow="Season Alias"
+        title={`Season ${formatRouteValue(normalizedSeasonNumber)}`}
+        description="This season alias route is publicly reachable and no longer imports the admin season editor."
+        details={[
+          { label: "Show", value: formatRouteValue(showId) },
+          {
+            label: "Season",
+            value: <PrefixedPathValue fallback={normalizedSeasonNumber} prefix="s" segmentIndex={1} />,
+          },
+          { label: "Subroute", value: formatRouteValue(rest) },
+        ]}
+        links={[
+          { href: `/${showId}`, label: "Show page" },
+          { href: `/${showId}/s${normalizedSeasonNumber}/social`, label: "Season social" },
         ]}
       />
     );

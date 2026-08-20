@@ -96,21 +96,42 @@ describe("Firebase server-session synchronization", () => {
     const user = buildUser("restored-token", "restored-user");
     const auth = buildAuth(user);
     registerFirebaseServerSessionSync(auth);
+    mocks.token(user);
 
     await waitForFirebaseServerSessionStartup(auth);
 
+    expect(fetch).toHaveBeenCalledTimes(1);
     expect(fetch).toHaveBeenCalledWith(
       "/api/session/login",
       expect.objectContaining({ body: JSON.stringify({ idToken: "restored-token" }) }),
     );
   });
 
-  it("clears a stale cookie for an initially signed-out Firebase client", async () => {
+  it("does not issue a passive logout for the combined initially signed-out callbacks", async () => {
     const auth = buildAuth(null);
     registerFirebaseServerSessionSync(auth);
 
+    await mocks.before(null);
+    mocks.abort();
+    mocks.token(null);
     await waitForFirebaseServerSessionStartup(auth);
 
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("clears the server cookie once for a real authenticated-to-null transition and explicit logout repair", async () => {
+    const user = buildUser("signed-in-token", "signed-in-user");
+    const auth = buildAuth(user);
+    registerFirebaseServerSessionSync(auth);
+    await waitForFirebaseServerSessionStartup(auth);
+    vi.mocked(fetch).mockClear();
+
+    await mocks.before(null);
+    auth.currentUser = null;
+    mocks.token(null);
+    await ensureFirebaseServerSession(auth, null);
+
+    expect(fetch).toHaveBeenCalledTimes(1);
     expect(fetch).toHaveBeenCalledWith(
       "/api/session/logout",
       expect.objectContaining({ method: "POST", credentials: "include" }),
@@ -138,6 +159,7 @@ describe("Firebase server-session synchronization", () => {
     const second = buildUser("token-generation-2", "same-user");
     const auth = buildAuth(first);
     registerFirebaseServerSessionSync(auth);
+    mocks.token(first);
     await waitForFirebaseServerSessionStartup(auth);
     vi.mocked(fetch).mockClear();
 
@@ -184,6 +206,7 @@ describe("Firebase server-session synchronization", () => {
     const user = buildUser();
     const auth = buildAuth(user);
     registerFirebaseServerSessionSync(auth);
+    mocks.token(user);
     await waitForFirebaseServerSessionStartup(auth);
     vi.mocked(fetch).mockClear();
     vi.mocked(fetch)

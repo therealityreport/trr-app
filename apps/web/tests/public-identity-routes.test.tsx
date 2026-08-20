@@ -25,6 +25,8 @@ vi.mock("@/lib/server/trr-api/public-identities", async (importOriginal) => {
 import PersonPage, {
   generateMetadata as generatePersonMetadata,
 } from "@/app/people/[personId]/[[...personTab]]/page";
+import RootShowSeasonAliasPage from "@/app/[showId]/s[seasonNumber]/[[...rest]]/page";
+import RootShowAliasPage from "@/app/[showId]/[[...rest]]/page";
 import ShowSeasonPage, {
   generateMetadata as generateSeasonMetadata,
 } from "@/app/shows/[showId]/seasons/[seasonNumber]/page";
@@ -194,6 +196,60 @@ describe("public identity routes", () => {
 
     expect(resolvePublicShowIdentityMock).toHaveBeenCalledOnce();
     expect(resolvePublicShowIdentityMock).toHaveBeenCalledWith("valley");
+  });
+
+  it("data-resolves a bare root show alias before permanently redirecting it", async () => {
+    resolvePublicShowIdentityMock.mockResolvedValue({
+      ...SHOW_IDENTITY,
+      requested_slug: "valley",
+      match_kind: "alias",
+    });
+
+    await expectPermanentRedirect(
+      RootShowAliasPage({ params: Promise.resolve({ showId: "valley" }) }),
+      "/shows/the-valley",
+    );
+
+    expect(resolvePublicShowIdentityMock).toHaveBeenCalledOnce();
+    expect(resolvePublicShowIdentityMock).toHaveBeenCalledWith("valley");
+  });
+
+  it("keeps root show subpaths on the public-safe catch-all without resolving identity", async () => {
+    const element = await RootShowAliasPage({
+      params: Promise.resolve({ showId: "valley", rest: ["social"] }),
+    });
+
+    expect(element.props.title).toBe("Public show route");
+    expect(resolvePublicShowIdentityMock).not.toHaveBeenCalled();
+  });
+
+  it("data-resolves a bare root season alias before permanently redirecting it", async () => {
+    resolvePublicSeasonIdentityMock.mockResolvedValue({
+      ...SEASON_IDENTITY,
+      season_number: 15,
+      requested_show_slug: "valley",
+      show_match_kind: "alias",
+      canonical_path: "/shows/the-valley/seasons/15",
+    });
+
+    await expectPermanentRedirect(
+      RootShowSeasonAliasPage({
+        params: Promise.resolve({ showId: "valley", seasonNumber: "15" }),
+      }),
+      "/shows/the-valley/seasons/15",
+    );
+
+    expect(resolvePublicSeasonIdentityMock).toHaveBeenCalledOnce();
+    expect(resolvePublicSeasonIdentityMock).toHaveBeenCalledWith("valley", 15);
+  });
+
+  it("keeps strict season subpaths on their existing public-safe alias route", async () => {
+    const element = await RootShowSeasonAliasPage({
+      params: Promise.resolve({ showId: "valley", seasonNumber: "15", rest: ["social"] }),
+    });
+
+    expect(element.props.title).toBe("Season 15");
+    expect(resolvePublicSeasonIdentityMock).not.toHaveBeenCalled();
   });
 
   it("permanently redirects a case variant directly to its canonical path", async () => {

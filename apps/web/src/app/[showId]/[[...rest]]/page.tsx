@@ -1,4 +1,10 @@
+import {
+  redirectToCanonicalPublicPath,
+  requestedPublicRoutePath,
+  resolvePublicIdentityForRoute,
+} from "@/app/_lib/public-identity-route";
 import PublicRouteShell, { formatRouteValue } from "@/components/public/PublicRouteShell";
+import { resolvePublicShowIdentity } from "@/lib/server/trr-api/public-identities";
 
 export const dynamic = "force-dynamic";
 
@@ -8,6 +14,14 @@ type ShowCatchAllPageProps = {
 
 export default async function ShowCatchAllPage({ params }: ShowCatchAllPageProps) {
   const { showId, rest } = await params;
+
+  if (!rest?.length) {
+    const identity = await resolvePublicIdentityForRoute(() => resolvePublicShowIdentity(showId));
+    redirectToCanonicalPublicPath(
+      requestedPublicRoutePath([showId]),
+      identity.canonical_path,
+    );
+  }
 
   return (
     <PublicRouteShell

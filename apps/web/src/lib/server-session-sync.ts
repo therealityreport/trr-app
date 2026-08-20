@@ -13,6 +13,10 @@ type SessionSyncState = {
   startupReady: Promise<void>;
   dirtyError: unknown;
   cleanup: (() => void) | null;
+  initialTokenEventPending: boolean;
+  startupReconciled: boolean;
+  startupUser: User | null | undefined;
+  logoutSync: Promise<void> | null;
 };
 
 const syncStates = new WeakMap<Auth, SessionSyncState>();
@@ -24,6 +28,10 @@ function createSyncState(): SessionSyncState {
     startupReady: Promise.resolve(),
     dirtyError: null,
     cleanup: null,
+    initialTokenEventPending: true,
+    startupReconciled: false,
+    startupUser: undefined,
+    logoutSync: null,
   };
 }
 
@@ -99,7 +107,34 @@ function publishSessionSync(auth: Auth, operation: () => Promise<void>): Promise
 }
 
 function publishBackgroundSessionSync(auth: Auth, user: User | null): void {
-  void publishSessionSync(auth, () => syncFirebaseServerSession(user)).catch(() => undefined);
+  void publishSessionChange(auth, user).catch(() => undefined);
+}
+
+function publishSessionChange(auth: Auth, user: User | null): Promise<void> {
+  const state = getSyncState(auth);
+
+  if (user) {
+    state.logoutSync = null;
+    return publishSessionSync(auth, () => syncFirebaseServerSession(user));
+  }
+
+  return publishLogoutSync(auth, () => syncFirebaseServerSession(null));
+}
+
+function publishLogoutSync(auth: Auth, operation: () => Promise<void>): Promise<void> {
+  const state = getSyncState(auth);
+  if (state.logoutSync) return state.logoutSync;
+
+  const next = publishSessionSync(auth, operation);
+  state.logoutSync = next;
+  void next.catch(() => {
+    if (state.logoutSync === next) state.logoutSync = null;
+  });
+  return next;
+}
+
+function isPassiveInitialNull(auth: Auth, state: SessionSyncState, user: User | null): boolean {
+  return user === null && !state.startupReconciled && auth.currentUser === null;
 }
 
 export async function ensureFirebaseServerSession(
@@ -109,7 +144,15 @@ export async function ensureFirebaseServerSession(
   const state = getSyncState(auth);
   await state.startupReady.catch(() => undefined);
 
-  return publishSessionSync(auth, async () => {
+  if (!expectedUser && state.logoutSync) {
+    await state.logoutSync;
+    if (auth.currentUser !== expectedUser) {
+      throw new Error("Firebase user changed before server session synchronization");
+    }
+    return;
+  }
+
+  const synchronize = async () => {
     if (auth.currentUser !== expectedUser) {
       throw new Error("Firebase user changed before server session synchronization");
     }
@@ -117,7 +160,12 @@ export async function ensureFirebaseServerSession(
     if (auth.currentUser !== expectedUser) {
       throw new Error("Firebase user changed during server session synchronization");
     }
-  });
+  };
+
+  if (!expectedUser) return publishLogoutSync(auth, synchronize);
+
+  state.logoutSync = null;
+  return publishSessionSync(auth, synchronize);
 }
 
 export function waitForFirebaseServerSessionStartup(auth: Auth): Promise<void> {
@@ -130,10 +178,21 @@ export function registerFirebaseServerSessionSync(auth: Auth): () => void {
 
   const unsubscribeBefore = beforeAuthStateChanged(
     auth,
-    (user) => publishSessionSync(auth, () => syncFirebaseServerSession(user)),
-    () => publishBackgroundSessionSync(auth, auth.currentUser),
+    (user) => {
+      if (isPassiveInitialNull(auth, state, user)) return Promise.resolve();
+      return publishSessionChange(auth, user);
+    },
+    () => {
+      const currentUser = auth.currentUser;
+      if (isPassiveInitialNull(auth, state, currentUser)) return;
+      publishBackgroundSessionSync(auth, currentUser);
+    },
   );
   const unsubscribeToken = onIdTokenChanged(auth, (user) => {
+    if (state.initialTokenEventPending) {
+      state.initialTokenEventPending = false;
+      if (!state.startupReconciled || state.startupUser === user) return;
+    }
     publishBackgroundSessionSync(auth, user);
   });
 
@@ -142,6 +201,10 @@ export function registerFirebaseServerSessionSync(auth: Auth): () => void {
     .then(() =>
       publishSessionSync(auth, async () => {
         const currentUser = auth.currentUser;
+        state.startupReconciled = true;
+        state.startupUser = currentUser;
+        if (!currentUser) return;
+        state.logoutSync = null;
         await syncFirebaseServerSession(currentUser);
         if (auth.currentUser !== currentUser) {
           throw new Error("Firebase user changed during startup session synchronization");

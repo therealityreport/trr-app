@@ -16,6 +16,7 @@ import {
   isLoopbackAdminHost,
   normalizeAdminHost,
   parseAdminHostAllowlist,
+  resolveConfiguredAdminOrigin,
   resolveAdminOriginFromRequest,
 } from "@/lib/admin/admin-url-defaults";
 import { toFriendlyBrandSlug } from "@/lib/admin/brand-profile";
@@ -288,6 +289,20 @@ function isRootShowUiPath(pathname: string): boolean {
   const second = segments[1] ?? "";
   if (isSeasonToken(second)) return true;
   return ROOT_SHOW_ROUTE_SECOND_SEGMENTS.has(second);
+}
+
+function isBarePublicShowIdentityPath(pathname: string): boolean {
+  const segments = pathname
+    .split("/")
+    .filter((segment) => segment.length > 0)
+    .map((segment) => segment.trim().toLowerCase());
+  if (segments.length === 0) return false;
+
+  const first = segments[0];
+  if (!first || ROOT_SHOW_ROUTE_RESERVED_FIRST_SEGMENTS.has(first)) return false;
+  if (!/^[a-z0-9-]+$/.test(first)) return false;
+
+  return segments.length === 1 || (segments.length === 2 && isSeasonToken(segments[1] ?? ""));
 }
 
 function toPathSegments(pathname: string): string[] {
@@ -1118,6 +1133,9 @@ export function proxy(request: NextRequest): NextResponse {
   const allowedAdminApiHosts = resolveAdminApiAllowedHosts(adminOrigin);
   const requestHost = normalizeAdminHost(getForwardedRequestHost(request)) ?? normalizeAdminHost(request.nextUrl.hostname);
   const onCanonicalAdminHost = hostsMatch(canonicalAdminHost, requestHost);
+  const hasConfiguredAdminOrigin = resolveConfiguredAdminOrigin() !== null;
+  const isSingleHostProductionFallback = process.env.NODE_ENV === "production" && !hasConfiguredAdminOrigin;
+  const isBarePublicShowIdentityRoute = isBarePublicShowIdentityPath(pathname);
   const isInternalAdminRewrite = request.headers.get(INTERNAL_ADMIN_REWRITE_HEADER) === "1";
   const screenalyticsCanonicalPath = isInternalAdminRewrite
     ? null
@@ -1176,6 +1194,14 @@ export function proxy(request: NextRequest): NextResponse {
   }
 
   if (onCanonicalAdminHost) {
+    // A production deployment without a configured admin origin falls back to
+    // treating its own public host as canonical admin. Let only the two bare
+    // public identity aliases reach their data-resolving App Router pages;
+    // configured admin hosts keep their short admin workspace aliases.
+    if (isSingleHostProductionFallback && isBarePublicShowIdentityRoute) {
+      return NextResponse.next();
+    }
+
     if (pathname === "/" && canonicalAdminHost === "admin.trr.localhost") {
       return NextResponse.redirect(new URL("/admin", adminOrigin || request.nextUrl.origin), 307);
     }

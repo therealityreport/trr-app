@@ -6,22 +6,34 @@ import { proxy } from "@/proxy";
 const trackedEnvKeys = [
   "NODE_ENV",
   "ADMIN_APP_ORIGIN",
+  "ADMIN_APP_BASE_DOMAIN",
+  "ADMIN_APP_DERIVE_FROM_REQUEST_HOST",
   "ADMIN_APP_HOSTS",
   "ADMIN_ENFORCE_HOST",
   "ADMIN_STRICT_HOST_ROUTING",
+  "PORTLESS_ADMIN_URL",
+  "PORTLESS_URL",
 ] as const;
 
 const originalEnv = new Map<string, string | undefined>();
 
 function setDefaultAdminRoutingEnv() {
   process.env.ADMIN_APP_ORIGIN = "http://admin.localhost:3000";
+  delete process.env.ADMIN_APP_BASE_DOMAIN;
+  delete process.env.ADMIN_APP_DERIVE_FROM_REQUEST_HOST;
   delete process.env.ADMIN_APP_HOSTS;
+  delete process.env.PORTLESS_ADMIN_URL;
+  delete process.env.PORTLESS_URL;
   process.env.ADMIN_ENFORCE_HOST = "true";
   process.env.ADMIN_STRICT_HOST_ROUTING = "false";
 }
 
 function runProxy(pathname: string) {
   return proxy(new NextRequest(`http://admin.localhost:3000${pathname}`));
+}
+
+function runPublicDeploymentProxy(pathname: string) {
+  return proxy(new NextRequest(`https://trr-app.vercel.app${pathname}`));
 }
 
 describe("proxy route characterization", () => {
@@ -83,6 +95,25 @@ describe("proxy route characterization", () => {
     expect(response.headers.get("x-middleware-rewrite")).toBe(expectedRewrite);
     expect(response.headers.get("location")).toBeNull();
   });
+
+  it.each(["/the-real-housewives-of-beverly-hills", "/the-real-housewives-of-beverly-hills/s15"])(
+    "leaves the bare public identity alias %s for its public App Router page on a single-host production deployment",
+    (pathname) => {
+      process.env.NODE_ENV = "production";
+      delete process.env.ADMIN_APP_ORIGIN;
+      delete process.env.ADMIN_APP_BASE_DOMAIN;
+      delete process.env.ADMIN_APP_DERIVE_FROM_REQUEST_HOST;
+      delete process.env.PORTLESS_ADMIN_URL;
+      delete process.env.PORTLESS_URL;
+
+      const response = runPublicDeploymentProxy(pathname);
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get("x-middleware-next")).toBe("1");
+      expect(response.headers.get("x-middleware-rewrite")).toBeNull();
+      expect(response.headers.get("location")).toBeNull();
+    },
+  );
 
   it("does not treat reserved root segments as show routes", () => {
     const response = runProxy("/hub");
