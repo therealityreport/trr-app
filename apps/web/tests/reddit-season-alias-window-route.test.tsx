@@ -24,7 +24,7 @@ vi.mock("@/app/admin/reddit-post-details/page", () => ({
   default: () => null,
 }));
 
-import RootShowSeasonAliasPage from "@/app/[showId]/s[seasonNumber]/[[...rest]]/page";
+import RootShowSeasonAliasPage from "@/app/[showId]/[seasonSegment]/[[...rest]]/page";
 
 describe("root show season alias reddit window routing", () => {
   it("redirects reddit community season paths to dedicated community page", async () => {
@@ -36,7 +36,7 @@ describe("root show season alias reddit window routing", () => {
       RootShowSeasonAliasPage({
         params: Promise.resolve({
           showId: "rhoslc",
-          seasonNumber: "social",
+          seasonSegment: "social",
           rest: ["reddit", "BravoRealHousewives", "s6"],
         }),
       }),
@@ -54,7 +54,7 @@ describe("root show season alias reddit window routing", () => {
       RootShowSeasonAliasPage({
         params: Promise.resolve({
           showId: "rhoslc",
-          seasonNumber: "ocial",
+          seasonSegment: "ocial",
           rest: ["reddit", "BravoRealHousewives", "s6"],
         }),
       }),
@@ -69,7 +69,7 @@ describe("root show season alias reddit window routing", () => {
     await RootShowSeasonAliasPage({
       params: Promise.resolve({
         showId: "rhoslc",
-        seasonNumber: "social",
+        seasonSegment: "social",
         rest: ["reddit", "BravoRealHousewives", "w0"],
       }),
     });
@@ -83,7 +83,7 @@ describe("root show season alias reddit window routing", () => {
     await RootShowSeasonAliasPage({
       params: Promise.resolve({
         showId: "rhoslc",
-        seasonNumber: "ocial",
+        seasonSegment: "ocial",
         rest: ["reddit", "BravoRealHousewives", "w0"],
       }),
     });
@@ -97,7 +97,7 @@ describe("root show season alias reddit window routing", () => {
     await RootShowSeasonAliasPage({
       params: Promise.resolve({
         showId: "rhoslc",
-        seasonNumber: "social",
+        seasonSegment: "social",
         rest: ["reddit", "BravoRealHousewives", "s6", "w0"],
       }),
     });
@@ -111,7 +111,7 @@ describe("root show season alias reddit window routing", () => {
     await RootShowSeasonAliasPage({
       params: Promise.resolve({
         showId: "rhoslc",
-        seasonNumber: "social",
+        seasonSegment: "social",
         rest: ["reddit", "BravoRealHousewives", "s6", "w0", "post", "abc123"],
       }),
     });
@@ -125,7 +125,7 @@ describe("root show season alias reddit window routing", () => {
     await RootShowSeasonAliasPage({
       params: Promise.resolve({
         showId: "rhoslc",
-        seasonNumber: "social",
+        seasonSegment: "social",
         rest: ["reddit", "BravoRealHousewives", "s6", "w0", "sample-thread--u-test-user"],
       }),
     });
@@ -133,13 +133,13 @@ describe("root show season alias reddit window routing", () => {
     expect(redirectMock).not.toHaveBeenCalled();
   });
 
-  it("does not redirect valid numeric season routes", async () => {
+  it("does not redirect valid s-prefixed season routes", async () => {
     redirectMock.mockReset();
 
     await RootShowSeasonAliasPage({
       params: Promise.resolve({
         showId: "rhoslc",
-        seasonNumber: "6",
+        seasonSegment: "s6",
         rest: ["social", "reddit", "BravoRealHousewives"],
       }),
     });

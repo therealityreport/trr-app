@@ -20,6 +20,7 @@ import {
   resolveAdminOriginFromRequest,
 } from "@/lib/admin/admin-url-defaults";
 import { toFriendlyBrandSlug } from "@/lib/admin/brand-profile";
+import { isReservedRootShowRouteFirstSegment } from "@/lib/public/root-show-route";
 import {
   appendScreenalyticsRhobhS5E16TestDefaults,
   buildScreenalyticsRunPath,
@@ -36,36 +37,6 @@ const INTERNAL_ADMIN_REWRITE_HEADER = "x-trr-admin-rewrite";
 const CANONICAL_SOCIAL_PATH = "/social";
 const CANONICAL_API_REFERENCES_PATH = "/api-references";
 const CANONICAL_DEV_DASHBOARD_PATH = "/dev-dashboard";
-const ROOT_SHOW_ROUTE_RESERVED_FIRST_SEGMENTS = new Set([
-  "admin",
-  "api",
-  "auth",
-  "brands",
-  "bravodle",
-  "dev-dashboard",
-  "docs",
-  "design-system",
-  "games",
-  "groups",
-  "hub",
-  "login",
-  "privacy-policy",
-  "people",
-  "profile",
-  "realations",
-  "realitease",
-  "screenalytics",
-  "screenlaytics",
-  "settings",
-  "social",
-  "social-media",
-  "shows",
-  "surveys",
-  "terms-of-sale",
-  "terms-of-service",
-  "test-auth",
-  "users",
-]);
 const ROOT_SHOW_ROUTE_SECOND_SEGMENTS = new Set([
   "overview",
   "details",
@@ -282,7 +253,7 @@ function isRootShowUiPath(pathname: string): boolean {
     .map((segment) => segment.trim().toLowerCase());
   if (segments.length === 0) return false;
   const first = segments[0];
-  if (!first || ROOT_SHOW_ROUTE_RESERVED_FIRST_SEGMENTS.has(first)) return false;
+  if (!first || isReservedRootShowRouteFirstSegment(first)) return false;
   if (!/^[a-z0-9-]+$/.test(first)) return false;
   if (segments.length === 1) return true;
 
@@ -299,7 +270,7 @@ function isBarePublicShowIdentityPath(pathname: string): boolean {
   if (segments.length === 0) return false;
 
   const first = segments[0];
-  if (!first || ROOT_SHOW_ROUTE_RESERVED_FIRST_SEGMENTS.has(first)) return false;
+  if (!first || isReservedRootShowRouteFirstSegment(first)) return false;
   if (!/^[a-z0-9-]+$/.test(first)) return false;
 
   return segments.length === 1 || (segments.length === 2 && isSeasonToken(segments[1] ?? ""));
@@ -671,7 +642,7 @@ function mapCanonicalAdminUiRedirect(pathname: string, searchParams?: URLSearchP
   const normalizedSecond = secondSegment?.toLowerCase() ?? "";
   const canonicalCreditsSegment = normalizeCanonicalCreditsSegment(secondSegment);
 
-  if (firstSegment && !ROOT_SHOW_ROUTE_RESERVED_FIRST_SEGMENTS.has(normalizedFirst)) {
+  if (firstSegment && !isReservedRootShowRouteFirstSegment(normalizedFirst)) {
     const encodedFirstSegment = encodeURIComponent(firstSegment);
     if (segments.length === 2 && canonicalCreditsSegment) {
       return appendSearch(`/${encodedFirstSegment}/${canonicalCreditsSegment}`, searchParams);
@@ -915,7 +886,7 @@ function mapCanonicalAdminUiRewrite(pathname: string, searchParams?: URLSearchPa
     return null;
   }
 
-  if (ROOT_SHOW_ROUTE_RESERVED_FIRST_SEGMENTS.has(normalizedFirst)) {
+  if (isReservedRootShowRouteFirstSegment(normalizedFirst)) {
     return null;
   }
   if (!/^[a-z0-9-]+$/.test(normalizedFirst)) {
@@ -1196,9 +1167,12 @@ export function proxy(request: NextRequest): NextResponse {
   if (onCanonicalAdminHost) {
     // A production deployment without a configured admin origin falls back to
     // treating its own public host as canonical admin. Let only the two bare
-    // public identity aliases reach their data-resolving App Router pages;
+    // public identity aliases and person detail pages reach their data-resolving App Router pages;
     // configured admin hosts keep their short admin workspace aliases.
-    if (isSingleHostProductionFallback && isBarePublicShowIdentityRoute) {
+    if (
+      isSingleHostProductionFallback &&
+      (pathname === "/" || isBarePublicShowIdentityRoute || isPublicPersonDetailPath(pathname))
+    ) {
       return NextResponse.next();
     }
 

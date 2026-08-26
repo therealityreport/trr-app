@@ -120,7 +120,7 @@ describe("public identity API contract", () => {
         cache: "no-store",
         credentials: "omit",
         headers: { Accept: "application/json" },
-        timeoutMs: 5_000,
+        timeoutMs: 20_000,
         timeoutName: "public-identity-v2",
       },
     );
@@ -224,7 +224,7 @@ describe("public identity API contract", () => {
   it("maps a transport timeout to a typed 504", async () => {
     timeoutSafeFetchMock.mockRejectedValue(
       new TimeoutSafeFetchTimeoutError("timed out", {
-        timeoutMs: 5_000,
+        timeoutMs: 20_000,
         timeoutName: "public-identity-v2",
       }),
     );
