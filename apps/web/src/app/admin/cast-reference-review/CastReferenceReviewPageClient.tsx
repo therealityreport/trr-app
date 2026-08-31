@@ -157,10 +157,6 @@ export default function CastReferenceReviewPageClient() {
     }
   }, [checking, user, hasAccess]);
 
-  useEffect(() => {
-    setSelectedFaceIndex(null);
-  }, [selectedItem?.id]);
-
   const approveSelectedFace = async () => {
     if (!selectedItem || selectedFaceIndex === null) return;
     setWorking(true);
@@ -285,7 +281,11 @@ export default function CastReferenceReviewPageClient() {
                 <button
                   type="button"
                   key={item.id}
-                  onClick={() => setSelectedId(item.id)}
+                  onClick={() => {
+                    if (item.id === selectedItem?.id) return;
+                    setSelectedId(item.id);
+                    setSelectedFaceIndex(null);
+                  }}
                   className={`block w-full border-b border-black px-4 py-4 text-left transition ${
                     active ? "bg-black text-white" : "bg-white text-black hover:bg-black/[0.04]"
                   }`}

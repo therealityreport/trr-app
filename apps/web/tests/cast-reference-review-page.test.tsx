@@ -79,6 +79,15 @@ const pendingQueuePayload = {
   ],
 };
 
+const secondQueueItem = {
+  ...pendingQueuePayload.items[0],
+  id: "22222222-2222-2222-2222-222222222222",
+  person_id: "person-2",
+  person_name: "Person Two",
+  source_url: "https://example.com/source-two.jpg",
+  hosted_url: "https://cdn.example.com/source-two.jpg",
+};
+
 describe("CastReferenceReviewPageClient", () => {
   beforeEach(() => {
     mocks.fetchAdminWithAuth.mockReset();
@@ -112,7 +121,9 @@ describe("CastReferenceReviewPageClient", () => {
     expect(approveButton).toBeDisabled();
 
     fireEvent.click(screen.getByRole("button", { name: "Select Face 2" }));
-    expect(approveButton).not.toBeDisabled();
+    await waitFor(() => {
+      expect(approveButton).not.toBeDisabled();
+    });
 
     fireEvent.click(approveButton);
 
@@ -138,5 +149,38 @@ describe("CastReferenceReviewPageClient", () => {
         }),
       }),
     );
+  });
+
+  it("clears the selected face when an admin switches queue items", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation((input: unknown) => {
+      const url = String(input);
+      if (url.includes("/review-queue")) {
+        return Promise.resolve(jsonResponse({ items: [...pendingQueuePayload.items, secondQueueItem] }));
+      }
+      return Promise.resolve(jsonResponse({}));
+    });
+
+    render(<CastReferenceReviewPageClient />);
+
+    expect(await screen.findByRole("heading", { name: "Person One" })).toBeInTheDocument();
+    const approveButton = screen.getByRole("button", { name: "Approve selected face" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Select Face 2" }));
+    await waitFor(() => {
+      expect(approveButton).not.toBeDisabled();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /Person Two/ }));
+    fireEvent.click(approveButton);
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Person Two" })).toBeInTheDocument();
+      expect(approveButton).toBeDisabled();
+    });
+    expect(
+      mocks.fetchAdminWithAuth.mock.calls.some(([input]) => {
+        const url = String(input);
+        return url.endsWith("/review") || url.endsWith("/reembed");
+      }),
+    ).toBe(false);
   });
 });
