@@ -165,7 +165,7 @@ test.describe("cast + season tabs smoke (mocked)", () => {
 
     await page.goto(`/${SHOW_SLUG}/s${SEASON_NUMBER}/credits`);
     await waitForAdminReady(page);
-    await expect(page).toHaveURL(new RegExp(`/${SHOW_SLUG}/s${SEASON_NUMBER}/credits`));
+    await expect(page).toHaveURL(new RegExp(`/${SHOW_SLUG}/s${SEASON_NUMBER}/credits$`));
 
     await expect(
       page.getByText("2/2/2 cast · 0/0/0 crew · 2/2/2 visible").first()
