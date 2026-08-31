@@ -1,11 +1,13 @@
 export const ROOT_SHOW_ROUTE_RESERVED_FIRST_SEGMENTS: ReadonlySet<string> = new Set([
   "admin",
   "api",
+  "api-references",
   "auth",
   "brands",
   "bravodle",
   "dev-dashboard",
   "docs",
+  "design-docs",
   "design-system",
   "games",
   "groups",

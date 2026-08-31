@@ -71,6 +71,7 @@ const stackFrames = (error: unknown): string[] => {
 
   const frames: string[] = [];
   for (const line of error.stack.split("\n")) {
+    if (!/^\s*at\s+/.test(line)) continue;
     const match = line.match(/(?:^|\s|\()([^()\s]+):(\d+):(\d+)\)?\s*$/);
     if (!match) continue;
     const [, rawPath, lineNumber, columnNumber] = match;
@@ -79,7 +80,12 @@ const stackFrames = (error: unknown): string[] => {
     const markerIndex = path.indexOf(marker);
     const relativePath = markerIndex >= 0 ? path.slice(markerIndex + marker.length) : path;
     if (markerIndex < 0 || !relativePath.startsWith("src/")) continue;
-    frames.push(`${relativePath}:${lineNumber}:${columnNumber}`);
+    const frame = optionalBoundedText(
+      `${relativePath}:${lineNumber}:${columnNumber}`,
+      MAX_VALUE_LENGTH,
+    );
+    if (!frame) continue;
+    frames.push(frame);
     if (frames.length === 5) break;
   }
   return frames;

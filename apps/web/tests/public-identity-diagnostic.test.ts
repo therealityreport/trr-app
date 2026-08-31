@@ -96,6 +96,25 @@ describe("public show identity diagnostics", () => {
     ]);
   });
 
+  it("does not treat a multiline error message as a local stack frame", () => {
+    const error = new Error(
+      "backend-controlled message\n/repo/TRR-APP/apps/web/src/app/not-a-frame.ts:90:1",
+    );
+    Object.defineProperty(error, "stack", {
+      configurable: true,
+      value: [
+        "Error: backend-controlled message",
+        "/repo/TRR-APP/apps/web/src/app/not-a-frame.ts:90:1",
+        "    at loadPublicIdentity (/repo/TRR-APP/apps/web/src/app/real-frame.ts:12:34)",
+      ].join("\n"),
+    });
+
+    logPublicShowIdentityFailure("the-valley", error);
+
+    const [record] = consoleErrorMock.mock.calls[0] as [Record<string, unknown>];
+    expect(record.stack_frames).toEqual(["src/app/real-frame.ts:12:34"]);
+  });
+
   it("does not serialize arbitrary error properties", () => {
     const error = new Error("safe message");
     Object.assign(error, { password: "do-not-log", response: { headers: "do-not-log" } });
