@@ -103,7 +103,7 @@ export class PublicIdentityApiError extends Error {
   }
 }
 
-const PUBLIC_IDENTITY_TIMEOUT_MS = 5_000;
+const PUBLIC_IDENTITY_TIMEOUT_MS = 20_000;
 const PRESERVED_PROBLEM_STATUSES = new Set([400, 404, 409, 500, 503]);
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SLUG_RE = /^[a-z0-9]+(?:-+[a-z0-9]+)*$/;

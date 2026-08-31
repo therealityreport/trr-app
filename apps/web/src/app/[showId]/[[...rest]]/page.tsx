@@ -3,6 +3,7 @@ import {
   requestedPublicRoutePath,
   resolvePublicIdentityForRoute,
 } from "@/app/_lib/public-identity-route";
+import { logPublicShowIdentityFailure } from "@/app/_lib/public-identity-diagnostic";
 import PublicRouteShell, { formatRouteValue } from "@/components/public/PublicRouteShell";
 import { resolvePublicShowIdentity } from "@/lib/server/trr-api/public-identities";
 
@@ -16,7 +17,13 @@ export default async function ShowCatchAllPage({ params }: ShowCatchAllPageProps
   const { showId, rest } = await params;
 
   if (!rest?.length) {
-    const identity = await resolvePublicIdentityForRoute(() => resolvePublicShowIdentity(showId));
+    let identity;
+    try {
+      identity = await resolvePublicIdentityForRoute(() => resolvePublicShowIdentity(showId));
+    } catch (error) {
+      logPublicShowIdentityFailure(showId, error);
+      throw error;
+    }
     redirectToCanonicalPublicPath(
       requestedPublicRoutePath([showId]),
       identity.canonical_path,

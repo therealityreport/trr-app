@@ -4,6 +4,7 @@ import {
   CAST_PERSON_SECONDARY_ID,
   SEASON_NUMBER,
   SHOW_ID,
+  SHOW_SLUG,
   buildCastRoleMember,
   buildSeasonCastMember,
   buildShowCastMember,
@@ -162,22 +163,24 @@ test.describe("cast + season tabs smoke (mocked)", () => {
       showRoles,
     });
 
-    await page.goto(`/${SHOW_ID}/s${SEASON_NUMBER}/credits`);
+    await page.goto(`/${SHOW_SLUG}/s${SEASON_NUMBER}/credits`);
     await waitForAdminReady(page);
+    await expect(page).toHaveURL(new RegExp(`/${SHOW_SLUG}/s${SEASON_NUMBER}/credits$`));
 
     await expect(
       page.getByText("2/2/2 cast · 0/0/0 crew · 2/2/2 visible").first()
     ).toBeVisible();
 
     await page.getByLabel("Search Name").fill("Lisa");
+    await expect(
+      page.getByText(/1\/1\/2 cast · 0\/0\/0 crew · 1\/1\/2 visible|1\/2\/2 cast · 0\/0\/0 crew · 1\/2\/2 visible/).first()
+    ).toBeVisible({ timeout: 8_000 });
+    await expect.poll(() => new URL(page.url()).searchParams.get("cast_q")).toBe("Lisa");
     await expect(page.getByRole("textbox", { name: "Search Name" })).toHaveValue("Lisa");
     await expect(page.getByRole("link", { name: /Lisa Barlow/ }).first()).toBeVisible({
       timeout: 8_000,
     });
     await expect(page.getByRole("link", { name: /Heather Gay/ })).toHaveCount(0);
-    await expect(
-      page.getByText(/1\/1\/2 cast · 0\/0\/0 crew · 1\/1\/2 visible|1\/2\/2 cast · 0\/0\/0 crew · 1\/2\/2 visible/).first()
-    ).toBeVisible({ timeout: 8_000 });
   });
 
   test("season social cast comparison queues SocialBlade refreshes with queued and running call ids", async ({ page }) => {

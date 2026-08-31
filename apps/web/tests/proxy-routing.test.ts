@@ -115,6 +115,38 @@ describe("proxy route characterization", () => {
     },
   );
 
+  it("leaves the public root for its App Router page on a single-host production deployment", () => {
+    process.env.NODE_ENV = "production";
+    delete process.env.ADMIN_APP_ORIGIN;
+    delete process.env.ADMIN_APP_BASE_DOMAIN;
+    delete process.env.ADMIN_APP_DERIVE_FROM_REQUEST_HOST;
+    delete process.env.PORTLESS_ADMIN_URL;
+    delete process.env.PORTLESS_URL;
+
+    const response = runPublicDeploymentProxy("/");
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-middleware-next")).toBe("1");
+    expect(response.headers.get("x-middleware-rewrite")).toBeNull();
+    expect(response.headers.get("location")).toBeNull();
+  });
+
+  it("leaves a public person detail route for its App Router page on a single-host production deployment", () => {
+    process.env.NODE_ENV = "production";
+    delete process.env.ADMIN_APP_ORIGIN;
+    delete process.env.ADMIN_APP_BASE_DOMAIN;
+    delete process.env.ADMIN_APP_DERIVE_FROM_REQUEST_HOST;
+    delete process.env.PORTLESS_ADMIN_URL;
+    delete process.env.PORTLESS_URL;
+
+    const response = runPublicDeploymentProxy("/people/kyle-richards");
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-middleware-next")).toBe("1");
+    expect(response.headers.get("x-middleware-rewrite")).toBeNull();
+    expect(response.headers.get("location")).toBeNull();
+  });
+
   it("does not treat reserved root segments as show routes", () => {
     const response = runProxy("/hub");
 

@@ -96,6 +96,9 @@ describe("reddit community view page", () => {
     );
     expect(
       existsSync(resolve(process.cwd(), "src/app/[showId]/s[seasonNumber]/[[...rest]]/page.tsx")),
+    ).toBe(false);
+    expect(
+      existsSync(resolve(process.cwd(), "src/app/[showId]/[seasonSegment]/[[...rest]]/page.tsx")),
     ).toBe(true);
     expect(
       existsSync(resolve(process.cwd(), "src/app/[showId]/s[seasonNumber]/social/reddit/[communitySlug]/page.tsx")),
@@ -109,7 +112,7 @@ describe("reddit community view page", () => {
       "This public season-scoped Reddit route no longer imports the admin community workspace.",
     );
     const rootSeasonAliasSource = readFileSync(
-      resolve(process.cwd(), "src/app/[showId]/s[seasonNumber]/[[...rest]]/page.tsx"),
+      resolve(process.cwd(), "src/app/[showId]/[seasonSegment]/[[...rest]]/page.tsx"),
       "utf8",
     );
     expect(rootSeasonAliasSource).toContain("resolveRedditPathContext");

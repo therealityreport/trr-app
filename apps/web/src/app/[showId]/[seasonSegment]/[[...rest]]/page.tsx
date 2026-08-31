@@ -9,12 +9,13 @@ import {
 import PublicRouteShell, { formatRouteValue } from "@/components/public/PublicRouteShell";
 import PrefixedPathValue from "@/components/public/PrefixedPathValue";
 import { resolvePrefixedRouteParam } from "@/lib/public/prefixed-route-params";
+import { isReservedRootShowRouteFirstSegment } from "@/lib/public/root-show-route";
 import { resolvePublicSeasonIdentity } from "@/lib/server/trr-api/public-identities";
 
 export const dynamic = "force-dynamic";
 
 interface RootShowSeasonAliasPageProps {
-  params: Promise<{ showId: string; seasonNumber: string; rest?: string[] }>;
+  params: Promise<{ showId: string; seasonSegment: string; rest?: string[] }>;
 }
 
 const isStrictSeasonNumber = (value: string): boolean => /^[0-9]{1,3}$/.test(value);
@@ -77,9 +78,13 @@ export default async function RootShowSeasonAliasPage({
   const resolvedParams = await params;
   const showId = resolvedParams.showId;
   const rest = resolvedParams.rest;
-  const normalizedSeasonNumber = resolvePrefixedRouteParam(resolvedParams, "seasonNumber", "s") ?? "";
+  const normalizedSeasonNumber = resolvePrefixedRouteParam(resolvedParams, "seasonSegment", "s") ?? "";
+  const isSeasonAlias =
+    isSeasonToken(resolvedParams.seasonSegment) &&
+    isStrictSeasonNumber(normalizedSeasonNumber) &&
+    !isReservedRootShowRouteFirstSegment(showId);
 
-  if (isStrictSeasonNumber(normalizedSeasonNumber) && !rest?.length) {
+  if (isSeasonAlias && !rest?.length) {
     const seasonNumber = parsePublicSeasonNumber(normalizedSeasonNumber);
     const identity = await resolvePublicIdentityForRoute(() =>
       resolvePublicSeasonIdentity(showId, seasonNumber),
@@ -144,7 +149,7 @@ export default async function RootShowSeasonAliasPage({
     );
   }
 
-  if (isStrictSeasonNumber(normalizedSeasonNumber)) {
+  if (isSeasonAlias) {
     return (
       <PublicRouteShell
         eyebrow="Season Alias"

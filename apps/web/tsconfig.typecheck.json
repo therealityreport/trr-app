@@ -16,6 +16,8 @@
     ".next-e2e-debug",
     ".next-e2e-debug/**",
     ".next-e2e-public",
-    ".next-e2e-public/**"
+    ".next-e2e-public/**",
+    ".next-e14-public-season-runtime",
+    ".next-e14-public-season-runtime/**"
   ]
 }

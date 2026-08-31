@@ -12,6 +12,7 @@
     "build": "node scripts/safe-next-build.mjs",
     "build:turbo": "node scripts/safe-next-build.mjs --turbopack",
     "start": "next start",
+    "test:runtime:public-season-route": "node tests/runtime/public-season-route-runtime.mjs --mode=dev",
     "typecheck": "rm -rf .next/dev/types .next/types && tsc -p tsconfig.typecheck.json --noEmit",
     "typecheck:fandom": "tsc -p tsconfig.typecheck.fandom.json --noEmit",
     "validate:quick": "pnpm run generated:check && pnpm exec vitest run -c vitest.config.mts tests/validation.test.ts tests/shared-env-contract.test.ts tests/safe-next-build.test.ts",

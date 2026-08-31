@@ -4,10 +4,16 @@ const {
   resolvePublicPersonIdentityMock,
   resolvePublicSeasonIdentityMock,
   resolvePublicShowIdentityMock,
+  logPublicShowIdentityFailureMock,
 } = vi.hoisted(() => ({
   resolvePublicPersonIdentityMock: vi.fn(),
   resolvePublicSeasonIdentityMock: vi.fn(),
   resolvePublicShowIdentityMock: vi.fn(),
+  logPublicShowIdentityFailureMock: vi.fn(),
+}));
+
+vi.mock("@/app/_lib/public-identity-diagnostic", () => ({
+  logPublicShowIdentityFailure: logPublicShowIdentityFailureMock,
 }));
 
 vi.mock("@/lib/server/trr-api/public-identities", async (importOriginal) => {
@@ -25,12 +31,13 @@ vi.mock("@/lib/server/trr-api/public-identities", async (importOriginal) => {
 import PersonPage, {
   generateMetadata as generatePersonMetadata,
 } from "@/app/people/[personId]/[[...personTab]]/page";
-import RootShowSeasonAliasPage from "@/app/[showId]/s[seasonNumber]/[[...rest]]/page";
+import RootShowSeasonAliasPage from "@/app/[showId]/[seasonSegment]/[[...rest]]/page";
 import RootShowAliasPage from "@/app/[showId]/[[...rest]]/page";
 import ShowSeasonPage, {
   generateMetadata as generateSeasonMetadata,
 } from "@/app/shows/[showId]/seasons/[seasonNumber]/page";
 import ShowPage, { generateMetadata as generateShowMetadata } from "@/app/shows/[showId]/page";
+import { ROOT_SHOW_ROUTE_RESERVED_FIRST_SEGMENTS } from "@/lib/public/root-show-route";
 import { PublicIdentityApiError } from "@/lib/server/trr-api/public-identities";
 
 const SHOW_ID = "11111111-1111-4111-8111-111111111111";
@@ -89,6 +96,7 @@ const expectPermanentRedirect = async (
 
 describe("public identity routes", () => {
   beforeEach(() => {
+    logPublicShowIdentityFailureMock.mockClear();
     resolvePublicShowIdentityMock.mockReset().mockResolvedValue(SHOW_IDENTITY);
     resolvePublicSeasonIdentityMock.mockReset().mockResolvedValue(SEASON_IDENTITY);
     resolvePublicPersonIdentityMock.mockReset().mockResolvedValue(PERSON_IDENTITY);
@@ -234,7 +242,7 @@ describe("public identity routes", () => {
 
     await expectPermanentRedirect(
       RootShowSeasonAliasPage({
-        params: Promise.resolve({ showId: "valley", seasonNumber: "15" }),
+        params: Promise.resolve({ showId: "valley", seasonSegment: "s15" }),
       }),
       "/shows/the-valley/seasons/15",
     );
@@ -245,12 +253,36 @@ describe("public identity routes", () => {
 
   it("keeps strict season subpaths on their existing public-safe alias route", async () => {
     const element = await RootShowSeasonAliasPage({
-      params: Promise.resolve({ showId: "valley", seasonNumber: "15", rest: ["social"] }),
+      params: Promise.resolve({ showId: "valley", seasonSegment: "s15", rest: ["social"] }),
     });
 
     expect(element.props.title).toBe("Season 15");
     expect(resolvePublicSeasonIdentityMock).not.toHaveBeenCalled();
   });
+
+  it.each(["15", "season15", "s", "s1000", "not-a-season"])(
+    "keeps invalid season segment %s on the public-safe non-season fallback",
+    async (seasonSegment) => {
+      const element = await RootShowSeasonAliasPage({
+        params: Promise.resolve({ showId: "valley", seasonSegment }),
+      });
+
+      expect(element.props.title).toBe("Public show alias route");
+      expect(resolvePublicSeasonIdentityMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(Array.from(ROOT_SHOW_ROUTE_RESERVED_FIRST_SEGMENTS))(
+    "never resolves a season identity for reserved root %s",
+    async (showId) => {
+      const element = await RootShowSeasonAliasPage({
+        params: Promise.resolve({ showId, seasonSegment: "s15" }),
+      });
+
+      expect(element.props.title).toBe("Public show alias route");
+      expect(resolvePublicSeasonIdentityMock).not.toHaveBeenCalled();
+    },
+  );
 
   it("permanently redirects a case variant directly to its canonical path", async () => {
     await expectPermanentRedirect(
@@ -333,12 +365,29 @@ describe("public identity routes", () => {
     ).rejects.toMatchObject({ digest: "NEXT_HTTP_ERROR_FALLBACK;404" });
   });
 
-  it.each([500, 502, 503, 504])("rethrows infrastructure status %i", async (status) => {
+  it.each([500, 502, 503, 504])("rethrows infrastructure status %i with one diagnostic", async (status) => {
     const error = apiError(status);
     resolvePublicShowIdentityMock.mockRejectedValue(error);
 
     await expect(
       ShowPage({ params: Promise.resolve({ showId: "the-valley" }) }),
     ).rejects.toBe(error);
+    await expect(
+      RootShowAliasPage({ params: Promise.resolve({ showId: "the-valley" }) }),
+    ).rejects.toBe(error);
+    expect(logPublicShowIdentityFailureMock).toHaveBeenCalledOnce();
+    expect(logPublicShowIdentityFailureMock).toHaveBeenCalledWith("the-valley", error);
+  });
+
+  it("rethrows an unknown bare-show error unchanged and emits one diagnostic", async () => {
+    const error = new Error("unexpected resolver failure");
+    resolvePublicShowIdentityMock.mockRejectedValue(error);
+
+    await expect(
+      RootShowAliasPage({ params: Promise.resolve({ showId: "the-valley" }) }),
+    ).rejects.toBe(error);
+
+    expect(logPublicShowIdentityFailureMock).toHaveBeenCalledOnce();
+    expect(logPublicShowIdentityFailureMock).toHaveBeenCalledWith("the-valley", error);
   });
 });

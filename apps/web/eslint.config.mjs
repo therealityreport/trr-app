@@ -23,6 +23,7 @@ const eslintConfig = [
       ".next-e2e/**",
       ".next-e2e-debug/**",
       ".next-e2e-public/**",
+      ".next-e14-public-season-runtime/**",
       ".next-social-debug/**",
       ".vercel/**",
       "out/**",
