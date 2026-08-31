@@ -736,10 +736,10 @@ describe("SocialAccountProfilePage", () => {
 
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "Catalog" })).toBeInTheDocument();
+      expect(requestUrls.some((url) => url.includes("/catalog/posts"))).toBe(true);
     });
 
     expect(screen.queryByRole("link", { name: "Posts" })).not.toBeInTheDocument();
-    expect(requestUrls.some((url) => url.includes("/catalog/posts"))).toBe(true);
     expect(requestUrls.some((url) => url.includes("/profiles/instagram/bravotv/posts?page="))).toBe(false);
   });
 
