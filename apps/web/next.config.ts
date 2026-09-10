@@ -53,6 +53,8 @@ const firebaseAliases = Object.fromEntries(
 );
 
 const nextConfig: NextConfig = {
+  // Preserve RSC cache keys through canonical admin redirects and rewrites.
+  skipProxyUrlNormalize: true,
   reactStrictMode: true,
   typedRoutes: TYPED_ROUTES_ENABLED,
   distDir: DIST_DIR,

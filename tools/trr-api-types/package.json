@@ -1,0 +1,10 @@
+{
+  "name": "@trr/api-types-tool",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Isolated TypeScript 5 compiler dependency for OpenAPI declaration generation.",
+  "dependencies": {
+    "openapi-typescript": "7.13.0",
+    "typescript": "5.9.3"
+  }
+}

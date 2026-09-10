@@ -1123,11 +1123,11 @@ export function proxy(request: NextRequest): NextResponse {
   }
 
   if (legacyBrandsPath) {
-    const redirectOrigin = onCanonicalAdminHost ? request.nextUrl.origin : adminOrigin;
+    const redirectOrigin = adminOrigin;
     if (!redirectOrigin) {
       return NextResponse.json({ error: "Admin origin is not configured." }, { status: 403 });
     }
-    return NextResponse.redirect(new URL(legacyBrandsPath + request.nextUrl.search, redirectOrigin), 307);
+    return NextResponse.redirect(new URL(legacyBrandsPath, redirectOrigin), 307);
   }
 
   const isAllowedAdminApiHost = isAllowedHost(allowedAdminApiHosts, requestHost);
@@ -1177,14 +1177,14 @@ export function proxy(request: NextRequest): NextResponse {
     }
 
     if (pathname === "/" && canonicalAdminHost === "admin.trr.localhost") {
-      return NextResponse.redirect(new URL("/admin", adminOrigin || request.nextUrl.origin), 307);
+      return NextResponse.redirect(new URL(`/admin${request.nextUrl.search}`, adminOrigin || request.nextUrl.origin), 307);
     }
 
     if (!isInternalAdminRewrite) {
       const canonicalPath = mapCanonicalAdminUiRedirect(pathname, request.nextUrl.searchParams);
       const currentPath = appendSearch(pathname, request.nextUrl.searchParams);
       if (canonicalPath && canonicalPath !== currentPath) {
-        return NextResponse.redirect(new URL(canonicalPath, request.nextUrl.origin), 307);
+        return NextResponse.redirect(new URL(canonicalPath, adminOrigin || request.nextUrl.origin), 307);
       }
     }
 
@@ -1205,7 +1205,10 @@ export function proxy(request: NextRequest): NextResponse {
           },
         });
       }
-      return NextResponse.redirect(targetUrl, 307);
+      return NextResponse.redirect(
+        new URL(targetUrl.pathname + targetUrl.search, adminOrigin || request.nextUrl.origin),
+        307,
+      );
     }
   }
 

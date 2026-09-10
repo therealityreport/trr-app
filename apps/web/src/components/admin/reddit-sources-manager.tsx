@@ -3903,9 +3903,10 @@ export default function RedditSourcesManager({
           ? toEasternMidnightIso(nextRow.episode_air_date ?? episodeAirDateByNumber.get(nextRow.episode_number) ?? null)
           : null;
         const start = livePostedAtByEpisode.get(row.episode_number) ?? rowAirMidnight ?? null;
-        const end =
-          (nextRow ? (livePostedAtByEpisode.get(nextRow.episode_number) ?? nextAirMidnight ?? null) : null) ??
-          addDaysUtc(lastEpisodeAirMidnight ?? rowAirMidnight, 7);
+        const nextEpisodeStart = nextRow
+          ? (livePostedAtByEpisode.get(nextRow.episode_number) ?? nextAirMidnight)
+          : null;
+        const end = nextEpisodeStart ?? addDaysUtc(lastEpisodeAirMidnight ?? rowAirMidnight, 7);
         bounds.set(`episode-${row.episode_number}`, {
           key: `episode-${row.episode_number}`,
           label: `Episode ${row.episode_number}`,
