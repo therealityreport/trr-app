@@ -1,8 +1,9 @@
 packages:
   - "apps/*"
   - "!apps/vue-wordle"
+  - "tools/trr-api-types"
 
-nodeVersion: 24.14.0
+nodeVersion: 24.21.0
 
 allowBuilds:
   # Firebase SDK utility package used by firebase/firebase-admin; trusted first-party dependency.

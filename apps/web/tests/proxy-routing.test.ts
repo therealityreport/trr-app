@@ -65,6 +65,19 @@ describe("proxy route characterization", () => {
   });
 
   it.each([
+    ["/admin/shows", "/shows"],
+    ["/admin/brands/instagram", "/brands/instagram"],
+  ])("keeps the public admin origin and RSC key when redirecting %s behind Portless", (pathname, target) => {
+    process.env.ADMIN_APP_ORIGIN = "https://admin.trr.localhost";
+    const response = proxy(new NextRequest(`https://localhost:3000${pathname}?_rsc=nav-key&tab=overview`, {
+      headers: { "x-forwarded-host": "admin.trr.localhost", rsc: "1" },
+    }));
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe(`https://admin.trr.localhost${target}?_rsc=nav-key&tab=overview`);
+  });
+
+  it.each([
     [
       "/screenlaytics?run_id=run-123&utm_source=test",
       "http://admin.localhost:3000/screenalytics/runs/run-123?utm_source=test",

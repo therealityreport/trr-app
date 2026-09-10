@@ -9,6 +9,10 @@ const inputPath = join(projectRoot, "src/lib/server/trr-api/generated/openapi.v2
 const outputPath = join(projectRoot, "src/lib/server/trr-api/generated/openapi.v2.d.ts");
 const executable = join(
   projectRoot,
+  "..",
+  "..",
+  "tools",
+  "trr-api-types",
   "node_modules",
   ".bin",
   process.platform === "win32" ? "openapi-typescript.cmd" : "openapi-typescript",

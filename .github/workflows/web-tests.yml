@@ -5,6 +5,10 @@ on:
     branches: [ main ]
     paths:
       - 'apps/web/**'
+      - 'tools/trr-api-types/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
       - '.github/workflows/web-tests.yml'
 
 jobs:
@@ -42,15 +46,16 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
           cache: pnpm
-          cache-dependency-path: apps/web/pnpm-lock.yaml
+          cache-dependency-path: pnpm-lock.yaml
       - name: Validate env contract
         run: |
           python3 scripts/check_env_example.py \
             --file apps/web/.env.example \
             --required TRR_API_URL TRR_INTERNAL_ADMIN_SHARED_SECRET
         working-directory: .
-      - name: Install deps
+      - name: Install workspace deps
         run: pnpm install --frozen-lockfile
+        working-directory: .
       - name: Run lint
         run: pnpm run lint
       - name: Run targeted fandom typecheck (Node 24 full lane)

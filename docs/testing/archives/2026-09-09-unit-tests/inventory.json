@@ -1,0 +1,3538 @@
+{
+  "date": "2026-09-09",
+  "base_commit": "4d05b1f12b155d5561eeea67220c8bfe14530585",
+  "policy": "Keep unit tests revised on or after 2026-08-26, changed in latest merged PR #131 or current uncommitted work, or documented failing in recent CI. Archive remaining currently passing unit tests.",
+  "scope": "511 Vitest .test.ts/.test.tsx files; E2E/runtime scripts and shared setup/helpers retained.",
+  "failure_evidence": {
+    "apps/web/tests/cast-reference-review-page.test.tsx": "https://github.com/therealityreport/trr-app/actions/runs/33352119008",
+    "apps/web/tests/social-account-profile-page.runtime.test.tsx": "https://github.com/therealityreport/trr-app/actions/runs/33350298745"
+  },
+  "retained": [
+    "apps/web/tests/cast-reference-review-page.test.tsx",
+    "apps/web/tests/proxy-routing.test.ts",
+    "apps/web/tests/public-identity-contract.test.ts",
+    "apps/web/tests/public-identity-diagnostic.test.ts",
+    "apps/web/tests/public-identity-routes.test.tsx",
+    "apps/web/tests/public-route-boundary.test.ts",
+    "apps/web/tests/reddit-community-view-page.test.tsx",
+    "apps/web/tests/reddit-season-alias-window-route.test.tsx",
+    "apps/web/tests/social-account-profile-page.runtime.test.tsx"
+  ],
+  "archived": [
+    {
+      "path": "apps/web/tests/admin-api-references-generator.test.ts",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 180,
+      "bytes": 6722,
+      "sha256": "c8cd25d9970468a3acabe15d75c297ee308a7224b09c825624ce66b6ac723169"
+    },
+    {
+      "path": "apps/web/tests/admin-api-references-library.test.tsx",
+      "last_committed_edit": "2026-06-16T09:17:30-04:00",
+      "lines": 44,
+      "bytes": 2511,
+      "sha256": "4b575f05aad94a455cea1ea7c5ff1ae863421adf62c055a36b87f41590b2a4e0"
+    },
+    {
+      "path": "apps/web/tests/admin-app-db-pressure-route.test.ts",
+      "last_committed_edit": "2026-06-09T23:51:27-04:00",
+      "lines": 143,
+      "bytes": 5072,
+      "sha256": "52c5b467e8f6aa9fc5e6314b93a6cc63e5f9d61d162cf5f106ff54d13a4af345"
+    },
+    {
+      "path": "apps/web/tests/admin-auth-drill-report-route.test.ts",
+      "last_committed_edit": "2026-02-17T16:43:01-05:00",
+      "lines": 89,
+      "bytes": 3023,
+      "sha256": "b15b9659206105277bafb0244bfa938fba78fcb074ac00cb2e13205c4b55b4ad"
+    },
+    {
+      "path": "apps/web/tests/admin-auth-status-reset-route.test.ts",
+      "last_committed_edit": "2026-05-20T18:23:40-04:00",
+      "lines": 87,
+      "bytes": 3062,
+      "sha256": "b6ec6abfb4e353d8c4e2b2f1ea504e7b594ade60d502e83e9ea1ffc12a53d50d"
+    },
+    {
+      "path": "apps/web/tests/admin-auth-status-route.test.ts",
+      "last_committed_edit": "2026-05-20T18:23:40-04:00",
+      "lines": 114,
+      "bytes": 3752,
+      "sha256": "9b7153a3ea805b55e6591e8672eed076b3d1a7b6f8158cd2d88e21ab0af066bb"
+    },
+    {
+      "path": "apps/web/tests/admin-backend-proxy-route.test.ts",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 361,
+      "bytes": 12083,
+      "sha256": "4b8070b87de43b688f47961cd0437d1f2909f3e65d6b67c37619fb752725d116"
+    },
+    {
+      "path": "apps/web/tests/admin-breadcrumbs-component.test.tsx",
+      "last_committed_edit": "2026-03-30T14:21:24-04:00",
+      "lines": 50,
+      "bytes": 1818,
+      "sha256": "079daace7b7c78c1ed5693c9ee22df6c3d32fce21cb03d6d3eff6bf78a834d5c"
+    },
+    {
+      "path": "apps/web/tests/admin-breadcrumbs.test.ts",
+      "last_committed_edit": "2026-04-02T05:51:42-04:00",
+      "lines": 138,
+      "bytes": 5426,
+      "sha256": "e0f2c1b1cbb37eb1716df512b023e11142b4fbd1bb99998bbded498b11b171c1"
+    },
+    {
+      "path": "apps/web/tests/admin-check-route.test.ts",
+      "last_committed_edit": "2026-07-13T17:45:37-04:00",
+      "lines": 45,
+      "bytes": 1545,
+      "sha256": "62c99ae41c271d9f3337e1316b569b441e25b67361d6a437871fed577819275f"
+    },
+    {
+      "path": "apps/web/tests/admin-client-auth.test.ts",
+      "last_committed_edit": "2026-03-30T14:21:24-04:00",
+      "lines": 289,
+      "bytes": 10259,
+      "sha256": "402860bdcabe1009ce757d16d053f0ca3148262f4122f7ed581e60596598ef8e"
+    },
+    {
+      "path": "apps/web/tests/admin-dev-dashboard-skills-and-agents-route.test.ts",
+      "last_committed_edit": "2026-05-20T18:23:40-04:00",
+      "lines": 68,
+      "bytes": 2260,
+      "sha256": "2a585d964171d307af96bcbf306e609ea1435cead406397107f5153aef893afa"
+    },
+    {
+      "path": "apps/web/tests/admin-docs-page.test.tsx",
+      "last_committed_edit": "2026-03-16T15:10:07-04:00",
+      "lines": 50,
+      "bytes": 2900,
+      "sha256": "a272ef10ac84bb31392963e312930eead201eb6a512d616ee6575b165e3e22ce"
+    },
+    {
+      "path": "apps/web/tests/admin-e2e-fixtures.test.ts",
+      "last_committed_edit": "2026-07-13T17:59:04-04:00",
+      "lines": 33,
+      "bytes": 1104,
+      "sha256": "055a7e82a628b4f6ac5d389aa99268a8c01968747840072977f376032360a748"
+    },
+    {
+      "path": "apps/web/tests/admin-external-id-reads.test.ts",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 187,
+      "bytes": 5978,
+      "sha256": "d3560e60451017ec6d80f972d0a3b1fcb8b46c5821d7e18c43c6ee218c4c825f"
+    },
+    {
+      "path": "apps/web/tests/admin-fetch.test.ts",
+      "last_committed_edit": "2026-05-06T01:48:14-04:00",
+      "lines": 367,
+      "bytes": 11081,
+      "sha256": "b6e35ed05380cb53046eb6ff7fe86dfc6a429e2e9b6d8f1a38cdcbda1e21cb55"
+    },
+    {
+      "path": "apps/web/tests/admin-fonts-tabs.test.ts",
+      "last_committed_edit": "2026-03-23T20:50:48-04:00",
+      "lines": 71,
+      "bytes": 2771,
+      "sha256": "c184d3fe1a8dcd3283ecbd5a506d3ffdde6455d65fbfe2cf2612d02e6e81f41d"
+    },
+    {
+      "path": "apps/web/tests/admin-games-config.test.ts",
+      "last_committed_edit": "2026-04-06T20:57:34-04:00",
+      "lines": 10,
+      "bytes": 411,
+      "sha256": "64f953c8fa677d4ca2c3e75fe1f31936331e73383ad46bc7dd343d487739991b"
+    },
+    {
+      "path": "apps/web/tests/admin-games-problem-reports-route.test.ts",
+      "last_committed_edit": "2026-05-20T18:23:40-04:00",
+      "lines": 151,
+      "bytes": 4754,
+      "sha256": "be98de0fa7cf3fe4072d6568efacc7591f4c281dd6fd317fa89248b93ffe21fa"
+    },
+    {
+      "path": "apps/web/tests/admin-global-header.test.tsx",
+      "last_committed_edit": "2026-07-13T17:52:19-04:00",
+      "lines": 208,
+      "bytes": 7489,
+      "sha256": "00282d3e854250aa4acd2d24666c81b90169f3ccf8d2ccc4f2d43c4e85e19f3d"
+    },
+    {
+      "path": "apps/web/tests/admin-global-search-route.test.ts",
+      "last_committed_edit": "2026-07-13T17:52:05-04:00",
+      "lines": 104,
+      "bytes": 3494,
+      "sha256": "8adec1cd03cc162a89409ec0838e731d525b2eee5b7239c5acb2359f352d66ea"
+    },
+    {
+      "path": "apps/web/tests/admin-host-middleware.test.ts",
+      "last_committed_edit": "2026-07-13T17:52:19-04:00",
+      "lines": 1196,
+      "bytes": 50348,
+      "sha256": "9e1c80ea2403bc1f5b70b69c26e92050f9b8ffe2a3b5044b53c2bc73f98d2e84"
+    },
+    {
+      "path": "apps/web/tests/admin-ia-section.test.tsx",
+      "last_committed_edit": "2026-03-26T13:31:56-04:00",
+      "lines": 27,
+      "bytes": 1525,
+      "sha256": "ba436d41c783aa05b4c42656f9b518c2546899a0df2ee5fdf06071dc62c92b8d"
+    },
+    {
+      "path": "apps/web/tests/admin-modal.test.tsx",
+      "last_committed_edit": "2026-02-24T15:09:38-05:00",
+      "lines": 89,
+      "bytes": 2807,
+      "sha256": "a04ab58637888586495890724829a7051c6575ecf778683f98e019822d980039"
+    },
+    {
+      "path": "apps/web/tests/admin-navigation.test.ts",
+      "last_committed_edit": "2026-06-09T23:51:27-04:00",
+      "lines": 81,
+      "bytes": 2576,
+      "sha256": "23f48d3bb23fb9beccf9c1c89f1416efb0e557a78e781741d78792d207d6a97c"
+    },
+    {
+      "path": "apps/web/tests/admin-network-detail-page-auth.test.tsx",
+      "last_committed_edit": "2026-04-02T05:00:35-04:00",
+      "lines": 31,
+      "bytes": 853,
+      "sha256": "d2be9168dfd3622158200d1852bbc501be30274d7109e05cbe31092817e7d385"
+    },
+    {
+      "path": "apps/web/tests/admin-network-detail-page.test.tsx",
+      "last_committed_edit": "2026-04-02T05:51:42-04:00",
+      "lines": 60,
+      "bytes": 1897,
+      "sha256": "490ed8a8708e9f3c64e71b1903179e4122076a67adf4a2a8413d9787f56a39d9"
+    },
+    {
+      "path": "apps/web/tests/admin-networks-page-auth.test.tsx",
+      "last_committed_edit": "2026-04-06T20:57:34-04:00",
+      "lines": 465,
+      "bytes": 16362,
+      "sha256": "727f4c07f5803c5cb06a70580dbda1f7c71b066e64a5b3f0b1ed15b05cae7ec9"
+    },
+    {
+      "path": "apps/web/tests/admin-networks-streaming-reads.test.ts",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 670,
+      "bytes": 21743,
+      "sha256": "3d113f45ef21cf7ce9d6d2fcfc85bfcb07269159a254bd9ae449beaa8bf4c0b2"
+    },
+    {
+      "path": "apps/web/tests/admin-operations-health-route.test.ts",
+      "last_committed_edit": "2026-04-02T05:51:42-04:00",
+      "lines": 89,
+      "bytes": 3205,
+      "sha256": "2c3dd885e78852cbc78db25fb16e2350db5d530346e70a0a1bd314187f99eb5b"
+    },
+    {
+      "path": "apps/web/tests/admin-operations-stale-cancel-route.test.ts",
+      "last_committed_edit": "2026-04-02T05:51:42-04:00",
+      "lines": 88,
+      "bytes": 3111,
+      "sha256": "09de5c0d0d677138aee68ebd8f743385e78de3f61d83bd68735b0980818db6b1"
+    },
+    {
+      "path": "apps/web/tests/admin-people-route.test.ts",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 97,
+      "bytes": 3107,
+      "sha256": "32bb0ab6c4888eb1f49298d6a8916bba496bbd847df0724df94a9b49182f1a1e"
+    },
+    {
+      "path": "apps/web/tests/admin-portless-status.test.ts",
+      "last_committed_edit": "2026-07-05T20:56:16-04:00",
+      "lines": 97,
+      "bytes": 2623,
+      "sha256": "bd4b761675cb5346b83af1863dcaeee5ee4fbc02f595fa158445def0c004d1e1"
+    },
+    {
+      "path": "apps/web/tests/admin-recent-shows.test.ts",
+      "last_committed_edit": "2026-03-23T20:50:48-04:00",
+      "lines": 67,
+      "bytes": 1998,
+      "sha256": "6ef939953ded7bc542d75357cde6f941eec3d994fcca5de52afe3619502e7d43"
+    },
+    {
+      "path": "apps/web/tests/admin-request-id.test.ts",
+      "last_committed_edit": "2026-04-09T08:48:36-04:00",
+      "lines": 23,
+      "bytes": 845,
+      "sha256": "d02e6f2bac48652dbd0dc43919eca8c6bc6e0fb5d77220c51fc411d8ff73c4f8"
+    },
+    {
+      "path": "apps/web/tests/admin-route-aliases.test.ts",
+      "last_committed_edit": "2026-04-21T10:58:35-04:00",
+      "lines": 59,
+      "bytes": 2352,
+      "sha256": "5ddf3a9ac31406cf92125dc4e875421b88723d44b3994fb78e3a2513eb8e2d2a"
+    },
+    {
+      "path": "apps/web/tests/admin-route-audit.test.ts",
+      "last_committed_edit": "2026-03-26T13:31:56-04:00",
+      "lines": 103,
+      "bytes": 3446,
+      "sha256": "c0007c7fd0b3e61e101b2fbe0381821955fbe45f1f5ce94b7e03cf5c691a66ff"
+    },
+    {
+      "path": "apps/web/tests/admin-route-cache-key-normalization.test.ts",
+      "last_committed_edit": "2026-07-13T17:52:10-04:00",
+      "lines": 176,
+      "bytes": 7479,
+      "sha256": "50bfd30c8ba24600d63fb740abe297efe9d8d6f18d83e64a3839f141c42d7505"
+    },
+    {
+      "path": "apps/web/tests/admin-route-paths.test.ts",
+      "last_committed_edit": "2026-04-21T10:58:35-04:00",
+      "lines": 54,
+      "bytes": 2546,
+      "sha256": "d35f53063f0390c4548bf2f0886cc5f9b8679613db88d22d3dc62b496f2c7a42"
+    },
+    {
+      "path": "apps/web/tests/admin-show-slug-reads.test.ts",
+      "last_committed_edit": "2026-08-05T10:25:43-04:00",
+      "lines": 239,
+      "bytes": 8211,
+      "sha256": "23605a30819512880aa6ea04b57d5f55c107351d9397fa594780dc4d33c4ccbc"
+    },
+    {
+      "path": "apps/web/tests/admin-shows-by-trr-show-route.test.ts",
+      "last_committed_edit": "2026-02-12T18:49:43-05:00",
+      "lines": 122,
+      "bytes": 3570,
+      "sha256": "81c1723aa3f824f123b8061890d6097123d06d6f0eea9e2c1a78a57b1daa9799"
+    },
+    {
+      "path": "apps/web/tests/admin-shows-route.test.ts",
+      "last_committed_edit": "2026-07-13T17:52:10-04:00",
+      "lines": 59,
+      "bytes": 2049,
+      "sha256": "9458134a5b3b272d9e00d12ed5fcb29e5fc7034d290cdf231e8927c2f4cec8b1"
+    },
+    {
+      "path": "apps/web/tests/admin-snapshot-cache.test.ts",
+      "last_committed_edit": "2026-04-28T05:44:25-04:00",
+      "lines": 201,
+      "bytes": 6478,
+      "sha256": "c07de184d74fe6754d2526746b584e41dd3dc6e79cdfa2d86714b48a02da4258"
+    },
+    {
+      "path": "apps/web/tests/admin-social-page-auth-bypass.test.tsx",
+      "last_committed_edit": "2026-07-05T20:56:16-04:00",
+      "lines": 1368,
+      "bytes": 45173,
+      "sha256": "6e6fb1604d07125029fcd100bc8a1f2d8d8013dc170e8af3194f83e7213a302b"
+    },
+    {
+      "path": "apps/web/tests/admin-surveys-userkey-fetch-stability.test.tsx",
+      "last_committed_edit": "2026-03-01T23:11:27-05:00",
+      "lines": 113,
+      "bytes": 3338,
+      "sha256": "029f570b29d958d385cd0c4d174155ba136d74669eaf94f8456501c9890325dc"
+    },
+    {
+      "path": "apps/web/tests/advanced-filters-references.test.ts",
+      "last_committed_edit": "2026-03-03T11:16:49-05:00",
+      "lines": 40,
+      "bytes": 1273,
+      "sha256": "c81d12bbd09c02cdb280ddbd094379cd350ab1cda14fe9abb9e68b0d81b1e9a4"
+    },
+    {
+      "path": "apps/web/tests/article-detail-page-block-toc.test.tsx",
+      "last_committed_edit": "2026-04-07T20:07:43-04:00",
+      "lines": 86,
+      "bytes": 3684,
+      "sha256": "055c1709e8e5b7eec7035f7230ace1529c1eb0df2ca2734daf5a393d7d1e152c"
+    },
+    {
+      "path": "apps/web/tests/article-detail-page-debate-speaking-time.test.tsx",
+      "last_committed_edit": "2026-05-17T14:52:05-04:00",
+      "lines": 82,
+      "bytes": 3706,
+      "sha256": "b06fc97612f202bd4014e56357a6106349c556c6f2ad84ab2074e1bc231d5a2a"
+    },
+    {
+      "path": "apps/web/tests/article-detail-page-nyt-shell.test.tsx",
+      "last_committed_edit": "2026-05-17T14:47:57-04:00",
+      "lines": 177,
+      "bytes": 8301,
+      "sha256": "6a3c02a65bc1c61805c721b8cfa4686c043bf12fab01125ec1d9c7e0b16d5e85"
+    },
+    {
+      "path": "apps/web/tests/asset-sectioning.test.ts",
+      "last_committed_edit": "2026-02-26T13:15:52-05:00",
+      "lines": 126,
+      "bytes": 4296,
+      "sha256": "5bc61a70bdd286e31769fee6337c1b39d4a60c5e8762657f863751b5e68dd845"
+    },
+    {
+      "path": "apps/web/tests/assets-content-type-route.test.ts",
+      "last_committed_edit": "2026-04-06T20:57:34-04:00",
+      "lines": 91,
+      "bytes": 2989,
+      "sha256": "47614bdc75c10a6f2ae4b1ea30aec4d8466a18c7b6a5786808b226799b5c21c6"
+    },
+    {
+      "path": "apps/web/tests/async-handles.test.ts",
+      "last_committed_edit": "2026-03-23T20:50:48-04:00",
+      "lines": 159,
+      "bytes": 5225,
+      "sha256": "414d1babb8f9be0647ccc63586bf6242837adba70ad96b006672e33e2c68af99"
+    },
+    {
+      "path": "apps/web/tests/auth-cutover-readiness.test.ts",
+      "last_committed_edit": "2026-02-17T16:43:01-05:00",
+      "lines": 79,
+      "bytes": 2398,
+      "sha256": "e32531157562ab2ce303fdc9dae57b4fb0b99be6ba5de53ffcbef7fa52856f2e"
+    },
+    {
+      "path": "apps/web/tests/backend-base.test.ts",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 79,
+      "bytes": 3360,
+      "sha256": "ed934b64b03ac94b1ff6f757798fde0e5be6177b5a94a773e35bab8b4b9a21eb"
+    },
+    {
+      "path": "apps/web/tests/brand-font-artifacts.test.ts",
+      "last_committed_edit": "2026-03-23T20:50:48-04:00",
+      "lines": 83,
+      "bytes": 3719,
+      "sha256": "9ec09a45f6d3ff7f2858ed01f09a3b03de506d96ce084e1003c4cb1e2616ab0d"
+    },
+    {
+      "path": "apps/web/tests/brand-font-asset-resolution.test.ts",
+      "last_committed_edit": "2026-03-26T13:31:56-04:00",
+      "lines": 80,
+      "bytes": 2632,
+      "sha256": "d89c5fbad5ebd04d7902dc77656214b68d47038f48968e0a8f2b0b114c6a3550"
+    },
+    {
+      "path": "apps/web/tests/brand-font-matches-route.test.ts",
+      "last_committed_edit": "2026-03-26T13:31:56-04:00",
+      "lines": 116,
+      "bytes": 3957,
+      "sha256": "45b1fc142e889b1fa34a20a70debef5081f8e295b93d17cf6af43c81bd9f15c4"
+    },
+    {
+      "path": "apps/web/tests/brand-font-matching-scoring.test.ts",
+      "last_committed_edit": "2026-07-05T20:56:16-04:00",
+      "lines": 424,
+      "bytes": 14719,
+      "sha256": "f7e31073c415f5bfca3839372f842d4aac767ea350fd68b1c2865139cd1d603a"
+    },
+    {
+      "path": "apps/web/tests/brand-font-normalization.test.ts",
+      "last_committed_edit": "2026-03-23T20:50:48-04:00",
+      "lines": 26,
+      "bytes": 1126,
+      "sha256": "e33e80e646bdcbbb2129a980d5e76b11bdc9faa7d49ba7e7fc177310cac1ecdf"
+    },
+    {
+      "path": "apps/web/tests/brand-font-ranking-snapshot.test.ts",
+      "last_committed_edit": "2026-08-05T10:37:39-04:00",
+      "lines": 45,
+      "bytes": 1493,
+      "sha256": "666c7883b6491c94b8935f7269a798b7130ff263657c46502d60cda7ec7cdf04"
+    },
+    {
+      "path": "apps/web/tests/brand-font-visual-similarity-script.test.ts",
+      "last_committed_edit": "2026-04-13T08:19:21-04:00",
+      "lines": 75,
+      "bytes": 2570,
+      "sha256": "4b01c15f71579da041c5e2148ff608221790b853fea4f273b06ef073daa1dd8c"
+    },
+    {
+      "path": "apps/web/tests/brand-logo-options-modal.test.tsx",
+      "last_committed_edit": "2026-04-06T20:57:34-04:00",
+      "lines": 355,
+      "bytes": 12225,
+      "sha256": "15d4b3f9c1d9582628765a28ec21f0e88669f68227eddbd207c89b1a52ad7cec"
+    },
+    {
+      "path": "apps/web/tests/brand-nyt-homepage-route.test.ts",
+      "last_committed_edit": "2026-04-21T10:58:35-04:00",
+      "lines": 34,
+      "bytes": 1088,
+      "sha256": "0bc64e1b583bfb307169a4b652f35de0e2955ee26e80c57522d4e69ae795cc34"
+    },
+    {
+      "path": "apps/web/tests/brand-profile-page.test.tsx",
+      "last_committed_edit": "2026-04-07T20:07:43-04:00",
+      "lines": 220,
+      "bytes": 7889,
+      "sha256": "7407149566a03b7e4a0e075722c7f9ee36ea1c26144caaf53dab797c35506326"
+    },
+    {
+      "path": "apps/web/tests/brand-profile-repository.test.ts",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 291,
+      "bytes": 9027,
+      "sha256": "086733855f4a613721e6896f4d79300df657199908cca8338bd357024c1e594e"
+    },
+    {
+      "path": "apps/web/tests/brand-profile-route.test.ts",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 321,
+      "bytes": 10130,
+      "sha256": "35951a9b0c26b15f72ffdb352e24abf32e960e41919b493dbef8bd90328c4d4f"
+    },
+    {
+      "path": "apps/web/tests/brand-profile-utils.test.ts",
+      "last_committed_edit": "2026-04-07T20:07:43-04:00",
+      "lines": 101,
+      "bytes": 2912,
+      "sha256": "15dafeab85c823358ecb52453f3daf96757b736edf94b93a4e74dde02d00dcd3"
+    },
+    {
+      "path": "apps/web/tests/brands-families-proxy-routes.test.ts",
+      "last_committed_edit": "2026-04-06T20:57:34-04:00",
+      "lines": 98,
+      "bytes": 3691,
+      "sha256": "f88bc6a1c5f3db2321b5156d58e8317a4855e271b4d0d0483d72152e735c8a75"
+    },
+    {
+      "path": "apps/web/tests/brands-franchise-proxy-routes.test.ts",
+      "last_committed_edit": "2026-04-06T20:57:34-04:00",
+      "lines": 213,
+      "bytes": 8271,
+      "sha256": "43f80f7889c72597717ab0ad32bf8ab5ec09b36494809567aaa204a038a9d092"
+    },
+    {
+      "path": "apps/web/tests/brands-logo-options-preview-route.test.ts",
+      "last_committed_edit": "2026-03-16T15:10:07-04:00",
+      "lines": 91,
+      "bytes": 3087,
+      "sha256": "4b99bffeb14a39875d4903b927c6cad3e1476cc163dcfcceffed3ed2d5859fc0"
+    },
+    {
+      "path": "apps/web/tests/brands-logo-sync-wiring.test.ts",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 74,
+      "bytes": 4310,
+      "sha256": "67b6247ae0f75ebb34c8015dc5f02c3b7c8ea1975b14a58a7589c16958f7d9ac"
+    },
+    {
+      "path": "apps/web/tests/brands-logos-options-proxy-routes.test.ts",
+      "last_committed_edit": "2026-04-06T20:57:34-04:00",
+      "lines": 193,
+      "bytes": 8586,
+      "sha256": "0e8648bc531e944566299b4f277a77a7c3dc0edbc974c61baabd0091bcbd0539"
+    },
+    {
+      "path": "apps/web/tests/brands-logos-route.test.ts",
+      "last_committed_edit": "2026-04-01T17:13:13-04:00",
+      "lines": 97,
+      "bytes": 3312,
+      "sha256": "47436b960626d4017e91196701df603facf18ddd2fab354aee5dac10ffe98e55"
+    },
+    {
+      "path": "apps/web/tests/brands-logos-sync-proxy-route.test.ts",
+      "last_committed_edit": "2026-04-06T20:57:34-04:00",
+      "lines": 92,
+      "bytes": 3450,
+      "sha256": "d9c5df5ed142a862bd252e57c969d65c935b1852de429c2d99afc575dad34c99"
+    },
+    {
+      "path": "apps/web/tests/brands-news-page-auth-bypass.test.tsx",
+      "last_committed_edit": "2026-03-16T15:10:07-04:00",
+      "lines": 77,
+      "bytes": 2554,
+      "sha256": "c4cfb84ba6934d2752cbd7f391f8f52b5811bf77aaa1b4fe38586f2e71d1c23a"
+    },
+    {
+      "path": "apps/web/tests/brands-other-page-auth-bypass.test.tsx",
+      "last_committed_edit": "2026-03-16T15:10:07-04:00",
+      "lines": 75,
+      "bytes": 2408,
+      "sha256": "a82c0f0a580864df57c7c98bc314ac7bbe74147d0cc0e0cab941a87570e0e411"
+    },
+    {
+      "path": "apps/web/tests/brands-shows-franchises-page-auth-bypass.test.tsx",
+      "last_committed_edit": "2026-03-16T15:10:07-04:00",
+      "lines": 75,
+      "bytes": 2416,
+      "sha256": "dea85f785c9226a15d26b71a848717c45628063688f21b4bb8a94fae8d8982e2"
+    },
+    {
+      "path": "apps/web/tests/bravotv-image-routes.test.ts",
+      "last_committed_edit": "2026-07-13T17:51:26-04:00",
+      "lines": 436,
+      "bytes": 15643,
+      "sha256": "cc5a8fb9848b107a2502f8067d767ace94da8901acc8043fdd17062eb3936e54"
+    },
+    {
+      "path": "apps/web/tests/bravotv-image-run-panel-wiring.test.ts",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 32,
+      "bytes": 1532,
+      "sha256": "4733a9f16d8870b188ddc0aaa47432d1204260b62bef3d3829aa211cd045844a"
+    },
+    {
+      "path": "apps/web/tests/bravotv-image-runs.test.ts",
+      "last_committed_edit": "2026-03-21T00:38:02-04:00",
+      "lines": 44,
+      "bytes": 1711,
+      "sha256": "c1e9ab327f8886765f80a79cefa3d41d9ea910e3435cc0778a1ac1a360276bd4"
+    },
+    {
+      "path": "apps/web/tests/browser-smoke-admin-detail-routes-script.test.ts",
+      "last_committed_edit": "2026-05-20T18:23:40-04:00",
+      "lines": 42,
+      "bytes": 2198,
+      "sha256": "63af2fff9a89a8c9ee64d71077dabafa1b2e4e6a5cd09cd33643831e646b19cc"
+    },
+    {
+      "path": "apps/web/tests/build-social-account-profile-url.test.ts",
+      "last_committed_edit": "2026-04-21T10:42:20-04:00",
+      "lines": 16,
+      "bytes": 782,
+      "sha256": "e094ffa55e433aef9fe93cfd8773f32739c1aceb36aa4fa8b1c472dba092551d"
+    },
+    {
+      "path": "apps/web/tests/cast-batch-progress.test.ts",
+      "last_committed_edit": "2026-02-18T23:49:54-05:00",
+      "lines": 21,
+      "bytes": 781,
+      "sha256": "3ebad4e29f2eff6ae2a88d86fb19d1bb77cc05b95c403a24ad469861ee985e14"
+    },
+    {
+      "path": "apps/web/tests/cast-episode-scope.test.ts",
+      "last_committed_edit": "2026-02-18T23:49:54-05:00",
+      "lines": 57,
+      "bytes": 1578,
+      "sha256": "109e027abc1b64e4bde2b417d17ddd1e4fa4b8e69f5eab37d01f9830e02515fa"
+    },
+    {
+      "path": "apps/web/tests/cast-incremental-render.test.tsx",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 45,
+      "bytes": 2552,
+      "sha256": "7e0c2a3df90edc25d992411da3138bf6aa293fb84ba3ed9f3e0daad4575c3fb2"
+    },
+    {
+      "path": "apps/web/tests/cast-matrix-sync-panel.test.tsx",
+      "last_committed_edit": "2026-02-17T07:52:29-05:00",
+      "lines": 82,
+      "bytes": 2696,
+      "sha256": "b64edd7d8c7f8617a1252c52f0e580c77e35461b3f1659ea7079fdf86c763934"
+    },
+    {
+      "path": "apps/web/tests/cast-multi-select-input.test.tsx",
+      "last_committed_edit": "2026-02-19T10:16:08-05:00",
+      "lines": 101,
+      "bytes": 3548,
+      "sha256": "884fd8d432090c60e9e2239de643fef49a37f13e5d9983a8ef49ecce4aca6788"
+    },
+    {
+      "path": "apps/web/tests/cast-photo-people-count-route.test.ts",
+      "last_committed_edit": "2026-02-18T23:49:54-05:00",
+      "lines": 93,
+      "bytes": 2842,
+      "sha256": "ed1675515eb9e446c961f71df5d6ce5f283356524ee44b61bf665a8a0745c1ca"
+    },
+    {
+      "path": "apps/web/tests/cast-photo-variants-proxy-route.test.ts",
+      "last_committed_edit": "2026-05-20T18:23:40-04:00",
+      "lines": 110,
+      "bytes": 3920,
+      "sha256": "ac53f8e9e565910ab64ec84ef628c39f950ee6b327dc92c435f3e9c404854904"
+    },
+    {
+      "path": "apps/web/tests/cast-refresh-orchestration.test.ts",
+      "last_committed_edit": "2026-02-24T09:22:27-05:00",
+      "lines": 183,
+      "bytes": 5464,
+      "sha256": "05fcc3c4d4272e5e07a130c3f71e6249ceed78fd30d61219a659609fab20ac5d"
+    },
+    {
+      "path": "apps/web/tests/cast-role-normalization.test.ts",
+      "last_committed_edit": "2026-02-17T07:52:29-05:00",
+      "lines": 32,
+      "bytes": 1185,
+      "sha256": "8677a60bf0414a7c36837e9fa67ac5e04faa847cbc65b2d4912f485f7a5f3047"
+    },
+    {
+      "path": "apps/web/tests/cast-role-season-filtering.test.ts",
+      "last_committed_edit": "2026-02-17T07:52:29-05:00",
+      "lines": 49,
+      "bytes": 1455,
+      "sha256": "dd77fc99deb87ca8f2a4a020ea8a6cafc21e06e4c17ff1aba9e0ae831cda4240"
+    },
+    {
+      "path": "apps/web/tests/cast-route-state.test.ts",
+      "last_committed_edit": "2026-04-07T20:07:43-04:00",
+      "lines": 108,
+      "bytes": 4718,
+      "sha256": "3f63218b48e1b91d0efb636d268549506f495f0473f00ceaad2c746b780f877e"
+    },
+    {
+      "path": "apps/web/tests/cast-screentime-page.test.tsx",
+      "last_committed_edit": "2026-07-13T17:52:19-04:00",
+      "lines": 628,
+      "bytes": 22948,
+      "sha256": "e8d93d4520dd954b5948ab5962491ec289192b2004c92be1bbcd081f520af9d5"
+    },
+    {
+      "path": "apps/web/tests/cast-screentime-proxy-route.test.ts",
+      "last_committed_edit": "2026-05-20T18:23:40-04:00",
+      "lines": 100,
+      "bytes": 3955,
+      "sha256": "3c1ee5e6cad743149f01d7f06f7e237d414cc0cfc59344c54c0b86023e10d05e"
+    },
+    {
+      "path": "apps/web/tests/cast-screentime-run-state.test.ts",
+      "last_committed_edit": "2026-04-06T20:57:34-04:00",
+      "lines": 65,
+      "bytes": 1882,
+      "sha256": "33771b8477abc2c4a0f975821bd3a9d2a5ebf48db9f7bb3decf524653070117b"
+    },
+    {
+      "path": "apps/web/tests/cast-smoke-preflight.test.ts",
+      "last_committed_edit": "2026-02-24T21:16:24-05:00",
+      "lines": 227,
+      "bytes": 7511,
+      "sha256": "196c117d9c563af4d44555a30688475f67903e3383a006c44d09fc726476d2b1"
+    },
+    {
+      "path": "apps/web/tests/cast-socialblade-charting.test.ts",
+      "last_committed_edit": "2026-03-20T03:06:04-04:00",
+      "lines": 40,
+      "bytes": 1372,
+      "sha256": "8b38f6698c61809aa5c935e0bd4489d1bcca1f7436ad8edaf9ec0a095d17443a"
+    },
+    {
+      "path": "apps/web/tests/cast-socialblade-comparison.test.tsx",
+      "last_committed_edit": "2026-07-13T17:52:45-04:00",
+      "lines": 62,
+      "bytes": 2093,
+      "sha256": "3caf78a01ae857dd3d4e77b5057e30de77bac39e78dd52e2185c6d47b52e3508"
+    },
+    {
+      "path": "apps/web/tests/cast-socialblade-snapshot-wiring.test.ts",
+      "last_committed_edit": "2026-07-05T20:56:16-04:00",
+      "lines": 52,
+      "bytes": 2386,
+      "sha256": "3e93870197c82cf380e2aa44d09652d0bfa8b5137e67b5157540ea9572b6621f"
+    },
+    {
+      "path": "apps/web/tests/cdn-fonts.test.ts",
+      "last_committed_edit": "2026-02-17T12:41:06-05:00",
+      "lines": 23,
+      "bytes": 1349,
+      "sha256": "3a0b89f0dc3a6e9afe7293f449d40675a1980957d41aefe557b69906b336dbcf"
+    },
+    {
+      "path": "apps/web/tests/client-admin-access.test.ts",
+      "last_committed_edit": "2026-07-13T17:51:26-04:00",
+      "lines": 148,
+      "bytes": 5582,
+      "sha256": "d5cda44b5f9e4a90ae7866578dd1a9223e6bbfec99677746a471d03bdf16d055"
+    },
+    {
+      "path": "apps/web/tests/color-lab-color-math.test.ts",
+      "last_committed_edit": "2026-02-26T13:15:52-05:00",
+      "lines": 38,
+      "bytes": 1221,
+      "sha256": "773407538bf0575a8903c8a3d0064ac6e703bec84a6c9d8a309c47718fd671cd"
+    },
+    {
+      "path": "apps/web/tests/color-lab-export.test.ts",
+      "last_committed_edit": "2026-04-13T08:59:52-04:00",
+      "lines": 36,
+      "bytes": 1478,
+      "sha256": "d57e3f974aca0ff5664d9ebabe69f4ee36f7b5bc6bb5bffb19e2d2cd3b58bb90"
+    },
+    {
+      "path": "apps/web/tests/color-lab-randomization.test.ts",
+      "last_committed_edit": "2026-02-26T13:15:52-05:00",
+      "lines": 70,
+      "bytes": 2051,
+      "sha256": "eb587a06dc42642e080c2c295979714983f41a8e22a8e991f8689b33234becc8"
+    },
+    {
+      "path": "apps/web/tests/color-lab-share-state.test.ts",
+      "last_committed_edit": "2026-04-13T08:59:52-04:00",
+      "lines": 61,
+      "bytes": 1887,
+      "sha256": "1814e4b681fa8d0851e76095d6174d49069327f12509a168a0663de1a20a53a5"
+    },
+    {
+      "path": "apps/web/tests/color-lab-theme-contrast.test.ts",
+      "last_committed_edit": "2026-02-26T13:15:52-05:00",
+      "lines": 32,
+      "bytes": 1130,
+      "sha256": "17a12a487d87acf220b6faf67ce3098de6d011eb85aa3d1a3d7fbf0f55f31f5a"
+    },
+    {
+      "path": "apps/web/tests/components-tab.test.tsx",
+      "last_committed_edit": "2026-03-11T19:37:32-04:00",
+      "lines": 32,
+      "bytes": 1663,
+      "sha256": "9748c95f70f331fcea13db6017b67df13c40673f072a2135657c7c14c35a5fdf"
+    },
+    {
+      "path": "apps/web/tests/content-type-utils.test.ts",
+      "last_committed_edit": "2026-02-19T10:16:08-05:00",
+      "lines": 38,
+      "bytes": 1292,
+      "sha256": "10171f3ab91572f6e288ce3fd1aa9c559c85a1c0b231933af327bfdcd68dc5f4"
+    },
+    {
+      "path": "apps/web/tests/covered-show-route-parity.test.ts",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 236,
+      "bytes": 7758,
+      "sha256": "bfb22eebb681dc75b5da813e246acddd1484dd0821ccc5da4634709758124b01"
+    },
+    {
+      "path": "apps/web/tests/covered-shows-page-no-fanout-wiring.test.ts",
+      "last_committed_edit": "2026-07-05T20:56:16-04:00",
+      "lines": 27,
+      "bytes": 1337,
+      "sha256": "c1d096147fd22d9b04e8f1d012a346725267d28c1c743637fd1f7b5e33fb7d0f"
+    },
+    {
+      "path": "apps/web/tests/covered-shows-repository-slug-query-safety.test.ts",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 77,
+      "bytes": 2357,
+      "sha256": "6217a2f89379c8d7fef3c5daac37fda0f260f68133b9382ce688e53dcc3ce471"
+    },
+    {
+      "path": "apps/web/tests/covered-shows-route-cache-dedupe.test.ts",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 100,
+      "bytes": 3485,
+      "sha256": "9d99e91035e0dfddb1ddd526452514b33923033954cfec89b5d03227e0cb188e"
+    },
+    {
+      "path": "apps/web/tests/covered-shows-route-metadata.test.ts",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 80,
+      "bytes": 2711,
+      "sha256": "a5c24d394a87ca5d6f9ecb5e5bcecf72d91cad790995d379a4e566d89af50a94"
+    },
+    {
+      "path": "apps/web/tests/cron-routes-auth.test.ts",
+      "last_committed_edit": "2026-06-10T11:17:17-04:00",
+      "lines": 163,
+      "bytes": 6452,
+      "sha256": "db09d2789e0bbe0ac4160f164a182046b5009bceb00007170cb295dff8dbfc19"
+    },
+    {
+      "path": "apps/web/tests/deadline-gallery-route.test.ts",
+      "last_committed_edit": "2026-03-16T15:10:07-04:00",
+      "lines": 91,
+      "bytes": 3135,
+      "sha256": "0fb17af16d21747584d289b70ce4b68110e89b1df41beade71ab784ed604b859"
+    },
+    {
+      "path": "apps/web/tests/deadline-gallery.test.ts",
+      "last_committed_edit": "2026-03-16T15:10:07-04:00",
+      "lines": 74,
+      "bytes": 3137,
+      "sha256": "75adf21db235598fcbe126a13e56066d88e37066f4c90f7f3e1476294db69112"
+    },
+    {
+      "path": "apps/web/tests/deal-order.test.ts",
+      "last_committed_edit": "2026-03-17T19:38:34-04:00",
+      "lines": 92,
+      "bytes": 3334,
+      "sha256": "1f7a0383da93c053a88a40e0279af964f25f4f738df30e3a27deee444b99804d"
+    },
+    {
+      "path": "apps/web/tests/debug-log-route.test.ts",
+      "last_committed_edit": "2026-07-13T17:51:26-04:00",
+      "lines": 241,
+      "bytes": 8874,
+      "sha256": "a8cb28c6b42b70e8a5b207191b9705a39f5ffdd77fbcd64a6d81dfc34066d5a6"
+    },
+    {
+      "path": "apps/web/tests/design-docs-ai-security-routes.test.ts",
+      "last_committed_edit": "2026-05-20T18:23:40-04:00",
+      "lines": 97,
+      "bytes": 3768,
+      "sha256": "e16381813504eaf38f32fc8c86a5c85032cd77f961eb9e06547b3f0a794f968d"
+    },
+    {
+      "path": "apps/web/tests/design-docs-generate-image-route.test.ts",
+      "last_committed_edit": "2026-06-09T23:51:27-04:00",
+      "lines": 32,
+      "bytes": 1179,
+      "sha256": "cd2d27f80f90eb45a413bff1cf6de255b89606b4c7467f02eb1f928540ec209d"
+    },
+    {
+      "path": "apps/web/tests/design-docs-pipeline-fidelity.test.ts",
+      "last_committed_edit": "2026-04-15T05:35:14-04:00",
+      "lines": 81,
+      "bytes": 3006,
+      "sha256": "3fae708938612216341cdf3a8858ed046cb9e6662d328fb765aa62d437d853b8"
+    },
+    {
+      "path": "apps/web/tests/design-docs-ui-primitives.test.ts",
+      "last_committed_edit": "2026-04-09T08:48:36-04:00",
+      "lines": 83,
+      "bytes": 2856,
+      "sha256": "37e70c70e074a0c3fd7de745d0f052786e8723cb2320bfca07011f645dfb9e11"
+    },
+    {
+      "path": "apps/web/tests/design-docs-validators.test.ts",
+      "last_committed_edit": "2026-04-15T05:35:14-04:00",
+      "lines": 199,
+      "bytes": 7743,
+      "sha256": "fd0a084adbfca1e13c531f5978f4e49b45b3f8c6f725256a9d9708e1792bb706"
+    },
+    {
+      "path": "apps/web/tests/design-system-fonts-page.test.tsx",
+      "last_committed_edit": "2026-04-07T20:07:43-04:00",
+      "lines": 335,
+      "bytes": 12382,
+      "sha256": "6050c4918c749aaa02f83e5e95187cd604df4428418d5072456de5eca70b4ea6"
+    },
+    {
+      "path": "apps/web/tests/design-system-typography-routes.test.ts",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 357,
+      "bytes": 12885,
+      "sha256": "299a6ea3b110731a79126685f4a74b2aa336408c738195c39d81eeb4d3480d16"
+    },
+    {
+      "path": "apps/web/tests/dev-admin-bypass.test.ts",
+      "last_committed_edit": "2026-06-09T23:51:27-04:00",
+      "lines": 52,
+      "bytes": 1975,
+      "sha256": "5027f2185d17a113f3d75c97069b181a6e8db8d59422c401e2e291ee6c3bf65f"
+    },
+    {
+      "path": "apps/web/tests/dev-dashboard-skills-agents-service.test.ts",
+      "last_committed_edit": "2026-07-13T19:09:33-04:00",
+      "lines": 213,
+      "bytes": 6520,
+      "sha256": "9cfc1b9cca93b1a9a906db6f950bcca88c73fc749539bdad97fb0aadec4490c2"
+    },
+    {
+      "path": "apps/web/tests/dev-dashboard-vercel-preview-readiness-service.test.ts",
+      "last_committed_edit": "2026-07-05T20:56:16-04:00",
+      "lines": 116,
+      "bytes": 3922,
+      "sha256": "b8071331de106859bf54a31b75b2910ad93baf557b64a31162a5ab3491a3ee5e"
+    },
+    {
+      "path": "apps/web/tests/dropdown-input.test.tsx",
+      "last_committed_edit": "2026-02-19T00:03:00-05:00",
+      "lines": 58,
+      "bytes": 1490,
+      "sha256": "81036d5242336dd81b1a255f6c5de701be1baa2f0e2571cf9e5f2d3952c177c8"
+    },
+    {
+      "path": "apps/web/tests/face-references-proxy-route.test.ts",
+      "last_committed_edit": "2026-06-09T23:51:27-04:00",
+      "lines": 102,
+      "bytes": 4123,
+      "sha256": "e316b3b51490f8895c5ba77f62d4b0aa104c49a8102a30aaf2981c39314b6a77"
+    },
+    {
+      "path": "apps/web/tests/facebank-seed-proxy-route.test.ts",
+      "last_committed_edit": "2026-05-20T18:23:40-04:00",
+      "lines": 113,
+      "bytes": 4250,
+      "sha256": "60a28a499dc83b7db6c9d6c9b652f94384cb057ecb30df6f7ebd3adfa4f4a63a"
+    },
+    {
+      "path": "apps/web/tests/facebank-seed-state.test.ts",
+      "last_committed_edit": "2026-02-12T18:49:43-05:00",
+      "lines": 64,
+      "bytes": 1819,
+      "sha256": "1a2d2746b7a0d3774abf3792cc92ddf5a582d40864a043b257e2aba80a6d7e9a"
+    },
+    {
+      "path": "apps/web/tests/fandom-person-ownership.test.ts",
+      "last_committed_edit": "2026-02-19T10:16:08-05:00",
+      "lines": 143,
+      "bytes": 5045,
+      "sha256": "67b1c2f15a2c2b809e43c2b18d641e64dcec1741b34f77735c9565aab93a1c09"
+    },
+    {
+      "path": "apps/web/tests/fandom-sync-modal.test.tsx",
+      "last_committed_edit": "2026-02-24T21:16:24-05:00",
+      "lines": 47,
+      "bytes": 2005,
+      "sha256": "e13df493b1f0edfc5c95160a1eef5507a5cb330d90d1d5e16481317c0849d20e"
+    },
+    {
+      "path": "apps/web/tests/filter-card-tracker.test.tsx",
+      "last_committed_edit": "2026-04-01T17:13:13-04:00",
+      "lines": 64,
+      "bytes": 2263,
+      "sha256": "55e163ae6c973729e6df20262f2ef2abbdcefdf80fe0dc83ef43cec8986ab469"
+    },
+    {
+      "path": "apps/web/tests/finish.flow.test.tsx",
+      "last_committed_edit": "2026-07-05T20:56:16-04:00",
+      "lines": 131,
+      "bytes": 4823,
+      "sha256": "9ed82948d596a1cfd8605905e2037c07b979e41b36356b824e4a6ae27205f930"
+    },
+    {
+      "path": "apps/web/tests/firebase-client-config.test.ts",
+      "last_committed_edit": "2026-03-13T17:25:42-04:00",
+      "lines": 92,
+      "bytes": 4409,
+      "sha256": "cc35134a7a2f193b5211a31ae3cb267cc1fea0b6b2009abc08171ef1e74d6260"
+    },
+    {
+      "path": "apps/web/tests/flashback-admin-repository-backend.test.ts",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 180,
+      "bytes": 5657,
+      "sha256": "0514e828524001f27f10982f9c10e86cfed647d2798c0b6c960c61d0f8e6bd2c"
+    },
+    {
+      "path": "apps/web/tests/flashback-admin-routes.test.ts",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 236,
+      "bytes": 7539,
+      "sha256": "aca66b8dce79b4b8d90ce6d535632920969a69338f8417a027389af3d82793b2"
+    },
+    {
+      "path": "apps/web/tests/flashback-disabled-routes.test.ts",
+      "last_committed_edit": "2026-04-06T20:57:34-04:00",
+      "lines": 47,
+      "bytes": 1428,
+      "sha256": "f51ff72d8969ee02a04a097b3b052d1fdf3a9e43c458d8656ba033ed71208e89"
+    },
+    {
+      "path": "apps/web/tests/flashback-ranker.test.tsx",
+      "last_committed_edit": "2026-02-19T10:16:08-05:00",
+      "lines": 335,
+      "bytes": 11408,
+      "sha256": "05a1fdddc77d79e892f877e9a10846479bde2c7a3754d30d82719f56bfa22a79"
+    },
+    {
+      "path": "apps/web/tests/font-pair-audit.test.tsx",
+      "last_committed_edit": "2026-03-23T20:50:48-04:00",
+      "lines": 29,
+      "bytes": 1410,
+      "sha256": "ff669d670530e3021b849789140f1d150bf7017de36a9e15e646f5b730f1af78"
+    },
+    {
+      "path": "apps/web/tests/gallery-advanced-filtering.test.ts",
+      "last_committed_edit": "2026-02-24T13:00:58-05:00",
+      "lines": 165,
+      "bytes": 6061,
+      "sha256": "d67ff89c55b08e99783d231c9780e3f86a961267c08788fcf4efd7f607f9376f"
+    },
+    {
+      "path": "apps/web/tests/gallery-asset-capabilities.test.ts",
+      "last_committed_edit": "2026-02-18T23:49:54-05:00",
+      "lines": 70,
+      "bytes": 2511,
+      "sha256": "f3c529c19aafc6840997267b57c57a59b77c94b9c4ed44f1cf99cd0084c5e653"
+    },
+    {
+      "path": "apps/web/tests/gallery-diagnostics.test.ts",
+      "last_committed_edit": "2026-02-12T18:49:43-05:00",
+      "lines": 80,
+      "bytes": 2461,
+      "sha256": "cc62d7a1f82fdc2b2550a0299fc97e5c1cb52b6d3e85df7baccaa0538c0b4495"
+    },
+    {
+      "path": "apps/web/tests/gallery-fallback-telemetry.test.ts",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 25,
+      "bytes": 1231,
+      "sha256": "e1004b04b46a8670b6342e44515b2cf2e75462457e407c9f57fa615ce8eace17"
+    },
+    {
+      "path": "apps/web/tests/games-identity.test.ts",
+      "last_committed_edit": "2026-03-03T11:16:49-05:00",
+      "lines": 29,
+      "bytes": 1089,
+      "sha256": "a3bb9ecaa73cfbf74e7a2af87657f639cbf1e4f62055f753b0628cd5ac110f2c"
+    },
+    {
+      "path": "apps/web/tests/games-report-problem-route.test.ts",
+      "last_committed_edit": "2026-03-03T11:16:49-05:00",
+      "lines": 208,
+      "bytes": 6480,
+      "sha256": "ef6d7b8225944c65d88a3cf98f8825435cdab6d23f26af6d1c26be09d5c36de6"
+    },
+    {
+      "path": "apps/web/tests/games-share-columns.test.ts",
+      "last_committed_edit": "2026-03-03T11:16:49-05:00",
+      "lines": 63,
+      "bytes": 2077,
+      "sha256": "e78376133ff07a34a83f1f787da67642958ff320844650add95c2ef9458a7cf7"
+    },
+    {
+      "path": "apps/web/tests/generated-esm-package-boundaries.test.ts",
+      "last_committed_edit": "2026-05-20T18:23:40-04:00",
+      "lines": 33,
+      "bytes": 1127,
+      "sha256": "6d9f022be0c2f50d73085ef7d1089bd50cf5ae0de3c9d09569c43c489cf6c5cf"
+    },
+    {
+      "path": "apps/web/tests/getty-local-prefetch-client.test.ts",
+      "last_committed_edit": "2026-03-26T13:31:56-04:00",
+      "lines": 174,
+      "bytes": 5516,
+      "sha256": "e6fcb0de449f3522d177320df0548db17732c52bbe36b5f9db50332af6b88253"
+    },
+    {
+      "path": "apps/web/tests/getty-local-scrape-payload-compact.test.ts",
+      "last_committed_edit": "2026-03-26T13:31:56-04:00",
+      "lines": 122,
+      "bytes": 5158,
+      "sha256": "eea64277f33359aa38d6f414b1df7a240303a23f1cb68f913f41f4b3130a2892"
+    },
+    {
+      "path": "apps/web/tests/getty-local-scrape-route.test.ts",
+      "last_committed_edit": "2026-03-26T13:31:56-04:00",
+      "lines": 90,
+      "bytes": 2913,
+      "sha256": "fe52cba0dbfb5deeb05806927c832ffaf55dbd5a425d5b0dec74e6db60f52751"
+    },
+    {
+      "path": "apps/web/tests/getty-prefetch-token.test.ts",
+      "last_committed_edit": "2026-07-13T17:51:26-04:00",
+      "lines": 111,
+      "bytes": 3311,
+      "sha256": "c4b5d38e5d3a65b988deae44a33df9c89a7b69a3d49bc80ed9888d47b4268a73"
+    },
+    {
+      "path": "apps/web/tests/global-header.test.tsx",
+      "last_committed_edit": "2026-03-13T17:25:42-04:00",
+      "lines": 143,
+      "bytes": 4353,
+      "sha256": "3b5f3be8dc827198c1c9c71ffa3849c78adca22a49bb7414aefc228e49746738"
+    },
+    {
+      "path": "apps/web/tests/hosted-font-catalog.test.ts",
+      "last_committed_edit": "2026-03-23T20:50:48-04:00",
+      "lines": 61,
+      "bytes": 1936,
+      "sha256": "48d677c851915cf3275b506a87fd17b26fac610501791136c6efbecaa808188a"
+    },
+    {
+      "path": "apps/web/tests/hosted-fonts.test.ts",
+      "last_committed_edit": "2026-08-05T10:25:43-04:00",
+      "lines": 111,
+      "bytes": 4361,
+      "sha256": "707995c2aa9c28a99dde841ae378b2f0b05eef8b82013328eba1bfa5a660b018"
+    },
+    {
+      "path": "apps/web/tests/hosted-media.test.ts",
+      "last_committed_edit": "2026-03-16T15:10:07-04:00",
+      "lines": 37,
+      "bytes": 1516,
+      "sha256": "acd59d7c989a02d07cfc5ca43de9f514eff0f94e481a18939fc12d0b83d88fb6"
+    },
+    {
+      "path": "apps/web/tests/hub-games-page.test.tsx",
+      "last_committed_edit": "2026-04-06T20:57:34-04:00",
+      "lines": 30,
+      "bytes": 1070,
+      "sha256": "9cb931f8b19c4c8441fd116992461d525f31c5ede6f95be66761e1a25c5f7bb4"
+    },
+    {
+      "path": "apps/web/tests/icon-rating-input.test.tsx",
+      "last_committed_edit": "2026-03-11T19:37:32-04:00",
+      "lines": 121,
+      "bytes": 4596,
+      "sha256": "0106dbc21b1f6d0035bf5033cf86692df406e54d6d42632fa8cab74d490507bb"
+    },
+    {
+      "path": "apps/web/tests/icons-illustrations-tab.test.tsx",
+      "last_committed_edit": "2026-03-11T19:37:32-04:00",
+      "lines": 28,
+      "bytes": 1325,
+      "sha256": "a48c07f573dbe9e24034a0be8c984b8177ba8ee97348b63357b6f37c5d0f7bc0"
+    },
+    {
+      "path": "apps/web/tests/image-lightbox-metadata.test.tsx",
+      "last_committed_edit": "2026-04-09T08:48:36-04:00",
+      "lines": 933,
+      "bytes": 27548,
+      "sha256": "9c229dee5e98501357ada337b15cc48d3680bcc13d1be862f8fac9cd413a06a1"
+    },
+    {
+      "path": "apps/web/tests/image-palette-lab.test.tsx",
+      "last_committed_edit": "2026-04-13T08:59:52-04:00",
+      "lines": 362,
+      "bytes": 12138,
+      "sha256": "9ee7153be1f2e4c4274bcaa6e6e092bde23c300fa0f43990a90ead239e790c17"
+    },
+    {
+      "path": "apps/web/tests/image-proxy-route.test.ts",
+      "last_committed_edit": "2026-05-20T18:23:40-04:00",
+      "lines": 116,
+      "bytes": 3804,
+      "sha256": "e595a68a65f339c799f157866119bbcde35e2c5f7b1b5026b6dea9af2d3c5144"
+    },
+    {
+      "path": "apps/web/tests/image-scrape-preview.test.ts",
+      "last_committed_edit": "2026-02-12T18:49:43-05:00",
+      "lines": 33,
+      "bytes": 1269,
+      "sha256": "dc0389530bc0f53ef1786a8890226336d44d4089ebc21720e0418080717936a3"
+    },
+    {
+      "path": "apps/web/tests/image-url-candidates.test.ts",
+      "last_committed_edit": "2026-03-23T20:50:48-04:00",
+      "lines": 164,
+      "bytes": 7221,
+      "sha256": "ccc6e35b3dacd6360fb47aaca8caeca7e2d0572df3209f46078ddc9853fe5e43"
+    },
+    {
+      "path": "apps/web/tests/instagram-catalog-backfill-mockup-page.test.tsx",
+      "last_committed_edit": "2026-07-05T20:56:16-04:00",
+      "lines": 372,
+      "bytes": 12560,
+      "sha256": "cb2f8d1c1a9910c1105b282db6f2ab5d12a75818159ed2e1f3307faa1788ccd3"
+    },
+    {
+      "path": "apps/web/tests/interactive-debate-speaking-time-chart.test.tsx",
+      "last_committed_edit": "2026-04-15T05:35:14-04:00",
+      "lines": 32,
+      "bytes": 1396,
+      "sha256": "b81db3c2996ee75a36da7aa12724e1c3352796f5da0f560127d6182bf2e26377"
+    },
+    {
+      "path": "apps/web/tests/interactive-debate-topic-bubble-chart.test.tsx",
+      "last_committed_edit": "2026-04-15T05:35:14-04:00",
+      "lines": 37,
+      "bytes": 1608,
+      "sha256": "248deb6535184d5f7a29652f309c0f5ac093896053b2552cdccf35d4cf43ccc9"
+    },
+    {
+      "path": "apps/web/tests/internal-admin-auth.test.ts",
+      "last_committed_edit": "2026-06-10T11:17:17-04:00",
+      "lines": 162,
+      "bytes": 5810,
+      "sha256": "a5a0ebca5f937fe342c7fac043bb33d2508042ab66dcd66bf383e5f5b4f1c3d9"
+    },
+    {
+      "path": "apps/web/tests/is-question-complete.test.ts",
+      "last_committed_edit": "2026-02-19T10:16:08-05:00",
+      "lines": 154,
+      "bytes": 4592,
+      "sha256": "eb75974ea4da1066ffbf969cd0be9afae4da4a4330238247774377ed3a131cb6"
+    },
+    {
+      "path": "apps/web/tests/job-live-counts.test.ts",
+      "last_committed_edit": "2026-04-01T17:13:13-04:00",
+      "lines": 114,
+      "bytes": 2593,
+      "sha256": "1be38ad7de07c05e5b703a37b8f5ba3e206c6e7f34e8f36f02f01b17d92adf6a"
+    },
+    {
+      "path": "apps/web/tests/matrix-likert-input.test.tsx",
+      "last_committed_edit": "2026-03-16T15:10:07-04:00",
+      "lines": 339,
+      "bytes": 11105,
+      "sha256": "debee85f11bd1ede7acf9f351d2de7e3452f12b5d864eb5b17d204e7da15670f"
+    },
+    {
+      "path": "apps/web/tests/media-asset-variants-proxy-route.test.ts",
+      "last_committed_edit": "2026-05-20T18:23:40-04:00",
+      "lines": 178,
+      "bytes": 6783,
+      "sha256": "54ff00125397759b626b0ec16612b33bbda49cdc811b4b9824d3da45402f9639"
+    },
+    {
+      "path": "apps/web/tests/media-link-context-route.test.ts",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 120,
+      "bytes": 3820,
+      "sha256": "963c54e83181ae8ffeeeb13ab7f4c702d80b2eecf93dff0eb4b3f19ee7ee7a04"
+    },
+    {
+      "path": "apps/web/tests/multi-select-input.test.tsx",
+      "last_committed_edit": "2026-02-19T10:16:08-05:00",
+      "lines": 125,
+      "bytes": 3430,
+      "sha256": "63cbc041fb4e54751ed4b37aea7fddd2f2d2f0c84fe0d0ca01e4f785cde639ee"
+    },
+    {
+      "path": "apps/web/tests/networks-overrides-secondary-load-wiring.test.ts",
+      "last_committed_edit": "2026-03-31T18:21:25-04:00",
+      "lines": 14,
+      "bytes": 679,
+      "sha256": "70813ba338ae20e9083314a5ef692c7ab663b714af74716b0ff13a3e8d6e052a"
+    },
+    {
+      "path": "apps/web/tests/networks-streaming-detail-route.test.ts",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 223,
+      "bytes": 7362,
+      "sha256": "b127f890a6358157e29adb85a342a9b89762f9d9f60827ca83679d831cb74b6e"
+    },
+    {
+      "path": "apps/web/tests/networks-streaming-overrides-route.test.ts",
+      "last_committed_edit": "2026-04-06T20:57:34-04:00",
+      "lines": 156,
+      "bytes": 6219,
+      "sha256": "593e685484a42f79b4ef2ab538fb48fdc53ec548b9709625c731cae1ad1e54e1"
+    },
+    {
+      "path": "apps/web/tests/networks-streaming-summary-route-cache-dedupe.test.ts",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 104,
+      "bytes": 3818,
+      "sha256": "8bd8994b750e1209881087704628291ba51ef091b4f3c0cc083973b49a0898a3"
+    },
+    {
+      "path": "apps/web/tests/networks-streaming-summary-route.test.ts",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 145,
+      "bytes": 5652,
+      "sha256": "cfa633202912dc62ce88918fdc4ee57d45ce84c4b614e207735c24a746dbac3e"
+    },
+    {
+      "path": "apps/web/tests/networks-streaming-sync-proxy-route.test.ts",
+      "last_committed_edit": "2026-04-06T20:57:34-04:00",
+      "lines": 181,
+      "bytes": 6299,
+      "sha256": "2e08ed32337740cce06e4f11531cf127b6542fd0bd87075428f90c8c6a2cc4b1"
+    },
+    {
+      "path": "apps/web/tests/networks-summary-polling-wiring.test.ts",
+      "last_committed_edit": "2026-03-26T13:31:56-04:00",
+      "lines": 14,
+      "bytes": 647,
+      "sha256": "98743933ca403085173bceb946300ec9a46c5eed44e5a933e83b40c1baf6018e"
+    },
+    {
+      "path": "apps/web/tests/no-runtime-ddl.test.ts",
+      "last_committed_edit": "2026-04-28T05:44:25-04:00",
+      "lines": 128,
+      "bytes": 4356,
+      "sha256": "b69876a3f771246e183fd8560f7bdc59b9beb3f86b681e8b93921f3318865c25"
+    },
+    {
+      "path": "apps/web/tests/normalized-survey-export-route.test.ts",
+      "last_committed_edit": "2026-02-12T18:49:43-05:00",
+      "lines": 168,
+      "bytes": 6141,
+      "sha256": "246ef490f303113fe9ececd56e6542dd2636d9edae7d36214667ede5bca9b96c"
+    },
+    {
+      "path": "apps/web/tests/normalized-survey-play-continue.test.tsx",
+      "last_committed_edit": "2026-02-24T21:16:24-05:00",
+      "lines": 193,
+      "bytes": 5471,
+      "sha256": "74cb9bee89f4947e5696d1e956588a97eeeb1503b7af47062b71027c269afd69"
+    },
+    {
+      "path": "apps/web/tests/nyt-games-media-assets.test.ts",
+      "last_committed_edit": "2026-04-01T17:13:13-04:00",
+      "lines": 81,
+      "bytes": 3441,
+      "sha256": "6e654169c574f6ccec800ffae753d5a3ea6382570c844431f18c0efefa2d8e87"
+    },
+    {
+      "path": "apps/web/tests/nyt-games-preview-shell.test.tsx",
+      "last_committed_edit": "2026-04-02T05:00:35-04:00",
+      "lines": 98,
+      "bytes": 4106,
+      "sha256": "ba525c56b34f74480c558e5fc3b120b0f100bd75963ff3b0ebd7271150598fee"
+    },
+    {
+      "path": "apps/web/tests/nyt-homepage-design-docs.test.tsx",
+      "last_committed_edit": "2026-04-21T10:58:35-04:00",
+      "lines": 69,
+      "bytes": 3180,
+      "sha256": "b6c6546d5ac0c1599ab8328fd86fdacc6c7ac432102deecdf2e4e12dfbdadc8d"
+    },
+    {
+      "path": "apps/web/tests/nyt-homepage-preview-route.test.ts",
+      "last_committed_edit": "2026-08-14T01:07:23-04:00",
+      "lines": 350,
+      "bytes": 11999,
+      "sha256": "bb25f687df27b7be494b3aac06c99f6c6737a744c2aff0beebf0acccd07e9d69"
+    },
+    {
+      "path": "apps/web/tests/packet2d-admin-adapters.test.ts",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 275,
+      "bytes": 8129,
+      "sha256": "f831a8c09c38d7569e553caef1280fc0b0744167b9d663a78e89e0032bf49603"
+    },
+    {
+      "path": "apps/web/tests/packet2d-image-media-routes.test.ts",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 215,
+      "bytes": 6768,
+      "sha256": "fad61cd53538179ffbce098fe5147624af8d49544b1b1e083d383e40e6d16371"
+    },
+    {
+      "path": "apps/web/tests/paginated-gallery-fetch.test.ts",
+      "last_committed_edit": "2026-05-06T01:48:14-04:00",
+      "lines": 132,
+      "bytes": 4168,
+      "sha256": "3e13ff106559c657e0a576654004a54d067fdb87548ee0701978af34aed98ad0"
+    },
+    {
+      "path": "apps/web/tests/palette-export-panel.test.tsx",
+      "last_committed_edit": "2026-05-20T18:23:40-04:00",
+      "lines": 55,
+      "bytes": 1592,
+      "sha256": "1fd8944aead3b81f514eb70cc6da113121c1b72ad156ca1dc4892dd94b2d0d20"
+    },
+    {
+      "path": "apps/web/tests/palette-library-route.test.ts",
+      "last_committed_edit": "2026-02-26T13:15:52-05:00",
+      "lines": 119,
+      "bytes": 4069,
+      "sha256": "79e9c1a9b70eb21480fbd6b6a42728c3c7f6b0093450de2030474a53134f75fa"
+    },
+    {
+      "path": "apps/web/tests/people-home-page.runtime.test.tsx",
+      "last_committed_edit": "2026-03-11T19:37:32-04:00",
+      "lines": 163,
+      "bytes": 5543,
+      "sha256": "e29977777048e0dcd757afd32d3050d6206c57b128ba4b5c47ce07e33d3ef804"
+    },
+    {
+      "path": "apps/web/tests/people-home-route.test.ts",
+      "last_committed_edit": "2026-04-21T10:58:35-04:00",
+      "lines": 108,
+      "bytes": 3722,
+      "sha256": "c54c634ccfa6f9278b8e703fa2e905001c083eb58aca9b6c102dcd95167dfa2b"
+    },
+    {
+      "path": "apps/web/tests/people-page-tabs-runtime.test.tsx",
+      "last_committed_edit": "2026-06-09T23:51:27-04:00",
+      "lines": 1097,
+      "bytes": 38341,
+      "sha256": "b4c0165bf7de040b9c89e4f77d6f1e679148e59bc33c92b868417fd2600f7934"
+    },
+    {
+      "path": "apps/web/tests/person-autocrop-wiring.test.ts",
+      "last_committed_edit": "2026-03-13T18:12:48-04:00",
+      "lines": 31,
+      "bytes": 1335,
+      "sha256": "4c3b82c566859738e67ad6a08f4ee5f944a09c16b766566bea7f830a437b4280"
+    },
+    {
+      "path": "apps/web/tests/person-cover-photo-route.test.ts",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 327,
+      "bytes": 10873,
+      "sha256": "c09447c830e282d5075242b25105cb38ae8e87c37baf5dabb4dd9c3a94816203"
+    },
+    {
+      "path": "apps/web/tests/person-cover-photo-timeout-wiring.test.ts",
+      "last_committed_edit": "2026-04-02T05:00:35-04:00",
+      "lines": 20,
+      "bytes": 930,
+      "sha256": "bfc1ea1f96ab69cb9f550a7d76c5db6d4b5333ece67cbfc4dc4d50af321307ab"
+    },
+    {
+      "path": "apps/web/tests/person-cover-photos-repository.test.ts",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 187,
+      "bytes": 5784,
+      "sha256": "bc76521ffee809cd90cdd9534f46e926e019bb9c27e1f0d0037df5db9e414269"
+    },
+    {
+      "path": "apps/web/tests/person-credits-route.test.ts",
+      "last_committed_edit": "2026-04-01T17:13:13-04:00",
+      "lines": 465,
+      "bytes": 15726,
+      "sha256": "40de1e270993d08a6f7e098b0c1c224c4aa6f58f1fcd88e17b74fd3d500cc902"
+    },
+    {
+      "path": "apps/web/tests/person-credits-show-scope-wiring.test.ts",
+      "last_committed_edit": "2026-04-02T05:00:35-04:00",
+      "lines": 43,
+      "bytes": 2208,
+      "sha256": "545e254a63ba108c1a32429d02bcb65e905bb876bf7873aca2273cf8bf561045"
+    },
+    {
+      "path": "apps/web/tests/person-external-ids-route.test.ts",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 217,
+      "bytes": 6600,
+      "sha256": "3dc2ca79b5ab2e5e6608b8217a82bcdc67aaa307de1c2f59b8d155a8fad7eb9b"
+    },
+    {
+      "path": "apps/web/tests/person-external-ids.test.ts",
+      "last_committed_edit": "2026-04-22T17:50:20-04:00",
+      "lines": 166,
+      "bytes": 5914,
+      "sha256": "3f979ffa0927ce4f1b125bec7c2f407e1d2f52072f65af065ea0078437b4eb07"
+    },
+    {
+      "path": "apps/web/tests/person-fandom-import-routes.test.ts",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 137,
+      "bytes": 5290,
+      "sha256": "7ac8135dbf8a327995da19998ad85e60680baab5e2611563612840130c24adfd"
+    },
+    {
+      "path": "apps/web/tests/person-fandom-route-proxy.test.ts",
+      "last_committed_edit": "2026-04-06T21:17:49-04:00",
+      "lines": 90,
+      "bytes": 3335,
+      "sha256": "a7396894f10f3d2916344c9d4dd368b2604752f24963647778be6d40832da0ba"
+    },
+    {
+      "path": "apps/web/tests/person-fandom-route.test.ts",
+      "last_committed_edit": "2026-04-06T21:17:49-04:00",
+      "lines": 59,
+      "bytes": 2029,
+      "sha256": "ac707ea15d186fcd060634b20b06fb45aec996e58f1172640678cd1eb701f176"
+    },
+    {
+      "path": "apps/web/tests/person-gallery-broken-filter.test.ts",
+      "last_committed_edit": "2026-03-31T16:33:40-04:00",
+      "lines": 157,
+      "bytes": 5116,
+      "sha256": "9ce9d9bc0a84bbaf35ef867787ca4bfaa6a4a4a86935ef38bff6cec90b0fb287"
+    },
+    {
+      "path": "apps/web/tests/person-gallery-broken-toggle.test.ts",
+      "last_committed_edit": "2026-03-13T18:12:48-04:00",
+      "lines": 19,
+      "bytes": 806,
+      "sha256": "d1816a66615a0dc24018a3cd0bd77339b870d4f0802718943966cabc17faf2aa"
+    },
+    {
+      "path": "apps/web/tests/person-gallery-detail-priority.test.ts",
+      "last_committed_edit": "2026-03-23T20:50:48-04:00",
+      "lines": 51,
+      "bytes": 1870,
+      "sha256": "21fc312625e68bf2d6b1e60f8a7637e0f11948b918c8ecca6be7722a82f154a3"
+    },
+    {
+      "path": "apps/web/tests/person-gallery-media-view.test.ts",
+      "last_committed_edit": "2026-04-09T08:48:36-04:00",
+      "lines": 1166,
+      "bytes": 41320,
+      "sha256": "2f8fdf543788d86bba00eb4e8abf4e7f11de8fb5ed59ef698227f25267d4a273"
+    },
+    {
+      "path": "apps/web/tests/person-gallery-route-cache-dedupe.test.ts",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 230,
+      "bytes": 7839,
+      "sha256": "95e6e8f93c44eaf2ad374bdae8b73dbc677e354ce78fcf4982bcb20d4704cb88"
+    },
+    {
+      "path": "apps/web/tests/person-gallery-thumbnail-wiring.test.ts",
+      "last_committed_edit": "2026-03-13T18:12:48-04:00",
+      "lines": 36,
+      "bytes": 1490,
+      "sha256": "8e2561e7d3af0d45c2ab08a834f9686602e54356dec8b8e19356a98b51c81df5"
+    },
+    {
+      "path": "apps/web/tests/person-getty-enrichment-route.test.ts",
+      "last_committed_edit": "2026-04-06T21:17:49-04:00",
+      "lines": 87,
+      "bytes": 3370,
+      "sha256": "a204ef1664491aed7606e4e68c72e5eff79a4649c872348c72ae1893c6e00dde"
+    },
+    {
+      "path": "apps/web/tests/person-link-images.test.ts",
+      "last_committed_edit": "2026-04-06T20:57:34-04:00",
+      "lines": 44,
+      "bytes": 1370,
+      "sha256": "a1e4ec697b6a1eb090c0112a7aae0005401ee9497a919e92354591e331ed70b2"
+    },
+    {
+      "path": "apps/web/tests/person-page-settings-controller.test.tsx",
+      "last_committed_edit": "2026-04-13T08:19:21-04:00",
+      "lines": 212,
+      "bytes": 7237,
+      "sha256": "85862042ba3d1bf7167a14709e8587f13ae5349249943a424835a1e0c4b4fbfa"
+    },
+    {
+      "path": "apps/web/tests/person-photo-dedupe-quality.test.ts",
+      "last_committed_edit": "2026-03-01T23:11:27-05:00",
+      "lines": 100,
+      "bytes": 3396,
+      "sha256": "1b313337f7cfb1e8be50a6eab2de70242819a7596a57c4e3ccd4002f1f159909"
+    },
+    {
+      "path": "apps/web/tests/person-photo-utils.test.ts",
+      "last_committed_edit": "2026-03-03T11:16:49-05:00",
+      "lines": 217,
+      "bytes": 7371,
+      "sha256": "ebc8bab02b765fcd1fba1e700acb586b8f7fd5ae60f3c2f431262b0c66b4ba1a"
+    },
+    {
+      "path": "apps/web/tests/person-rankings-input.test.tsx",
+      "last_committed_edit": "2026-02-18T23:49:54-05:00",
+      "lines": 75,
+      "bytes": 1960,
+      "sha256": "480e1b2296e8e6f0982752cd51255d0798b00c2032332d5a67e2a8a601d7c34d"
+    },
+    {
+      "path": "apps/web/tests/person-refresh-images-stream-route.test.ts",
+      "last_committed_edit": "2026-07-13T17:51:26-04:00",
+      "lines": 554,
+      "bytes": 20534,
+      "sha256": "08471c635bd3a0e88e216e037a097bd60eedaf1e87a6c0a0a7a8b4d16ffd225c"
+    },
+    {
+      "path": "apps/web/tests/person-refresh-profile-stream-route.test.ts",
+      "last_committed_edit": "2026-04-01T17:13:13-04:00",
+      "lines": 74,
+      "bytes": 2929,
+      "sha256": "84433788b82f807df68192fb47f27a520ea34c36821e39ed5188524783cb9403"
+    },
+    {
+      "path": "apps/web/tests/person-refresh-progress.test.ts",
+      "last_committed_edit": "2026-03-26T13:31:56-04:00",
+      "lines": 596,
+      "bytes": 20957,
+      "sha256": "8bb65338b0a805878e9ee5bfae104726e279a3e1127606d667cce0c48d8078c0"
+    },
+    {
+      "path": "apps/web/tests/person-refresh-request-id-wiring.test.ts",
+      "last_committed_edit": "2026-04-22T17:50:20-04:00",
+      "lines": 120,
+      "bytes": 7054,
+      "sha256": "128231084b9bf4acdef2640df849c1e1d342d1d9a6ed392eb3264e718790d99f"
+    },
+    {
+      "path": "apps/web/tests/person-refresh-summary.test.ts",
+      "last_committed_edit": "2026-03-01T23:11:27-05:00",
+      "lines": 61,
+      "bytes": 1978,
+      "sha256": "f68aae031711835d50d0e3d016797b2fb469c4224e4fa5d940fb6308ac3276ec"
+    },
+    {
+      "path": "apps/web/tests/person-reprocess-images-stream-route.test.ts",
+      "last_committed_edit": "2026-04-06T21:17:49-04:00",
+      "lines": 326,
+      "bytes": 11727,
+      "sha256": "716cfe5081799c38e66ec44a49b21fb9a3c129d0b6c3e2643a96945d038a4005"
+    },
+    {
+      "path": "apps/web/tests/person-resolve-slug-route-parity.test.ts",
+      "last_committed_edit": "2026-03-26T13:31:56-04:00",
+      "lines": 68,
+      "bytes": 2132,
+      "sha256": "fc39666482ea1fd07cce6f7fcb3e9cc66afd78364c9f4c857c8d01ff00c21834"
+    },
+    {
+      "path": "apps/web/tests/person-route-parity.test.ts",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 124,
+      "bytes": 4625,
+      "sha256": "341e599502d332aae13e339ce96bd6d387da5a00859ef3e033ca57ba57fff009"
+    },
+    {
+      "path": "apps/web/tests/person-thumbnail-crop-route.test.ts",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 181,
+      "bytes": 6121,
+      "sha256": "520e041290cce02eebbaeedc74b9635f837b6154c9cf7fd9ffd348f0f876967b"
+    },
+    {
+      "path": "apps/web/tests/person-thumbnail-crops-repository.test.ts",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 170,
+      "bytes": 4843,
+      "sha256": "27e4ab416e564baced60b022633c10004f839b0c5c5c19d91f777dbade3040fe"
+    },
+    {
+      "path": "apps/web/tests/photo-metadata.test.ts",
+      "last_committed_edit": "2026-04-09T08:48:36-04:00",
+      "lines": 1253,
+      "bytes": 38989,
+      "sha256": "38634f4b4a4a5ba766f250d47a1c341f15a8c723d969dff7dfb653f96bde7e1d"
+    },
+    {
+      "path": "apps/web/tests/poster-rankings-input.test.tsx",
+      "last_committed_edit": "2026-02-18T23:49:54-05:00",
+      "lines": 72,
+      "bytes": 1902,
+      "sha256": "9ef3b0e8498f9156033b481f7971d7e6b7179f7b5b885458b0383e7e6af954c5"
+    },
+    {
+      "path": "apps/web/tests/postgres-connection-string-resolution.test.ts",
+      "last_committed_edit": "2026-07-05T20:56:16-04:00",
+      "lines": 432,
+      "bytes": 17080,
+      "sha256": "dfb43efe268a2e3f10d15988b9fe17e66df4298ece6bacad51da4359dbbf724a"
+    },
+    {
+      "path": "apps/web/tests/prefixed-pathname.test.ts",
+      "last_committed_edit": "2026-07-05T20:56:16-04:00",
+      "lines": 20,
+      "bytes": 910,
+      "sha256": "2eb58f30d1242bb83634ca589d10d040aebcc07d82bd9a6b9261511ddc4415bb"
+    },
+    {
+      "path": "apps/web/tests/profile-page.test.tsx",
+      "last_committed_edit": "2026-05-20T18:23:40-04:00",
+      "lines": 103,
+      "bytes": 3349,
+      "sha256": "7a79ee91af461ae81fab16953ff19c0f173c940e576f21519108aaabb2a6d9e6"
+    },
+    {
+      "path": "apps/web/tests/profile.test.ts",
+      "last_committed_edit": "2026-02-12T18:49:43-05:00",
+      "lines": 26,
+      "bytes": 901,
+      "sha256": "cc46ae58353ebf7a608f79dabc733c8bcc6844f58478ef3be5f59340aa7cb38d"
+    },
+    {
+      "path": "apps/web/tests/proxy-person-showid.test.ts",
+      "last_committed_edit": "2026-03-23T20:50:48-04:00",
+      "lines": 19,
+      "bytes": 682,
+      "sha256": "3494c6acb74d8f906766407208df50567d8949c041fc844c773139ca4cb27923"
+    },
+    {
+      "path": "apps/web/tests/public-route-rewrites.test.ts",
+      "last_committed_edit": "2026-03-20T03:06:04-04:00",
+      "lines": 19,
+      "bytes": 757,
+      "sha256": "dfd720518d69dc73ac6ad4f637af4d6f8c6d5b410f33378b24fd3f5a46e3086e"
+    },
+    {
+      "path": "apps/web/tests/question-renderer-rankings.test.tsx",
+      "last_committed_edit": "2026-02-27T22:04:23-05:00",
+      "lines": 307,
+      "bytes": 9946,
+      "sha256": "2f917e9062d6158ed7303f85417df402e408c1a6ec448421b1fe7d294e59249c"
+    },
+    {
+      "path": "apps/web/tests/questions-tab-ranking-labels.test.tsx",
+      "last_committed_edit": "2026-02-24T21:16:24-05:00",
+      "lines": 61,
+      "bytes": 2572,
+      "sha256": "0d0fca71a9e858284750a7887b58952db6b446f15baf3fcba6b846559ca99dd5"
+    },
+    {
+      "path": "apps/web/tests/rank-order-input.test.tsx",
+      "last_committed_edit": "2026-03-13T17:25:42-04:00",
+      "lines": 231,
+      "bytes": 6641,
+      "sha256": "e55473ad99c10d7c379006db875740209a14a9fa29c78e0dcde6107d26aea9eb"
+    },
+    {
+      "path": "apps/web/tests/rank-text-fields-input.test.tsx",
+      "last_committed_edit": "2026-02-24T21:16:24-05:00",
+      "lines": 224,
+      "bytes": 6072,
+      "sha256": "836d270f6a4a9a410d54b35e3a16989ba1c5c3795f7c05e8dc2d8a1956f08cc4"
+    },
+    {
+      "path": "apps/web/tests/recent-people-route.test.ts",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 324,
+      "bytes": 10361,
+      "sha256": "40478e723246bda690aac51a1077e1d1e21922637a5f4aa6fa79ff3e4118d220"
+    },
+    {
+      "path": "apps/web/tests/reddit-analytics-posts-route.test.ts",
+      "last_committed_edit": "2026-03-26T13:31:56-04:00",
+      "lines": 102,
+      "bytes": 3770,
+      "sha256": "e5e2b99a705ee680c84fc1eaa0da83d070410e6691f8698b5a7b077da6a2d3a1"
+    },
+    {
+      "path": "apps/web/tests/reddit-analytics-summary-route.test.ts",
+      "last_committed_edit": "2026-03-26T13:31:56-04:00",
+      "lines": 101,
+      "bytes": 3535,
+      "sha256": "44456bd2753b2db6c7d88afa6247083cbb0d46a8ae52acc5d23c2e272ad4f006"
+    },
+    {
+      "path": "apps/web/tests/reddit-communities-route.test.ts",
+      "last_committed_edit": "2026-04-09T22:36:01-04:00",
+      "lines": 333,
+      "bytes": 11763,
+      "sha256": "30a8c717dba9f4321ccdad36a57889e532f1e98a34edb8aa884335788fa40f27"
+    },
+    {
+      "path": "apps/web/tests/reddit-community-discover-route.test.ts",
+      "last_committed_edit": "2026-03-17T22:41:21-04:00",
+      "lines": 497,
+      "bytes": 19225,
+      "sha256": "391545d9b3df2cc81e444603b81b3d658112beb0e859de11fbc869e00d73c97d"
+    },
+    {
+      "path": "apps/web/tests/reddit-community-episode-refresh-route.test.ts",
+      "last_committed_edit": "2026-05-20T18:23:40-04:00",
+      "lines": 1092,
+      "bytes": 39027,
+      "sha256": "f9ae61de3190a5c6300ac7285bf1e61cca23492e88eca9c19973ad3aa5efcc57"
+    },
+    {
+      "path": "apps/web/tests/reddit-community-episode-save-route.test.ts",
+      "last_committed_edit": "2026-05-20T18:23:40-04:00",
+      "lines": 299,
+      "bytes": 10330,
+      "sha256": "4830744a9e85df99c47dc180b59e8438f61d83dc1f52a54d52255f560474885d"
+    },
+    {
+      "path": "apps/web/tests/reddit-community-flairs-refresh-route.test.ts",
+      "last_committed_edit": "2026-05-20T18:23:40-04:00",
+      "lines": 157,
+      "bytes": 5285,
+      "sha256": "4df1d523b7f468476b2a80eecc3eb2806edf5d806fa031b582a1fe9f78b25ec2"
+    },
+    {
+      "path": "apps/web/tests/reddit-community-post-details-route.test.ts",
+      "last_committed_edit": "2026-03-26T13:31:56-04:00",
+      "lines": 115,
+      "bytes": 4110,
+      "sha256": "b28bae14c8f8d7e692300ba29987e37dba018b166713191d69b91d694a6fc918"
+    },
+    {
+      "path": "apps/web/tests/reddit-community-post-resolve-route.test.ts",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 146,
+      "bytes": 5154,
+      "sha256": "c5031fff10cf144f05d59248aec7195924011ea846619c3fe01bb318dbf8a25e"
+    },
+    {
+      "path": "apps/web/tests/reddit-community-route.test.ts",
+      "last_committed_edit": "2026-04-13T08:59:52-04:00",
+      "lines": 514,
+      "bytes": 17610,
+      "sha256": "b08f0ff727435c2de1e8add2fb0d1215210bf81ab05272ab58adb5187cdb9ee9"
+    },
+    {
+      "path": "apps/web/tests/reddit-community-stored-post-counts-route.test.ts",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 154,
+      "bytes": 5068,
+      "sha256": "443b09e0450d76241eaa80afb3c759c7257992a3cd0c52adda47eaaefe2e640b"
+    },
+    {
+      "path": "apps/web/tests/reddit-community-stored-posts-route.test.ts",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 146,
+      "bytes": 4953,
+      "sha256": "92661410e904925e485bcaecc1657da230d16bc8a8ce8fe1a28b990f33ccd052"
+    },
+    {
+      "path": "apps/web/tests/reddit-dashboard-page.test.tsx",
+      "last_committed_edit": "2026-04-21T10:58:35-04:00",
+      "lines": 104,
+      "bytes": 3082,
+      "sha256": "cde0330f0f4f8ce7cde4412d579e1bca44ad23cdf916bb33f92fe39c8f15e7de"
+    },
+    {
+      "path": "apps/web/tests/reddit-discovery-service.test.ts",
+      "last_committed_edit": "2026-05-20T18:23:40-04:00",
+      "lines": 1578,
+      "bytes": 59440,
+      "sha256": "5567a047cfca6458a1be05c2fa4cc9cb371782d311ab3ca16e17bbbaa31c45ed"
+    },
+    {
+      "path": "apps/web/tests/reddit-flairs-service.test.ts",
+      "last_committed_edit": "2026-03-03T11:16:49-05:00",
+      "lines": 134,
+      "bytes": 4543,
+      "sha256": "fec066c80d4bec4b640f4664c2156717fc28ca6214f6a73d3288f7c37e637ddd"
+    },
+    {
+      "path": "apps/web/tests/reddit-post-details-page.test.tsx",
+      "last_committed_edit": "2026-03-11T19:37:32-04:00",
+      "lines": 212,
+      "bytes": 6589,
+      "sha256": "3b4fc5ee412a35d5db623182fd17879f2921684996714bbdf99d3e9fd4a925be"
+    },
+    {
+      "path": "apps/web/tests/reddit-runs-backfill-route.test.ts",
+      "last_committed_edit": "2026-03-23T20:50:48-04:00",
+      "lines": 126,
+      "bytes": 4272,
+      "sha256": "28eb263b4c9150b4d3e01cd74cf655eb2b4e10d0bf3ffd027bd519a3fe56229f"
+    },
+    {
+      "path": "apps/web/tests/reddit-runs-route.test.ts",
+      "last_committed_edit": "2026-03-05T13:17:53-05:00",
+      "lines": 72,
+      "bytes": 2628,
+      "sha256": "588dbd6c54ce4942589f8016ebf78543289fb14d6dffec10fd17567e9a3cafdd"
+    },
+    {
+      "path": "apps/web/tests/reddit-sources-manager-backfill-polling-wiring.test.ts",
+      "last_committed_edit": "2026-04-13T08:19:21-04:00",
+      "lines": 18,
+      "bytes": 933,
+      "sha256": "94280e26c54e0ecadd3fa2529382d4376ac94b46531356a4bf79ec4dcf380aeb"
+    },
+    {
+      "path": "apps/web/tests/reddit-sources-manager.test.tsx",
+      "last_committed_edit": "2026-05-20T18:23:40-04:00",
+      "lines": 4493,
+      "bytes": 170502,
+      "sha256": "bacc79a4f25f15b1a7fe3a424a52104d6e4c412068663cbb5cc78f3352fbac2b"
+    },
+    {
+      "path": "apps/web/tests/reddit-sources-repository-backend.test.ts",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 289,
+      "bytes": 9291,
+      "sha256": "589096b270bc30bdb0c826f1e2ef59fef7e51e0337b956ef0a4fb4166c0496f1"
+    },
+    {
+      "path": "apps/web/tests/reddit-sources-snapshot-wiring.test.ts",
+      "last_committed_edit": "2026-06-09T23:51:27-04:00",
+      "lines": 13,
+      "bytes": 583,
+      "sha256": "6bc637d0397a4077698a167ef9f3b9c92c77e37a54fb33077aae03575bb0b9d4"
+    },
+    {
+      "path": "apps/web/tests/reddit-stable-read.test.ts",
+      "last_committed_edit": "2026-05-20T18:23:40-04:00",
+      "lines": 90,
+      "bytes": 2861,
+      "sha256": "084e8e8b8fe2fe0050f61abd3ceef4ebc9b9236ca5a2c74d68bed5c2e415fea2"
+    },
+    {
+      "path": "apps/web/tests/reddit-stable-route-cache.test.ts",
+      "last_committed_edit": "2026-06-09T23:51:27-04:00",
+      "lines": 51,
+      "bytes": 1685,
+      "sha256": "761584e7d43aea2bee58e748fd9fd0728314be2f258ab18ef714f95862d33613"
+    },
+    {
+      "path": "apps/web/tests/reddit-thread-route.test.ts",
+      "last_committed_edit": "2026-03-26T13:31:56-04:00",
+      "lines": 99,
+      "bytes": 3192,
+      "sha256": "4c01de3cddf673882ff4a99c78cc31cbe9ebdf05716b71b983df51bfd2cef17c"
+    },
+    {
+      "path": "apps/web/tests/reddit-threads-route.test.ts",
+      "last_committed_edit": "2026-03-26T13:31:56-04:00",
+      "lines": 185,
+      "bytes": 6191,
+      "sha256": "3cfb05147f571186a87d18c36a798e01d071a3c04eaf8f242f26e1364c7d02d3"
+    },
+    {
+      "path": "apps/web/tests/reddit-window-posts-page.test.tsx",
+      "last_committed_edit": "2026-08-05T11:25:41-04:00",
+      "lines": 583,
+      "bytes": 20587,
+      "sha256": "bc9012b2ffc6030112cd370d36dac08d2a3d4b6f5ebd071da6a84ce63a04ca2f"
+    },
+    {
+      "path": "apps/web/tests/refresh-log-pipeline.test.ts",
+      "last_committed_edit": "2026-04-01T17:13:13-04:00",
+      "lines": 132,
+      "bytes": 3750,
+      "sha256": "3b059ca1fa1a474081fba4ab46b31501b663203ee705987f66ce68228b83897f"
+    },
+    {
+      "path": "apps/web/tests/register.flow.test.tsx",
+      "last_committed_edit": "2026-02-12T18:49:43-05:00",
+      "lines": 86,
+      "bytes": 3073,
+      "sha256": "c065549040d7286b5ca40f6afed3a2a1166a3e8fc8260a3283f7602d9b4b6058"
+    },
+    {
+      "path": "apps/web/tests/register.validation.test.ts",
+      "last_committed_edit": "2026-02-12T18:49:43-05:00",
+      "lines": 23,
+      "bytes": 933,
+      "sha256": "87c4bbc9173a24828012103e8147a875fffc8b01f25898cb82397f475ce1d510"
+    },
+    {
+      "path": "apps/web/tests/reunion-seating-prediction-input.test.tsx",
+      "last_committed_edit": "2026-02-28T04:06:34-05:00",
+      "lines": 179,
+      "bytes": 7768,
+      "sha256": "387cca0eb5c9c1e322d435545735f480d5dca4814000e076661a6e4b0db02779"
+    },
+    {
+      "path": "apps/web/tests/run-migrations.test.ts",
+      "last_committed_edit": "2026-05-20T18:23:40-04:00",
+      "lines": 76,
+      "bytes": 2510,
+      "sha256": "5f2345d9ef1a810da5a43e46b6838a3e48a527388bbfb549d29f621e08def8cf"
+    },
+    {
+      "path": "apps/web/tests/run-session.test.ts",
+      "last_committed_edit": "2026-03-05T13:17:53-05:00",
+      "lines": 94,
+      "bytes": 2713,
+      "sha256": "eb60b542a168dd29474f1d438eed83cbc9eb030204552ea527963226905dbe52"
+    },
+    {
+      "path": "apps/web/tests/safe-next-build.test.ts",
+      "last_committed_edit": "2026-08-09T23:25:30-04:00",
+      "lines": 95,
+      "bytes": 3054,
+      "sha256": "cad1e3b89ce2d7a13bb8f1e6ffbc9cd045d7e1c5a1095a0dd12a33cdefc8b1c6"
+    },
+    {
+      "path": "apps/web/tests/season-assets-batch-jobs-stream-route.test.ts",
+      "last_committed_edit": "2026-04-06T21:17:49-04:00",
+      "lines": 106,
+      "bytes": 4046,
+      "sha256": "23eb8edfa85eb6258470e43690fbb806bc7e37a2e8b3c49a050b0f0f04f89206"
+    },
+    {
+      "path": "apps/web/tests/season-assets-route.test.ts",
+      "last_committed_edit": "2026-05-06T01:48:14-04:00",
+      "lines": 285,
+      "bytes": 9119,
+      "sha256": "ac060a41f3c154f3bab60c3118a65344ec5385c3172997216130c15194e52c5f"
+    },
+    {
+      "path": "apps/web/tests/season-autocrop-wiring.test.ts",
+      "last_committed_edit": "2026-02-24T09:09:52-05:00",
+      "lines": 29,
+      "bytes": 1127,
+      "sha256": "e2770a4257e488bc47f21316b0380a58018030d09395405530945751419a8ec1"
+    },
+    {
+      "path": "apps/web/tests/season-backdrop-routes.test.ts",
+      "last_committed_edit": "2026-03-26T13:31:56-04:00",
+      "lines": 95,
+      "bytes": 3511,
+      "sha256": "2ecdfd7f638bf4232687bd74922a8a16a46af168fc18ffeda67f9ad7673f2cce"
+    },
+    {
+      "path": "apps/web/tests/season-cast-route-fallback.test.ts",
+      "last_committed_edit": "2026-03-26T13:31:56-04:00",
+      "lines": 84,
+      "bytes": 3079,
+      "sha256": "e83ceffc8fdbc954245792c18ef79d8d7e85590e05e18081b964ddb4c1738112"
+    },
+    {
+      "path": "apps/web/tests/season-cast-survey-roles-repository.test.ts",
+      "last_committed_edit": "2026-08-05T10:25:43-04:00",
+      "lines": 167,
+      "bytes": 5382,
+      "sha256": "be48d9d458bb624ab2fe6923442d10584e79e24ced10b41ab4a2116cbd31807f"
+    },
+    {
+      "path": "apps/web/tests/season-cast-survey-route.test.ts",
+      "last_committed_edit": "2026-08-05T10:25:43-04:00",
+      "lines": 220,
+      "bytes": 7161,
+      "sha256": "a3fc629d0da10aa047bc346d17934b66ce97bb5a479a04bb0892c13431f653f6"
+    },
+    {
+      "path": "apps/web/tests/season-cast-tab-quality-wiring.test.ts",
+      "last_committed_edit": "2026-04-22T17:50:20-04:00",
+      "lines": 121,
+      "bytes": 7030,
+      "sha256": "0e2e0f920f2a4bde46724b07754dcd3f2e68033851f0be46b3bced9f286e6fb6"
+    },
+    {
+      "path": "apps/web/tests/season-episode-focus.runtime.test.tsx",
+      "last_committed_edit": "2026-03-01T23:11:27-05:00",
+      "lines": 20,
+      "bytes": 645,
+      "sha256": "0a7f11644dc05d7687801b1c028e8e32ad84c5ee60d128421a0bb85c1119bcc2"
+    },
+    {
+      "path": "apps/web/tests/season-episodes-route-parity.test.ts",
+      "last_committed_edit": "2026-07-13T17:52:05-04:00",
+      "lines": 64,
+      "bytes": 2456,
+      "sha256": "d3615f3e338ad2db28dafacd6e906e88dcf1af2220ea79feb4d0e444c92a0689"
+    },
+    {
+      "path": "apps/web/tests/season-fandom-import-routes.test.ts",
+      "last_committed_edit": "2026-04-06T21:17:49-04:00",
+      "lines": 99,
+      "bytes": 3738,
+      "sha256": "6abd0f9fba5d47b160aaa5a0e95269aaac60b44fcda464caa1b117275aedd4bc"
+    },
+    {
+      "path": "apps/web/tests/season-fandom-route-proxy.test.ts",
+      "last_committed_edit": "2026-04-06T21:17:49-04:00",
+      "lines": 53,
+      "bytes": 1865,
+      "sha256": "f5c26cc248292eeafa6d8e2bbde9bd4eb3d40eb0fa49a7bb41f3217a372382af"
+    },
+    {
+      "path": "apps/web/tests/season-gallery-batch-preflight.test.ts",
+      "last_committed_edit": "2026-02-24T13:00:58-05:00",
+      "lines": 18,
+      "bytes": 756,
+      "sha256": "657522cc7532db3a233e8aa880929823cc9240dbcf931dcfe5ea2b25ba9f49f2"
+    },
+    {
+      "path": "apps/web/tests/season-gallery-lightbox-wiring.test.ts",
+      "last_committed_edit": "2026-02-18T23:49:54-05:00",
+      "lines": 32,
+      "bytes": 1215,
+      "sha256": "bd22c0c91872efe4b57f05d73305b821053cd56d409fa9e74e4c6e14733d4336"
+    },
+    {
+      "path": "apps/web/tests/season-gallery-pagination.test.ts",
+      "last_committed_edit": "2026-05-06T01:48:14-04:00",
+      "lines": 42,
+      "bytes": 1350,
+      "sha256": "b6143cc5c0655b97b626d16cd7ee3927d152d141900f8e1190936072c13e00b3"
+    },
+    {
+      "path": "apps/web/tests/season-page-error-reset.test.tsx",
+      "last_committed_edit": "2026-02-19T10:16:08-05:00",
+      "lines": 31,
+      "bytes": 1116,
+      "sha256": "ca143e5df3eabe363f129e1dfb5960028b7956049e204db73ffb6373f7eb6a58"
+    },
+    {
+      "path": "apps/web/tests/season-refresh-request-id-wiring.test.ts",
+      "last_committed_edit": "2026-04-09T08:48:36-04:00",
+      "lines": 41,
+      "bytes": 1635,
+      "sha256": "dd01c45d1bb9dafb5def65f582dd2ba60f40a551c341a8632b14a8c57b1c3760"
+    },
+    {
+      "path": "apps/web/tests/season-route-canonicalization-wiring.test.ts",
+      "last_committed_edit": "2026-02-25T11:49:22-05:00",
+      "lines": 29,
+      "bytes": 1327,
+      "sha256": "eef9aa586ead5026f8e5a4d8fb52c7eb40c4b580357e55f46745228dd88cc344"
+    },
+    {
+      "path": "apps/web/tests/season-social-analytics-polling-wiring.test.ts",
+      "last_committed_edit": "2026-04-09T08:48:36-04:00",
+      "lines": 14,
+      "bytes": 612,
+      "sha256": "ea42a30b1bb3dc2b6bdaf4ee95f8297efcad4e928c966f57c05fbf306660c5b1"
+    },
+    {
+      "path": "apps/web/tests/season-social-analytics-section.test.tsx",
+      "last_committed_edit": "2026-07-13T17:52:45-04:00",
+      "lines": 5309,
+      "bytes": 188648,
+      "sha256": "4ae18de194a2d500bba5a46c66d3433f1cd3d4daf30c1748581cf7f14257cbc5"
+    },
+    {
+      "path": "apps/web/tests/season-social-load-resilience-wiring.test.ts",
+      "last_committed_edit": "2026-02-27T22:04:23-05:00",
+      "lines": 48,
+      "bytes": 2087,
+      "sha256": "c2e6ea9a95b35a880be6f9bdf9e19a2e99fd15c73e617834a7fb91e58e64ef95"
+    },
+    {
+      "path": "apps/web/tests/season-social-subnav-wiring.test.ts",
+      "last_committed_edit": "2026-03-13T17:25:42-04:00",
+      "lines": 44,
+      "bytes": 1752,
+      "sha256": "c0a1e032d9598481d1b18b54dd2a2056a0f55059e52e9218c62e36786f3efc5b"
+    },
+    {
+      "path": "apps/web/tests/season-social-tab.runtime.test.tsx",
+      "last_committed_edit": "2026-03-01T23:11:27-05:00",
+      "lines": 19,
+      "bytes": 778,
+      "sha256": "5774e7de3d5e8748e82e983d8fe8f35e9681baddd5ffdfa8ac626cc61ca9b0a2"
+    },
+    {
+      "path": "apps/web/tests/season-tab-alias-redirect.test.ts",
+      "last_committed_edit": "2026-03-16T15:10:07-04:00",
+      "lines": 70,
+      "bytes": 2393,
+      "sha256": "c32672a6fd0fc723400d09065b8c2d82b47b3f91e5e11f2a206e1bdff8ba2a85"
+    },
+    {
+      "path": "apps/web/tests/season-tabs-nav.runtime.test.tsx",
+      "last_committed_edit": "2026-02-24T15:09:38-05:00",
+      "lines": 57,
+      "bytes": 1740,
+      "sha256": "342ee10050eeafc26cb52001bcbe37f175facac0c80f51e2a98bf3ee79592926"
+    },
+    {
+      "path": "apps/web/tests/server-auth-adapter.test.ts",
+      "last_committed_edit": "2026-07-13T17:45:37-04:00",
+      "lines": 772,
+      "bytes": 27280,
+      "sha256": "5ac63f43f8ad8a1f7ea72c0fab0cd54dc09b16dfe1e8128f906f7bf5004eaf73"
+    },
+    {
+      "path": "apps/web/tests/server-session-sync.test.ts",
+      "last_committed_edit": "2026-08-20T19:24:11-04:00",
+      "lines": 251,
+      "bytes": 8907,
+      "sha256": "976e8cee43f8d8801a5a16612135e411f1fa539b034492efb09eff718a6f9813"
+    },
+    {
+      "path": "apps/web/tests/session-login-route.test.ts",
+      "last_committed_edit": "2026-08-12T14:50:06-04:00",
+      "lines": 98,
+      "bytes": 3440,
+      "sha256": "8538242bd050ec9bfc89a408d892092cdbf2213a70b709e963ee8fa5834b6b04"
+    },
+    {
+      "path": "apps/web/tests/shared-env-contract.test.ts",
+      "last_committed_edit": "2026-07-05T20:56:16-04:00",
+      "lines": 88,
+      "bytes": 3786,
+      "sha256": "67ffb291c06a6e57c9a73cd3a77c0b5d2cd273b26eeba6443581951918e66463"
+    },
+    {
+      "path": "apps/web/tests/shared-live-resource-polling.test.tsx",
+      "last_committed_edit": "2026-07-05T20:56:16-04:00",
+      "lines": 314,
+      "bytes": 9201,
+      "sha256": "b4767598b5aeb46fae5b674a8259024348e224452eb0c7ad99094b309e514621"
+    },
+    {
+      "path": "apps/web/tests/show-admin-routes.test.ts",
+      "last_committed_edit": "2026-07-05T20:56:16-04:00",
+      "lines": 793,
+      "bytes": 24918,
+      "sha256": "a5037464287b410d06c8d34df66a1115dea3b62b2cc5deab1a674e60f8200334"
+    },
+    {
+      "path": "apps/web/tests/show-assets-batch-jobs-stream-route.test.ts",
+      "last_committed_edit": "2026-04-06T21:17:49-04:00",
+      "lines": 105,
+      "bytes": 4031,
+      "sha256": "9552f73e7e1449838d9530e9d23746a4c712ba7e79dfe7546a7179200d207523"
+    },
+    {
+      "path": "apps/web/tests/show-assets-image-sections.runtime.test.tsx",
+      "last_committed_edit": "2026-02-26T13:15:52-05:00",
+      "lines": 115,
+      "bytes": 3860,
+      "sha256": "8dc1f55d7dbb4cc4125206372a408d11f58d5da281d737b347cdb9e6282b3719"
+    },
+    {
+      "path": "apps/web/tests/show-assets-route.test.ts",
+      "last_committed_edit": "2026-07-13T17:52:05-04:00",
+      "lines": 305,
+      "bytes": 10141,
+      "sha256": "633121afeb15bb8be8a00563d31cb17f833297535746ca187823ce287bb73995"
+    },
+    {
+      "path": "apps/web/tests/show-assets-tab-wiring.test.ts",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 47,
+      "bytes": 2372,
+      "sha256": "fbf982a5363914b8a6eabad15383b22a40301c07acc8c8c4adf71987c301f492"
+    },
+    {
+      "path": "apps/web/tests/show-assets-tab.test.tsx",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 311,
+      "bytes": 11208,
+      "sha256": "9b91893e6455f22aa47b2411a22ded92b25c238fabab2a829d2e46795930e4a5"
+    },
+    {
+      "path": "apps/web/tests/show-autocrop-wiring.test.ts",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 34,
+      "bytes": 1267,
+      "sha256": "42b676332e917ff8104a240a5f9952a9e90c93db3a4d69dd0d8b920337f49976"
+    },
+    {
+      "path": "apps/web/tests/show-batch-role-modals-wiring.test.ts",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 38,
+      "bytes": 1947,
+      "sha256": "9e1a719db79c65b37bf4cf6b67b1030a07f3d1e3cda3589b6fd9309bdf03f3bc"
+    },
+    {
+      "path": "apps/web/tests/show-batch-role-modals.test.tsx",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 154,
+      "bytes": 6563,
+      "sha256": "4148b7152264969c9f31fa5b2b6bc0ecc59f87c5c18ef1afb59a8804da9367b6"
+    },
+    {
+      "path": "apps/web/tests/show-brand-logos-section.runtime.test.tsx",
+      "last_committed_edit": "2026-03-03T11:16:49-05:00",
+      "lines": 109,
+      "bytes": 3777,
+      "sha256": "33bd14c959aec1fd14884332c66db3a2229d799ddd1bb8a0b3061e97dfeb20dd"
+    },
+    {
+      "path": "apps/web/tests/show-bravo-cast-only-preview-details.test.ts",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 36,
+      "bytes": 2094,
+      "sha256": "f119e2bf1dde0f056cf64488a17c56e7d97defdc53bf80e8827e2f138da1303d"
+    },
+    {
+      "path": "apps/web/tests/show-bravo-cast-only-wiring.test.ts",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 47,
+      "bytes": 2684,
+      "sha256": "aac6104c8c0058559aac751845c13ce637153499b37843ad5f37a1a03cd1d452"
+    },
+    {
+      "path": "apps/web/tests/show-bravo-fandom-integration-wiring.test.ts",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 29,
+      "bytes": 1496,
+      "sha256": "f610d393736d54ad997730263ad4a9e7d24c08ad2e5670200f6f52127abe2f87"
+    },
+    {
+      "path": "apps/web/tests/show-bravo-preview-stream-proxy-route.test.ts",
+      "last_committed_edit": "2026-04-06T21:17:49-04:00",
+      "lines": 160,
+      "bytes": 5834,
+      "sha256": "108f9a86624fa79ca7c3e3770fe2e396b09c140f023b63159b6c2f91cfdbf261"
+    },
+    {
+      "path": "apps/web/tests/show-bravo-sync-modal-wiring.test.ts",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 43,
+      "bytes": 1964,
+      "sha256": "3d8c87d4d45d38cf3e61ca7ecc76346c51c422ea7909dc78273aa04148da85c3"
+    },
+    {
+      "path": "apps/web/tests/show-bravo-sync-modal.test.tsx",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 281,
+      "bytes": 10029,
+      "sha256": "705c8079bbefbc847ed3672bab15e23eb16b6eed8b4cab27ce3e4711355176d0"
+    },
+    {
+      "path": "apps/web/tests/show-bravo-video-thumbnail-sync-proxy-route.test.ts",
+      "last_committed_edit": "2026-05-20T18:23:40-04:00",
+      "lines": 95,
+      "bytes": 3291,
+      "sha256": "4caf6f94b133f395556161ece904291f8925bee0cf940593cfb68fda5010daf0"
+    },
+    {
+      "path": "apps/web/tests/show-bravo-video-thumbnail-wiring.test.ts",
+      "last_committed_edit": "2026-04-09T08:48:36-04:00",
+      "lines": 43,
+      "bytes": 1457,
+      "sha256": "1387d4ecdd0c679572571cb6156273d9809e18d60fd845853b1b1c3759d19d6c"
+    },
+    {
+      "path": "apps/web/tests/show-bravo-videos-proxy-route.test.ts",
+      "last_committed_edit": "2026-05-20T18:23:40-04:00",
+      "lines": 192,
+      "bytes": 6894,
+      "sha256": "e6cf47e54b8a7873afc565c0b591111ec444f17b60653727d16953245e99cac9"
+    },
+    {
+      "path": "apps/web/tests/show-cast-lazy-loading-wiring.test.ts",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 230,
+      "bytes": 14503,
+      "sha256": "fe6b5ece95867a4a6f7391aa24781d0adc1371d0350405425daa606f924fecbd"
+    },
+    {
+      "path": "apps/web/tests/show-cast-matrix-sync-proxy-route.test.ts",
+      "last_committed_edit": "2026-05-20T18:23:40-04:00",
+      "lines": 107,
+      "bytes": 3657,
+      "sha256": "503764b2adcb709dc122a168bea30d3de93a1284bec3a1b764c3a58c7ab955fd"
+    },
+    {
+      "path": "apps/web/tests/show-cast-role-members-proxy-route.test.ts",
+      "last_committed_edit": "2026-04-06T21:17:49-04:00",
+      "lines": 149,
+      "bytes": 5318,
+      "sha256": "4e3e22f53c1b32e50677300b5bfe4f9c919fa4f7e84dee7c884c1a369ab6a141"
+    },
+    {
+      "path": "apps/web/tests/show-cast-route-default-min-episodes.test.ts",
+      "last_committed_edit": "2026-07-13T17:52:05-04:00",
+      "lines": 170,
+      "bytes": 6594,
+      "sha256": "838b4c5b1ac5c3a40e81f1c093fac981f85a314f935c417bca0abaec093c567b"
+    },
+    {
+      "path": "apps/web/tests/show-cast-tab.test.tsx",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 357,
+      "bytes": 14590,
+      "sha256": "632468a9d8d28121a1ae276882acc7c80d8cdd4d579e7c4e3f56d1a4c41009f3"
+    },
+    {
+      "path": "apps/web/tests/show-credits-view-modes.test.tsx",
+      "last_committed_edit": "2026-04-07T20:07:43-04:00",
+      "lines": 111,
+      "bytes": 4239,
+      "sha256": "cff61ed19f16070d8a7d50f661f35dd6992c4b6cf1791e7d0bf7828ca8ebd462"
+    },
+    {
+      "path": "apps/web/tests/show-detail-utilities.test.ts",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 266,
+      "bytes": 8963,
+      "sha256": "eee458ecb860050485cf8179eca13588a07f1255ec7168a40cfc738291e0f3c3"
+    },
+    {
+      "path": "apps/web/tests/show-details-form.test.ts",
+      "last_committed_edit": "2026-04-07T20:07:43-04:00",
+      "lines": 107,
+      "bytes": 3521,
+      "sha256": "8990e68a28527d3070522f4b525a2e089196ff6a1d8d6921cb513072439b9309"
+    },
+    {
+      "path": "apps/web/tests/show-featured-image-validation-route.test.ts",
+      "last_committed_edit": "2026-08-05T10:25:43-04:00",
+      "lines": 407,
+      "bytes": 12921,
+      "sha256": "ec62457dd8c344f81824996852573111b77d1f5c5bd2095ac8b79bf3bd15132f"
+    },
+    {
+      "path": "apps/web/tests/show-featured-media-selectors.runtime.test.tsx",
+      "last_committed_edit": "2026-03-11T19:37:32-04:00",
+      "lines": 102,
+      "bytes": 3348,
+      "sha256": "d95d0360862266e0bd1d68178d3c01d06fd34938aad8c82dade603eca870477f"
+    },
+    {
+      "path": "apps/web/tests/show-featured-media-selectors.test.tsx",
+      "last_committed_edit": "2026-03-16T15:10:07-04:00",
+      "lines": 54,
+      "bytes": 1779,
+      "sha256": "a3ca33c99911e2aa8cf759529abea814a7b1369ca735311544632bd7100c6281"
+    },
+    {
+      "path": "apps/web/tests/show-gallery-batch-preflight.test.ts",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 24,
+      "bytes": 957,
+      "sha256": "740a3fb33210bc5c1304e39c5a2d9b89ee14429d3f4ad13ecafe87120fe5ba47"
+    },
+    {
+      "path": "apps/web/tests/show-gallery-delete-wiring.test.ts",
+      "last_committed_edit": "2026-02-18T23:49:54-05:00",
+      "lines": 19,
+      "bytes": 772,
+      "sha256": "7006a42c47c5cde9a59b2d4eea22e5e4b675b71ff9f489cb927e75e232c14e5a"
+    },
+    {
+      "path": "apps/web/tests/show-gallery-pagination.test.ts",
+      "last_committed_edit": "2026-05-06T01:48:14-04:00",
+      "lines": 55,
+      "bytes": 1769,
+      "sha256": "9fbb7f77c1da5def50bbdb97fc7de711dca17aa19b488b936a7fc975c6af4691"
+    },
+    {
+      "path": "apps/web/tests/show-gallery-section-visibility.test.ts",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 30,
+      "bytes": 1330,
+      "sha256": "6c769770335ad2f54d78fbc8197583e038a2165a0a4b9cd06cbc92ece20bf2e3"
+    },
+    {
+      "path": "apps/web/tests/show-google-news-sync-proxy-route.test.ts",
+      "last_committed_edit": "2026-04-06T21:17:49-04:00",
+      "lines": 79,
+      "bytes": 2772,
+      "sha256": "328bc3fba950f9afc9fc869d4bf5b5e28b220c80b4aec175d2926a87a7e43fe9"
+    },
+    {
+      "path": "apps/web/tests/show-google-news-sync-status-proxy-route.test.ts",
+      "last_committed_edit": "2026-05-20T18:23:40-04:00",
+      "lines": 94,
+      "bytes": 3404,
+      "sha256": "c099daa5b68fbe5c52eec64e0af29ac3a621fb13f9e4179e5e5b8c222704136d"
+    },
+    {
+      "path": "apps/web/tests/show-health-center-modal.test.tsx",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 198,
+      "bytes": 6246,
+      "sha256": "068b6be82c652ec938ab325b0da247b3b4fbd230dab63557beeccbc2c2f0d0ac"
+    },
+    {
+      "path": "apps/web/tests/show-link-badges.test.tsx",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 62,
+      "bytes": 1972,
+      "sha256": "cb8ac0490147a9f18ed3c0398f99b7ea54a9517c0d96a58cc7962a9fa5e829e5"
+    },
+    {
+      "path": "apps/web/tests/show-link-display-model.test.ts",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 214,
+      "bytes": 7542,
+      "sha256": "0aaebea05a8a05da7301739f6b8619021407b8ebbed816ff1444b421346e66d8"
+    },
+    {
+      "path": "apps/web/tests/show-links-discover-route.test.ts",
+      "last_committed_edit": "2026-04-06T21:17:49-04:00",
+      "lines": 81,
+      "bytes": 2940,
+      "sha256": "d57abded32b2cbf3644ca343462fe426f5028886da43d16e2858027a5bfd1b5a"
+    },
+    {
+      "path": "apps/web/tests/show-links-discover-stream-route.test.ts",
+      "last_committed_edit": "2026-04-28T05:44:25-04:00",
+      "lines": 167,
+      "bytes": 6314,
+      "sha256": "f780a93f1d7f2a9de0fd12cac55d6aa18e649b42169f6999d09f7e3310e5a9ab"
+    },
+    {
+      "path": "apps/web/tests/show-links-discovery-modal-wiring.test.ts",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 37,
+      "bytes": 1885,
+      "sha256": "355e5438e10cfac6412ea31065b0f7535a4d3dd969c9c9012daaab52f3bb0fd7"
+    },
+    {
+      "path": "apps/web/tests/show-links-discovery-modal.test.tsx",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 189,
+      "bytes": 7302,
+      "sha256": "39c0dba86de159c8dfc825f337361c64d728c4b48b01f07afb8dad2ab5d90daa"
+    },
+    {
+      "path": "apps/web/tests/show-links-refresh-progress.test.ts",
+      "last_committed_edit": "2026-04-09T08:48:36-04:00",
+      "lines": 187,
+      "bytes": 6155,
+      "sha256": "8c50a91e0861317bb95e8b333bb31b46f204a9e81b282b770e0466d0c22b859c"
+    },
+    {
+      "path": "apps/web/tests/show-links-route.test.ts",
+      "last_committed_edit": "2026-05-20T18:23:40-04:00",
+      "lines": 78,
+      "bytes": 2827,
+      "sha256": "29974fb02e2fbe45545879d2563c985672b293df20150cf9e6437b74ecce34e5"
+    },
+    {
+      "path": "apps/web/tests/show-logo-featured-route.test.ts",
+      "last_committed_edit": "2026-08-05T10:25:43-04:00",
+      "lines": 156,
+      "bytes": 5291,
+      "sha256": "93a79e9536dd816fa872cfd6a79d927227f54b29d237c0f6a88e4326468d76ed"
+    },
+    {
+      "path": "apps/web/tests/show-logo-featured-utils.test.ts",
+      "last_committed_edit": "2026-02-26T13:15:52-05:00",
+      "lines": 76,
+      "bytes": 2221,
+      "sha256": "92a6506fcfe95d2152bc1f23c8883a9dd9d95113d4d7413d14cb2e8e4c7c306f"
+    },
+    {
+      "path": "apps/web/tests/show-logo-featured.test.ts",
+      "last_committed_edit": "2026-03-16T15:10:07-04:00",
+      "lines": 47,
+      "bytes": 1452,
+      "sha256": "2416207f4d7977f1963509f166a51cb527efe4582a819120d29aa1c8e2e9fe7b"
+    },
+    {
+      "path": "apps/web/tests/show-news-proxy-route.test.ts",
+      "last_committed_edit": "2026-04-06T21:17:49-04:00",
+      "lines": 86,
+      "bytes": 3199,
+      "sha256": "367ca34ea3ef062c1f08f1c58edce1f7105864021f3e44ae0ad30bc95964bfa2"
+    },
+    {
+      "path": "apps/web/tests/show-news-tab-google-wiring.test.ts",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 55,
+      "bytes": 2751,
+      "sha256": "7f1819e43cb86a14fe94db37c0193acb15af0d0b8b842306fa7ba1b59dc1dc31"
+    },
+    {
+      "path": "apps/web/tests/show-news-tab.runtime.test.tsx",
+      "last_committed_edit": "2026-04-22T18:05:28-04:00",
+      "lines": 82,
+      "bytes": 3147,
+      "sha256": "6f34a1c3547e15658030dee0e45f1461d233dcfe38830041ce82146fc26386e1"
+    },
+    {
+      "path": "apps/web/tests/show-overview-display.test.tsx",
+      "last_committed_edit": "2026-04-07T20:07:43-04:00",
+      "lines": 328,
+      "bytes": 10112,
+      "sha256": "fd68e71ec8b3d3317844b6025827501f66862469b88d1c48c6ee8e6023d3eff5"
+    },
+    {
+      "path": "apps/web/tests/show-overview-tab.test.tsx",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 262,
+      "bytes": 8646,
+      "sha256": "6672398bb72ebdd5b2203f2ff075c2cc4f9dbf2600bf543440aa98bc486137a6"
+    },
+    {
+      "path": "apps/web/tests/show-person-refresh-getty-prefetch-wiring.test.ts",
+      "last_committed_edit": "2026-04-22T17:50:20-04:00",
+      "lines": 28,
+      "bytes": 1405,
+      "sha256": "ce0709000a0bea564a9780eb034f2af1e3d4a43222bdd67fab4228bd4f2286eb"
+    },
+    {
+      "path": "apps/web/tests/show-refresh-health-center-wiring.test.ts",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 90,
+      "bytes": 5081,
+      "sha256": "cd85684d8f8c758d2e3d51daf875312f3932ab94d5f9081f4d052c3063856cd8"
+    },
+    {
+      "path": "apps/web/tests/show-refresh-photos-stream-route.test.ts",
+      "last_committed_edit": "2026-04-06T21:17:49-04:00",
+      "lines": 133,
+      "bytes": 5190,
+      "sha256": "e7267a118f9e912122dbd5001685436921e35556b9cb03c0226115ca45ba8d6a"
+    },
+    {
+      "path": "apps/web/tests/show-refresh-stream-route.test.ts",
+      "last_committed_edit": "2026-04-06T20:57:34-04:00",
+      "lines": 97,
+      "bytes": 3574,
+      "sha256": "c12f5acafbae758ed131108865ad37edf39a41881e6784eba49fcdc504627f63"
+    },
+    {
+      "path": "apps/web/tests/show-role-mutation-proxy-route.test.ts",
+      "last_committed_edit": "2026-04-06T21:17:49-04:00",
+      "lines": 125,
+      "bytes": 4512,
+      "sha256": "059047aba2aa27d5be395f1b5e392a37d855be382dac2391e006a5c86ad8c229"
+    },
+    {
+      "path": "apps/web/tests/show-roles-proxy-route.test.ts",
+      "last_committed_edit": "2026-04-06T21:17:49-04:00",
+      "lines": 137,
+      "bytes": 5092,
+      "sha256": "abefab600b96279a4986fd2f3fe94083a27a6909e9615e83d044ee45bee267bf"
+    },
+    {
+      "path": "apps/web/tests/show-route-canonicalization-wiring.test.ts",
+      "last_committed_edit": "2026-04-01T17:13:13-04:00",
+      "lines": 30,
+      "bytes": 1196,
+      "sha256": "a123bfa898736690cafd831ccafce0a0424fdeb4514f4e765301b29c9c09f517"
+    },
+    {
+      "path": "apps/web/tests/show-route-parity.test.ts",
+      "last_committed_edit": "2026-08-05T10:25:43-04:00",
+      "lines": 284,
+      "bytes": 10160,
+      "sha256": "12051ffedca8984747b1f6acbca73f6df30a5ec53393fd0062acb71f3b6b7a9e"
+    },
+    {
+      "path": "apps/web/tests/show-route-slug.test.ts",
+      "last_committed_edit": "2026-03-11T19:37:32-04:00",
+      "lines": 46,
+      "bytes": 1377,
+      "sha256": "836f409201b09af3688192e0f7807ca52f6d63a17bd1811ee7cd79c6f27fa2df"
+    },
+    {
+      "path": "apps/web/tests/show-season-cards.runtime.test.tsx",
+      "last_committed_edit": "2026-06-09T23:51:27-04:00",
+      "lines": 113,
+      "bytes": 3771,
+      "sha256": "bbeadb37cfcc3bfa0012ff6bc32aa9f7963683d57495420435e37b2a345b224b"
+    },
+    {
+      "path": "apps/web/tests/show-seasons-route-episode-signal.test.ts",
+      "last_committed_edit": "2026-07-13T17:52:10-04:00",
+      "lines": 155,
+      "bytes": 5428,
+      "sha256": "bdb8ce1e55a26168c4ef641e9eb57f55dff35b7a70de7d49e72abfc78a7826fb"
+    },
+    {
+      "path": "apps/web/tests/show-section-redirect-page.test.ts",
+      "last_committed_edit": "2026-03-16T15:10:07-04:00",
+      "lines": 54,
+      "bytes": 1717,
+      "sha256": "02f1f7a4f1bbc2520323e345d9cf618ec5fe5aa5368f71fc924345e7a7a7e070"
+    },
+    {
+      "path": "apps/web/tests/show-settings-link-display.test.ts",
+      "last_committed_edit": "2026-04-09T08:48:36-04:00",
+      "lines": 97,
+      "bytes": 3493,
+      "sha256": "ab55593976f986f55bb8b6ee7efb6eb23c05e808003ee5f6139566816a947c38"
+    },
+    {
+      "path": "apps/web/tests/show-settings-links-fandom-visibility.test.ts",
+      "last_committed_edit": "2026-04-09T08:48:36-04:00",
+      "lines": 54,
+      "bytes": 1880,
+      "sha256": "61a17af26b1449825c1cf9d8e3a4ba62528ec419bdd4db95e564a7c1367bf140"
+    },
+    {
+      "path": "apps/web/tests/show-settings-page-tabs-auth-bypass.test.tsx",
+      "last_committed_edit": "2026-04-09T08:48:36-04:00",
+      "lines": 227,
+      "bytes": 7392,
+      "sha256": "b6a220a0df45bda4475d73a8e67a778bc3da33cdd9874655439487494b92f2f4"
+    },
+    {
+      "path": "apps/web/tests/show-settings-tab-wiring.test.ts",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 51,
+      "bytes": 2724,
+      "sha256": "818ac36015d1ea3917756d0d82499c135e3926b43f86e61f4f3b0746c22eacf2"
+    },
+    {
+      "path": "apps/web/tests/show-settings-tab.test.tsx",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 318,
+      "bytes": 10617,
+      "sha256": "8ce290e43174b0cbf38494c9108fbf5fa44a71638652b9994a3b081b254a79e8"
+    },
+    {
+      "path": "apps/web/tests/show-social-load-resilience-wiring.test.ts",
+      "last_committed_edit": "2026-05-20T18:23:40-04:00",
+      "lines": 84,
+      "bytes": 4324,
+      "sha256": "9bc3bffdfcd11ba029db572a4080854617764283e6a0e4a3a8a73dc322a0e33a"
+    },
+    {
+      "path": "apps/web/tests/show-social-subnav-no-season.test.tsx",
+      "last_committed_edit": "2026-03-20T03:06:04-04:00",
+      "lines": 21,
+      "bytes": 989,
+      "sha256": "27c2bff7f210bf1add513f2d15522280b8c3f6617c650102a9a58781907008c8"
+    },
+    {
+      "path": "apps/web/tests/show-social-subnav-wiring.test.ts",
+      "last_committed_edit": "2026-03-17T22:41:21-04:00",
+      "lines": 65,
+      "bytes": 3629,
+      "sha256": "e3b8a399f5ad4a61ea74b91c5f77f310588f77905a65def4f042390b4e5d433d"
+    },
+    {
+      "path": "apps/web/tests/show-social-tab.runtime.test.tsx",
+      "last_committed_edit": "2026-03-20T03:06:04-04:00",
+      "lines": 70,
+      "bytes": 2817,
+      "sha256": "70dbf3a7ce303a7a6f8adc7461761ad5c249b755dd62c63d238a0c94f6e99898"
+    },
+    {
+      "path": "apps/web/tests/show-tabs-nav.runtime.test.tsx",
+      "last_committed_edit": "2026-02-24T15:09:38-05:00",
+      "lines": 73,
+      "bytes": 2299,
+      "sha256": "e2e6a13ef02a75a6ddc96bc38fd878706a95990818a0cec8e66aa035c0fa2730"
+    },
+    {
+      "path": "apps/web/tests/show-workspace-model.test.ts",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 168,
+      "bytes": 4566,
+      "sha256": "a150ca8131f843606911c565d7d5f24093afb10212a034c304a86b2f949182a9"
+    },
+    {
+      "path": "apps/web/tests/shows-repository-ddl-guard.test.ts",
+      "last_committed_edit": "2026-04-28T05:44:25-04:00",
+      "lines": 24,
+      "bytes": 749,
+      "sha256": "e637ddf8ea97036ff3031bda489830dd066ceff9347d684a3e55357028560958"
+    },
+    {
+      "path": "apps/web/tests/shows-route-config.test.ts",
+      "last_committed_edit": "2026-07-05T20:56:16-04:00",
+      "lines": 98,
+      "bytes": 3408,
+      "sha256": "a234fdea047a9b4096fddf045089ade0667d23b8462b7fac746ba1cf60a248e5"
+    },
+    {
+      "path": "apps/web/tests/single-select-cast-input.test.tsx",
+      "last_committed_edit": "2026-02-19T10:16:08-05:00",
+      "lines": 70,
+      "bytes": 2491,
+      "sha256": "bc2ee159344e73aac05a580e3ce28cc3e5da489abef8cbdef71e3bbb8e46da2f"
+    },
+    {
+      "path": "apps/web/tests/single-select-input.test.tsx",
+      "last_committed_edit": "2026-02-19T10:16:08-05:00",
+      "lines": 85,
+      "bytes": 2283,
+      "sha256": "96477eeaadad36ce3c8243802cd43917025cacd46f61839ec72ce0bba3dc2b73"
+    },
+    {
+      "path": "apps/web/tests/skills-agents-dashboard-content.test.tsx",
+      "last_committed_edit": "2026-03-26T13:31:56-04:00",
+      "lines": 87,
+      "bytes": 3148,
+      "sha256": "dfab937ef18a63a31f14e1658966414d51d2eaf1cdd8e51b7f088f2c3dfcbc91"
+    },
+    {
+      "path": "apps/web/tests/social-account-catalog-alt-page.test.ts",
+      "last_committed_edit": "2026-07-05T20:56:16-04:00",
+      "lines": 58,
+      "bytes": 1774,
+      "sha256": "9fb27349d9e2e1a6d2de39e89b370f5f4f7957eddbc41667d4ad59532f79a7d9"
+    },
+    {
+      "path": "apps/web/tests/social-account-catalog-capacity-route.test.ts",
+      "last_committed_edit": "2026-07-13T17:52:45-04:00",
+      "lines": 65,
+      "bytes": 2633,
+      "sha256": "2341a1b94113677d0794109c52b166254acca4673a619aa6c6d643d2811fff95"
+    },
+    {
+      "path": "apps/web/tests/social-account-catalog-freshness-route.test.ts",
+      "last_committed_edit": "2026-05-06T01:48:14-04:00",
+      "lines": 106,
+      "bytes": 3526,
+      "sha256": "f523212f4c9d1407e7710f0d00d9f2b73a0cae3d8bd597283347d51c94cdcdc4"
+    },
+    {
+      "path": "apps/web/tests/social-account-catalog-gap-analysis-route.test.ts",
+      "last_committed_edit": "2026-06-09T23:51:27-04:00",
+      "lines": 110,
+      "bytes": 3888,
+      "sha256": "55f649716551fce33faeeba2e05b1df58520937ead62b583beeaaee7bcfbc0fa"
+    },
+    {
+      "path": "apps/web/tests/social-account-catalog-gap-analysis-run-route.test.ts",
+      "last_committed_edit": "2026-06-09T23:51:27-04:00",
+      "lines": 98,
+      "bytes": 3618,
+      "sha256": "fb2c0f522d43578af15d7c1f08d478a6b148037ba471c535814cbc1e38e18f7d"
+    },
+    {
+      "path": "apps/web/tests/social-account-catalog-page.test.ts",
+      "last_committed_edit": "2026-04-21T10:42:20-04:00",
+      "lines": 58,
+      "bytes": 1725,
+      "sha256": "b82d10b509f5a89bc0799dcbeb567409d1390e3f26c2ed922f1cd4be859027aa"
+    },
+    {
+      "path": "apps/web/tests/social-account-catalog-recent-runs-route.test.ts",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 205,
+      "bytes": 7659,
+      "sha256": "edde76cd0fef2e1fbb397624c6b8023e49e3d8f948aac2d3d2dd89f25da5717a"
+    },
+    {
+      "path": "apps/web/tests/social-account-catalog-run-cancel-route.test.ts",
+      "last_committed_edit": "2026-05-06T01:48:14-04:00",
+      "lines": 91,
+      "bytes": 3158,
+      "sha256": "0e2a5a22fe7285b037cfefe5ff994b37ef6c3d65e4e36649efee18fec2bdc07c"
+    },
+    {
+      "path": "apps/web/tests/social-account-catalog-run-progress-route.test.ts",
+      "last_committed_edit": "2026-07-13T17:52:45-04:00",
+      "lines": 151,
+      "bytes": 5575,
+      "sha256": "484680bef0e6af813f30d8a804e7f5d6eeb0f6be8c27ad385c27b94ad4503b6e"
+    },
+    {
+      "path": "apps/web/tests/social-account-catalog-verification-route.test.ts",
+      "last_committed_edit": "2026-03-21T00:38:02-04:00",
+      "lines": 84,
+      "bytes": 3013,
+      "sha256": "f3b462e95763b1670cddec240239933cdfe95092d7a26b93596cea51b235c1bf"
+    },
+    {
+      "path": "apps/web/tests/social-account-comments-audit-cursor-retries-route.test.ts",
+      "last_committed_edit": "2026-06-12T20:57:55-04:00",
+      "lines": 100,
+      "bytes": 3139,
+      "sha256": "0c079c86f9c04e48599bf2368239ac10b310a8c27eb9be52e910d85bf80ee0f0"
+    },
+    {
+      "path": "apps/web/tests/social-account-comments-cancel-route.test.ts",
+      "last_committed_edit": "2026-04-30T20:11:28-04:00",
+      "lines": 85,
+      "bytes": 3034,
+      "sha256": "929c6727a073be831fc40367cc4c2eacfb741c3c834782607ce08486696b45cf"
+    },
+    {
+      "path": "apps/web/tests/social-account-comments-guarded-restart-route.test.ts",
+      "last_committed_edit": "2026-06-16T11:18:31-04:00",
+      "lines": 112,
+      "bytes": 4294,
+      "sha256": "de80d23fd34475c91b2651ead45f09c10af2512a4a5da55b2e2631bc9625a2ed"
+    },
+    {
+      "path": "apps/web/tests/social-account-comments-scrape-route.test.ts",
+      "last_committed_edit": "2026-05-06T01:48:14-04:00",
+      "lines": 142,
+      "bytes": 5063,
+      "sha256": "cd14c3f8803348ae1c901562ba093190c0fe9cfd57ab3c03cc1646ea24549b3d"
+    },
+    {
+      "path": "apps/web/tests/social-account-hashtag-timeline-route.test.ts",
+      "last_committed_edit": "2026-03-21T00:38:02-04:00",
+      "lines": 79,
+      "bytes": 2783,
+      "sha256": "edf048e093ff01dbcd3481f706904d9b2d34161766928797936e6c730b83ecd0"
+    },
+    {
+      "path": "apps/web/tests/social-account-hashtag-timeline.runtime.test.tsx",
+      "last_committed_edit": "2026-07-05T20:56:16-04:00",
+      "lines": 246,
+      "bytes": 8302,
+      "sha256": "9f2fe032a80a9f0e33d61ced5ecd86f56c2bb622e703d65094b3d5200c792070"
+    },
+    {
+      "path": "apps/web/tests/social-account-hashtags-route.test.ts",
+      "last_committed_edit": "2026-04-28T06:58:31-04:00",
+      "lines": 133,
+      "bytes": 4690,
+      "sha256": "09d79481fb69c58701213d88c33583a20284c900f06c5335d5ef31bd7b4e2830"
+    },
+    {
+      "path": "apps/web/tests/social-account-live-profile-total-route.test.ts",
+      "last_committed_edit": "2026-07-05T20:56:16-04:00",
+      "lines": 66,
+      "bytes": 2646,
+      "sha256": "c04d4001f3870b970612aac5de003388d46ca00df047a336c241b0e3d9233df5"
+    },
+    {
+      "path": "apps/web/tests/social-account-profile-auth-bypass.test.tsx",
+      "last_committed_edit": "2026-05-20T18:23:40-04:00",
+      "lines": 148,
+      "bytes": 4748,
+      "sha256": "f0af0fb53ecc4f8995390d07a950ba5c3b3dd3e86b469fd70bcd640881add565"
+    },
+    {
+      "path": "apps/web/tests/social-account-profile-backfill-command.test.ts",
+      "last_committed_edit": "2026-07-05T20:56:16-04:00",
+      "lines": 98,
+      "bytes": 3681,
+      "sha256": "ffcce8acec64e96cd32a55132b1c736a2f32b204faaa87dfa9eb01ab43f1bfa3"
+    },
+    {
+      "path": "apps/web/tests/social-account-profile-capacity.test.ts",
+      "last_committed_edit": "2026-07-13T17:52:45-04:00",
+      "lines": 80,
+      "bytes": 2757,
+      "sha256": "11376659eb6a82305e6fbf66b0dc6684481cd3788b7c148630372d0f35bb6a8f"
+    },
+    {
+      "path": "apps/web/tests/social-account-profile-catalog-diagnostics.test.ts",
+      "last_committed_edit": "2026-07-05T20:56:16-04:00",
+      "lines": 77,
+      "bytes": 3201,
+      "sha256": "c0bc49a4bca9ad0ee35c566129d669dd1f562b8d20f0d8f6a8b783a21b0a1dd5"
+    },
+    {
+      "path": "apps/web/tests/social-account-profile-collaborators-route.test.ts",
+      "last_committed_edit": "2026-04-30T20:11:28-04:00",
+      "lines": 100,
+      "bytes": 3724,
+      "sha256": "af4adecad3aa6c3f519d7c80c0798304fade8672aef66e811eaa245dd9a98640"
+    },
+    {
+      "path": "apps/web/tests/social-account-profile-completion-summary-route.test.ts",
+      "last_committed_edit": "2026-07-13T17:52:27-04:00",
+      "lines": 211,
+      "bytes": 7931,
+      "sha256": "55772bb9e583efe286d1f26a042f4fd88f2913a6336b860596fd482c34f810e9"
+    },
+    {
+      "path": "apps/web/tests/social-account-profile-hashtags-route.test.ts",
+      "last_committed_edit": "2026-04-30T20:11:28-04:00",
+      "lines": 102,
+      "bytes": 3710,
+      "sha256": "1887d1deac212cea0466c74da0d7d5005f3a7ff0dcb93c12da193ad248adf619"
+    },
+    {
+      "path": "apps/web/tests/social-account-profile-page.hashtag-preview.test.ts",
+      "last_committed_edit": "2026-07-05T20:56:16-04:00",
+      "lines": 76,
+      "bytes": 2148,
+      "sha256": "d36273bef6c8c66894f9d2b5906e2a532d20b20ff2cd65329b8b507873f2a6ed"
+    },
+    {
+      "path": "apps/web/tests/social-account-profile-read-routes.test.ts",
+      "last_committed_edit": "2026-06-12T20:06:29-04:00",
+      "lines": 221,
+      "bytes": 8734,
+      "sha256": "1dd6b3e88da23b39c34add86e6f3566398966f136ee762352e0b9a637f992eef"
+    },
+    {
+      "path": "apps/web/tests/social-account-profile-relationships-route.test.ts",
+      "last_committed_edit": "2026-05-13T23:52:48-04:00",
+      "lines": 56,
+      "bytes": 2110,
+      "sha256": "eec79879dc8276eed6d6cc181395bb6c4ba6c90d71915ece0582ff89af669f20"
+    },
+    {
+      "path": "apps/web/tests/social-account-profile-route.test.ts",
+      "last_committed_edit": "2026-07-05T20:56:16-04:00",
+      "lines": 178,
+      "bytes": 5945,
+      "sha256": "ace3a1bcd2352589e3811be389ebdd02065142bf071cea2790e43806a25c70c4"
+    },
+    {
+      "path": "apps/web/tests/social-account-profile-snapshot-route.test.ts",
+      "last_committed_edit": "2026-07-05T20:56:16-04:00",
+      "lines": 351,
+      "bytes": 13527,
+      "sha256": "90c5efbae7ddcc947c81a5d2f1730dbe64f37bf35dcf406fa934a26c62ce0752"
+    },
+    {
+      "path": "apps/web/tests/social-account-socialblade-page.test.ts",
+      "last_committed_edit": "2026-05-13T23:52:48-04:00",
+      "lines": 72,
+      "bytes": 2221,
+      "sha256": "cc3180e7baef540627a96a4043f7e7f8e26537cad332fd79bd597764d8c68ea3"
+    },
+    {
+      "path": "apps/web/tests/social-account-socialblade-refresh-route.test.ts",
+      "last_committed_edit": "2026-05-13T23:52:48-04:00",
+      "lines": 56,
+      "bytes": 2207,
+      "sha256": "9299569fcb7f22de23060eb7d7fdc95ec1818e8bd5e41ff5ad201ccbd2ff61a0"
+    },
+    {
+      "path": "apps/web/tests/social-account-socialblade-route.test.ts",
+      "last_committed_edit": "2026-04-09T08:48:36-04:00",
+      "lines": 50,
+      "bytes": 1901,
+      "sha256": "0f0d61367abea8692d03619a7e7d820564be12465452977e9988effdef1b69b8"
+    },
+    {
+      "path": "apps/web/tests/social-account-summary-route.test.ts",
+      "last_committed_edit": "2026-05-06T01:48:14-04:00",
+      "lines": 89,
+      "bytes": 3294,
+      "sha256": "8093b3da04b4462ecbdd0de2568df5ce13b2bdfc4242c580cae8231d1e31b04b"
+    },
+    {
+      "path": "apps/web/tests/social-admin-proxy.test.ts",
+      "last_committed_edit": "2026-08-05T10:53:48-04:00",
+      "lines": 821,
+      "bytes": 29610,
+      "sha256": "1b24c0fec839cd6c4630ab8a41c593adaed16d04eb69d08730ea9dca99dda2ec"
+    },
+    {
+      "path": "apps/web/tests/social-comments-coverage-route.test.ts",
+      "last_committed_edit": "2026-03-13T17:25:42-04:00",
+      "lines": 81,
+      "bytes": 3262,
+      "sha256": "4a252bd6b1d2230b6dbafdb18b5695448600bdcd24255023488178306900aefe"
+    },
+    {
+      "path": "apps/web/tests/social-growth-batch-route.test.ts",
+      "last_committed_edit": "2026-06-09T23:51:27-04:00",
+      "lines": 159,
+      "bytes": 5474,
+      "sha256": "aa3ad55a6363e153f1eb2f7b3883e89af0d222e4cd34432fa5951e10a79c2e85"
+    },
+    {
+      "path": "apps/web/tests/social-growth-cookie-health-route.test.ts",
+      "last_committed_edit": "2026-07-05T20:56:16-04:00",
+      "lines": 115,
+      "bytes": 4137,
+      "sha256": "c72d162af9e4682aa0112db4c2030be95cc2be293687915a53b5e7de8af0bb22"
+    },
+    {
+      "path": "apps/web/tests/social-growth-refresh-route.test.ts",
+      "last_committed_edit": "2026-06-09T23:51:27-04:00",
+      "lines": 185,
+      "bytes": 6023,
+      "sha256": "2af9aacc1bf7f1de6326fd41d3506023aaf4b6b7dbbc7c5dcb4738f9f0774191"
+    },
+    {
+      "path": "apps/web/tests/social-growth-route.test.ts",
+      "last_committed_edit": "2026-06-09T23:51:27-04:00",
+      "lines": 163,
+      "bytes": 5264,
+      "sha256": "4ab2199028f879c005a5636edf82e0b75f43f230daf1b55c1336ea9ed98567fe"
+    },
+    {
+      "path": "apps/web/tests/social-growth-section.test.tsx",
+      "last_committed_edit": "2026-06-09T23:51:27-04:00",
+      "lines": 226,
+      "bytes": 7197,
+      "sha256": "e7e65b0bcfb49f9dfc6c498d9989fea58af205cb8bf2aa144e1ae62680959b3e"
+    },
+    {
+      "path": "apps/web/tests/social-ingest-health-dot-route.test.ts",
+      "last_committed_edit": "2026-03-03T11:16:49-05:00",
+      "lines": 71,
+      "bytes": 2475,
+      "sha256": "2d98f0a71ce9320178fd6f23ffd11660b75516b52d50476d25f704b60347e1cf"
+    },
+    {
+      "path": "apps/web/tests/social-ingest-job-debug-route.test.ts",
+      "last_committed_edit": "2026-03-03T11:16:49-05:00",
+      "lines": 97,
+      "bytes": 3891,
+      "sha256": "9239ac407fe37981e1fa2dbf45568833003e194792c81aeba95128813303528b"
+    },
+    {
+      "path": "apps/web/tests/social-ingest-media-mirror-drain-account-route.test.ts",
+      "last_committed_edit": "2026-07-05T20:56:16-04:00",
+      "lines": 167,
+      "bytes": 5705,
+      "sha256": "053907c541a08cc34ff307a71d8885e6c347311f1ddc15c7a3f026a73e7ec6ea"
+    },
+    {
+      "path": "apps/web/tests/social-ingest-media-mirror-recover-route.test.ts",
+      "last_committed_edit": "2026-07-05T20:56:16-04:00",
+      "lines": 115,
+      "bytes": 3987,
+      "sha256": "8778b9bf3763c602fff728be1d38ca92f39862d2cdf357773d13f6c07856d8c7"
+    },
+    {
+      "path": "apps/web/tests/social-ingest-route.test.ts",
+      "last_committed_edit": "2026-05-06T01:48:14-04:00",
+      "lines": 105,
+      "bytes": 3950,
+      "sha256": "07ec1e6c60269626b6814b3853172f0c87e96f00d89d4b6defa0d9002792df45"
+    },
+    {
+      "path": "apps/web/tests/social-ingest-stuck-jobs-cancel-route.test.ts",
+      "last_committed_edit": "2026-04-22T18:20:10-04:00",
+      "lines": 93,
+      "bytes": 3389,
+      "sha256": "a6b5bd4814277232dcecf38081a3e2d7921f17fcbd90f0157dcc9c938cb3e919"
+    },
+    {
+      "path": "apps/web/tests/social-ingest-worker-detail-route.test.ts",
+      "last_committed_edit": "2026-03-03T11:16:49-05:00",
+      "lines": 73,
+      "bytes": 3042,
+      "sha256": "cb0e5e53a15bc85520b33b788968339f6e56844fa9a01fa69d0af5b89c611a8b"
+    },
+    {
+      "path": "apps/web/tests/social-landing-repository.test.ts",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 2672,
+      "bytes": 87219,
+      "sha256": "9ccf16dc626a62da5a2cd21a748efa8afae7b85287051c51088f4b372523d03d"
+    },
+    {
+      "path": "apps/web/tests/social-landing-route-cache.test.ts",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 245,
+      "bytes": 9429,
+      "sha256": "e61fdd5069c0f868f54805a13db1e502037fe890c3f689a2904644b1b7d6c297"
+    },
+    {
+      "path": "apps/web/tests/social-live-status-route.test.ts",
+      "last_committed_edit": "2026-05-06T01:48:14-04:00",
+      "lines": 131,
+      "bytes": 4954,
+      "sha256": "d814e165b6df64bcd10401337f05d8879b85b42a8687fd13f0343e43276d6434"
+    },
+    {
+      "path": "apps/web/tests/social-live-status-stream-route.test.ts",
+      "last_committed_edit": "2026-05-06T01:48:14-04:00",
+      "lines": 114,
+      "bytes": 3697,
+      "sha256": "e58021977732a506b52536539de51307fccde38007200e0f2240caea6b0c12a1"
+    },
+    {
+      "path": "apps/web/tests/social-media-queue-snapshots-route.test.ts",
+      "last_committed_edit": "2026-07-05T20:56:16-04:00",
+      "lines": 76,
+      "bytes": 2780,
+      "sha256": "a19d8e3658457ac63d0cba8aa70a1e2f9fd8bd74c217813ce8b399277fbab536"
+    },
+    {
+      "path": "apps/web/tests/social-mirror-coverage-route.test.ts",
+      "last_committed_edit": "2026-03-13T17:25:42-04:00",
+      "lines": 79,
+      "bytes": 3188,
+      "sha256": "92fed80c840f8cb2d1453f329800cc20af3f3249d7036bdfa25792fe49ff5f6d"
+    },
+    {
+      "path": "apps/web/tests/social-mirror-requeue-route.test.ts",
+      "last_committed_edit": "2026-05-06T01:48:14-04:00",
+      "lines": 100,
+      "bytes": 3773,
+      "sha256": "db417d3751b3f0132d2cf918e4668b2f6d2f9d223cd9a8fdbfdf0c01a4889e55"
+    },
+    {
+      "path": "apps/web/tests/social-posts-direct-sql-guard.test.ts",
+      "last_committed_edit": "2026-04-28T05:44:25-04:00",
+      "lines": 34,
+      "bytes": 1116,
+      "sha256": "2de50e026a7eb81ce30f2ce28e2dac8ddae9d9a20c7d4c04d0c679931a139d8a"
+    },
+    {
+      "path": "apps/web/tests/social-posts-postid-route.test.ts",
+      "last_committed_edit": "2026-04-06T20:57:34-04:00",
+      "lines": 196,
+      "bytes": 7137,
+      "sha256": "1bc59ab1b083691720d2650887b14d39cfcd42e03853497c55a521f92f9a0556"
+    },
+    {
+      "path": "apps/web/tests/social-posts-section.test.tsx",
+      "last_committed_edit": "2026-03-01T23:11:27-05:00",
+      "lines": 212,
+      "bytes": 7890,
+      "sha256": "73f19bbdb6d309e410e8db8fcac328f9976576b075b52e415787c3f044a38be6"
+    },
+    {
+      "path": "apps/web/tests/social-posts-show-route.test.ts",
+      "last_committed_edit": "2026-05-20T18:23:40-04:00",
+      "lines": 228,
+      "bytes": 7296,
+      "sha256": "9e877743d1bd2cb001c2571ec908098acfa135f8a75a2acb5870469ff50497d3"
+    },
+    {
+      "path": "apps/web/tests/social-profile-cookie-health-route.test.ts",
+      "last_committed_edit": "2026-05-20T18:23:40-04:00",
+      "lines": 100,
+      "bytes": 3362,
+      "sha256": "44b9bf4684aab7d526a0cdc10d49dacfc80cbc6f67d715c593d744fa1dc83045"
+    },
+    {
+      "path": "apps/web/tests/social-run-cancel-route.test.ts",
+      "last_committed_edit": "2026-03-05T13:17:53-05:00",
+      "lines": 108,
+      "bytes": 3781,
+      "sha256": "2c8dfb9c3536e0deb91222f8c8634c95e3c411249d739772cb6ec20b08000916"
+    },
+    {
+      "path": "apps/web/tests/social-run-scope-wiring.test.ts",
+      "last_committed_edit": "2026-03-16T15:10:07-04:00",
+      "lines": 73,
+      "bytes": 3300,
+      "sha256": "00614b7f24ee6ab31e974511cfe1f631893eb7cb58600424eaff89c0da4d0b44"
+    },
+    {
+      "path": "apps/web/tests/social-season-hint-routes.test.ts",
+      "last_committed_edit": "2026-07-13T17:52:45-04:00",
+      "lines": 630,
+      "bytes": 24858,
+      "sha256": "774286b2a970ff24829aa0272a8c1bda553e0a45c94e1f363b5fff1c37e8c6c7"
+    },
+    {
+      "path": "apps/web/tests/social-shared-sources-repository-backend.test.ts",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 114,
+      "bytes": 3460,
+      "sha256": "4b6c4cd008a1297e98a8a8ac9286bef1e977f553d0efc58af43acc2d4d6ea5aa"
+    },
+    {
+      "path": "apps/web/tests/social-shared-sources-route.test.ts",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 118,
+      "bytes": 4077,
+      "sha256": "682a902018fa2b2281a8c0d24b1b57328215b4bb412500378374f1ba2b7219f4"
+    },
+    {
+      "path": "apps/web/tests/social-sync-session.test.ts",
+      "last_committed_edit": "2026-03-17T22:41:21-04:00",
+      "lines": 46,
+      "bytes": 1557,
+      "sha256": "85a433ae0c1d6935a97498cf13aaf171fc8186900cfeed04c5dd431b8ba03a67"
+    },
+    {
+      "path": "apps/web/tests/social-sync-sessions-routes.test.ts",
+      "last_committed_edit": "2026-05-06T01:48:14-04:00",
+      "lines": 191,
+      "bytes": 7531,
+      "sha256": "7f9b08c67f607aee00c2912fe3a3be9fc6efefb3b3f8654e341fb004354751b1"
+    },
+    {
+      "path": "apps/web/tests/social-timezone.test.ts",
+      "last_committed_edit": "2026-07-05T20:56:16-04:00",
+      "lines": 39,
+      "bytes": 1316,
+      "sha256": "cfc167d90844b1ad1bcf44c424d72893c0b6444b5d45e1342645b69dfde0e15f"
+    },
+    {
+      "path": "apps/web/tests/social-week-detail-wiring.test.ts",
+      "last_committed_edit": "2026-06-09T23:51:27-04:00",
+      "lines": 627,
+      "bytes": 28571,
+      "sha256": "35cc490b1c70c9f9918964ab9cea939c34617e95eb4158f8d7180b620b463e6e"
+    },
+    {
+      "path": "apps/web/tests/social-week-route-entry-guardrails.test.ts",
+      "last_committed_edit": "2026-03-13T17:53:45-04:00",
+      "lines": 120,
+      "bytes": 4252,
+      "sha256": "c53959ee6b5fd3a09cbb135aea643435254589cfaa73f109b3dd2ef940416220"
+    },
+    {
+      "path": "apps/web/tests/social-week-thumbnail-selection.test.ts",
+      "last_committed_edit": "2026-03-13T17:25:42-04:00",
+      "lines": 87,
+      "bytes": 3923,
+      "sha256": "efa32e39733f4d5015e9b71a24fe91c3918bdf5da20447fd3e0286fc90caf722"
+    },
+    {
+      "path": "apps/web/tests/social-week-worker-health-polling-wiring.test.ts",
+      "last_committed_edit": "2026-04-09T08:48:36-04:00",
+      "lines": 14,
+      "bytes": 603,
+      "sha256": "76bbbf2a2dbc50786ffe47e00ed8c6476d0055a172e57cb9e57a46418942e1a4"
+    },
+    {
+      "path": "apps/web/tests/social-worker-health-route.test.ts",
+      "last_committed_edit": "2026-03-11T19:42:50-04:00",
+      "lines": 118,
+      "bytes": 4354,
+      "sha256": "22c12cf93695de14c083157f570f0d083107db67ddd15cf754c40aec7f49a8af"
+    },
+    {
+      "path": "apps/web/tests/ssr.guards.test.ts",
+      "last_committed_edit": "2026-06-09T23:51:27-04:00",
+      "lines": 41,
+      "bytes": 1567,
+      "sha256": "f0d9c43bede04ea21d099187639411bd9b5739897811d4d4f74c33c027df2289"
+    },
+    {
+      "path": "apps/web/tests/survey-continue-button.test.tsx",
+      "last_committed_edit": "2026-02-19T10:16:08-05:00",
+      "lines": 19,
+      "bytes": 734,
+      "sha256": "136200d51a644cda813e7c9d60852e0b3bd22ab2c427924ba286ef707436f79c"
+    },
+    {
+      "path": "apps/web/tests/survey-detail-route.test.ts",
+      "last_committed_edit": "2026-08-05T10:25:43-04:00",
+      "lines": 185,
+      "bytes": 6201,
+      "sha256": "32f15690d0aee757f1cf2c8a501b58f2b35fd0f5f77924373ddbcae27245be86"
+    },
+    {
+      "path": "apps/web/tests/survey-from-show-route.test.ts",
+      "last_committed_edit": "2026-08-05T10:25:43-04:00",
+      "lines": 81,
+      "bytes": 2587,
+      "sha256": "3ff4ce24583782c76ea2a7507422a9863341e0dfd8bf7716d862a5aa7a0d3b5c"
+    },
+    {
+      "path": "apps/web/tests/surveys/sections-grouping.test.ts",
+      "last_committed_edit": "2026-02-12T18:49:43-05:00",
+      "lines": 26,
+      "bytes": 982,
+      "sha256": "3a0a950125eefd8b5e47968eda16eb1c66efaf65c828451901ee7db9e9af8890"
+    },
+    {
+      "path": "apps/web/tests/surveys/single-choice-mapping.test.ts",
+      "last_committed_edit": "2026-02-12T18:49:43-05:00",
+      "lines": 44,
+      "bytes": 1279,
+      "sha256": "bf037e4fc8230fff9958fd1c5a697125be2daabd12129de242efea457752c1a5"
+    },
+    {
+      "path": "apps/web/tests/surveys/ui-templates.test.ts",
+      "last_committed_edit": "2026-02-18T23:49:54-05:00",
+      "lines": 36,
+      "bytes": 1239,
+      "sha256": "0769f326754a9577c9bf864b542e011bc7d6d96f70063033f386e8cf9f492fda"
+    },
+    {
+      "path": "apps/web/tests/system-health-live-status-wiring.test.ts",
+      "last_committed_edit": "2026-04-13T08:19:21-04:00",
+      "lines": 16,
+      "bytes": 533,
+      "sha256": "9c0ed987bbd3997ad0e76c56a5a920855bbb689c782d21a3f62f10ab5645c9d1"
+    },
+    {
+      "path": "apps/web/tests/system-health-modal-copy.runtime.test.tsx",
+      "last_committed_edit": "2026-05-20T18:23:40-04:00",
+      "lines": 396,
+      "bytes": 13479,
+      "sha256": "72d2e0cd3f84b840fc2493e11bc3fbdc51ede94ce67a5e6fa0c3bfa3493368f8"
+    },
+    {
+      "path": "apps/web/tests/system-health-modal.test.tsx",
+      "last_committed_edit": "2026-06-09T23:51:27-04:00",
+      "lines": 1247,
+      "bytes": 44863,
+      "sha256": "61a70457b5902d47635ab975be8d540f32071aaa61e9085f6f1e0dca3ebfd270"
+    },
+    {
+      "path": "apps/web/tests/tags-people-count-source-route.test.ts",
+      "last_committed_edit": "2026-06-09T23:51:27-04:00",
+      "lines": 314,
+      "bytes": 9750,
+      "sha256": "86df9e687731a2539d5dea01b4aed057254fa29d7aa96a8956f9c64a300f5cc6"
+    },
+    {
+      "path": "apps/web/tests/three-choice-slider-input.test.tsx",
+      "last_committed_edit": "2026-03-13T17:25:42-04:00",
+      "lines": 277,
+      "bytes": 8770,
+      "sha256": "be86668c7ca45d9e58c5c0d3b7f65de6e886178b975760173eff0dc536c4be37"
+    },
+    {
+      "path": "apps/web/tests/thumbnail-crop-state.test.ts",
+      "last_committed_edit": "2026-02-12T18:49:43-05:00",
+      "lines": 130,
+      "bytes": 3522,
+      "sha256": "7137625fb12459a5eedcf2b7ac4215fc7be8db9bc4cb2f18cbb78e6adaaa079c"
+    },
+    {
+      "path": "apps/web/tests/thumbnail-crop-utils.test.ts",
+      "last_committed_edit": "2026-03-05T13:17:53-05:00",
+      "lines": 141,
+      "bytes": 4116,
+      "sha256": "7006dadb725a0b52204164343345495d233d70ca736218494008add33194c20a"
+    },
+    {
+      "path": "apps/web/tests/timeout-safe-fetch.test.ts",
+      "last_committed_edit": "2026-05-20T18:23:40-04:00",
+      "lines": 44,
+      "bytes": 1369,
+      "sha256": "1af457f53c21fddbdba941fe833fb443ba129a9e9d16ead3da9b80d7267fd03b"
+    },
+    {
+      "path": "apps/web/tests/trr-api-backend-base.test.ts",
+      "last_committed_edit": "2026-06-09T23:51:27-04:00",
+      "lines": 28,
+      "bytes": 1215,
+      "sha256": "bd6ac85a4fc95584fc17138f41745fde853d94d7c93b394d7ba49c0f25df70cf"
+    },
+    {
+      "path": "apps/web/tests/trr-app-flags.test.ts",
+      "last_committed_edit": "2026-07-05T20:56:16-04:00",
+      "lines": 72,
+      "bytes": 2348,
+      "sha256": "333a07faff4152b468914cd1679841a27ff71a42520a021523b9d855620552b2"
+    },
+    {
+      "path": "apps/web/tests/trr-shows-page-covered-shows-loading.test.tsx",
+      "last_committed_edit": "2026-06-16T10:07:26-04:00",
+      "lines": 149,
+      "bytes": 4563,
+      "sha256": "de0af85bf3efafd13e43f38be0586c70c016b5acc8f4b6f7098c11d06a4a0528"
+    },
+    {
+      "path": "apps/web/tests/trr-shows-repository-core-cast-credit-adapter.test.ts",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 302,
+      "bytes": 8797,
+      "sha256": "4680f64e111220a72dfbd4c0707bbf171b863fec4a48ee63229b250faf2cc2b1"
+    },
+    {
+      "path": "apps/web/tests/trr-shows-repository-core-people-adapter.test.ts",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 100,
+      "bytes": 2701,
+      "sha256": "3be29bac099fbc75b148c81801a0a9f99ea1bb7d8cf1103cc78151b1d8bd0954"
+    },
+    {
+      "path": "apps/web/tests/trr-shows-repository-face-box-diagnostics.test.ts",
+      "last_committed_edit": "2026-08-05T11:13:33-04:00",
+      "lines": 22,
+      "bytes": 1038,
+      "sha256": "1a384f9b594556cb1d11c0ba3cd4f6b39a71ba60a12fdc2bf53176ffed4d087e"
+    },
+    {
+      "path": "apps/web/tests/trr-shows-repository-featured-image-validation.test.ts",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 85,
+      "bytes": 2778,
+      "sha256": "42e8544190141419c8f0829792fa82e2e416a1d271ce1af86fed99f979e2f3a4"
+    },
+    {
+      "path": "apps/web/tests/trr-shows-repository-person-episode-credits.test.ts",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 119,
+      "bytes": 3761,
+      "sha256": "a5c575a08eafb469f24160bd13dce6925c7dc8f8299fd98534f1710ff4dca937"
+    },
+    {
+      "path": "apps/web/tests/trr-shows-repository-person-show-scope-credits.test.ts",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 95,
+      "bytes": 2955,
+      "sha256": "e87f35c678f708365684f940c4bf74e37a30114896c9200d039d31e90b90577d"
+    },
+    {
+      "path": "apps/web/tests/trr-shows-repository-photo-fallback.test.ts",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 89,
+      "bytes": 2737,
+      "sha256": "a11815e7eb1f6ab3947f8dd6d07a5aed62053358946960ac28f8831febb54f33"
+    },
+    {
+      "path": "apps/web/tests/trr-shows-repository-resolve-slug.test.ts",
+      "last_committed_edit": "2026-08-05T10:25:43-04:00",
+      "lines": 176,
+      "bytes": 5582,
+      "sha256": "773f88e00ef7baf0651d3073bc7870e627ca28db9cd44d845e12693b18aba446"
+    },
+    {
+      "path": "apps/web/tests/trr-shows-repository-slug-query-safety.test.ts",
+      "last_committed_edit": "2026-08-05T10:25:43-04:00",
+      "lines": 306,
+      "bytes": 10761,
+      "sha256": "adbe3f6cee550d5fc4e7be7a573d0210dfe2e8ddf984c353eeff40d09ea6f537"
+    },
+    {
+      "path": "apps/web/tests/two-axis-grid-input.test.tsx",
+      "last_committed_edit": "2026-02-12T18:49:43-05:00",
+      "lines": 196,
+      "bytes": 5801,
+      "sha256": "cb9e16b2ba992185004dc7535d77529b9984ade34a3c85295da87c5475dd2b10"
+    },
+    {
+      "path": "apps/web/tests/two-axis-grid-utils.test.ts",
+      "last_committed_edit": "2026-02-12T18:49:43-05:00",
+      "lines": 76,
+      "bytes": 2392,
+      "sha256": "44e3a2d7c875e721028e0dff23c9348234486ff0e5d674f5dc11c10c4aa2aa60"
+    },
+    {
+      "path": "apps/web/tests/typography-repository-read-path.test.ts",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 98,
+      "bytes": 3054,
+      "sha256": "ac398a1356a50dcf06fbc40c5232fd11519b7c20a04c93e2a3720d157c221802"
+    },
+    {
+      "path": "apps/web/tests/typography-repository.test.ts",
+      "last_committed_edit": "2026-08-05T04:49:16-04:00",
+      "lines": 126,
+      "bytes": 3539,
+      "sha256": "318156ff147c6da96f87a93bc4b130c0dc8c0961986ee52be1350a1cffef53d6"
+    },
+    {
+      "path": "apps/web/tests/typography-runtime.test.ts",
+      "last_committed_edit": "2026-03-16T15:10:07-04:00",
+      "lines": 219,
+      "bytes": 5987,
+      "sha256": "48b79bb7d3a2339c6178be803d8e5c8456b4ebb1507466dfaf63c5b491efe301"
+    },
+    {
+      "path": "apps/web/tests/typography-tab.test.tsx",
+      "last_committed_edit": "2026-03-16T15:10:07-04:00",
+      "lines": 398,
+      "bytes": 12582,
+      "sha256": "cb7cd9fc9886e3494efa6c52263b839aa0e343d15ee2d1063a7a80ab9effaff1"
+    },
+    {
+      "path": "apps/web/tests/use-admin-guard-stability.test.tsx",
+      "last_committed_edit": "2026-08-12T14:50:06-04:00",
+      "lines": 410,
+      "bytes": 14840,
+      "sha256": "e5017ff328ebd9a58e07b605ce0f7ae7475ad3f7d1e18606efff4ae8003b6c6a"
+    },
+    {
+      "path": "apps/web/tests/users.integration.test.ts",
+      "last_committed_edit": "2026-03-05T14:23:30-05:00",
+      "lines": 21,
+      "bytes": 704,
+      "sha256": "55e1b8ed1cf79e44fe697c8ef9d6d2aceb44506454e9aeaae9452d4d0165dda9"
+    },
+    {
+      "path": "apps/web/tests/validation.test.ts",
+      "last_committed_edit": "2026-02-12T18:49:43-05:00",
+      "lines": 37,
+      "bytes": 1401,
+      "sha256": "43e17c55a75b178412acb6023c17408af40030eaede8b8dabe932da874356587"
+    },
+    {
+      "path": "apps/web/tests/vercel-rollback-guard.test.ts",
+      "last_committed_edit": "2026-08-05T10:25:43-04:00",
+      "lines": 289,
+      "bytes": 9521,
+      "sha256": "01d6220007bb48671f985ead7411e05f03ba10afaaeff526e90198ecd693f1ea"
+    },
+    {
+      "path": "apps/web/tests/week-social-thumbnails.test.tsx",
+      "last_committed_edit": "2026-05-17T14:47:57-04:00",
+      "lines": 4841,
+      "bytes": 178957,
+      "sha256": "88161e88902ed8962b65c504f1c570af66df64e10904bb3281b1178b130b3dc6"
+    },
+    {
+      "path": "apps/web/tests/whose-side-input.test.tsx",
+      "last_committed_edit": "2026-03-11T19:37:32-04:00",
+      "lines": 155,
+      "bytes": 4709,
+      "sha256": "23a060dc07d9b0fae82cd8000b286b1b9a24c18f60060f12a18383bd6c493aa9"
+    }
+  ],
+  "archive_sha256": "1dd52258b923240553e81e2fae4ebcfa888f4bc048c69f7848987e2a6e45cfc1"
+}
