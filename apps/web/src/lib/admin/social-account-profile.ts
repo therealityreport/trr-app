@@ -1338,6 +1338,24 @@ export type SocialAccountCatalogGapAnalysisStatusResponse = {
 };
 
 export type SocialAccountCatalogRunProgressSnapshot = {
+  detail_contract_version?: number | null;
+  detail_manifests?: Record<string, { identity: string; [key: string]: unknown }> | null;
+  detail_outcomes?: {
+    total: number;
+    committed: number;
+    cached_satisfied: number;
+    source_unavailable: number;
+    unresolved: number;
+    failed: number;
+    retry_wait: number;
+    resumable: number;
+    attempted: number;
+    requests: number;
+    next_attempt_at?: string | null;
+    next_eligible_at?: string | null;
+    last_progress_at?: string | null;
+  } | null;
+  detail_resume_eligible?: boolean;
   season_id?: string | null;
   run_id: string;
   run_status: string;
