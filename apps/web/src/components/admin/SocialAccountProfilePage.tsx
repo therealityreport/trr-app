@@ -78,7 +78,7 @@ import { buildAdminSectionBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
 import { ADMIN_SOCIAL_PATH } from "@/lib/admin/admin-route-paths";
 import { isLocalDevHostname } from "@/lib/admin/dev-admin-bypass";
 import { buildSocialAccountProfileUrl } from "@/lib/admin/show-admin-routes";
-import { fetchSocialAccountCatalogRunProgressSnapshot } from "@/lib/admin/social-account-catalog-progress";
+import { fetchSocialAccountCatalogRunProgressSnapshot, readDetailTargetProgress } from "@/lib/admin/social-account-catalog-progress";
 import { invalidateAdminSnapshotFamilies } from "@/lib/admin/admin-snapshot-client";
 import { recordAdminLoadSample } from "@/lib/admin/admin-load-samples";
 import { fetchAdminWithAuth as fetchAdminWithAuthBase } from "@/lib/admin/client-auth";
@@ -1884,6 +1884,7 @@ const isDetailsRefreshCatalogProgress = (
   const detailRefreshStage = getStageGraphNode(progress, "detail_refresh");
   const detailRefreshStatus = getStageGraphNodeStatus(detailRefreshStage);
   return (
+    progress?.detail_contract_version === 1 ||
     Boolean(progress?.details_refresh_force_detail_fetch) ||
     Boolean(progress?.force_network_detail_fetch) ||
     Boolean(progress?.detail_refresh) ||
@@ -1939,7 +1940,7 @@ const formatCatalogStageActivitySummary = (
   if (normalized === "shared_account_posts" && detailsRefresh) {
     return [
       `${formatInteger(stats.scraped)} checked`,
-      stats.saved > 0 ? `${formatInteger(stats.saved)} refreshed` : null,
+      stats.saved > 0 ? `${formatInteger(stats.saved)} legacy writes (outcome unverified)` : null,
     ]
       .filter(Boolean)
       .join(" · ");
@@ -2429,8 +2430,9 @@ const getCatalogStageBadge = (
   };
 };
 
-const getCatalogPhaseLabel = (progress?: SocialAccountCatalogRunProgressSnapshot | null): string | null => {
+const getCatalogPhaseLabel = (progress?: SocialAccountCatalogRunProgressSnapshot | null, platform?: string): string | null => {
   const detailsRefresh = isDetailsRefreshCatalogProgress(progress);
+  if (detailsRefresh && platform === "instagram") return readDetailTargetProgress(progress).label;
   const queuedUnclaimedJobs = Number(progress?.dispatch_health?.queued_unclaimed_jobs ?? 0);
   const dispatchBlockedJobs = Number(progress?.dispatch_health?.dispatch_blocked_jobs ?? 0);
   const modalPendingJobs = Number(progress?.dispatch_health?.modal_pending_jobs ?? 0);
@@ -6049,7 +6051,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   ]);
 
   const catalogPhaseLabel = useMemo(() => {
-    const progressLabel = getCatalogPhaseLabel(catalogRunProgress);
+    const progressLabel = getCatalogPhaseLabel(catalogRunProgress, platform);
     if (progressLabel) {
       return progressLabel;
     }
@@ -6071,8 +6073,35 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     return null;
   }, [catalogRunProgress, displayedCatalogRunStatus, platform]);
   const detailsRefreshProgress = useMemo(() => {
-    return isDetailsRefreshCatalogProgress(catalogRunProgress);
-  }, [catalogRunProgress]);
+    return platform === "instagram" && isDetailsRefreshCatalogProgress(catalogRunProgress);
+  }, [catalogRunProgress, platform]);
+  const detailTargetProgress = readDetailTargetProgress(catalogRunProgress);
+  const [resumingDetailTargets, setResumingDetailTargets] = useState(false);
+  const resumeDetailTargets = async () => {
+    const manifest = catalogRunProgress?.detail_manifests?.[handle.trim().replace(/^@+/, "").toLowerCase()];
+    if (!user || !catalogRunProgress?.detail_resume_eligible || !detailTargetProgress.counts || !manifest?.identity || typeof manifest.source_scope !== "string" || !manifest.source_scope || resumingDetailTargets) return;
+    setResumingDetailTargets(true);
+    try {
+      const response = await fetchAdminWithAuth(
+        `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/catalog/retry-targets`,
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
+          run_id: catalogRunProgress.run_id, manifest_identity: manifest.identity,
+          source_scope: manifest.source_scope, dispatch_immediately: true,
+        }) },
+        { preferredUser: user },
+      );
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || data.detail || "Failed to resume Post Details");
+      setCatalogActionMessage(data.resumed ? "Resuming unfinished Post Details targets in the original scope." : "No eligible unfinished targets remain.");
+      setCatalogProgressRunId(catalogRunProgress.run_id);
+      setCatalogProgressRequestNonce((current) => current + 1);
+      await refreshProfileSnapshotNow({ runId: catalogRunProgress.run_id });
+    } catch (error) {
+      setCatalogActionMessage(error instanceof Error ? error.message : "Failed to resume Post Details");
+    } finally {
+      setResumingDetailTargets(false);
+    }
+  };
 
   const catalogDispatchStatusMessage = useMemo(() => {
     return getCatalogDispatchStatusMessage(catalogRunProgress);
@@ -6158,8 +6187,9 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   ]);
 
   const displayedCatalogRunStatusLabel = useMemo(() => {
+    if (detailsRefreshProgress) return readDetailTargetProgress(catalogRunProgress).label;
     return getCatalogRunDisplayStatusLabel(displayedCatalogRunStatus, catalogRunProgress);
-  }, [catalogRunProgress, displayedCatalogRunStatus]);
+  }, [catalogRunProgress, displayedCatalogRunStatus, detailsRefreshProgress]);
   const catalogBlockedAuthPresentation = useMemo(() => {
     const operationalState = String(catalogRunProgress?.operational_state || "").trim().toLowerCase();
     const launchState = String(catalogRunProgress?.launch_state || "").trim().toLowerCase();
@@ -6692,6 +6722,13 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   }, [catalogProgressActionScope]);
 
   const catalogPostProgress = useMemo(() => {
+    if (detailsRefreshProgress) {
+      const detail = readDetailTargetProgress(catalogRunProgress);
+      const total = detail.counts?.total ?? 0;
+      const completed = detail.counts ? total - detail.counts.unresolved : 0;
+      return { total, completed, displayedCompleted: completed, displayedPersisted: detail.counts?.committed ?? 0,
+        hasTotal: detail.counts !== null, hasCompleted: detail.counts !== null, pct: detail.percent ?? 0 };
+    }
     const payload = catalogRunProgress?.post_progress ?? {};
     const rawCompleted = Number(payload.completed_posts ?? 0);
     const terminalRunHasNoStageTelemetry =
@@ -6750,6 +6787,8 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     };
   }, [
     catalogProgressSummary.items,
+    detailsRefreshProgress,
+    catalogRunProgress,
     catalogProgressSummary.pct,
     catalogProgressSummary.total,
     catalogRunProgress?.post_progress,
@@ -6764,11 +6803,12 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   ]);
 
   const catalogProgressBarWidthPct = useMemo(() => {
+    if (detailsRefreshProgress) return catalogPostProgress.pct;
     if (TERMINAL_CATALOG_RUN_STATUSES.has(displayedCatalogRunStatus)) {
       return Math.max(0, Math.min(100, catalogPostProgress.pct));
     }
     return Math.max(catalogPostProgress.pct, 2);
-  }, [catalogPostProgress.pct, displayedCatalogRunStatus]);
+  }, [catalogPostProgress.pct, displayedCatalogRunStatus, detailsRefreshProgress]);
 
   const postDetailsBackfillActiveBanner = useMemo(() => {
     if (platform !== "instagram" || !supportsCatalog || !catalogRunProgress) return null;
@@ -11124,7 +11164,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                       ) : null}
                     </div>
                   ) : null}
-                  {catalogScrapeCompletionMessage ? (
+                  {catalogScrapeCompletionMessage && !detailsRefreshProgress ? (
                     <p className="mt-2 text-sm text-emerald-700">{catalogScrapeCompletionMessage}</p>
                   ) : null}
                   {catalogTerminalCoverageMessage ? (
@@ -11139,10 +11179,10 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                 <div className="min-w-[190px] rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-3">
                   <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Active Run Progress</p>
                   <p className="mt-2 text-3xl font-bold text-zinc-900">
-                    {catalogPostProgress.pct}%
+                    {detailsRefreshProgress && !readDetailTargetProgress(catalogRunProgress).counts ? "Unknown" : `${catalogPostProgress.pct}%`}
                   </p>
                   <p className="mt-1 text-sm text-zinc-600">
-                    {catalogProgressMode === "bounded"
+                    {detailsRefreshProgress ? readDetailTargetProgress(catalogRunProgress).label : catalogProgressMode === "bounded"
                       ? catalogPostProgress.hasCompleted
                         ? `${formatInteger(catalogPostProgress.displayedCompleted)} posts checked`
                         : `${formatInteger(catalogProgressSummary.finished)} / ${formatInteger(catalogProgressSummary.total)} jobs`
@@ -11153,7 +11193,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                       : `${formatInteger(catalogProgressSummary.finished)} / ${formatInteger(catalogProgressSummary.total)} jobs`}
                   </p>
                   <p className="mt-1 text-xs text-zinc-500">
-                    {catalogPostProgress.hasTotal || catalogPostProgress.hasCompleted
+                    {detailsRefreshProgress ? "Unique target outcomes shown below" : catalogPostProgress.hasTotal || catalogPostProgress.hasCompleted
                       ? `${formatInteger(catalogPostProgress.displayedPersisted)} ${detailsRefreshProgress ? "refreshed" : "persisted"}`
                       : `${formatInteger(catalogProgressSummary.items)} scraped`}
                     {catalogProgressSummary.running > 0 ? ` · ${formatInteger(catalogProgressSummary.running)} running` : ""}
@@ -11176,6 +11216,39 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
               </div>
 
               <Progress className="mt-4 h-2" value={catalogProgressBarWidthPct} />
+
+              {detailsRefreshProgress ? (
+                <section aria-label="Post Details target outcomes" className="mt-4 rounded-2xl border border-zinc-200 p-4">
+                  <h3 className="text-sm font-semibold">Post Details target outcomes</h3>
+                  <p className="mt-1 text-sm">{detailTargetProgress.label}</p>
+                  {detailTargetProgress.counts ? (
+                    <>
+                      <dl className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-4">
+                        {([
+                          ["Total targets", detailTargetProgress.counts.total],
+                          ["Successfully refreshed", detailTargetProgress.counts.committed],
+                          ["Satisfied from cache", detailTargetProgress.counts.cached_satisfied],
+                          ["Unavailable", detailTargetProgress.counts.source_unavailable],
+                          ["Failed targets", detailTargetProgress.counts.failed],
+                          ["Retrying targets", detailTargetProgress.counts.retry_wait],
+                          ["Remaining targets", detailTargetProgress.counts.unresolved],
+                        ] as const).map(([label, count]) => (
+                          <div key={label}><dt className="text-xs text-zinc-500">{label}</dt><dd className="text-lg font-semibold">{formatInteger(count)}</dd></div>
+                        ))}
+                      </dl>
+                      <p className="mt-3 text-xs text-zinc-500">
+                        {formatInteger(detailTargetProgress.counts.attempted)} target attempts · {formatInteger(detailTargetProgress.counts.requests)} HTTP requests.
+                        {" "}Attempts can exceed unique targets. Failed and retrying targets are included in remaining targets.
+                      </p>
+                      <p className="mt-2 text-xs">Last progress: {detailTargetProgress.counts.last_progress_at ? formatDateTime(detailTargetProgress.counts.last_progress_at) : "No committed progress recorded"}</p>
+                      {detailTargetProgress.counts.next_attempt_at ? <p className="mt-1 text-xs">Cooldown: next retry {formatDateTime(detailTargetProgress.counts.next_attempt_at)}</p> : null}
+                      <p className="mt-1 text-xs">Resume: {catalogRunProgress?.detail_resume_eligible ? "Eligible for unfinished targets in this saved scope" : "Not currently eligible"}</p>
+                      {catalogRunProgress?.detail_resume_eligible ? <Button className="mt-3" variant="outline" size="sm" disabled={resumingDetailTargets || !catalogRunProgress.detail_manifests?.[handle.trim().replace(/^@+/, "").toLowerCase()]?.identity} onClick={() => void resumeDetailTargets()}>{resumingDetailTargets ? "Resuming…" : "Resume unfinished Post Details"}</Button> : null}
+                    </>
+                  ) : <p className="mt-2 text-xs text-zinc-500">This report does not contain verified target outcomes. Saved rows and finished jobs do not establish successful refreshes.</p>}
+                  {catalogRunProgress?.stop_reason || catalogRunProgress?.last_error_code ? <p className="mt-2 text-xs">Stopped reason: {formatRecoveryReasonLabel(catalogRunProgress.stop_reason || catalogRunProgress.last_error_code)}</p> : null}
+                </section>
+              ) : null}
 
               {shouldRenderCatalogOperatorSummary ? (
                 <div className="mt-4 rounded-2xl border border-zinc-200 bg-zinc-50 p-4">

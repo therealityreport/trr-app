@@ -18,6 +18,28 @@ export type CatalogRunProgressProxyErrorPayload = {
   upstream_detail_code?: string;
 };
 
+// Only balanced versioned target outcomes establish detail completion. Old job
+// counts and generic scraped_at timestamps cannot supply missing success data.
+export function readDetailTargetProgress(progress?: SocialAccountCatalogRunProgressSnapshot | null) {
+  const counts = progress?.detail_outcomes;
+  const keys = ["total", "committed", "cached_satisfied", "source_unavailable", "unresolved", "failed", "retry_wait", "resumable", "attempted", "requests"] as const;
+  if (progress?.detail_contract_version !== 1 || progress.progress_authoritative === false || progress.progress_degraded === true || !counts ||
+      keys.some((key) => !Number.isSafeInteger(counts[key]) || counts[key] < 0) ||
+      counts.total !== counts.committed + counts.cached_satisfied + counts.source_unavailable + counts.unresolved ||
+      counts.failed + counts.retry_wait > counts.unresolved || counts.resumable > counts.unresolved) {
+    return { counts: null, percent: null, label: "Post Details outcome unknown (legacy or incomplete report)" };
+  }
+  const status = String(progress.run_status || "").toLowerCase();
+  const stopped = ["failed", "cancelled", "blocked_auth"].includes(status);
+  const label = stopped ? `Post Details ${status.replaceAll("_", " ")}`
+    : counts.unresolved > 0 ? (counts.retry_wait > 0 ? "Post Details waiting to retry" : "Post Details incomplete")
+    : status !== "completed" ? "Post Details targets resolved; awaiting completion confirmation"
+    : counts.total === 0 ? "Post Details complete: no targets"
+    : counts.source_unavailable > 0 ? "Post Details completed with unavailable posts"
+    : "Post Details complete";
+  return { counts, percent: counts.total === 0 ? 100 : Math.floor(100 * (counts.total - counts.unresolved) / counts.total), label };
+}
+
 export type CatalogRunProgressRequestError = Error & {
   code?: string;
   retryable?: boolean;

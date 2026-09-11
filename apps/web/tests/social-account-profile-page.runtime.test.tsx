@@ -1,6 +1,39 @@
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { readDetailTargetProgress } from "@/lib/admin/social-account-catalog-progress";
+import type { SocialAccountCatalogRunProgressSnapshot } from "@/lib/admin/social-account-profile";
+
+describe("Post Details durable outcome presentation", () => {
+  const progress = (overrides: Record<string, unknown> = {}, status = "completed") => ({
+    run_id: "detail-run", run_status: status, detail_contract_version: 1,
+    detail_outcomes: { total: 10, committed: 5, cached_satisfied: 3, source_unavailable: 2,
+      unresolved: 0, failed: 0, retry_wait: 0, resumable: 0, attempted: 12, requests: 16, ...overrides },
+  } as SocialAccountCatalogRunProgressSnapshot);
+
+  it("keeps cache and unavailable outcomes separate from refreshed targets", () => {
+    const result = readDetailTargetProgress(progress());
+    expect(result.label).toBe("Post Details completed with unavailable posts");
+    expect(result.counts?.committed).toBe(5);
+    expect(result.counts?.attempted).toBe(12);
+    expect(result.percent).toBe(100);
+  });
+  it("does not trust completed jobs with unresolved, missing, or unbalanced outcomes", () => {
+    expect(readDetailTargetProgress(progress({ committed: 3, unresolved: 2, failed: 2 })).label).toBe("Post Details incomplete");
+    expect(readDetailTargetProgress(progress({ total: 11 })).counts).toBeNull();
+    expect(readDetailTargetProgress({ run_id: "legacy", run_status: "completed" }).percent).toBeNull();
+    expect(readDetailTargetProgress(progress({ committed: undefined })).counts).toBeNull();
+  });
+  it("preserves cancelled and cooldown states and does not infer owner completion", () => {
+    expect(readDetailTargetProgress(progress({}, "cancelled")).label).toBe("Post Details cancelled");
+    expect(readDetailTargetProgress(progress({ committed: 3, unresolved: 2, retry_wait: 2 }, "running")).label).toBe("Post Details waiting to retry");
+    expect(readDetailTargetProgress(progress({}, "running")).label).toContain("awaiting completion confirmation");
+    expect(readDetailTargetProgress(progress({}, "failed")).label).toBe("Post Details failed");
+  });
+  it("distinguishes empty scope from a missing manifest report", () => {
+    expect(readDetailTargetProgress(progress({ total: 0, committed: 0, cached_satisfied: 0, source_unavailable: 0 })).label).toBe("Post Details complete: no targets");
+  });
+});
 
 const mocks = vi.hoisted(() => ({
   fetchAdminWithAuth: vi.fn(),
@@ -4860,8 +4893,9 @@ describe("SocialAccountProfilePage", () => {
 
     await waitFor(() => {
       expect(screen.queryByText(/Instagram backfill accepted\./)).not.toBeInTheDocument();
-      expect(screen.getByText("66 / 437 posts checked")).toBeInTheDocument();
-      expect(screen.getAllByText(/Run catalog- · Fetching/).length).toBeGreaterThan(0);
+      expect(screen.getAllByText("Post Details outcome unknown (legacy or incomplete report)").length).toBeGreaterThan(0);
+      expect(screen.queryByText("66 / 437 posts checked")).not.toBeInTheDocument();
+      expect(screen.getAllByText(/Run catalog- · Post Details outcome unknown/).length).toBeGreaterThan(0);
     });
   });
 
@@ -12293,6 +12327,40 @@ it("prefers terminal cancelled status labels over stale recovering state", async
     });
     expect(screen.queryByText("872 / 436 posts checked")).not.toBeInTheDocument();
     expect(screen.queryByText("872 persisted")).not.toBeInTheDocument();
+  });
+
+  it("renders durable detail outcomes and resumes the original manifest scope", async () => {
+    const runId = "run-detail-manifest";
+    const progress = {
+      run_id: runId, run_status: "running", detail_contract_version: 1,
+      detail_manifests: { thetraitorsus: { identity: "frozen-manifest", source_scope: "network" } },
+      detail_resume_eligible: true,
+      detail_outcomes: { total: 10, committed: 4, cached_satisfied: 2, source_unavailable: 1,
+        unresolved: 3, failed: 1, retry_wait: 2, resumable: 3, attempted: 12, requests: 15,
+        last_progress_at: "2026-09-11T12:00:00Z", next_attempt_at: "2026-09-11T13:00:00Z" },
+      stages: {}, per_handle: [], recent_log: [],
+      post_progress: { completed_posts: 100, matched_posts: 100, total_posts: 100 },
+    };
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/retry-targets")) return jsonResponse({ resumed: true, run_id: runId });
+      if (url.includes("/snapshot")) return jsonResponse({ summary: { ...baseSummary,
+        catalog_recent_runs: [{ run_id: runId, status: "running" }] }, catalog_run_progress: progress });
+      if (url.includes("/progress")) return jsonResponse(progress);
+      if (url.includes("/summary")) return jsonResponse(baseSummary);
+      throw new Error(`Unhandled request: ${url}`);
+    });
+    render(<SocialAccountProfilePage platform="instagram" handle="thetraitorsus" activeTab="catalog" />);
+    const panel = await screen.findByRole("region", { name: "Post Details target outcomes" });
+    expect(within(panel).getByText("Successfully refreshed").nextElementSibling).toHaveTextContent("4");
+    expect(within(panel).getByText("Remaining targets").nextElementSibling).toHaveTextContent("3");
+    expect(within(panel).getByText("Satisfied from cache").nextElementSibling).toHaveTextContent("2");
+    fireEvent.click(within(panel).getByRole("button", { name: "Resume unfinished Post Details" }));
+    await waitFor(() => expect(mocks.fetchAdminWithAuth).toHaveBeenCalledWith(
+      expect.stringContaining("/catalog/retry-targets"),
+      expect.objectContaining({ body: JSON.stringify({ run_id: runId, manifest_identity: "frozen-manifest", source_scope: "network", dispatch_immediately: true }) }),
+      expect.anything(),
+    ));
   });
 
   it("does not auto-display completed catalog runs as progress without an active polling target", async () => {
