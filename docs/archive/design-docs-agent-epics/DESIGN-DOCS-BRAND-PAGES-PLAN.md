@@ -17,8 +17,8 @@ apps/web/src/app/admin/design-docs/brand-the-athletic/[tab]/page.tsx
 
 Each `[tab]/page.tsx`:
 - Validates tab param against allowed tab IDs
-- Renders `DesignDocsPageClient` with `sectionId="brand-nyt"` + `tab={tab}`
-- Invalid tabs redirect to first tab (typography)
+- Current implementation renders `DesignDocsPageClient` with `activeSection="brand-nyt"` + `brandTab={tab}`
+- Current NYT implementation redirects invalid tabs to `homepage` (the original plan called for `typography`)
 
 **NYT tab IDs:** `typography`, `colors`, `layout`, `architecture`, `charts`, `components`, `resources`
 **Athletic tab IDs:** `typography`, `colors`, `components`, `layout`, `shapes`, `resources`
@@ -46,7 +46,7 @@ Update `NYT_BRAND_SUB_SECTIONS` and `ATHLETIC_BRAND_SUB_SECTIONS` to use `href` 
 
 **File:** `DesignDocsPageClient.tsx`
 
-Add `tab` prop support. When `sectionId="brand-nyt"` and `tab` is set, render the specific tab component instead of the full BrandNYTSection.
+Current implementation uses `brandTab` with `activeSection="brand-nyt"` to render the selected tab. The original `tab`/`sectionId` names were proposal names, not the current component contract.
 
 ### 1e. Brand landing pages
 
@@ -250,7 +250,7 @@ Purpose: Audit and sync article data to parent brand tab components
 **Modified files (8):**
 - `design-docs-config.ts` — sub-section hrefs, article gaps
 - `DesignDocsSidebar.tsx` — page links instead of anchors
-- `DesignDocsPageClient.tsx` — tab prop + tab component routing
+- `DesignDocsPageClient.tsx` — current `brandTab` prop + tab component routing
 - `BrandNYTSection.tsx` — becomes landing page (delegates to tabs)
 - `BrandTheAthleticSection.tsx` — becomes landing page (delegates to tabs)
 - `SKILL.md` (orchestrator) — add Step 8
