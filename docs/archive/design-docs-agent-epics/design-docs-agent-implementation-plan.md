@@ -1,6 +1,6 @@
 # Implementation Plan: Design Docs Brand Page Generator Agent
 
-**Epic Plan:** `docs/epics/design-docs-agent-epic-plan.md`
+**Epic Plan:** `docs/archive/design-docs-agent-epics/design-docs-agent-epic-plan.md`
 **Created:** 2026-03-24
 **Status:** Ready for execution
 
