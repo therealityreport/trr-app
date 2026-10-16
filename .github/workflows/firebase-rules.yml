@@ -35,8 +35,8 @@ jobs:
           FIRESTORE_EMULATOR_HOST: localhost:8080
         run: |
           # Start only Firestore emulator to validate rules load; exits after command
-          # Uses default project from .firebaserc (demo-trr); no secrets required
-          firebase emulators:exec --only firestore -- bash -lc "echo Rules loaded"
+          # Pin a demo project; pass the child command as one CLI argument.
+          firebase emulators:exec --project demo-trr-plan055 --only firestore "echo Rules loaded"
         shell: bash
 
   deploy:
