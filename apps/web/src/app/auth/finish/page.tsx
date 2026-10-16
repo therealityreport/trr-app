@@ -5,7 +5,7 @@ export const dynamic = "force-dynamic";
 import { useEffect, useMemo, useState, Suspense } from "react";
 import { useRouter } from "next/navigation";
 import { auth } from "@/lib/firebase";
-import { getUserByUsername, isFirestoreUnavailableError } from "@/lib/db/users";
+import { isUsernameAvailable, upsertUserProfile, isFirestoreUnavailableError } from "@/lib/db/users";
 import { validateBirthday, validateUsername, parseShows, validateShowsMin, type UserProfile } from "@/lib/validation/user";
 import { ALL_SHOWS } from "@/lib/data/shows";
 import { COUNTRIES } from "@/lib/data/countries";
@@ -186,11 +186,11 @@ function FinishProfileContent() {
     const baseErr = validateUsername(u);
     if (baseErr) return baseErr;
     try {
-      const existing = await getUserByUsername(u);
-      return existing ? "That username is taken. Try another." : null;
+      const available = await isUsernameAvailable(u);
+      return !available ? "That username is taken. Try another." : null;
     } catch (error) {
-      console.warn("Finish: username uniqueness lookup unavailable; skipping live uniqueness check", error);
-      return null;
+      console.warn("Username availability lookup failed", error);
+      return "Unable to check username. Please try again.";
     }
   };
 
@@ -227,9 +227,8 @@ function FinishProfileContent() {
       if (!ok) return;
       const u = auth.currentUser;
       if (!u) throw new Error("Not signed in");
-      
-      console.log("Finish: Current user", { uid: u.uid, email: u.email });
-      
+
+
       const provider = u.providerData?.[0]?.providerId ?? "password";
       const isUS = country.trim() === "United States";
       const payload: Partial<UserProfile> = {
@@ -244,9 +243,8 @@ function FinishProfileContent() {
         ...(isUS ? { state: state.trim() } : { country: country.trim() }),
         provider,
       };
-      
-      console.log("Finish: Saving profile", payload);
-      
+
+
       // Force token refresh to ensure fresh authentication
       try {
         console.log("Finish: Refreshing auth token");
@@ -256,29 +254,10 @@ function FinishProfileContent() {
         console.error("Finish: Token refresh failed", tokenError);
       }
       
-      // Use direct Firestore write instead of helper function to bypass permission issues
+      // The profile helper preserves the original creation timestamp.
       try {
-        console.log("Finish: Writing profile directly to Firestore");
-        const { doc, setDoc, serverTimestamp } = await import("firebase/firestore");
-        const { requireDb } = await import("@/lib/firebase-db");
-
-        const userRef = doc(requireDb(), "users", u.uid);
-        const profileData = {
-          uid: u.uid,
-          email: u.email ?? null,
-          username: username.trim(),
-          birthday: requireBirthday ? birthday.trim() : birthday.trim(),
-          shows: parseShows(selectedShows),
-          showRequests: parseShows(showRequests),
-          gender: gender.trim(),
-          livesInUS: isUS,
-          ...(isUS ? { state: state.trim() } : { country: country.trim() }),
-          provider,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        };
-        
-        await setDoc(userRef, profileData, { merge: true });
+        console.log("Finish: Saving profile");
+        await upsertUserProfile(u.uid, payload);
         console.log("Finish: Profile saved successfully");
         
         sessionStorage.setItem("toastMessage", "Profile completed");
@@ -290,7 +269,7 @@ function FinishProfileContent() {
         } catch {}
         router.replace("/hub");
       } catch (firestoreError) {
-        console.error("Finish: Direct Firestore write failed", firestoreError);
+        console.error("Finish: Profile write failed", firestoreError);
         if (isFirestoreUnavailableError(firestoreError)) {
           sessionStorage.setItem("toastMessage", "Signed in. Profile sync is temporarily unavailable.");
           router.replace("/hub");

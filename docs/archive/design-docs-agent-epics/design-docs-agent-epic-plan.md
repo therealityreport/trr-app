@@ -531,5 +531,5 @@ The NYT article page at `/admin/design-docs/nyt-articles/trump-economy-year-1` s
 ## Next Step
 
 ```
-/create-implementation-plan docs/epics/design-docs-agent-epic-plan.md
+/create-implementation-plan docs/archive/design-docs-agent-epics/design-docs-agent-epic-plan.md
 ```

@@ -4,14 +4,11 @@ import { requireUser } from "@/lib/server/auth";
 import {
   getActiveRunForSurvey,
   submitSurveyResponse,
+  SurveyAnswerValidationError,
 } from "@/lib/server/surveys/survey-run-repository";
 import type { AnswerInput, SubmitResponse } from "@/lib/surveys/normalized-types";
 
 export const dynamic = "force-dynamic";
-
-interface SubmitRequestBody {
-  answers: AnswerInput[];
-}
 
 export async function POST(
   request: NextRequest,
@@ -24,8 +21,16 @@ export async function POST(
     const user = await requireUser(request);
 
     // Parse request body
-    const body = (await request.json()) as SubmitRequestBody;
-    const { answers } = body;
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json(
+        { success: false, error: "Invalid request: JSON body required" },
+        { status: 400 },
+      );
+    }
+    const answers = body && typeof body === "object" && "answers" in body ? body.answers : undefined;
 
     if (!answers || !Array.isArray(answers)) {
       return NextResponse.json(
@@ -47,7 +52,7 @@ export async function POST(
     const response = await submitSurveyResponse(
       { firebaseUid: user.uid },
       activeRun.id,
-      answers,
+      answers as AnswerInput[],
     );
 
     return NextResponse.json({
@@ -55,6 +60,12 @@ export async function POST(
       responseId: response.id,
     });
   } catch (error) {
+    if (error instanceof SurveyAnswerValidationError) {
+      return NextResponse.json(
+        { success: false, error: error.message },
+        { status: 400 },
+      );
+    }
     console.error("[api] Failed to submit survey", error);
 
     const message = error instanceof Error ? error.message : "failed";

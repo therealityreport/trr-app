@@ -203,6 +203,12 @@ function RegisterContent() {
       } catch {}
       router.replace("/auth/finish");
     } catch (err: unknown) {
+      if ((err as { code?: string })?.code === "auth/email-already-in-use") {
+        setIsExistingUser(true);
+        setStage("login");
+        setFormError("An account already uses this email. Enter your password to log in.");
+        return;
+      }
       const message = getFriendlyError(err);
       setFormError(message);
     } finally {

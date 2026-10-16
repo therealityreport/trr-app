@@ -206,7 +206,7 @@ export default function RhoslcSurveyPlayPage() {
     setSaveState("saving");
     try {
       const ranking = rankingIds.map((id) => CAST_MEMBERS.find((item) => item.id === id)).filter(Boolean) as SurveyRankingItem[];
-      await manager.saveResponse(
+      const outcome = await manager.saveResponse(
         IDENTIFIERS,
         userId,
         {
@@ -218,7 +218,9 @@ export default function RhoslcSurveyPlayPage() {
         { surveyKey: RHOSLC_SURVEY_ID },
       );
       setSaveState("saved");
-      router.push("/surveys/rhoslc-s6/results");
+      if (outcome.completed && outcome.syncState === "synced") {
+        router.push("/surveys/rhoslc-s6/results");
+      }
     } catch (error) {
       console.error("Failed to submit survey", error);
       setSaveState("error");

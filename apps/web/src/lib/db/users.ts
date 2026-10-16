@@ -1,25 +1,28 @@
+import { auth } from "@/lib/firebase";
+import { fetchSignInMethodsForEmail } from "firebase/auth";
 import { requireDb } from "@/lib/firebase-db";
 import {
-  collection,
   doc,
   getDoc,
-  getDocs,
-  limit,
-  query,
   serverTimestamp,
   setDoc,
-  where,
 } from "firebase/firestore";
 import type { UserProfile } from "@/lib/validation/user";
 
 const USERS = "users" as const;
 
-export async function getUserByUsername(username: string): Promise<UserProfile | null> {
-  const q = query(collection(requireDb(), USERS), where("username", "==", username), limit(1));
-  const snap = await getDocs(q);
-  if (snap.empty) return null;
-  const docSnap = snap.docs[0];
-  return docSnap.data() as UserProfile;
+export async function isUsernameAvailable(username: string): Promise<boolean> {
+  const user = auth.currentUser;
+  if (!user) throw new Error("Sign in to check username availability.");
+  const token = await user.getIdToken();
+  const response = await fetch(`/api/profile/username-availability?username=${encodeURIComponent(username)}`, {
+    headers: { authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  if (!response.ok) throw new Error("Username availability is unavailable. Please retry.");
+  const body = await response.json();
+  if (typeof body.available !== "boolean") throw new Error("Invalid username availability response.");
+  return body.available;
 }
 
 export async function createUserProfile(
@@ -57,13 +60,19 @@ export async function upsertUserProfile(uid: string, partial: Partial<UserProfil
 export async function getUserProfile(uid: string): Promise<UserProfile | null> {
   const ref = doc(requireDb(), USERS, uid);
   const snap = await getDoc(ref);
-  return snap.exists() ? (snap.data() as UserProfile) : null;
+  if (!snap.exists()) return null;
+  const profile = snap.data();
+  // Owner-supplied private list entries remain untrusted at the read boundary.
+  const strings = (value: unknown): string[] => Array.isArray(value)
+    ? value.filter((entry): entry is string => typeof entry === "string")
+    : [];
+  return { ...profile, shows: strings(profile.shows), showRequests: strings(profile.showRequests) } as UserProfile;
 }
 
 export async function checkUserExists(email: string): Promise<boolean> {
-  const q = query(collection(requireDb(), USERS), where("email", "==", email), limit(1));
-  const snap = await getDocs(q);
-  return !snap.empty;
+  // Auth discovery may intentionally return [] under email enumeration protection.
+  // Account creation handles email-already-in-use and offers the login stage.
+  return (await fetchSignInMethodsForEmail(auth, email.trim())).length > 0;
 }
 
 export function isFirestoreUnavailableError(error: unknown): boolean {

@@ -8,6 +8,9 @@ This script parses Python source files to extract:
 Output files are written to docs/Repository/generated/:
 - CODE_IMPORT_GRAPH.md - Internal import dependency graph
 - SCRIPTS_FLOW.md - Script entrypoints and their dependencies
+
+Checked-in diagrams/git_workflow.md and diagrams/system_maps.md are also
+regenerated from the stable templates below. Edit these templates, not outputs.
 """
 
 from __future__ import annotations
@@ -363,13 +366,13 @@ def find_entrypoints(scripts_dir: Path) -> list[Path]:
 
 
 def generate_scripts_flow(scripts_dir: Path, parser: Parser) -> str:
-    """Generate Mermaid diagram showing script entrypoints and their trr_backend dependencies."""
+    """Generate Mermaid diagram showing script entrypoints and local backend imports, if any."""
     entrypoints = find_entrypoints(scripts_dir)
 
     lines = [
         "# Scripts Flow",
         "",
-        "Script entrypoints (`if __name__ == '__main__'`) and their trr_backend dependencies.",
+        "Script entrypoints (`if __name__ == '__main__'`) and any local backend dependencies.",
         "",
         "```mermaid",
         "flowchart LR",
@@ -408,13 +411,14 @@ def generate_scripts_flow(scripts_dir: Path, parser: Parser) -> str:
         lines.append("    end")
         subgraph_id += 1
 
-    # Add trr_backend subgraph with consistent ordering
-    lines.append('    subgraph trr["trr_backend/"]')
-    lines.append('        ingestion["ingestion"]')
-    lines.append('        integrations["integrations"]')
-    lines.append('        media["media"]')
-    lines.append('        repos["repositories"]')
-    lines.append("    end")
+    # This app checkout has no trr_backend package; do not draw a phantom node.
+    if (scripts_dir.parent / "trr_backend").is_dir():
+        lines.append('    subgraph trr["trr_backend/"]')
+        lines.append('        ingestion["ingestion"]')
+        lines.append('        integrations["integrations"]')
+        lines.append('        media["media"]')
+        lines.append('        repos["repositories"]')
+        lines.append("    end")
 
     # Collect all edges as tuples for deterministic sorting
     edges: list[tuple[str, str]] = []
@@ -463,10 +467,12 @@ def generate_scripts_flow(scripts_dir: Path, parser: Parser) -> str:
 
 
 def ensure_git_workflow_template(diagrams_dir: Path) -> None:
-    """Ensure git_workflow.md exists with stable template content."""
+    """Overwrite git_workflow.md from its authoritative stable template."""
     git_workflow_path = diagrams_dir / "git_workflow.md"
 
     template = """# Git Workflow
+
+<!-- Generated from scripts/generate_repo_mermaid.py; edit the template, not this output. -->
 
 This repo has no prescribed branching or worktree strategy.
 
@@ -491,68 +497,41 @@ flowchart TB
 
 
 def ensure_system_maps_template(diagrams_dir: Path) -> None:
-    """Ensure system_maps.md exists with stable template content."""
+    """Overwrite system_maps.md from its authoritative stable template."""
     system_maps_path = diagrams_dir / "system_maps.md"
 
     template = """# System Architecture Maps
 
+<!-- Generated from scripts/generate_repo_mermaid.py; edit the template, not this output. -->
+
 ## Module Boundaries
 
 ```mermaid
-flowchart TB
-    subgraph scripts["scripts/"]
-        s1["ShowInfo"]
-        s2["CastInfo"]
-        s3["RealiteaseInfo"]
-        s4["WWHLInfo"]
-        s5["FinalList"]
-    end
-
-    subgraph api["api/"]
-        routers["routers/"]
-        realtime["realtime/"]
-        auth["auth.py"]
-    end
-
-    subgraph trr["trr_backend/"]
-        repos["repositories/"]
-        integrations["integrations/"]
-        ingestion["ingestion/"]
-        media["media/"]
-    end
-
-    subgraph external["External APIs"]
-        tmdb["TMDb"]
-        imdb["IMDb"]
-        fandom["Fandom"]
-    end
-
-    scripts --> repos
-    scripts --> ingestion
-    api --> repos
-    ingestion --> integrations
-    integrations --> external
-    repos --> db[(Supabase)]
-    media --> s3[(S3)]
+flowchart LR
+    routes["apps/web/src/app/ (Next.js routes)"] --> components["apps/web/src/components/ (UI)"]
+    routes --> lib["apps/web/src/lib/ (app services)"]
+    components --> lib
+    wordle["apps/vue-wordle/src/ (reference-only Vue sandbox)"]
+    scripts["scripts/ (workspace tools)"]
+    lib --> backend["Sibling TRR-Backend API"]
 ```
 
-## Data Flow
+## Request Flow
 
 ```mermaid
 flowchart LR
-    lists["IMDb/TMDb Lists"] --> resolve["resolve_tmdb_ids"]
-    resolve --> backfill["backfill_tmdb_details"]
-    backfill --> sync["sync_entities"]
-    sync --> providers["sync_watch_providers"]
-    providers --> api["API serves ShowDetail"]
+    browser["Browser"] --> routes["Next.js app routes"]
+    routes --> lib["App services / API clients"]
+    lib --> backend["Sibling TRR-Backend API"]
 ```
 
 ## Key Components
 
-- **scripts/**: Data ingestion and enrichment pipelines
-- **api/**: FastAPI REST endpoints and WebSocket realtime
-- **trr_backend/**: Core business logic and data access
-- **integrations/**: External API clients (TMDb, IMDb, etc.)
+- **apps/web/src/app/**: Next.js pages and API routes
+- **apps/web/src/components/**: Shared app and admin UI
+- **apps/web/src/lib/**: App-side services and API clients
+- **apps/vue-wordle/src/**: Reference-only Vue Wordle sandbox; lifecycle and installation boundary: [README](../../../apps/vue-wordle/README.md)
+- **scripts/**: Workspace tooling
 """
 
     system_maps_path.write_text(template)
@@ -612,7 +591,7 @@ def main() -> int:
     entrypoint_count = len(find_entrypoints(root / "scripts"))
     print(f"Wrote {generated_dir / 'SCRIPTS_FLOW.md'} ({entrypoint_count} entrypoints)")
 
-    # Ensure curated diagram templates exist (NEW)
+    # Regenerate checked-in diagrams from their authoritative templates
     ensure_git_workflow_template(diagrams_dir)
     print(f"Wrote {diagrams_dir / 'git_workflow.md'} (template)")
 

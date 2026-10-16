@@ -1,5 +1,7 @@
 # Git Workflow
 
+<!-- Generated from scripts/generate_repo_mermaid.py; edit the template, not this output. -->
+
 This repo has no prescribed branching or worktree strategy.
 
 ```mermaid

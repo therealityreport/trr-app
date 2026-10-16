@@ -1,10 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminAuth } from "@/lib/firebaseAdmin";
+import { isSameOriginSessionRequest } from "@/lib/server/session-origin";
 
 const UNSUPPORTED_SUPABASE_SESSION_MESSAGE =
   "TRR_AUTH_PROVIDER=supabase is not supported for durable login/session cookies; Firebase must issue __session.";
 
 export async function POST(req: NextRequest) {
+  if (!isSameOriginSessionRequest(req)) {
+    return NextResponse.json({ error: "invalid_origin" }, { status: 403 });
+  }
+  if (req.headers.get("content-type")?.split(";")[0].trim().toLowerCase() !== "application/json") {
+    return NextResponse.json({ error: "unsupported_media_type" }, { status: 415 });
+  }
+
   try {
     const body = await req.json();
     const { idToken } = body;

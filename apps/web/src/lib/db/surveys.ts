@@ -19,7 +19,32 @@ export async function getSurveyXState(uid: string): Promise<SurveyXState | null>
   };
 }
 
+const surveyXSaves = new Map<string, { tail: Promise<void>; latest: Promise<void> }>();
+
 export async function saveSurveyXResponses(user: User, responses: SurveyXResponses): Promise<void> {
+  const savedResponses = {
+    ...responses,
+    view_platforms_subscriptions: [...responses.view_platforms_subscriptions],
+    view_devices_reality: [...responses.view_devices_reality],
+  };
+  const queue = surveyXSaves.get(user.uid) ?? { tail: Promise.resolve(), latest: Promise.resolve() };
+  const operation = queue.tail.then(() => persistSurveyXResponses(user, savedResponses));
+  queue.latest = operation;
+  queue.tail = operation.then(() => undefined, () => undefined);
+  surveyXSaves.set(user.uid, queue);
+  let observed = operation;
+  for (;;) {
+    let failed = false;
+    let error: unknown;
+    try { await observed; } catch (caught) { failed = true; error = caught; }
+    if (queue.latest !== observed) { observed = queue.latest; continue; }
+    if (surveyXSaves.get(user.uid) === queue) surveyXSaves.delete(user.uid);
+    if (failed) throw error;
+    return;
+  }
+}
+
+async function persistSurveyXResponses(user: User, responses: SurveyXResponses): Promise<void> {
   const uid = user.uid;
   const ref = doc(requireDb(), "users", uid);
   const existing = await getDoc(ref);
@@ -29,7 +54,8 @@ export async function saveSurveyXResponses(user: User, responses: SurveyXRespons
     ref,
     {
       surveyX: {
-        completed: true,
+        completed: false,
+        syncState: "pending",
         completedAt: serverTimestamp(),
         responses,
       },
@@ -38,8 +64,14 @@ export async function saveSurveyXResponses(user: User, responses: SurveyXRespons
     { merge: true },
   );
 
-  await syncSurveyXResponses(user, responses, username);
-  await syncGlobalProfileSurvey(user, responses, username);
+  try {
+    await syncSurveyXResponses(user, responses, username);
+    await syncGlobalProfileSurvey(user, responses, username);
+    await setDoc(ref, { surveyX: { completed: true, syncState: "synced" }, surveyXLastUpdatedAt: serverTimestamp() }, { merge: true });
+  } catch (error) {
+    await setDoc(ref, { surveyX: { completed: false, syncState: "error" }, surveyXLastUpdatedAt: serverTimestamp() }, { merge: true });
+    throw new Error("Your answers are saved, but syncing failed. Please submit again to retry.", { cause: error });
+  }
 }
 
 async function syncSurveyXResponses(user: User, responses: SurveyXResponses, username: string | null): Promise<void> {

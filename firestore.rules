@@ -30,6 +30,149 @@ service cloud.firestore {
         );
     }
 
+    function optionalString(data, key, maxSize) {
+      return !(key in data) || (data[key] is string && data[key].size() <= maxSize);
+    }
+    // These private owner fields are lists; consumers filter untrusted entries on read.
+    function stringList(value) {
+      return value is list && value.size() <= 50;
+    }
+    function surveyStringList(value) {
+      let count = value.size();
+      return value is list && count <= 20
+        && (count <= 0 || value[0] is string)
+        && (count <= 1 || value[1] is string)
+        && (count <= 2 || value[2] is string)
+        && (count <= 3 || value[3] is string)
+        && (count <= 4 || value[4] is string)
+        && (count <= 5 || value[5] is string)
+        && (count <= 6 || value[6] is string)
+        && (count <= 7 || value[7] is string)
+        && (count <= 8 || value[8] is string)
+        && (count <= 9 || value[9] is string)
+        && (count <= 10 || value[10] is string)
+        && (count <= 11 || value[11] is string)
+        && (count <= 12 || value[12] is string)
+        && (count <= 13 || value[13] is string)
+        && (count <= 14 || value[14] is string)
+        && (count <= 15 || value[15] is string)
+        && (count <= 16 || value[16] is string)
+        && (count <= 17 || value[17] is string)
+        && (count <= 18 || value[18] is string)
+        && (count <= 19 || value[19] is string)
+        ;
+    }
+    function validSurveyX(value) {
+      return value is map && value.keys().hasOnly(["completed", "completedAt", "responses", "syncState"])
+        && value.completed is bool
+        && (!("completedAt" in value) || value.completedAt is timestamp)
+        && (!("syncState" in value) || value.syncState in ["pending", "synced", "error"])
+        && (!("responses" in value) || validSurveyXResponses(value.responses));
+    }
+    function validSurveyXResponses(value) {
+      return value is map && value.keys().hasOnly([
+        "view_live_tv_household", "view_platforms_subscriptions", "primaryPlatform", "watchFrequency", "watchMode",
+        "view_reality_cowatch", "view_live_chats_social", "view_devices_reality"
+      ])
+        && optionalString(value, "view_live_tv_household", 200)
+        && optionalString(value, "primaryPlatform", 200)
+        && optionalString(value, "watchFrequency", 200)
+        && optionalString(value, "watchMode", 200)
+        && optionalString(value, "view_reality_cowatch", 200)
+        && optionalString(value, "view_live_chats_social", 200)
+        && (!("view_platforms_subscriptions" in value) || surveyStringList(value.view_platforms_subscriptions))
+        && (!("view_devices_reality" in value) || surveyStringList(value.view_devices_reality));
+    }
+    function validProfile(data, uid, changed) {
+      return data.uid == uid && data.createdAt is timestamp && data.updatedAt is timestamp
+        && (!("email" in data) || data.email == null || (data.email is string && data.email.size() <= 320 && data.email == request.auth.token.email))
+        && optionalString(data, "name", 200)
+        && (!("username" in data) || (data.username is string && data.username.matches('^[a-z0-9_]{3,20}$')))
+        && (!("birthday" in data) || data.birthday == "" || isIsoDate(data.birthday))
+        && (!changed.hasAny(["shows"]) || stringList(data.shows))
+        && (!changed.hasAny(["showRequests"]) || stringList(data.showRequests))
+        && optionalString(data, "gender", 100)
+        && optionalString(data, "state", 100)
+        && optionalString(data, "country", 100)
+        && optionalString(data, "provider", 100)
+        && (!("livesInUS" in data) || data.livesInUS is bool)
+        && (!changed.hasAny(["surveyX"]) || validSurveyX(data.surveyX))
+        && (!("surveyXLastUpdatedAt" in data) || data.surveyXLastUpdatedAt is timestamp);
+    }
+    function profileFields() {
+      return ["uid", "email", "name", "username", "birthday", "shows", "showRequests", "gender", "livesInUS",
+        "state", "country", "provider", "createdAt", "updatedAt", "surveyX", "surveyXLastUpdatedAt"];
+    }
+    match /users/{uid} {
+      allow get: if isOwner(uid);
+      allow list, delete: if false;
+      allow create: if isOwner(uid) && request.resource.data.keys().hasOnly(profileFields()) && validProfile(request.resource.data, uid, request.resource.data.keys());
+      allow update: if isOwner(uid) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(profileFields())
+        && request.resource.data.createdAt == resource.data.createdAt && validProfile(request.resource.data, uid, request.resource.data.diff(resource.data).affectedKeys());
+    }
+    function validGamePrefs(value, realitease) {
+      return value is map && value.keys().hasOnly(realitease ? ["ageOrZodiac", "serviceMode"] : ["ageOrZodiac"])
+        && (!("ageOrZodiac" in value) || value.ageOrZodiac in ["age", "zodiac"])
+        && (!("serviceMode" in value) || value.serviceMode in ["networks", "streamers"]);
+    }
+    match /user_preferences/{uid} {
+      allow read: if isOwner(uid);
+      allow create, update: if isOwner(uid) && request.resource.data.keys().hasOnly(["realitease", "bravodle"])
+        && (!("realitease" in request.resource.data) || validGamePrefs(request.resource.data.realitease, true))
+        && (!("bravodle" in request.resource.data) || validGamePrefs(request.resource.data.bravodle, false));
+      allow delete: if false;
+    }
+    function rankingItem(value) {
+      return value is map && value.keys().hasOnly(["id", "label", "img"])
+        && value.id is string && value.label is string && value.img is string;
+    }
+    // Current legacy ranking writers use 8/9 choices; 20 stays within the rules expression budget.
+    function validRanking(value) {
+      let count = value.size();
+      return value is list && count <= 20
+        && (count <= 0 || rankingItem(value[0]))
+        && (count <= 1 || rankingItem(value[1]))
+        && (count <= 2 || rankingItem(value[2]))
+        && (count <= 3 || rankingItem(value[3]))
+        && (count <= 4 || rankingItem(value[4]))
+        && (count <= 5 || rankingItem(value[5]))
+        && (count <= 6 || rankingItem(value[6]))
+        && (count <= 7 || rankingItem(value[7]))
+        && (count <= 8 || rankingItem(value[8]))
+        && (count <= 9 || rankingItem(value[9]))
+        && (count <= 10 || rankingItem(value[10]))
+        && (count <= 11 || rankingItem(value[11]))
+        && (count <= 12 || rankingItem(value[12]))
+        && (count <= 13 || rankingItem(value[13]))
+        && (count <= 14 || rankingItem(value[14]))
+        && (count <= 15 || rankingItem(value[15]))
+        && (count <= 16 || rankingItem(value[16]))
+        && (count <= 17 || rankingItem(value[17]))
+        && (count <= 18 || rankingItem(value[18]))
+        && (count <= 19 || rankingItem(value[19]))
+        ;
+    }
+    match /surveyResults/{showId}/seasons/{seasonId}/episodes/{episodeId}/episodeMeta/{metaId} {
+      allow read: if isAuthenticated();
+      allow write: if false;
+    }
+    match /surveyResults/{showId}/seasons/{seasonId}/episodes/{episodeId}/responses/{uid} {
+      allow read: if isOwner(uid);
+      allow create, update: if isOwner(uid)
+        && request.resource.data.keys().hasOnly(["uid", "showId", "seasonId", "episodeId", "ranking", "seasonRating", "completionPct", "completed", "createdAt", "updatedAt", "syncState", "requestedCompleted"])
+        && request.resource.data.uid == uid && request.resource.data.showId == showId
+        && request.resource.data.seasonId == seasonId && request.resource.data.episodeId == episodeId
+        && validRanking(request.resource.data.ranking)
+        && request.resource.data.completionPct is number && request.resource.data.completionPct >= 0 && request.resource.data.completionPct <= 100
+        && request.resource.data.completed is bool
+        && (!("requestedCompleted" in request.resource.data) || request.resource.data.requestedCompleted is bool)
+        && (!("syncState" in request.resource.data) || request.resource.data.syncState in ["pending", "synced", "error"])
+        && (!("seasonRating" in request.resource.data) || request.resource.data.seasonRating == null ||
+          (request.resource.data.seasonRating is number && request.resource.data.seasonRating >= 0 && request.resource.data.seasonRating <= 10))
+        && request.resource.data.createdAt is timestamp && request.resource.data.updatedAt is timestamp;
+      allow delete: if false;
+    }
+
     // User-scoped analytics + game docs
     match /user_analytics/{userId} {
       allow read, write: if isOwner(userId);
@@ -46,15 +189,15 @@ service cloud.firestore {
     }
 
     // Puzzle/global analytics are readable by all clients.
-    // Writes are limited to authenticated sessions.
+    // Aggregate writes are server-owned.
     match /realitease_analytics/{docId} {
       allow read: if true;
-      allow write: if isAuthenticated();
+      allow write: if false;
     }
 
     match /bravodle_analytics/{docId} {
       allow read: if true;
-      allow write: if isAuthenticated();
+      allow write: if false;
     }
 
     // Answer keys are never writable by clients.

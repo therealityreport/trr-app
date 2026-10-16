@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
- * Delete web-scrape imports for a given show season, filtered by source + source page URL.
+ * Remove web-scrape links for one season, filtered by source + source page URL.
+ * Media assets are retained: other seasons and non-link consumers can share them.
  *
  * Defaults are set up for the RHOSLC S3 E! Online cast photos page referenced in TASK1.
  *
@@ -19,7 +20,7 @@
  *     --apply
  */
 
-import { Pool } from "pg";
+import { Client, Pool } from "pg";
 import dotenv from "dotenv";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -28,174 +29,122 @@ import { readFileSync } from "node:fs";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Load environment variables (.env.local is the common local setup for apps/web scripts)
-dotenv.config({ path: path.join(__dirname, "../.env.local") });
-
-const args = process.argv.slice(2);
-const hasFlag = (flag) => args.includes(flag);
-const readArg = (key, fallback) => {
-  const idx = args.indexOf(key);
-  if (idx === -1) return fallback;
-  const val = args[idx + 1];
-  return val !== undefined ? val : fallback;
-};
-
-const APPLY = hasFlag("--apply");
-const SHOW_NAME = readArg("--show", "The Real Housewives of Salt Lake City");
-const SEASON_NUMBER = Number.parseInt(readArg("--season", "3"), 10);
-const SOURCE = readArg("--source", "web_scrape:eonline.com").toLowerCase();
-const PAGE_URL = readArg(
-  "--page-url",
-  "https://www.eonline.com/photos/34966/the-real-housewives-of-salt-lake-citys-season-3-cast-photos"
-);
-
-const connectionString = process.env.DATABASE_URL;
-if (!connectionString) {
-  console.error("[delete-web-scrape-imports] DATABASE_URL is not set");
-  process.exit(1);
+// Resolve TLS once. pg URL parameters otherwise replace the explicit ssl object.
+export function resolveDatabaseConfig(connectionString, env = process.env) {
+  const url = new URL(connectionString);
+  // Parsing a Client does not connect. Reuse the installed pg URL semantics,
+  // including certificate files, explicit opt-outs and PGSSLMODE defaults.
+  const parsed = new Client({
+    connectionString,
+    ssl: env.DATABASE_SSL === "true" ? { rejectUnauthorized: false } : undefined,
+  }).connectionParameters;
+  // pg hides the client key with a non-enumerable descriptor. Preserve it and
+  // its logging protection, without mutating a possible pg defaults object.
+  let ssl = parsed.ssl && typeof parsed.ssl === "object"
+    ? Object.defineProperties({}, Object.getOwnPropertyDescriptors(parsed.ssl))
+    : parsed.ssl;
+  if (env.DATABASE_SSL_STRICT === "true") {
+    if (!ssl || typeof ssl !== "object") ssl = {};
+    ssl.rejectUnauthorized = true;
+    // libpq-compatible verify-ca can install a hostname-check bypass.
+    delete ssl.checkServerIdentity;
+  }
+  if (ssl) {
+    const inlineCa = env.DATABASE_SSL_CA;
+    const caPath = env.DATABASE_SSL_CA_PATH;
+    if (inlineCa || caPath) {
+      if (typeof ssl !== "object") ssl = {};
+      if (inlineCa) ssl.ca = inlineCa.replace(/\\n/g, "\n");
+      else ssl.ca = readFileSync(path.resolve(__dirname, "..", caPath), "utf8");
+    }
+  }
+  for (const key of ["ssl", "sslmode", "sslrootcert", "sslcert", "sslkey", "uselibpqcompat", "sslnegotiation"]) {
+    url.searchParams.delete(key);
+  }
+  return { connectionString: url.toString(), ssl, sslnegotiation: parsed.sslnegotiation };
 }
 
-if (!Number.isFinite(SEASON_NUMBER)) {
-  console.error("[delete-web-scrape-imports] --season must be a number");
-  process.exit(1);
-}
-
-// Configure SSL (best-effort; DATABASE_URL often includes sslmode=require)
-let ssl = undefined;
-let sslMode = null;
-try {
-  sslMode = new URL(connectionString).searchParams.get("sslmode");
-} catch {
-  sslMode = null;
-}
-const shouldUseSsl =
-  process.env.DATABASE_SSL === "true" ||
-  (typeof sslMode === "string" && sslMode.toLowerCase() !== "disable");
-
-if (shouldUseSsl) {
-  const strict = process.env.DATABASE_SSL_STRICT === "true";
-  if (!strict) {
-    ssl = { rejectUnauthorized: false };
-  } else {
-    const inlineCa = process.env.DATABASE_SSL_CA;
-    const caPath = process.env.DATABASE_SSL_CA_PATH;
-    if (inlineCa) {
-      ssl = { rejectUnauthorized: true, ca: inlineCa };
-    } else if (caPath) {
-    const resolved = path.resolve(path.join(__dirname, ".."), caPath);
-    const ca = readFileSync(resolved, "utf8");
-    ssl = { rejectUnauthorized: true, ca };
-  } else {
-    // Many hosted DBs (and some local tunnels) present an intermediate cert chain that pg
-    // treats as self-signed unless a CA is explicitly provided. For admin scripts, prefer
-    // usability: fall back to insecure SSL in that case.
-    console.warn(
-      "[delete-web-scrape-imports] DATABASE_SSL=true but no CA configured; falling back to rejectUnauthorized=false"
+// Unlink only the selected season associations. Retain assets for separate,
+// reference-aware garbage collection; media_links is not their only consumer.
+export async function removeSeasonImports(client, { seasonId, source, pageUrl, apply = false }) {
+  if (apply) await client.query("begin");
+  try {
+    const result = await client.query(
+      `select ml.id as link_id, ma.id, ma.hosted_url, ml.kind
+       from core.media_links ml
+       join core.media_assets ma on ma.id = ml.media_asset_id
+       where ml.entity_type = 'season' and ml.entity_id = $1
+         and lower(ma.source) = $2
+         and (ma.metadata->>'page_url' = $3 or ma.metadata->>'source_page_url' = $3)
+       order by ml.kind nulls last, ma.id
+       ${apply ? "for update of ml" : ""}`,
+      [seasonId, source, pageUrl],
     );
-    ssl = { rejectUnauthorized: false };
-  }
+    const rows = result.rows ?? [];
+    let removed = 0;
+    if (apply) {
+      if (rows.length) {
+        const deleted = await client.query(
+          `delete from core.media_links
+           where id = any($1::uuid[]) and entity_type = 'season' and entity_id = $2`,
+          [rows.map((row) => row.link_id), seasonId],
+        );
+        removed = deleted.rowCount;
+      }
+      await client.query("commit");
+    }
+    return { rows, removed };
+  } catch (error) {
+    if (apply) await client.query("rollback");
+    throw error;
   }
 }
-
-const pool = new Pool({ connectionString, ssl });
 
 async function main() {
-  const client = await pool.connect();
+  dotenv.config({ path: path.join(__dirname, "../.env.local"), quiet: true });
+  const args = process.argv.slice(2);
+  const readArg = (key, fallback) => {
+    const index = args.indexOf(key);
+    return index === -1 ? fallback : args[index + 1];
+  };
+  const apply = args.includes("--apply");
+  const showName = readArg("--show", "The Real Housewives of Salt Lake City");
+  const rawSeason = readArg("--season", "3");
+  if (!/^\d+$/.test(rawSeason ?? "") || !Number.isSafeInteger(Number(rawSeason)) || Number(rawSeason) < 1) {
+    throw new Error("--season must be a positive integer");
+  }
+  const seasonNumber = Number(rawSeason);
+  const source = readArg("--source", "web_scrape:eonline.com")?.toLowerCase();
+  const pageUrl = readArg("--page-url", "https://www.eonline.com/photos/34966/the-real-housewives-of-salt-lake-citys-season-3-cast-photos");
+  if (!showName || !source || !pageUrl) throw new Error("A value is required for each filter");
+  if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL is not set");
+  const pool = new Pool(resolveDatabaseConfig(process.env.DATABASE_URL));
+  let client;
   try {
-    const showRes = await client.query(
-      `select id, name from core.shows where name = $1 limit 1`,
-      [SHOW_NAME]
-    );
-    if (showRes.rowCount === 0) {
-      console.error(`[delete-web-scrape-imports] Show not found: ${SHOW_NAME}`);
-      process.exit(1);
-    }
-    const show = showRes.rows[0];
-
-    const seasonRes = await client.query(
-      `select id, season_number from core.seasons where show_id = $1 and season_number = $2 limit 1`,
-      [show.id, SEASON_NUMBER]
-    );
-    if (seasonRes.rowCount === 0) {
-      console.error(
-        `[delete-web-scrape-imports] Season not found: show=${SHOW_NAME} season=${SEASON_NUMBER}`
-      );
-      process.exit(1);
-    }
-    const season = seasonRes.rows[0];
-
-    const assetsRes = await client.query(
-      `
-        select distinct
-          ma.id,
-          ma.hosted_url,
-          ml.kind,
-          ma.source,
-          ma.metadata->>'page_url' as page_url,
-          ma.metadata->>'source_page_url' as source_page_url
-        from core.media_links ml
-        join core.media_assets ma on ma.id = ml.media_asset_id
-        where ml.entity_type = 'season'
-          and ml.entity_id = $1
-          and lower(ma.source) = $2
-          and (
-            ma.metadata->>'page_url' = $3
-            or ma.metadata->>'source_page_url' = $3
-          )
-        order by ml.kind nulls last, ma.id
-      `,
-      [season.id, SOURCE, PAGE_URL]
-    );
-
-    const rows = assetsRes.rows ?? [];
-    const uniqueAssetIds = [...new Set(rows.map((r) => r.id))];
-    console.log(
-      `[delete-web-scrape-imports] Found ${rows.length} matching links across ${uniqueAssetIds.length} assets for show="${show.name}" season=${season.season_number}`
-    );
-    for (const row of rows.slice(0, 25)) {
-      console.log(`- ${row.id} kind=${row.kind ?? "?"} hosted_url=${row.hosted_url ?? "?"}`);
-    }
-    if (rows.length > 25) {
-      console.log(`...and ${rows.length - 25} more`);
-    }
-
-    if (!APPLY) {
-      console.log("[delete-web-scrape-imports] Dry run only. Re-run with --apply to delete.");
-      return;
-    }
-
-    if (rows.length === 0) {
-      console.log("[delete-web-scrape-imports] Nothing to delete.");
-      return;
-    }
-
-    const assetIds = uniqueAssetIds;
-
-    await client.query("begin");
-    await client.query(
-      `delete from core.media_links where media_asset_id = any($1::uuid[])`,
-      [assetIds]
-    );
-    await client.query(`delete from core.media_assets where id = any($1::uuid[])`, [assetIds]);
-    await client.query("commit");
-
-    console.log(`[delete-web-scrape-imports] Deleted ${assetIds.length} assets.`);
-  } catch (err) {
-    try {
-      await client.query("rollback");
-    } catch {}
-    console.error("[delete-web-scrape-imports] Failed:", err);
-    process.exitCode = 1;
+    client = await pool.connect();
+    const show = (await client.query("select id, name from core.shows where name = $1 limit 1", [showName])).rows[0];
+    if (!show) throw new Error("Show not found");
+    const season = (await client.query(
+      "select id, season_number from core.seasons where show_id = $1 and season_number = $2 limit 1",
+      [show.id, seasonNumber],
+    )).rows[0];
+    if (!season) throw new Error("Season not found");
+    const { rows, removed } = await removeSeasonImports(client, { seasonId: season.id, source, pageUrl, apply });
+    const assets = new Set(rows.map((row) => row.id));
+    console.log(`[delete-web-scrape-imports] ${rows.length} matching season links across ${assets.size} assets.`);
+    for (const row of rows.slice(0, 25)) console.log(`- ${row.id} kind=${row.kind ?? "?"}`);
+    if (apply) console.log(`[delete-web-scrape-imports] Removed ${removed} season links; media assets retained.`);
+    else console.log("[delete-web-scrape-imports] Dry run only. Re-run with --apply to remove these season links. Media assets will be retained.");
   } finally {
-    client.release();
+    client?.release();
+    await pool.end();
   }
 }
 
-main()
-  .catch((err) => {
-    console.error("[delete-web-scrape-imports] Unhandled:", err);
+if (process.argv[1] && path.resolve(process.argv[1]) === __filename) {
+  main().catch(() => {
+    // Driver errors can contain the connection URL or certificate details.
+    console.error("[delete-web-scrape-imports] Failed; no successful cleanup was reported. Check filters, database access and TLS configuration.");
     process.exitCode = 1;
-  })
-  .finally(async () => {
-    await pool.end().catch(() => {});
   });
+}

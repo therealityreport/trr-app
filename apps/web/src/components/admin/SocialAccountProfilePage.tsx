@@ -63,7 +63,6 @@ import {
   type SocialPlatformSlug,
   type SocialAccountProfileCollaboratorTagAggregate,
   type SocialProfileCookieHealth,
-  type SocialProfileCookieRefreshResult,
   type SocialAccountCommentsGapPost,
   type SocialAccountCommentsRunProgress,
   type SocialAccountCommentsShardProgress,
@@ -81,7 +80,6 @@ import { buildSocialAccountProfileUrl } from "@/lib/admin/show-admin-routes";
 import { fetchSocialAccountCatalogRunProgressSnapshot, readDetailTargetProgress } from "@/lib/admin/social-account-catalog-progress";
 import { invalidateAdminSnapshotFamilies } from "@/lib/admin/admin-snapshot-client";
 import { recordAdminLoadSample } from "@/lib/admin/admin-load-samples";
-import { fetchAdminWithAuth as fetchAdminWithAuthBase } from "@/lib/admin/client-auth";
 import { useSharedPollingResource } from "@/lib/admin/shared-live-resource";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 import {
@@ -143,6 +141,29 @@ export {
 
 export { shouldUseSummaryTopHashtagsPreview } from "./social-account-profile/profile-presentation";
 
+import {
+  INSTAGRAM_AUTH_REFRESH_CONFIRMATION,
+  INSTAGRAM_AUTH_REFRESH_WARNING,
+  buildSocialAccountRequestError,
+  isBackendPressureError,
+  isBackendSaturationError,
+  isCatalogFreshnessDegraded,
+  isTimeoutRequestError,
+  toCatalogGapAnalysisStatusError,
+  toProxyErrorPayload,
+  toSharedLiveResourceRequestError,
+  toSocialAccountRequestError,
+  useSocialProfileApi,
+  withSocialProfileRequestDedup,
+  type CatalogFreshnessPayload,
+  type ProxyErrorPayload,
+  type SocialAccountRequestError,
+} from "./social-account-profile/profile-api";
+import { useProfileCookieHealth, useProfileCookieHealthPreflight } from "./social-account-profile/use-profile-cookie-health";
+import { ProfileCookieHealthCard } from "./social-account-profile/ProfileCookieHealthCard";
+
+export { __resetSocialProfileRequestInflightForTests } from "./social-account-profile/profile-api";
+
 type Props = {
   platform: SocialPlatformSlug;
   handle: string;
@@ -194,9 +215,6 @@ type InstagramCommentsStreamingBanner = {
   historyItems: string[];
 };
 
-const INSTAGRAM_AUTH_REFRESH_CONFIRMATION = "I UNDERSTAND INSTAGRAM AUTH RISK";
-const INSTAGRAM_AUTH_REFRESH_WARNING =
-  "Manual Instagram auth can surface CAPTCHA, verification code, checkpoint, or account-lock prompts. Complete those steps yourself before confirming a validated-cookie sync.";
 const CANCEL_STUCK_SOCIAL_INGEST_JOBS_URL = "/api/admin/trr-api/social/ingest/stuck-jobs/cancel";
 const CATALOG_ADVANCED_DETAILS_STORAGE_PREFIX = "trr-social-catalog-advanced-details";
 const NYT_DASHBOARD_BUTTON_CLASS =
@@ -354,44 +372,12 @@ type CollaboratorsTagsResponse = {
   mentions: SocialAccountProfileCollaboratorTagAggregate[];
 };
 
-type ProxyErrorPayload = {
-  error?: string;
-  detail?: string;
-  code?: string;
-  retryable?: boolean;
-  retry_after_seconds?: number;
-  trace_id?: string;
-  upstream_status?: number;
-  upstream_detail?: unknown;
-  upstream_detail_code?: string;
-};
-
-type SocialAccountRequestError = Error & {
-  code?: string;
-  retryable?: boolean;
-  retryAfterMs?: number;
-  isBackendSaturated?: boolean;
-  upstreamStatus?: number;
-  traceId?: string;
-};
-
 type SummaryResponse = SocialAccountProfileSummary & ProxyErrorPayload;
 
 type SummaryLoadResult = {
   data: SocialAccountProfileSummary;
   uninitialized: boolean;
 };
-
-type CatalogFreshnessPayload = SocialAccountCatalogFreshness &
-  ProxyErrorPayload & {
-    degraded?: boolean;
-    partial?: boolean;
-    freshness_degraded?: boolean;
-    recent_runs_degraded?: boolean;
-    recent_runs_unavailable?: boolean;
-    degraded_reason?: string | null;
-    degradation_reason?: string | null;
-  };
 
 type SocialAccountProfileSnapshot = {
   summary?: SocialAccountProfileSummary | null;
@@ -490,26 +476,6 @@ type InstagramPipelineIssueRow = {
   actionBusyLabel?: string;
   actionDisabled?: boolean;
   tone: "amber" | "red" | "sky";
-};
-
-const socialProfileRequestInflight = new Map<string, Promise<unknown>>();
-
-export const __resetSocialProfileRequestInflightForTests = (): void => {
-  socialProfileRequestInflight.clear();
-};
-
-const withSocialProfileRequestDedup = <T,>(key: string, loader: () => Promise<T>): Promise<T> => {
-  const existing = socialProfileRequestInflight.get(key) as Promise<T> | undefined;
-  if (existing) {
-    return existing;
-  }
-  const promise = loader().finally(() => {
-    if (socialProfileRequestInflight.get(key) === promise) {
-      socialProfileRequestInflight.delete(key);
-    }
-  });
-  socialProfileRequestInflight.set(key, promise as Promise<unknown>);
-  return promise;
 };
 
 const ACTIVE_CATALOG_RUN_STATUSES = new Set(["queued", "pending", "retrying", "running", "cancelling"]);
@@ -1031,168 +997,6 @@ const mergeProfileSummaryPreservingLiveTotal = (
   return next;
 };
 
-const hasBackendSaturationText = (value: string): boolean => {
-  const message = value.toLowerCase();
-  return (
-    message.includes("connection pool exhausted") ||
-    message.includes("database pool initialization failed") ||
-    message.includes("maxclientsinsessionmode") ||
-    message.includes("session-pool capacity") ||
-    message.includes("session pool capacity") ||
-    message.includes("pool pressure") ||
-    message.includes("backend is saturated")
-  );
-};
-
-const isBackendPressureCode = (value: string | null | undefined): boolean => {
-  const normalized = String(value || "").trim().toUpperCase();
-  return (
-    normalized === "BACKEND_TIMEOUT" ||
-    normalized === "BACKEND_REQUEST_TIMEOUT" ||
-    normalized === "DATABASE_SERVICE_UNAVAILABLE" ||
-    normalized === "UPSTREAM_TIMEOUT" ||
-    normalized === "REQUEST_TIMEOUT"
-  );
-};
-
-const isBackendSaturatedPayload = (payload: ProxyErrorPayload): boolean => {
-  const upstreamDetail =
-    payload.upstream_detail && typeof payload.upstream_detail === "object"
-      ? (payload.upstream_detail as Record<string, unknown>)
-      : null;
-  const upstreamReason =
-    typeof upstreamDetail?.reason === "string" && upstreamDetail.reason.trim()
-      ? upstreamDetail.reason.trim().toLowerCase()
-      : "";
-  const upstreamCode =
-    (typeof payload.upstream_detail_code === "string" && payload.upstream_detail_code.trim()) ||
-    (typeof upstreamDetail?.code === "string" && upstreamDetail.code.trim()) ||
-    (typeof payload.code === "string" && payload.code.trim()) ||
-    "";
-  const detailMessage = [payload.error, payload.detail, upstreamDetail?.message, upstreamDetail?.error]
-    .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
-    .join(" ");
-  return (
-    payload.code === "BACKEND_SATURATED" ||
-    upstreamReason === "session_pool_capacity" ||
-    (upstreamCode === "DATABASE_SERVICE_UNAVAILABLE" && upstreamReason === "session_pool_capacity") ||
-    hasBackendSaturationText(detailMessage)
-  );
-};
-
-const buildSocialAccountRequestError = (
-  payload: ProxyErrorPayload,
-  fallbackMessage: string,
-): SocialAccountRequestError => {
-  const upstreamDetail =
-    payload.upstream_detail && typeof payload.upstream_detail === "object"
-      ? (payload.upstream_detail as Record<string, unknown>)
-      : null;
-  const message =
-    (typeof payload.error === "string" && payload.error.trim()) ||
-    (typeof payload.detail === "string" && payload.detail.trim()) ||
-    (typeof upstreamDetail?.message === "string" && upstreamDetail.message.trim()) ||
-    fallbackMessage;
-  const retryAfterMs =
-    typeof payload.retry_after_seconds === "number" && Number.isFinite(payload.retry_after_seconds)
-      ? Math.max(0, payload.retry_after_seconds * 1000)
-      : undefined;
-  const error = new Error(message) as SocialAccountRequestError;
-  error.code = typeof payload.code === "string" && payload.code.trim() ? payload.code.trim() : undefined;
-  error.retryable = Boolean(payload.retryable);
-  error.retryAfterMs = retryAfterMs;
-  error.isBackendSaturated = isBackendSaturatedPayload(payload);
-  error.upstreamStatus = typeof payload.upstream_status === "number" ? payload.upstream_status : undefined;
-  error.traceId = typeof payload.trace_id === "string" && payload.trace_id.trim() ? payload.trace_id.trim() : undefined;
-  return error;
-};
-
-const toSocialAccountRequestError = (
-  error: unknown,
-  fallbackMessage: string,
-): SocialAccountRequestError => {
-  if (error instanceof Error) {
-    const existing = error as SocialAccountRequestError;
-    if (
-      existing.code ||
-      existing.retryable !== undefined ||
-      existing.retryAfterMs !== undefined ||
-      existing.isBackendSaturated !== undefined ||
-      existing.upstreamStatus !== undefined ||
-      existing.traceId !== undefined
-    ) {
-      return existing;
-    }
-    const normalized = new Error(existing.message || fallbackMessage) as SocialAccountRequestError;
-    normalized.code = existing.code;
-    normalized.retryable = existing.retryable;
-    normalized.retryAfterMs = existing.retryAfterMs;
-    normalized.isBackendSaturated = existing.isBackendSaturated;
-    normalized.upstreamStatus = existing.upstreamStatus;
-    normalized.traceId = existing.traceId;
-    return normalized;
-  }
-  return new Error(fallbackMessage) as SocialAccountRequestError;
-};
-
-const isBackendSaturationError = (error: unknown): error is SocialAccountRequestError => {
-  return Boolean((error as SocialAccountRequestError | undefined)?.isBackendSaturated);
-};
-
-const isCatalogFreshnessDegraded = (payload: CatalogFreshnessPayload | null | undefined): boolean => {
-  if (!payload) return false;
-  const reason = payload.degraded_reason ?? payload.degradation_reason ?? payload.reason ?? null;
-  return (
-    Boolean(payload.degraded) ||
-    Boolean(payload.partial) ||
-    Boolean(payload.freshness_degraded) ||
-    Boolean(payload.recent_runs_degraded) ||
-    Boolean(payload.recent_runs_unavailable) ||
-    Boolean(reason && hasBackendSaturationText(reason)) ||
-    isBackendSaturatedPayload(payload)
-  );
-};
-
-const toSharedLiveResourceRequestError = (
-  message: string | null,
-  details: {
-    code?: string;
-    retryable?: boolean;
-    retryAfterMs?: number;
-    isBackendSaturated?: boolean;
-    upstreamStatus?: number;
-  } | null,
-): SocialAccountRequestError => {
-  const error = new Error(message || details?.code || "Fetch failed") as SocialAccountRequestError;
-  error.code = details?.code;
-  error.retryable = details?.retryable;
-  error.retryAfterMs = details?.retryAfterMs;
-  error.isBackendSaturated = details?.isBackendSaturated;
-  error.upstreamStatus = details?.upstreamStatus;
-  return error;
-};
-
-const isTimeoutRequestError = (error: SocialAccountRequestError | null | undefined): boolean => {
-  if (!error) return false;
-  return (
-    error.code === "BACKEND_REQUEST_TIMEOUT" ||
-    error.code === "UPSTREAM_TIMEOUT" ||
-    error.upstreamStatus === 504 ||
-    error.message.toLowerCase().includes("timed out")
-  );
-};
-
-const isBackendPressureError = (error: unknown): error is SocialAccountRequestError => {
-  const requestError = error as SocialAccountRequestError | undefined;
-  if (!requestError) return false;
-  return (
-    Boolean(requestError.isBackendSaturated) ||
-    isBackendPressureCode(requestError.code) ||
-    isTimeoutRequestError(requestError) ||
-    hasBackendSaturationText(requestError.message || "")
-  );
-};
-
 const formatCatalogGalleryErrorMessage = (error: unknown): string => {
   const requestError = toSocialAccountRequestError(error, "Failed to load social account catalog posts");
   const fallbackMessage = requestError.message || "Failed to load social account catalog posts";
@@ -1258,51 +1062,6 @@ const formatSummaryRequestErrorMessage = (error: SocialAccountRequestError | nul
     return "Account summary temporarily unavailable. Saved profile totals may be stale until the summary reloads.";
   }
   return (error as Error).message || "Failed to load social account profile summary";
-};
-
-const toCatalogGapAnalysisStatusError = (
-  value: unknown,
-  fallbackMessage: string,
-): SocialAccountRequestError | null => {
-  if (!value || typeof value !== "object") {
-    if (typeof value === "string" && value.trim()) {
-      return new Error(value.trim()) as SocialAccountRequestError;
-    }
-    return null;
-  }
-  const payload = value as ProxyErrorPayload & { message?: string; detail?: string };
-  if (payload.error || payload.detail || payload.code || payload.retryable || payload.upstream_status) {
-    return buildSocialAccountRequestError(payload, fallbackMessage);
-  }
-  if (typeof payload.message === "string" && payload.message.trim()) {
-    return new Error(payload.message.trim()) as SocialAccountRequestError;
-  }
-  return null;
-};
-
-const toProxyErrorPayload = (value: unknown): ProxyErrorPayload => {
-  if (!value || typeof value !== "object") {
-    return {};
-  }
-  const payload = value as Record<string, unknown>;
-  return {
-    error: typeof payload.error === "string" ? payload.error : undefined,
-    detail: typeof payload.detail === "string" ? payload.detail : undefined,
-    code: typeof payload.code === "string" ? payload.code : undefined,
-    retryable: typeof payload.retryable === "boolean" ? payload.retryable : undefined,
-    retry_after_seconds:
-      typeof payload.retry_after_seconds === "number" && Number.isFinite(payload.retry_after_seconds)
-        ? payload.retry_after_seconds
-        : undefined,
-    trace_id: typeof payload.trace_id === "string" ? payload.trace_id : undefined,
-    upstream_status:
-      typeof payload.upstream_status === "number" && Number.isFinite(payload.upstream_status)
-        ? payload.upstream_status
-        : undefined,
-    upstream_detail: payload.upstream_detail,
-    upstream_detail_code:
-      typeof payload.upstream_detail_code === "string" ? payload.upstream_detail_code : undefined,
-  };
 };
 
 const buildHashtagDraftAssignments = (
@@ -2820,13 +2579,6 @@ const formatCookieHealthSourceLabel = (cookieHealth?: SocialProfileCookieHealth 
   return "";
 };
 
-const formatCookieHealthWarningLabel = (cookieHealth?: SocialProfileCookieHealth | null): string => {
-  if (cookieHealth?.warning_code === "env_json_source_refresh_writes_file") {
-    return "Sync writes file";
-  }
-  return "Warning";
-};
-
 const isInstagramPostsAuthVerified = (cookieHealth?: SocialProfileCookieHealth | null): boolean => {
   const health = cookieHealth?.posts_auth_health ?? null;
   const probe = cookieHealth?.posts_auth_probe as JsonRecord | null | undefined;
@@ -2979,67 +2731,6 @@ const getInstagramCookiePayloadStatusCopy = (
   return null;
 };
 
-const buildCommentsAuthCookieHealthProbeKey = (
-  platform: string,
-  handle: string,
-  cookieHealth: SocialProfileCookieHealth,
-): string => {
-  const fingerprint = String(cookieHealth.cookie_fingerprint || "").trim();
-  const sourcePath = String(cookieHealth.source_path || "").trim();
-  return [platform, handle, fingerprint || "no-fingerprint", cookieHealth.source_kind || "", sourcePath].join(":");
-};
-
-const COOKIE_HEALTH_SESSION_CACHE_TTL_MS = 5 * 60 * 1000;
-
-const buildCookieHealthSessionCacheKey = (platform: string, handle: string): string =>
-  `trr-social-cookie-health:${platform.toLowerCase()}:${handle.toLowerCase()}`;
-
-const hasCommentsAuthProbe = (cookieHealth: SocialProfileCookieHealth): boolean =>
-  Boolean(cookieHealth.comments_auth_health || cookieHealth.comments_auth_probe);
-
-const readCookieHealthSessionCache = (input: {
-  platform: string;
-  handle: string;
-  needsCommentsAuth: boolean;
-}): SocialProfileCookieHealth | null => {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = window.sessionStorage.getItem(buildCookieHealthSessionCacheKey(input.platform, input.handle));
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as {
-      cached_at?: unknown;
-      cookie_health?: unknown;
-    };
-    if (typeof parsed.cached_at !== "number") return null;
-    if (Date.now() - parsed.cached_at > COOKIE_HEALTH_SESSION_CACHE_TTL_MS) return null;
-    if (!parsed.cookie_health || typeof parsed.cookie_health !== "object") return null;
-    const cookieHealth = parsed.cookie_health as SocialProfileCookieHealth;
-    if (input.needsCommentsAuth && !hasCommentsAuthProbe(cookieHealth)) return null;
-    return cookieHealth;
-  } catch {
-    return null;
-  }
-};
-
-const writeCookieHealthSessionCache = (
-  platform: string,
-  handle: string,
-  cookieHealth: SocialProfileCookieHealth,
-): void => {
-  if (typeof window === "undefined") return;
-  try {
-    window.sessionStorage.setItem(
-      buildCookieHealthSessionCacheKey(platform, handle),
-      JSON.stringify({
-        cached_at: Date.now(),
-        cookie_health: cookieHealth,
-      }),
-    );
-  } catch {
-    // A disabled or full sessionStorage should not block the live health check.
-  }
-};
-
 const buildProvisionalCatalogRunProgress = (input: {
   runId: string;
   status?: string | null;
@@ -3081,19 +2772,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   const { user, checking, hasAccess } = useAdminGuard();
   const profileLoadStartedAtRef = useRef<number>(nowMs());
   const profileNavigationSampleRecordedRef = useRef(false);
-  const fetchAdminWithAuth = useCallback(
-    (
-      input: RequestInfo | URL,
-      init?: RequestInit,
-      options?: Parameters<typeof fetchAdminWithAuthBase>[2],
-    ) =>
-      fetchAdminWithAuthBase(input, init, {
-        ...options,
-        preferredUser: options?.preferredUser ?? user,
-        allowDevAdminBypass: options?.allowDevAdminBypass ?? true,
-      }),
-    [user],
-  );
+  const fetchAdminWithAuth = useSocialProfileApi(user);
   const [summary, setSummary] = useState<SocialAccountProfileSummary | null>(null);
   const [summaryUninitialized, setSummaryUninitialized] = useState(false);
   const [summaryLoading, setSummaryLoading] = useState(false);
@@ -3264,12 +2943,6 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     "facebook",
   ];
   const platformRequiresCookies = COOKIE_REQUIRED_PLATFORMS.includes(platform);
-  const [cookieHealth, setCookieHealth] = useState<SocialProfileCookieHealth | null>(null);
-  const [cookieHealthLoading, setCookieHealthLoading] = useState(false);
-  const [cookieHealthError, setCookieHealthError] = useState<string | null>(null);
-  const [cookieRefreshing, setCookieRefreshing] = useState(false);
-  const [cookieRefreshMessage, setCookieRefreshMessage] = useState<string | null>(null);
-  const [cookieRefreshConfirmationPending, setCookieRefreshConfirmationPending] = useState(false);
   const [catalogRepairAuthConfirmationRunId, setCatalogRepairAuthConfirmationRunId] = useState<string | null>(null);
   const [commentsRepairAuthConfirmationRunId, setCommentsRepairAuthConfirmationRunId] = useState<string | null>(null);
   const [secondaryReadsGateOpen, setSecondaryReadsGateOpen] = useState(false);
@@ -3281,7 +2954,6 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   const [liveProfileTotalRequestNonce, setLiveProfileTotalRequestNonce] = useState(0);
   const pendingCatalogActionAfterCookieRepairRef = useRef<PendingCatalogAction | null>(null);
   const liveProfileTotalProbeKeyRef = useRef<string | null>(null);
-  const commentsAuthCookieHealthProbeKeyRef = useRef<string | null>(null);
 
   const supportsCatalog = SOCIAL_ACCOUNT_CATALOG_ENABLED_PLATFORMS.includes(platform);
   const supportsCatalogDetail = SOCIAL_ACCOUNT_CATALOG_DETAIL_ENABLED_PLATFORMS.includes(platform);
@@ -3440,6 +3112,24 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     });
     return true;
   }, []);
+  const {
+    resetCookieHealthState,
+    cookieHealthPreflight,
+    cookieHealth,
+    cookieHealthLoading,
+    cookieHealthError,
+    cookieRefreshing,
+    cookieRefreshMessage,
+    cookieRefreshConfirmationPending,
+    setCookieRefreshMessage,
+    setCookieRefreshConfirmationPending,
+    fetchCookieHealth,
+    handleCookieRefresh,
+  } = useProfileCookieHealth({
+    platform, handle, selectedTab, user, checking, hasAccess, hasCurrentSummary,
+    platformRequiresCookies, shouldDeferSecondaryCatalogReads, secondaryReadBudgetSlot,
+    fetchAdminWithAuth, pauseSecondaryReadsForPressure,
+  });
   const visibleCatalogRecentRuns = useMemo(() => {
     const runs = summary?.catalog_recent_runs ?? [];
     const filteredRuns =
@@ -3626,16 +3316,10 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     setCatalogGapAnalysisLoading(false);
     setCatalogGapAnalysisError(null);
     setCatalogGapAnalysisRequestNonce(0);
-    setCookieHealth(null);
-    setCookieHealthLoading(false);
-    setCookieHealthError(null);
-    setCookieRefreshing(false);
-    setCookieRefreshMessage(null);
-    setCookieRefreshConfirmationPending(false);
+    resetCookieHealthState();
     setCatalogRepairAuthConfirmationRunId(null);
     setSecondaryReadsGateOpen(false);
     setSecondaryReadsPressurePause(null);
-    commentsAuthCookieHealthProbeKeyRef.current = null;
     setCollaboratorsTags(null);
     setCollaboratorsLoading(false);
     setCollaboratorsError(null);
@@ -3645,7 +3329,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     setPostSearchLoading(false);
     setPostSearchError(null);
     liveProfileTotalProbeKeyRef.current = null;
-  }, [platform, handle]);
+  }, [platform, handle, resetCookieHealthState]);
 
   useEffect(() => {
     if (!supportsCatalog) return;
@@ -7950,183 +7634,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     }
   };
 
-  // --- Cookie preflight: fetch health on load for cookie-dependent platforms ---
-  const fetchCookieHealth = useCallback(
-    async (
-      force = false,
-      options: { includePostsAuth?: boolean; includeCommentsAuth?: boolean } = {},
-    ): Promise<SocialProfileCookieHealth | null> => {
-      if (!platformRequiresCookies || !user) return null;
-      const commentsAuthRequested = platform === "instagram" && selectedTab === "comments";
-      if (!force) {
-        const cachedCookieHealth = readCookieHealthSessionCache({
-          platform,
-          handle,
-          needsCommentsAuth: commentsAuthRequested,
-        });
-        if (cachedCookieHealth) {
-          setCookieHealth(cachedCookieHealth);
-          setCookieHealthError(null);
-          if (commentsAuthRequested) {
-            commentsAuthCookieHealthProbeKeyRef.current = buildCommentsAuthCookieHealthProbeKey(
-              platform,
-              handle,
-              cachedCookieHealth,
-            );
-          }
-          return cachedCookieHealth;
-        }
-      }
-      setCookieHealthLoading(true);
-      setCookieHealthError(null);
-      try {
-        const params = new URLSearchParams();
-        if (force) params.set("force", "true");
-        if (platform === "instagram") {
-          if (options.includePostsAuth ?? force) params.set("posts_auth", "true");
-          if (options.includeCommentsAuth ?? commentsAuthRequested) params.set("comments_auth", "true");
-        }
-        const qs = params.size > 0 ? `?${params.toString()}` : "";
-        const response = await fetchAdminWithAuth(
-          `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/cookies/health${qs}`,
-          { method: "GET" },
-          { preferredUser: user },
-        );
-        const data = (await response.json().catch(() => ({}))) as SocialProfileCookieHealth & ProxyErrorPayload;
-        if (!response.ok) throw buildSocialAccountRequestError(data, "Failed to check cookie health");
-        setCookieHealth(data);
-        writeCookieHealthSessionCache(platform, handle, data);
-        if (commentsAuthRequested) {
-          commentsAuthCookieHealthProbeKeyRef.current = buildCommentsAuthCookieHealthProbeKey(platform, handle, data);
-        }
-        return data;
-      } catch (error) {
-        pauseSecondaryReadsForPressure(error, "Failed to check cookie health");
-        setCookieHealthError(error instanceof Error ? error.message : "Cookie health check failed");
-        return null;
-      } finally {
-        setCookieHealthLoading(false);
-      }
-    },
-    [platformRequiresCookies, user, platform, handle, selectedTab, fetchAdminWithAuth, pauseSecondaryReadsForPressure],
-  );
-
-  useEffect(() => {
-    const commentsAuthProbeMissing =
-      platform === "instagram" &&
-      selectedTab === "comments" &&
-      Boolean(cookieHealth) &&
-      !cookieHealth?.comments_auth_health &&
-      !cookieHealth?.comments_auth_probe;
-    const commentsAuthProbeKey =
-      commentsAuthProbeMissing && cookieHealth
-        ? buildCommentsAuthCookieHealthProbeKey(platform, handle, cookieHealth)
-        : null;
-    const commentsAuthProbeAlreadyRequested =
-      Boolean(commentsAuthProbeKey) && commentsAuthCookieHealthProbeKeyRef.current === commentsAuthProbeKey;
-    if (
-      checking ||
-      !user ||
-      !hasAccess ||
-      !hasCurrentSummary ||
-      !platformRequiresCookies ||
-      shouldDeferSecondaryCatalogReads ||
-      secondaryReadBudgetSlot < 3 ||
-      (commentsAuthProbeMissing && commentsAuthProbeAlreadyRequested) ||
-      (cookieHealth && !commentsAuthProbeMissing) ||
-      cookieHealthLoading
-    ) {
-      return;
-    }
-    if (platformRequiresCookies && user && (!cookieHealth || commentsAuthProbeMissing) && !cookieHealthLoading) {
-      void fetchCookieHealth(commentsAuthProbeMissing, {
-        includeCommentsAuth: platform === "instagram" && selectedTab === "comments",
-        includePostsAuth: false,
-      });
-    }
-  }, [
-    checking,
-    cookieHealth,
-    cookieHealthLoading,
-    fetchCookieHealth,
-    hasAccess,
-    handle,
-    hasCurrentSummary,
-    platform,
-    platformRequiresCookies,
-    selectedTab,
-    secondaryReadBudgetSlot,
-    shouldDeferSecondaryCatalogReads,
-    user,
-  ]);
-
-  const handleCookieRefresh = useCallback(async (options: { confirmed?: boolean } = {}): Promise<{
-    refreshResult: SocialProfileCookieRefreshResult | null;
-    refreshedHealth: SocialProfileCookieHealth | null;
-  }> => {
-    if (!user) {
-      return { refreshResult: null, refreshedHealth: null };
-    }
-    const refreshAction = cookieHealth?.refresh_action || (platform === "instagram" ? "instagram_auth_repair" : "cookie_refresh");
-    const refreshLabel =
-      cookieHealth?.refresh_label ||
-      (refreshAction === "instagram_auth_repair" ? "Manual Instagram Auth" : "Refresh Cookies");
-    const requiresInstagramConfirmation = platform === "instagram" && refreshAction === "instagram_auth_repair";
-    if (requiresInstagramConfirmation && !options.confirmed) {
-      setCookieRefreshConfirmationPending(true);
-      setCookieRefreshMessage(INSTAGRAM_AUTH_REFRESH_WARNING);
-      return { refreshResult: null, refreshedHealth: null };
-    }
-    setCookieRefreshing(true);
-    setCookieRefreshConfirmationPending(false);
-    setCookieRefreshMessage(
-      refreshAction === "instagram_auth_repair"
-        ? "Checking manual Instagram auth state and syncing only already validated cookies."
-        : "Opening browser… Log in to " + SOCIAL_ACCOUNT_PLATFORM_LABELS[platform] + " in the browser window.",
-    );
-    try {
-      const response = await fetchAdminWithAuth(
-        `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/cookies/refresh`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            headless: false,
-            timeout_seconds: 180,
-            operator_confirmation: requiresInstagramConfirmation ? INSTAGRAM_AUTH_REFRESH_CONFIRMATION : undefined,
-            allow_cookie_refresh: true,
-          }),
-        },
-        { preferredUser: user },
-      );
-      const data = (await response.json().catch(() => ({}))) as SocialProfileCookieRefreshResult & {
-        detail?: { message?: string };
-      };
-      if (!response.ok) {
-        throw new Error(data.detail?.message || data.reason || "Cookie refresh failed");
-      }
-      const refreshedHealth = await fetchCookieHealth(true);
-      if (data.success) {
-        setCookieRefreshMessage(
-          refreshAction === "instagram_auth_repair"
-            ? "Validated Instagram cookies synced."
-            : `${refreshLabel} completed successfully.`,
-        );
-      } else {
-        setCookieRefreshMessage(
-          refreshAction === "instagram_auth_repair"
-            ? `Manual Instagram auth check completed but health is still invalid: ${data.reason || "unknown"}`
-            : `Refresh completed but cookies may still be invalid: ${data.reason || "unknown"}`,
-        );
-      }
-      return { refreshResult: data, refreshedHealth };
-    } catch (error) {
-      setCookieRefreshMessage(error instanceof Error ? error.message : "Cookie refresh failed");
-      return { refreshResult: null, refreshedHealth: null };
-    } finally {
-      setCookieRefreshing(false);
-    }
-  }, [cookieHealth?.refresh_action, cookieHealth?.refresh_label, fetchAdminWithAuth, fetchCookieHealth, handle, platform, user]);
+  useProfileCookieHealthPreflight(cookieHealthPreflight);
 
   const buildFullHistoryBackfillRequest = useCallback(
     (
@@ -9871,100 +9379,22 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                 ) : null}
                 {/* Cookie preflight card for cookie-dependent platforms */}
                 {supportsCatalog && platformRequiresCookies ? (
-                  <div className="mt-3 flex items-center gap-3 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2.5">
-                    {showCookieHealthLoading ? (
-                      <>
-                        <span className="inline-block h-2.5 w-2.5 animate-pulse rounded-full bg-zinc-400" />
-                        <span className="text-xs text-zinc-500">Checking cookies…</span>
-                      </>
-                    ) : showCookieHealthError ? (
-                      <>
-                        <span className="inline-block h-2.5 w-2.5 rounded-full bg-amber-400" />
-                        <span className="text-xs text-zinc-500">Cookie check failed</span>
-                        <Button
-                          onClick={() => void fetchCookieHealth(true)}
-                          size="sm"
-                          variant="outline"
-                          className={NYT_DASHBOARD_BUTTON_CLASS}
-                        >
-                          Retry
-                        </Button>
-                      </>
-                    ) : instagramCommentsAuthOwnsCurrentSurface ? (
-                      <>
-                        <span className="inline-block h-2.5 w-2.5 rounded-full bg-emerald-500" />
-                        <span className="text-xs text-zinc-600">Comments auth active</span>
-                      </>
-                    ) : cookieHealth?.degraded ? (
-                      <>
-                        <span className="inline-block h-2.5 w-2.5 rounded-full bg-amber-400" />
-                        <span className="text-xs text-zinc-600">Cookie check unavailable</span>
-                      </>
-                    ) : cookieHealth?.healthy === true ? (
-                      <>
-                        <span className="inline-block h-2.5 w-2.5 rounded-full bg-emerald-500" />
-                        <span className="text-xs text-zinc-600">
-                          {cookieHealthPrimaryLabel ?? "Local cookies healthy"}
-                        </span>
-                      </>
-                    ) : cookieHealth?.healthy === false ? (
-                      <>
-                        <span className="inline-block h-2.5 w-2.5 rounded-full bg-red-500" />
-                        <span className="text-xs text-zinc-600">
-                          {cookieHealth.auth_surface_blocked ? "Instagram auth blocked" : "Cookies expired"}
-                          {cookieHealth.reason ? ` — ${cookieHealth.reason}` : ""}
-                        </span>
-                        {cookieHealth.refresh_available ? (
-                          <Button
-                            onClick={() =>
-                              void handleCookieRefresh({
-                                confirmed:
-                                  platform === "instagram" &&
-                                  cookieHealth.refresh_action === "instagram_auth_repair" &&
-                                  cookieRefreshConfirmationPending,
-                              })
-                            }
-                            disabled={cookieRefreshing}
-                            size="sm"
-                            variant="outline"
-                            className={NYT_DASHBOARD_BUTTON_CLASS}
-                          >
-                            {cookieRefreshing
-                              ? platform === "instagram" && cookieHealth.refresh_action === "instagram_auth_repair"
-                                ? "Syncing…"
-                                : "Refreshing…"
-                              : platform === "instagram" &&
-                                  cookieHealth.refresh_action === "instagram_auth_repair" &&
-                                  cookieRefreshConfirmationPending
-                                ? "Confirm Manual Auth Check"
-                                : cookieHealth.refresh_label || "Refresh Cookies"}
-                          </Button>
-                        ) : (
-                          <span className="text-xs text-zinc-400" title="Cookie refresh requires local dev server">
-                            {(cookieHealth.refresh_label || "Refresh Cookies") + " unavailable (requires local dev)"}
-                          </span>
-                        )}
-                      </>
-                    ) : null}
-                    {instagramPostsAuthStatusCopy ? (
-                      <span className={`text-xs ${instagramPostsAuthStatusCopy.tone}`}>
-                        {instagramPostsAuthStatusCopy.text}
-                      </span>
-                    ) : null}
-                    {instagramCookiePayloadStatusCopy ? (
-                      <span className={`text-xs ${instagramCookiePayloadStatusCopy.tone}`}>
-                        {instagramCookiePayloadStatusCopy.text}
-                      </span>
-                    ) : null}
-                    {cookieRefreshMessage && !instagramCommentsAuthOwnsCurrentSurface ? (
-                      <span className="text-xs text-zinc-500">{cookieRefreshMessage}</span>
-                    ) : null}
-                    {cookieHealth?.warning_message ? (
-                      <span className="text-xs text-amber-600" title={cookieHealth.warning_message}>
-                        ⚠ {formatCookieHealthWarningLabel(cookieHealth)}
-                      </span>
-                    ) : null}
-                  </div>
+                  <ProfileCookieHealthCard
+                    platform={platform}
+                    cookieHealth={cookieHealth}
+                    showCookieHealthLoading={showCookieHealthLoading}
+                    showCookieHealthError={showCookieHealthError}
+                    instagramCommentsAuthOwnsCurrentSurface={instagramCommentsAuthOwnsCurrentSurface}
+                    cookieHealthPrimaryLabel={cookieHealthPrimaryLabel}
+                    cookieRefreshing={cookieRefreshing}
+                    cookieRefreshConfirmationPending={cookieRefreshConfirmationPending}
+                    instagramPostsAuthStatusCopy={instagramPostsAuthStatusCopy}
+                    instagramCookiePayloadStatusCopy={instagramCookiePayloadStatusCopy}
+                    cookieRefreshMessage={cookieRefreshMessage}
+                    fetchCookieHealth={fetchCookieHealth}
+                    handleCookieRefresh={handleCookieRefresh}
+                    buttonClassName={NYT_DASHBOARD_BUTTON_CLASS}
+                  />
                 ) : null}
                 <div className="mt-4 flex flex-col gap-1">
                   <h2 className="text-base font-semibold text-zinc-900">Coverage</h2>
