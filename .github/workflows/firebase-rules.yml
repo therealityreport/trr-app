@@ -60,7 +60,9 @@ jobs:
           trap 'rm -f "$GOOGLE_APPLICATION_CREDENTIALS"' EXIT
           node <<'NODE'
           const fs = require('node:fs');
-          const account = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT || '{}');
+          let account;
+          try { account = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT || '{}'); }
+          catch { throw new Error('Firebase rules credentials are not valid JSON'); }
           if (account.type !== 'service_account' || account.project_id !== 'trr-web-25d2e') {
             throw new Error('Firebase rules credentials must belong to trr-web-25d2e');
           }
