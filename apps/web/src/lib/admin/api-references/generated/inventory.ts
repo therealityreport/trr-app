@@ -3,8 +3,8 @@ import type { AdminApiReferenceInventory } from "@/lib/admin/api-references/type
 export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
   "inventorySchemaVersion": "1.0.0",
   "generatorVersion": "1.0.0",
-  "generatedAt": "2026-10-04T07:50:55.239Z",
-  "sourceCommitSha": "06cf0986001905c6da6cb8e3a4a277f2331d1fa3",
+  "generatedAt": "2026-10-16T08:12:31.218Z",
+  "sourceCommitSha": "55beadba24609d91eb011f3aac56ba4fa687a569",
   "overrideDigest": "ab48dccad1d5b9faafd4ef40e8374574768e133192929e6264ff8727fbaf68e1",
   "nodes": [
     {
@@ -8015,6 +8015,40 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "fanoutRisk": "low"
     },
     {
+      "id": "route:GET:/api/admin/instagram-ingestion/[handle]/[...operation]",
+      "kind": "api_route",
+      "title": "GET /api/admin/instagram-ingestion/[handle]/[...operation]",
+      "pathPattern": "/api/admin/instagram-ingestion/[handle]/[...operation]",
+      "symbol": "GET",
+      "sourceFile": "src/app/api/admin/instagram-ingestion/[handle]/[...operation]/route.ts",
+      "sourceLocator": {
+        "line": 55,
+        "symbol": "GET"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:app_api_route"
+      ],
+      "usageTier": "manual",
+      "polls": false,
+      "pollCadenceMs": null,
+      "automatic": false,
+      "loadsLargeDatasets": false,
+      "usesPagination": true,
+      "returnsWideRowsOrBlobsOrRawJson": false,
+      "fansOutQueries": false,
+      "postgresAccess": "none",
+      "viewKinds": [
+        "list",
+        "detail"
+      ],
+      "staticOnly": false,
+      "payloadRisk": "low",
+      "fanoutRisk": "low"
+    },
+    {
       "id": "route:GET:/api/admin/nbcumv/talent-bios",
       "kind": "api_route",
       "title": "GET /api/admin/nbcumv/talent-bios",
@@ -14396,6 +14430,40 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       ],
       "staticOnly": false,
       "payloadRisk": "high",
+      "fanoutRisk": "low"
+    },
+    {
+      "id": "route:POST:/api/admin/instagram-ingestion/[handle]/[...operation]",
+      "kind": "api_route",
+      "title": "POST /api/admin/instagram-ingestion/[handle]/[...operation]",
+      "pathPattern": "/api/admin/instagram-ingestion/[handle]/[...operation]",
+      "symbol": "POST",
+      "sourceFile": "src/app/api/admin/instagram-ingestion/[handle]/[...operation]/route.ts",
+      "sourceLocator": {
+        "line": 56,
+        "symbol": "POST"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:app_api_route"
+      ],
+      "usageTier": "manual",
+      "polls": false,
+      "pollCadenceMs": null,
+      "automatic": false,
+      "loadsLargeDatasets": false,
+      "usesPagination": true,
+      "returnsWideRowsOrBlobsOrRawJson": false,
+      "fansOutQueries": false,
+      "postgresAccess": "none",
+      "viewKinds": [
+        "list",
+        "detail"
+      ],
+      "staticOnly": false,
+      "payloadRisk": "low",
       "fanoutRisk": "low"
     },
     {
@@ -24023,6 +24091,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
         "route:GET:/api/admin/health/app-db-pressure",
         "route:GET:/api/admin/health/instagram-comment-rollups",
         "route:GET:/api/admin/images/[imageType]/[imageId]",
+        "route:GET:/api/admin/instagram-ingestion/[handle]/[...operation]",
         "route:GET:/api/admin/nbcumv/talent-bios",
         "route:GET:/api/admin/networks-streaming/detail",
         "route:GET:/api/admin/networks-streaming/overrides",
@@ -24212,6 +24281,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
         "route:POST:/api/admin/flashback/quizzes",
         "route:POST:/api/admin/flashback/quizzes/[quizId]/events",
         "route:POST:/api/admin/getty-local/scrape",
+        "route:POST:/api/admin/instagram-ingestion/[handle]/[...operation]",
         "route:POST:/api/admin/networks-streaming/overrides",
         "route:POST:/api/admin/networks-streaming/sync",
         "route:POST:/api/admin/normalized-surveys",
@@ -24747,11 +24817,11 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "renders_view": []
     },
     "summary": {
-      "totalNodes": 594,
+      "totalNodes": 596,
       "totalEdges": 212,
       "nodesByKind": {
         "ui_surface": 57,
-        "api_route": 403,
+        "api_route": 405,
         "backend_endpoint": 129,
         "repository_surface": 1,
         "polling_loop": 4

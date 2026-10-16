@@ -381,6 +381,44 @@ describe("SocialAccountProfilePage", () => {
     vi.useRealTimers();
   });
 
+  it("routes enabled durable ingestion launches without legacy launch or progress transfer", async () => {
+    const newRunId = "11111111-1111-4111-8111-111111111111";
+    let newRunState = "running";
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: true, account: "bravotv", supported_actions: ["backfill", "sync_recent", "sync_newer"], replay_apply_enabled: false });
+      if (url.includes("/instagram-ingestion/") && url.includes("/runs/recent")) return jsonResponse({ runs: [] });
+      if (url.includes("/instagram-ingestion/") && url.endsWith("/runs") && init?.method === "POST") return jsonResponse({ run_id: newRunId, state: "running", engine: "dbos", workflow_version: "v1", generation: 1 }, 202);
+      if (url.includes("/instagram-ingestion/") && url.includes("/diagnostics")) return jsonResponse({ run_id: newRunId, account: "bravotv", targets: [], evidence: [], targets_truncated: false, evidence_truncated: false });
+      if (url.includes("/instagram-ingestion/") && url.endsWith(newRunId)) return jsonResponse({ run_id: newRunId, account: "bravotv", state: newRunState, stages: [], complete: newRunState === "completed", allowed_actions: newRunState === "running" ? ["cancel"] : [], last_committed_at: null, engine: "dbos", workflow_version: "v1", generation: 1 });
+      if (url.includes("/catalog/capacity")) return jsonResponse({ available: true, blocked: false, safe_combined_worker_limit: 16, remaining_workers: 16, raw_requested_workers: 16, backend_effective_requested_workers: 16, effective_details_worker_count: 8, effective_comments_worker_count: 8, active_db_jobs: 0, dispatched_unclaimed_jobs: 0, nonterminal_remote_call_ids: [] });
+      if (url.includes("/cookies/health")) return jsonResponse(healthyCookieHealth("instagram"));
+      if (url.includes("/snapshot")) return jsonResponse({ summary: baseSummary, catalog_run_progress: null, generated_at: "2026-10-16T12:00:00Z" });
+      if (url.includes("/summary")) return jsonResponse(baseSummary);
+      if (url.includes("/catalog/posts")) return jsonResponse({ items: [], pagination: { page: 1, page_size: 25, total: 0, total_pages: 1 } });
+      return jsonResponse({});
+    });
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
+    await screen.findByRole("region", { name: "Durable Instagram ingestion" });
+    fireEvent.click(screen.getByRole("button", { name: "Backfill Posts" }));
+    fireEvent.input(screen.getByLabelText("Instagram backfill start month"), { target: { value: "2026-01" } });
+    fireEvent.input(screen.getByLabelText("Instagram backfill end month"), { target: { value: "2026-09" } });
+    fireEvent.click(screen.getByRole("button", { name: "Start Backfill" }));
+    await waitFor(() => expect(mocks.fetchAdminWithAuth.mock.calls.some(([input, init]) => String(input).endsWith("/instagram-ingestion/bravotv/runs") && init?.method === "POST")).toBe(true));
+    const launch = mocks.fetchAdminWithAuth.mock.calls.find(([input, init]) => String(input).endsWith("/instagram-ingestion/bravotv/runs") && init?.method === "POST");
+    expect(JSON.parse(launch![1].body)).toMatchObject({ action: "backfill", source_scope: "network", backfill_scope: "bounded_window", date_start: "2026-01-01T00:00:00.000Z", selected_tasks: [...INSTAGRAM_BACKFILL_DEFAULT_TASKS], detail_worker_count: 8, comments_worker_count: 8 });
+    expect(new Headers(launch![1].headers).get("Idempotency-Key")).toBeTruthy();
+    await waitFor(() => expect(screen.getAllByText(/Run 11111111 · running/).length).toBeGreaterThan(0));
+    expect(mocks.fetchAdminWithAuth.mock.calls.some(([input]) => String(input).includes("/catalog/backfill"))).toBe(false);
+    expect(mocks.fetchAdminWithAuth.mock.calls.some(([input]) => String(input).includes(`/catalog/runs/${newRunId}`))).toBe(false);
+    const snapshotsBeforeCompletion = mocks.fetchAdminWithAuth.mock.calls.filter(([input]) => String(input).includes("/snapshot")).length;
+    newRunState = "completed";
+    fireEvent.click(within(screen.getByRole("region", { name: "Durable Instagram ingestion" })).getByRole("button", { name: "Refresh", exact: true }));
+    await waitFor(() => expect(screen.getByText(/Run 11111111 · completed/)).toBeInTheDocument());
+    await waitFor(() => expect(mocks.fetchAdminWithAuth.mock.calls.filter(([input]) => String(input).includes("/snapshot")).length).toBeGreaterThan(snapshotsBeforeCompletion));
+    expect(mocks.fetchAdminWithAuth.mock.calls.some(([input]) => String(input).includes("/snapshot") && String(input).includes(newRunId))).toBe(false);
+  });
+
   it("shows the combined Instagram DB worker budget in catalog diagnostics", () => {
     const progress = {
       db_session_capacity: {

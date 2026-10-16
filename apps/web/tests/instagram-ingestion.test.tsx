@@ -1,0 +1,160 @@
+import React from "react";
+import { act, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { IngestionRequestError, ingestionProxyPath, ingestionLaunchFromCatalog, type IngestionProgress, type IngestionDiagnostics } from "@/lib/social/ingestion-client";
+import { ingestionPollInterval, IngestionRequestIdentities, useInstagramIngestion } from "@/lib/social/ingestion-hooks";
+import { StageProgress } from "@/components/admin/social/ingestion/StageProgress";
+import { RecoveryControls } from "@/components/admin/social/ingestion/RecoveryControls";
+import { Diagnostics } from "@/components/admin/social/ingestion/Diagnostics";
+import { InstagramIngestionPanel } from "@/components/admin/social/ingestion/InstagramIngestionPanel";
+const mocks = vi.hoisted(() => ({ fetch: vi.fn() }));
+vi.mock("@/lib/admin/client-auth", () => ({ fetchAdminWithAuth: (...args: unknown[]) => mocks.fetch(...args) }));
+const runId = "11111111-1111-4111-8111-111111111111";
+const oldId = "22222222-2222-4222-8222-222222222222";
+const evidenceId = "33333333-3333-4333-8333-333333333333";
+const intent: IngestionProgress["intent"] = { platform: "instagram", account: "bravotv", action: "backfill", source_scope: "network", date_start: null, date_end: null, selected_tasks: ["post_details"], scope: "full_history", metadata_ttl_days: 30, metrics_ttl_hours: 24, force: false, policy_version: 1, comments_enable_media_followups: true, comments_max_attempts: 12, enable_cap4_canary: false, listing_max_attempts: 12, media_max_attempts: 3 };
+const progress = (overrides: Partial<IngestionProgress> = {}): IngestionProgress => ({ run_id: runId, account: "bravotv", intent, intent_hash: "hash", engine: "dbos", workflow_version: "instagram-v1", state: "running", generation: 1, last_committed_at: "2026-10-16T10:00:00Z", created_at: "2026-10-16T09:00:00Z", updated_at: "2026-10-16T10:00:00Z", pinned_evidence_count: 1, complete: false, allowed_actions: ["cancel", "replay", "retry_targets"], stages: [{ stage: "post_details", discovery_complete: false, sealed_at: null, total: 10, committed: 4, cached_satisfied: 2, source_unavailable: 1, unresolved: 3, attempts: 30, requests: 100, retry_at: null, blocked_reasons: [], last_committed_at: "2026-10-16T10:00:00Z", complete: false }], ...overrides });
+const diagnostics: IngestionDiagnostics = { run_id: runId, account: "bravotv", targets: [{ stage: "post_details", target_key: "p1", outcome: "unresolved", attempts: 2, requests: 3, max_attempts: 12, retry_at: null, blocked_reason: "cooldown" }], evidence: [{ evidence_id: evidenceId, stage: "post_details", target_key: "p1", source_identity: "post:1", captured_at: "2026-10-16T09:00:00Z", content_hash: "sha256", available: true, expires_at: "2099-01-01T00:00:00Z", pinned: true, parser_version: "parser-v1", schema_version: 1 }], targets_truncated: false, evidence_truncated: false };
+const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+const capability = (enabled = true) => ({ enabled, account: "bravotv", engine: "dbos", workflow_version: "v1", supported_actions: ["backfill", "sync_recent", "sync_newer"], replay_apply_enabled: false });
+beforeEach(() => { mocks.fetch.mockReset(); });
+
+describe("typed ingestion lifecycle", () => {
+  it("preserves launcher scope, selected tasks, date boundaries, workers, and confirmation without legacy-only fields", () => {
+    const result = ingestionLaunchFromCatalog("backfill", { source_scope: "creator", backfill_scope: "bounded_window", date_start: "2026-01-01T00:00:00Z", date_end: "2026-02-01T00:00:00Z", selected_tasks: ["comments"], detail_worker_count: 2, comments_worker_count: 4, comments_enable_media_followups: false, operator_confirmation: "APPLY REVIEWED", allow_inline_dev_fallback: true, execution_preference: "prefer_local_inline" }, "network");
+    expect(result).toMatchObject({ action: "backfill", source_scope: "creator", backfill_scope: "bounded_window", date_start: "2026-01-01T00:00:00Z", date_end: "2026-02-01T00:00:00Z", selected_tasks: ["comments"], detail_worker_count: 2, comments_worker_count: 4, comments_enable_media_followups: false, operator_confirmation: "APPLY REVIEWED" });
+    expect(result).not.toHaveProperty("allow_inline_dev_fallback"); expect(result).not.toHaveProperty("execution_preference");
+    expect(ingestionLaunchFromCatalog("sync_recent", { lookback_days: 3 }, "news")).toMatchObject({ action: "sync_recent", lookback_days: 3, source_scope: "news" });
+  });
+  it("keeps identities stable after uncertain delivery and separates commands", () => {
+    const identities = new IngestionRequestIdentities(); const body = { selected_tasks: ["comments"] };
+    const first = identities.get("launch:account", body);
+    expect(identities.get("launch:account", body)).toBe(first);
+    expect(identities.get("cancel:run", body)).not.toBe(first);
+    identities.committed("launch:account", body);
+    expect(identities.get("launch:account", body)).not.toBe(first);
+    expect(ingestionProxyPath(`https://admin.trr.localhost/api/v2/admin/social/profiles/instagram/bravotv/ingestion/runs/${runId}`)).toBe(`/api/admin/instagram-ingestion/bravotv/runs/${runId}`);
+    expect(() => ingestionProxyPath("https://host/api/v1/other")).toThrow();
+  });
+  it("polls visible active work at 3s, backs off, honors retry timing, and stops terminal work", () => {
+    expect(ingestionPollInterval({ visible: true, progress: progress() })).toBe(3000);
+    expect(ingestionPollInterval({ visible: false, progress: progress() })).toBe(false);
+    expect(ingestionPollInterval({ visible: true, progress: progress({ state: "completed" }) })).toBe(false);
+    expect(ingestionPollInterval({ visible: true, progress: progress({ state: "blocked" }) })).toBe(false);
+    const error = new IngestionRequestError({ code: "BUSY", message: "Busy", status: 503, retryable: true, retry_after_ms: 25000 });
+    expect(ingestionPollInterval({ visible: true, progress: progress(), error, failures: 2 })).toBe(25000);
+    const run = progress(); run.stages[0].retry_at = new Date(40000).toISOString();
+    expect(ingestionPollInterval({ visible: true, progress: run, now: 10000 })).toBe(30000);
+  });
+  it("uses live visibility and focus events for active polling and stops after terminal progress", async () => {
+    vi.useFakeTimers();
+    let visibility: DocumentVisibilityState = "visible"; let state: IngestionProgress["state"] = "running";
+    vi.spyOn(document, "visibilityState", "get").mockImplementation(() => visibility);
+    mocks.fetch.mockImplementation(async (url: string) => {
+      if (url.endsWith("/capabilities")) return json(capability());
+      if (url.includes("/runs/recent")) return json({ runs: [{ ...progress(), intent }] });
+      if (url.includes("/diagnostics")) return json(diagnostics);
+      return json(progress({ state }));
+    });
+    const { result } = renderHook(() => useInstagramIngestion({ account: "bravotv", sourceScope: "network" }, true));
+    await act(async () => { await vi.advanceTimersByTimeAsync(20); });
+    expect(result.current.progress.data?.state).toBe("running");
+    const count = () => mocks.fetch.mock.calls.filter(([url]) => String(url).endsWith(`/runs/${runId}`)).length;
+    const initial = count();
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000); }); expect(count()).toBe(initial + 1);
+    visibility = "hidden";
+    await act(async () => { document.dispatchEvent(new Event("visibilitychange", { bubbles: true })); await vi.advanceTimersByTimeAsync(10); });
+    const hiddenCount = count(); await act(async () => { await vi.advanceTimersByTimeAsync(10000); }); expect(count()).toBe(hiddenCount);
+    state = "completed"; visibility = "visible";
+    await act(async () => { document.dispatchEvent(new Event("visibilitychange", { bubbles: true })); await vi.advanceTimersByTimeAsync(20); });
+    expect(count()).toBeGreaterThan(hiddenCount); expect(result.current.progress.data?.state).toBe("completed");
+    const terminalCount = count(); await act(async () => { await vi.advanceTimersByTimeAsync(10000); }); expect(count()).toBe(terminalCount);
+  });
+  it("preserves all four outcomes and discovery incomplete despite high request counts", () => {
+    render(<StageProgress progress={progress()} />);
+    expect(screen.getByText("Discovery incomplete · total can grow")).toBeInTheDocument();
+    for (const label of ["Committed", "Cached satisfied", "Source unavailable", "Unresolved"]) expect(screen.getByText(label)).toBeInTheDocument();
+    expect(screen.getByText(/Requests 100/)).toBeInTheDocument();
+    expect(screen.getByText(/Work remains/)).toBeInTheDocument();
+  });
+  it("requires cancellation confirmation and retries only selected unresolved targets", () => {
+    const control = vi.fn(); const retry = vi.fn();
+    render(<RecoveryControls progress={progress()} diagnostics={diagnostics} pending={false} onControl={control} onRetry={retry} />);
+    fireEvent.click(screen.getByRole("button", { name: "Cancel Run" })); expect(control).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Confirm cancel" })); expect(control).toHaveBeenCalledWith("cancel");
+    fireEvent.click(screen.getByText("Retry selected unresolved targets"));
+    fireEvent.click(screen.getByRole("checkbox")); fireEvent.click(screen.getByRole("button", { name: "Retry 1 targets" })); expect(retry).toHaveBeenCalledWith("post_details", ["p1"]);
+  });
+  it("defaults replay to dry run, gates apply on reviewed output, and blocks expired evidence", async () => {
+    const onReplay = vi.fn().mockResolvedValue({ mode: "dry_run", evidence_id: evidenceId, parser_version: "parser-v1", comparison: { changed: true }, writes: 0, source_requests: 0 });
+    const { rerender } = render(<Diagnostics diagnostics={diagnostics} canReplay canApply pending={false} onReplay={onReplay} />);
+    fireEvent.click(screen.getByText("Diagnostics and evidence replay"));
+    fireEvent.change(screen.getByLabelText("Replay evidence"), { target: { value: evidenceId } });
+    expect(screen.getByRole("button", { name: "Apply Reviewed Replay" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Dry Run Replay" }));
+    await waitFor(() => expect(onReplay).toHaveBeenCalledWith({ evidence_id: evidenceId, parser_version: "parser-v1", apply: false }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Apply Reviewed Replay" })).toBeEnabled());
+    fireEvent.change(screen.getByLabelText("Replay parser version"), { target: { value: "parser-v2" } });
+    expect(screen.getByRole("button", { name: "Apply Reviewed Replay" })).toBeDisabled();
+    rerender(<Diagnostics diagnostics={{ ...diagnostics, evidence: [{ ...diagnostics.evidence[0], available: false }] }} canReplay canApply={false} pending={false} onReplay={onReplay} />);
+    expect(screen.getByRole("button", { name: "Dry Run Replay" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Apply Reviewed Replay" })).not.toBeInTheDocument();
+  });
+  it("keeps capability and history reads usable through React Strict Mode remounts", async () => {
+    mocks.fetch.mockImplementation(async (url: string) => json(url.endsWith("/capabilities") ? capability(false) : { runs: [] }));
+    const { result } = renderHook(() => useInstagramIngestion({ account: "bravotv", sourceScope: "network" }, true), { wrapper: ({ children }) => <React.StrictMode>{children}</React.StrictMode> });
+    await waitFor(() => expect(result.current.recent.isSuccess).toBe(true));
+    expect(result.current.enabled).toBe(false);
+  });
+  it("leaves the legacy surface unchanged when disabled without saved runs", async () => {
+    mocks.fetch.mockImplementation(async (url: string) => json(url.endsWith("/capabilities") ? capability(false) : { runs: [] }));
+    const { result } = renderHook(() => useInstagramIngestion({ account: "bravotv", sourceScope: "network" }, true));
+    await waitFor(() => expect(result.current.recent.isSuccess).toBe(true));
+    render(<InstagramIngestionPanel controller={result.current} />);
+    expect(screen.queryByRole("region", { name: "Durable Instagram ingestion" })).not.toBeInTheDocument();
+    expect(result.current.enabled).toBe(false);
+  });
+  it("keeps rollback history readable and active recovery separate from inspected history", async () => {
+    mocks.fetch.mockImplementation(async (url: string) => {
+      if (url.endsWith("/capabilities")) return json(capability(false));
+      if (url.includes("/runs/recent")) return json({ runs: [{ ...progress(), intent, run_id: runId }, { ...progress({ state: "failed" }), intent, run_id: oldId }] });
+      if (url.includes("/diagnostics")) return json(diagnostics);
+      return json(progress({ run_id: url.endsWith(oldId) ? oldId : runId }));
+    });
+    const { result } = renderHook(() => useInstagramIngestion({ account: "bravotv", sourceScope: "network", dateStart: "2026-01", dateEnd: "2026-12" }, true));
+    await waitFor(() => expect(result.current.activeRunId).toBe(runId));
+    act(() => result.current.inspect(oldId));
+    await waitFor(() => expect(result.current.progress.data?.run_id).toBe(oldId));
+    expect(result.current.activeRunId).toBe(runId); expect(result.current.enabled).toBe(false); expect(result.current.showPanel).toBe(true);
+    await expect(result.current.launch(ingestionLaunchFromCatalog("backfill", { backfill_scope: "full_history" }, "network"))).rejects.toThrow("disabled");
+    await waitFor(() => expect(result.current.active?.run_id).toBe(runId));
+    render(<InstagramIngestionPanel controller={result.current} />);
+    const activeControls = within(screen.getByLabelText("Active ingestion run controls"));
+    fireEvent.click(activeControls.getByRole("button", { name: "Cancel Run" }));
+    fireEvent.click(activeControls.getByRole("button", { name: "Confirm cancel" }));
+    await waitFor(() => expect(mocks.fetch.mock.calls.some(([url, init]) => String(url).endsWith(`/runs/${runId}/cancel`) && init?.method === "POST")).toBe(true));
+    expect(mocks.fetch.mock.calls.some(([url]) => String(url).endsWith(`/runs/${oldId}/cancel`))).toBe(false);
+  });
+  it("retains committed progress after transient failure and reuses a launch key on explicit retry without automatic retries", async () => {
+    let failProgress = false; let launches = 0;
+    mocks.fetch.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/capabilities")) return json(capability());
+      if (url.includes("/runs/recent")) return json({ runs: [] });
+      if (init?.method === "POST") { launches++; if (launches === 1) throw new TypeError("Network interrupted"); return json({ run_id: runId, state: "running", engine: "dbos", workflow_version: "v1", generation: 1 }, 202); }
+      if (url.includes("/diagnostics")) return json(diagnostics);
+      return failProgress ? json({ detail: { code: "BUSY", message: "Please retry later.", retryable: true, retry_after_ms: 60000 } }, 503) : json(progress());
+    });
+    const { result } = renderHook(() => useInstagramIngestion({ account: "bravotv", sourceScope: "network" }, true));
+    await waitFor(() => expect(result.current.enabled).toBe(true));
+    const body = ingestionLaunchFromCatalog("backfill", { backfill_scope: "full_history", selected_tasks: ["comments"], comments_worker_count: 4 }, "network");
+    await act(async () => { await expect(result.current.launch(body)).rejects.toThrow(); }); expect(launches).toBe(1);
+    await act(async () => { await result.current.launch(body); });
+    const requests = mocks.fetch.mock.calls.filter(([, init]) => init?.method === "POST");
+    expect(new Headers(requests[0][1].headers).get("Idempotency-Key")).toBe(new Headers(requests[1][1].headers).get("Idempotency-Key"));
+    expect(requests[0][2]).toEqual({ retryOnAuthError: false });
+    await waitFor(() => expect(result.current.progress.data?.stages[0].committed).toBe(4));
+    failProgress = true;
+    await act(async () => { await result.current.progress.refetch(); });
+    expect(result.current.progress.data?.stages[0].committed).toBe(4); await waitFor(() => expect(result.current.progress.error).toBeInstanceOf(IngestionRequestError));
+  });
+});

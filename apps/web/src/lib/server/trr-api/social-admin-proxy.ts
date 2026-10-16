@@ -513,6 +513,7 @@ type SeasonBackendOptions = FetchWithRetryOptions & {
 type SocialBackendOptions = FetchWithRetryOptions & {
   adminContext?: VerifiedAdminContext;
   queryString?: string;
+  routeFamily?: "instagram-ingestion-v2";
 };
 
 const buildProxyHeaders = (
@@ -765,7 +766,10 @@ export const fetchSocialBackendJson = async (
   socialPath: string,
   options: SocialBackendOptions,
 ): Promise<Record<string, unknown>> => {
-  const backendBase = buildSocialBackendUrl(socialPath);
+  const backendBase = options.routeFamily === "instagram-ingestion-v2"
+    ? getBackendApiUrl(`/admin/social${socialPath}`, "v2")
+    : buildSocialBackendUrl(socialPath);
+  if (!backendBase) throw new Error("Backend API not configured");
   const backendUrl = appendQuery(backendBase, options.queryString ?? "");
   const traceId =
     String(options.traceId || new Headers(options.headers).get("x-trace-id") || "").trim() ||

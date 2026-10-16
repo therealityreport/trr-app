@@ -663,6 +663,159 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v2/admin/social/profiles/instagram/{handle}/ingestion/capabilities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Capabilities */
+        get: operations["getInstagramIngestionCapabilitiesV2"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/admin/social/profiles/instagram/{handle}/ingestion/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Launch */
+        post: operations["launchInstagramIngestionRunV2"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/admin/social/profiles/instagram/{handle}/ingestion/runs/{run_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Progress */
+        get: operations["getInstagramIngestionRunV2"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/admin/social/profiles/instagram/{handle}/ingestion/runs/{run_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel */
+        post: operations["cancelInstagramIngestionRunV2"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/admin/social/profiles/instagram/{handle}/ingestion/runs/{run_id}/diagnostics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Diagnostics */
+        get: operations["getInstagramIngestionDiagnosticsV2"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/admin/social/profiles/instagram/{handle}/ingestion/runs/{run_id}/replay": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Replay */
+        post: operations["replayInstagramIngestionEvidenceV2"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/admin/social/profiles/instagram/{handle}/ingestion/runs/{run_id}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Resume */
+        post: operations["resumeInstagramIngestionRunV2"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/admin/social/profiles/instagram/{handle}/ingestion/runs/{run_id}/retry-targets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Retry */
+        post: operations["retryInstagramIngestionTargetsV2"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/admin/social/profiles/instagram/{handle}/ingestion/runs/recent": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Recent */
+        get: operations["listRecentInstagramIngestionRunsV2"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v2/admin/socials/shared-account-sources": {
         parameters: {
             query?: never;
@@ -2405,6 +2558,486 @@ export interface components {
         /** IdentityProblemResponse */
         IdentityProblemResponse: {
             detail: components["schemas"]["IdentityProblemDetail"];
+        };
+        /** InstagramEvidenceDiagnosticV2 */
+        InstagramEvidenceDiagnosticV2: {
+            /** Available */
+            available: boolean;
+            /**
+             * Captured At
+             * Format: date-time
+             */
+            captured_at: string;
+            /** Content Hash */
+            content_hash: string;
+            /**
+             * Evidence Id
+             * Format: uuid
+             */
+            evidence_id: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /** Parser Version */
+            parser_version: string;
+            /** Pinned */
+            pinned: boolean;
+            /** Schema Version */
+            schema_version: number;
+            /** Source Identity */
+            source_identity: string;
+            /**
+             * Stage
+             * @enum {string}
+             */
+            stage: "listing" | "post_details" | "comments" | "media";
+            /** Target Key */
+            target_key: string;
+        };
+        /** InstagramIngestionCapabilitiesV2 */
+        InstagramIngestionCapabilitiesV2: {
+            /** Account */
+            account: string;
+            /** Disabled Reason */
+            disabled_reason?: string | null;
+            /** Enabled */
+            enabled: boolean;
+            /** Engine */
+            engine?: ("dbos" | "temporal") | null;
+            /**
+             * Replay Apply Enabled
+             * @default false
+             */
+            replay_apply_enabled: boolean;
+            /** Supported Actions */
+            supported_actions?: ("backfill" | "sync_recent" | "sync_newer" | "resume_tail")[];
+            /** Workflow Version */
+            workflow_version?: string | null;
+        };
+        /** InstagramIngestionCommandV2 */
+        InstagramIngestionCommandV2: {
+            /**
+             * Engine
+             * @enum {string}
+             */
+            engine: "dbos" | "temporal";
+            /** Execution Id */
+            execution_id?: string | null;
+            /** Generation */
+            generation: number;
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "queued" | "running" | "blocked" | "cancelled" | "completed" | "failed";
+            /** Workflow Version */
+            workflow_version: string;
+        };
+        /**
+         * InstagramIngestionControlV2
+         * @description Optional empty command body; supplied unknown fields remain invalid.
+         */
+        InstagramIngestionControlV2: Record<string, never>;
+        /** InstagramIngestionDiagnosticsV2 */
+        InstagramIngestionDiagnosticsV2: {
+            /** Account */
+            account: string;
+            /** Evidence */
+            evidence: components["schemas"]["InstagramEvidenceDiagnosticV2"][];
+            /** Evidence Truncated */
+            evidence_truncated: boolean;
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /** Targets */
+            targets: components["schemas"]["InstagramTargetDiagnosticV2"][];
+            /** Targets Truncated */
+            targets_truncated: boolean;
+        };
+        /** InstagramIngestionLaunchV2 */
+        InstagramIngestionLaunchV2: {
+            /**
+             * Action
+             * @default backfill
+             * @enum {string}
+             */
+            action: "backfill" | "sync_recent" | "sync_newer" | "resume_tail";
+            /** Apply Run Id */
+            apply_run_id?: string | null;
+            /**
+             * Backfill Scope
+             * @default full_history
+             * @enum {string}
+             */
+            backfill_scope: "full_history" | "bounded_window";
+            /** Comments Enable Media Followups */
+            comments_enable_media_followups?: boolean | null;
+            /** Comments Worker Count */
+            comments_worker_count?: number | null;
+            /** Date End */
+            date_end?: string | null;
+            /** Date Start */
+            date_start?: string | null;
+            /** Detail Worker Count */
+            detail_worker_count?: number | null;
+            /**
+             * Enable Cap4 Canary
+             * @default false
+             */
+            enable_cap4_canary: boolean;
+            /**
+             * Force Catalog Rediscovery
+             * @default false
+             */
+            force_catalog_rediscovery: boolean;
+            /**
+             * Lookback Days
+             * @default 1
+             */
+            lookback_days: number;
+            /** Operator Confirmation */
+            operator_confirmation?: string | null;
+            /** Selected Tasks */
+            selected_tasks?: ("post_details" | "comments" | "media")[];
+            /**
+             * Source Scope
+             * @default network
+             * @enum {string}
+             */
+            source_scope: "bravo" | "network" | "creator" | "community" | "news";
+        };
+        /** InstagramIngestionProblemResponseV2 */
+        InstagramIngestionProblemResponseV2: {
+            detail: components["schemas"]["InstagramIngestionProblemV2"];
+        };
+        /** InstagramIngestionProblemV2 */
+        InstagramIngestionProblemV2: {
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+            /** Request Id */
+            request_id?: string | null;
+            /** Retry After Ms */
+            retry_after_ms?: number | null;
+            /**
+             * Retryable
+             * @default false
+             */
+            retryable: boolean;
+            /** Status */
+            status: number;
+            /** Trace Id */
+            trace_id?: string | null;
+        };
+        /** InstagramIngestionProgressV2 */
+        InstagramIngestionProgressV2: {
+            /** Account */
+            account: string;
+            /** Allowed Actions */
+            allowed_actions: ("cancel" | "resume" | "retry_targets" | "replay")[];
+            /** Complete */
+            complete: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Engine
+             * @enum {string}
+             */
+            engine: "dbos" | "temporal";
+            /** Generation */
+            generation: number;
+            intent: components["schemas"]["InstagramRunIntentV2"];
+            /** Intent Hash */
+            intent_hash: string;
+            /** Last Committed At */
+            last_committed_at: string | null;
+            /** Pinned Evidence Count */
+            pinned_evidence_count: number;
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /** Stages */
+            stages: components["schemas"]["InstagramStageProgressV2"][];
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "queued" | "running" | "blocked" | "cancelled" | "completed" | "failed";
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Workflow Version */
+            workflow_version: string;
+        };
+        /** InstagramRecentRunsV2 */
+        InstagramRecentRunsV2: {
+            /** Runs */
+            runs: components["schemas"]["InstagramRecentRunV2"][];
+        };
+        /** InstagramRecentRunV2 */
+        InstagramRecentRunV2: {
+            /** Account */
+            account: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Engine
+             * @enum {string}
+             */
+            engine: "dbos" | "temporal";
+            intent: components["schemas"]["InstagramRunIntentV2"];
+            /** Last Committed At */
+            last_committed_at: string | null;
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "queued" | "running" | "blocked" | "cancelled" | "completed" | "failed";
+            /** Workflow Version */
+            workflow_version: string;
+        };
+        /** InstagramReplayComparisonV2 */
+        InstagramReplayComparisonV2: {
+            /** Changed */
+            changed: boolean;
+            current: components["schemas"]["JsonValue"];
+            previous: components["schemas"]["JsonValue"];
+        };
+        /** InstagramReplayResultV2 */
+        InstagramReplayResultV2: {
+            /** Capture Parser Version */
+            capture_parser_version: string;
+            /**
+             * Captured At
+             * Format: date-time
+             */
+            captured_at: string;
+            comparison: components["schemas"]["InstagramReplayComparisonV2"];
+            /** Content Hash */
+            content_hash: string;
+            /**
+             * Evidence Id
+             * Format: uuid
+             */
+            evidence_id: string;
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "dry_run" | "apply";
+            normalized: components["schemas"]["JsonValue"];
+            /** Parser Version */
+            parser_version: string;
+            /** Receipt Id */
+            receipt_id?: string | null;
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /** Schema Version */
+            schema_version: number;
+            /**
+             * Source Requests
+             * @default 0
+             * @constant
+             */
+            source_requests: 0;
+            /**
+             * Stage
+             * @enum {string}
+             */
+            stage: "listing" | "post_details" | "comments" | "media";
+            /** Target Key */
+            target_key: string;
+            /** Writes */
+            writes: number;
+        };
+        /** InstagramReplayV2 */
+        InstagramReplayV2: {
+            /**
+             * Apply
+             * @default false
+             */
+            apply: boolean;
+            /**
+             * Evidence Id
+             * Format: uuid
+             */
+            evidence_id: string;
+            /** Parser Version */
+            parser_version: string;
+        };
+        /** InstagramRetryTargetsV2 */
+        InstagramRetryTargetsV2: {
+            /**
+             * Stage
+             * @enum {string}
+             */
+            stage: "post_details" | "comments" | "media";
+            /** Target Keys */
+            target_keys: string[];
+        };
+        /** InstagramRunIntentV2 */
+        InstagramRunIntentV2: {
+            /** Account */
+            account: string;
+            /**
+             * Action
+             * @enum {string}
+             */
+            action: "backfill" | "sync_recent" | "sync_newer" | "resume_tail";
+            /**
+             * Comments Enable Media Followups
+             * @default true
+             */
+            comments_enable_media_followups: boolean;
+            /**
+             * Comments Max Attempts
+             * @default 12
+             */
+            comments_max_attempts: number;
+            /** Comments Worker Count */
+            comments_worker_count?: number | null;
+            /** Date End */
+            date_end: string | null;
+            /** Date Start */
+            date_start: string | null;
+            /** Detail Worker Count */
+            detail_worker_count?: number | null;
+            /**
+             * Enable Cap4 Canary
+             * @default false
+             */
+            enable_cap4_canary: boolean;
+            /** Force */
+            force: boolean;
+            /**
+             * Listing Max Attempts
+             * @default 12
+             */
+            listing_max_attempts: number;
+            /**
+             * Media Max Attempts
+             * @default 3
+             * @constant
+             */
+            media_max_attempts: 3;
+            /** Metadata Ttl Days */
+            metadata_ttl_days: number;
+            /**
+             * Metrics Ttl Hours
+             * @constant
+             */
+            metrics_ttl_hours: 24;
+            /**
+             * Platform
+             * @constant
+             */
+            platform: "instagram";
+            /**
+             * Policy Version
+             * @constant
+             */
+            policy_version: 1;
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "full_history" | "bounded_window" | "recent_window" | "head_gap" | "frontier_resume";
+            /** Selected Tasks */
+            selected_tasks: ("post_details" | "comments" | "media")[];
+            /**
+             * Source Scope
+             * @enum {string}
+             */
+            source_scope: "bravo" | "network" | "creator" | "community" | "news";
+        };
+        /** InstagramStageProgressV2 */
+        InstagramStageProgressV2: {
+            /** Attempts */
+            attempts: number;
+            /** Blocked Reasons */
+            blocked_reasons: string[];
+            /** Cached Satisfied */
+            cached_satisfied: number;
+            /** Committed */
+            committed: number;
+            /** Complete */
+            complete: boolean;
+            /** Discovery Complete */
+            discovery_complete: boolean;
+            /** Last Committed At */
+            last_committed_at: string | null;
+            /** Requests */
+            requests: number;
+            /** Retry At */
+            retry_at: string | null;
+            /** Sealed At */
+            sealed_at: string | null;
+            /** Source Unavailable */
+            source_unavailable: number;
+            /**
+             * Stage
+             * @enum {string}
+             */
+            stage: "listing" | "post_details" | "comments" | "media";
+            /** Total */
+            total: number;
+            /** Unresolved */
+            unresolved: number;
+        };
+        /** InstagramTargetDiagnosticV2 */
+        InstagramTargetDiagnosticV2: {
+            /** Attempts */
+            attempts: number;
+            /** Blocked Reason */
+            blocked_reason: string | null;
+            /** Last Error Code */
+            last_error_code?: string | null;
+            /** Max Attempts */
+            max_attempts: number;
+            /**
+             * Outcome
+             * @enum {string}
+             */
+            outcome: "committed" | "cached_satisfied" | "source_unavailable" | "unresolved";
+            /** Requests */
+            requests: number;
+            /** Retry At */
+            retry_at: string | null;
+            /**
+             * Stage
+             * @enum {string}
+             */
+            stage: "listing" | "post_details" | "comments" | "media";
+            /** Target Key */
+            target_key: string;
         };
         JsonValue: unknown;
         /** NetworkStreamingCompletionDetailV2 */
@@ -6581,6 +7214,974 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AdminSocialCatalogRunsProblemResponseV2"];
+                };
+            };
+        };
+    };
+    getInstagramIngestionCapabilitiesV2: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                handle: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionCapabilitiesV2"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+            /** @description Gone */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+        };
+    };
+    launchInstagramIngestionRunV2: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                handle: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InstagramIngestionLaunchV2"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionCommandV2"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+            /** @description Gone */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+        };
+    };
+    getInstagramIngestionRunV2: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                handle: string;
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProgressV2"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+            /** @description Gone */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+        };
+    };
+    cancelInstagramIngestionRunV2: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                handle: string;
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["InstagramIngestionControlV2"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionCommandV2"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+            /** @description Gone */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+        };
+    };
+    getInstagramIngestionDiagnosticsV2: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                handle: string;
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionDiagnosticsV2"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+            /** @description Gone */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+        };
+    };
+    replayInstagramIngestionEvidenceV2: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                handle: string;
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InstagramReplayV2"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramReplayResultV2"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+            /** @description Gone */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+        };
+    };
+    resumeInstagramIngestionRunV2: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                handle: string;
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["InstagramIngestionControlV2"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionCommandV2"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+            /** @description Gone */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+        };
+    };
+    retryInstagramIngestionTargetsV2: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                handle: string;
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InstagramRetryTargetsV2"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionCommandV2"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+            /** @description Gone */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+        };
+    };
+    listRecentInstagramIngestionRunsV2: {
+        parameters: {
+            query?: {
+                limit?: number;
+                source_scope?: "bravo" | "network" | "creator" | "community" | "news";
+            };
+            header?: never;
+            path: {
+                handle: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramRecentRunsV2"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+            /** @description Gone */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstagramIngestionProblemResponseV2"];
                 };
             };
         };

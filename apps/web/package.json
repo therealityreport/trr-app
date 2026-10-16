@@ -57,6 +57,7 @@
     "@firebase/util": "1.15.1",
     "@sentry/nextjs": "^10.62.0",
     "@supabase/supabase-js": "^2.110.0",
+    "@tanstack/react-query": "^5.104.3",
     "@vercel/analytics": "^2.0.1",
     "@vercel/functions": "^3.7.4",
     "@vercel/speed-insights": "^2.0.0",
@@ -68,6 +69,8 @@
     "html-to-image": "^1.11.13",
     "lucide-react": "^1.22.0",
     "next": "16.3.6",
+    "openapi-fetch": "^0.17.0",
+    "openapi-react-query": "^0.5.4",
     "pg": "^8.22.0",
     "radix-ui": "^1.6.0",
     "react": "19.2.8",
@@ -83,10 +86,12 @@
     "@tailwindcss/postcss": "^4.3.3",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
+    "@trr/api-types-tool": "workspace:*",
     "@types/node": "^25.9.4",
     "@types/pg": "^8.20.0",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
+    "@vitest/coverage-v8": "5.0.0",
     "ajv": "^8.20.0",
     "dotenv": "^17.4.2",
     "esbuild": "0.28.1",
@@ -98,9 +103,7 @@
     "vite": "8.2.2",
     "vitest": "5.0.0",
     "vitest-axe": "^0.1.0",
-    "yaml": "^2.9.0",
-    "@trr/api-types-tool": "workspace:*",
-    "@vitest/coverage-v8": "5.0.0"
+    "yaml": "^2.9.0"
   },
   "engines": {
     "node": "24.x"
