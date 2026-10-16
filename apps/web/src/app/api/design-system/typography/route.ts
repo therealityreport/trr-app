@@ -44,7 +44,6 @@ export async function GET() {
     return NextResponse.json(payload);
   } catch (error) {
     console.error("[api] Failed to load public typography state", error);
-    const message = error instanceof Error ? error.message : "failed";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: "Unable to load typography state." }, { status: 500 });
   }
 }
