@@ -1,14 +1,15 @@
 import React from "react";
 import { act, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { IngestionRequestError, ingestionProxyPath, ingestionLaunchFromCatalog, type IngestionProgress, type IngestionDiagnostics } from "@/lib/social/ingestion-client";
+import { INGESTION_BASE, ingestionFetchClient, IngestionRequestError, ingestionProxyPath, ingestionLaunchFromCatalog, type IngestionProgress, type IngestionDiagnostics } from "@/lib/social/ingestion-client";
 import { ingestionPollInterval, IngestionRequestIdentities, useInstagramIngestion } from "@/lib/social/ingestion-hooks";
 import { StageProgress } from "@/components/admin/social/ingestion/StageProgress";
 import { RecoveryControls } from "@/components/admin/social/ingestion/RecoveryControls";
 import { Diagnostics } from "@/components/admin/social/ingestion/Diagnostics";
 import { InstagramIngestionPanel } from "@/components/admin/social/ingestion/InstagramIngestionPanel";
-const mocks = vi.hoisted(() => ({ fetch: vi.fn() }));
+const mocks = vi.hoisted(() => ({ fetch: vi.fn(), devBypass: vi.fn(() => false) }));
 vi.mock("@/lib/admin/client-auth", () => ({ fetchAdminWithAuth: (...args: unknown[]) => mocks.fetch(...args) }));
+vi.mock("@/lib/admin/dev-admin-bypass", () => ({ isDevAdminBypassEnabledClient: mocks.devBypass }));
 const runId = "11111111-1111-4111-8111-111111111111";
 const oldId = "22222222-2222-4222-8222-222222222222";
 const evidenceId = "33333333-3333-4333-8333-333333333333";
@@ -17,9 +18,16 @@ const progress = (overrides: Partial<IngestionProgress> = {}): IngestionProgress
 const diagnostics: IngestionDiagnostics = { run_id: runId, account: "bravotv", targets: [{ stage: "post_details", target_key: "p1", outcome: "unresolved", attempts: 2, requests: 3, max_attempts: 12, retry_at: null, blocked_reason: "cooldown" }], evidence: [{ evidence_id: evidenceId, stage: "post_details", target_key: "p1", source_identity: "post:1", captured_at: "2026-10-16T09:00:00Z", content_hash: "sha256", available: true, expires_at: "2099-01-01T00:00:00Z", pinned: true, parser_version: "parser-v1", schema_version: 1 }], targets_truncated: false, evidence_truncated: false };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 const capability = (enabled = true) => ({ enabled, account: "bravotv", engine: "dbos", workflow_version: "v1", supported_actions: ["backfill", "sync_recent", "sync_newer"], replay_apply_enabled: false });
-beforeEach(() => { mocks.fetch.mockReset(); });
+beforeEach(() => { mocks.fetch.mockReset(); mocks.devBypass.mockReset().mockReturnValue(false); });
 
 describe("typed ingestion lifecycle", () => {
+  it.each([false, true])("uses the existing local bypass decision (%s) without changing GET retry policy", async allowed => {
+    mocks.devBypass.mockReturnValue(allowed);
+    mocks.fetch.mockImplementation(async () => json(capability()));
+    await ingestionFetchClient.GET(`${INGESTION_BASE}/capabilities`, { params: { path: { handle: "bravotv" } } });
+    expect(mocks.devBypass).toHaveBeenCalled();
+    expect(mocks.fetch.mock.calls[0][2]).toEqual({ allowDevAdminBypass: allowed, retryOnAuthError: true });
+  });
   it("preserves launcher scope, selected tasks, date boundaries, workers, and confirmation without legacy-only fields", () => {
     const result = ingestionLaunchFromCatalog("backfill", { source_scope: "creator", backfill_scope: "bounded_window", date_start: "2026-01-01T00:00:00Z", date_end: "2026-02-01T00:00:00Z", selected_tasks: ["comments"], detail_worker_count: 2, comments_worker_count: 4, comments_enable_media_followups: false, operator_confirmation: "APPLY REVIEWED", allow_inline_dev_fallback: true, execution_preference: "prefer_local_inline" }, "network");
     expect(result).toMatchObject({ action: "backfill", source_scope: "creator", backfill_scope: "bounded_window", date_start: "2026-01-01T00:00:00Z", date_end: "2026-02-01T00:00:00Z", selected_tasks: ["comments"], detail_worker_count: 2, comments_worker_count: 4, comments_enable_media_followups: false, operator_confirmation: "APPLY REVIEWED" });
@@ -151,7 +159,7 @@ describe("typed ingestion lifecycle", () => {
     await act(async () => { await result.current.launch(body); });
     const requests = mocks.fetch.mock.calls.filter(([, init]) => init?.method === "POST");
     expect(new Headers(requests[0][1].headers).get("Idempotency-Key")).toBe(new Headers(requests[1][1].headers).get("Idempotency-Key"));
-    expect(requests[0][2]).toEqual({ retryOnAuthError: false });
+    expect(requests[0][2]).toEqual({ allowDevAdminBypass: false, retryOnAuthError: false });
     await waitFor(() => expect(result.current.progress.data?.stages[0].committed).toBe(4));
     failProgress = true;
     await act(async () => { await result.current.progress.refetch(); });

@@ -3,6 +3,7 @@
 import createFetchClient from "openapi-fetch";
 import createQueryClient from "openapi-react-query";
 import { fetchAdminWithAuth } from "@/lib/admin/client-auth";
+import { isDevAdminBypassEnabledClient } from "@/lib/admin/dev-admin-bypass";
 import type { CatalogBackfillRequest, CatalogSyncRecentRequest, CatalogSyncNewerRequest } from "@/lib/admin/social-account-profile";
 import type { components, paths } from "@/lib/server/trr-api/generated/openapi.v2";
 
@@ -39,7 +40,7 @@ export const ingestionFetchClient = createFetchClient<paths>({
       body: request.method === "GET" ? undefined : await request.text(),
       signal: request.signal,
       cache: "no-store",
-    }, { retryOnAuthError: request.method === "GET" });
+    }, { allowDevAdminBypass: isDevAdminBypassEnabledClient(), retryOnAuthError: request.method === "GET" });
     if (!response.ok) {
       const payload = await response.clone().json().catch(() => ({}));
       const detail = payload.detail;
