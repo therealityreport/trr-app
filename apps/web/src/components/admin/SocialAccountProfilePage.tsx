@@ -7772,7 +7772,16 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
         }
         setRunningCatalogAction(action);
         try {
-          const result = await ingestion.launch(ingestionLaunchFromCatalog(action, requestBody, activeCatalogSourceScope));
+          const launchRequest = ingestionLaunchFromCatalog(action, requestBody, activeCatalogSourceScope);
+          if (action === "backfill" && launchRequest.backfill_scope === "bounded_window" && launchRequest.date_end) {
+            const end = new Date(launchRequest.date_end);
+            const nextMonthStart = Date.UTC(end.getUTCFullYear(), end.getUTCMonth() + 1, 1);
+            // The month picker is inclusive for legacy requests; ingestion uses an exclusive end.
+            if (end.getTime() === nextMonthStart - 1) {
+              launchRequest.date_end = new Date(nextMonthStart).toISOString();
+            }
+          }
+          const result = await ingestion.launch(launchRequest);
           setCatalogActionMessage(`Instagram ingestion accepted. Run ${result.run_id.slice(0, 8)} · ${result.state}.`);
         } catch (error) {
           setCatalogActionMessage(ingestionErrorMessage(error));

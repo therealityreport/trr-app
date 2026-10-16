@@ -402,11 +402,11 @@ describe("SocialAccountProfilePage", () => {
     await screen.findByRole("region", { name: "Durable Instagram ingestion" });
     fireEvent.click(screen.getByRole("button", { name: "Backfill Posts" }));
     fireEvent.input(screen.getByLabelText("Instagram backfill start month"), { target: { value: "2026-01" } });
-    fireEvent.input(screen.getByLabelText("Instagram backfill end month"), { target: { value: "2026-09" } });
+    fireEvent.input(screen.getByLabelText("Instagram backfill end month"), { target: { value: "2026-12" } });
     fireEvent.click(screen.getByRole("button", { name: "Start Backfill" }));
     await waitFor(() => expect(mocks.fetchAdminWithAuth.mock.calls.some(([input, init]) => String(input).endsWith("/instagram-ingestion/bravotv/runs") && init?.method === "POST")).toBe(true));
     const launch = mocks.fetchAdminWithAuth.mock.calls.find(([input, init]) => String(input).endsWith("/instagram-ingestion/bravotv/runs") && init?.method === "POST");
-    expect(JSON.parse(launch![1].body)).toMatchObject({ action: "backfill", source_scope: "network", backfill_scope: "bounded_window", date_start: "2026-01-01T00:00:00.000Z", selected_tasks: [...INSTAGRAM_BACKFILL_DEFAULT_TASKS], detail_worker_count: 8, comments_worker_count: 8 });
+    expect(JSON.parse(launch![1].body)).toMatchObject({ action: "backfill", source_scope: "network", backfill_scope: "bounded_window", date_start: "2026-01-01T00:00:00.000Z", date_end: "2027-01-01T00:00:00.000Z", selected_tasks: [...INSTAGRAM_BACKFILL_DEFAULT_TASKS], detail_worker_count: 8, comments_worker_count: 8 });
     expect(new Headers(launch![1].headers).get("Idempotency-Key")).toBeTruthy();
     await waitFor(() => expect(screen.getAllByText(/Run 11111111 · running/).length).toBeGreaterThan(0));
     expect(mocks.fetchAdminWithAuth.mock.calls.some(([input]) => String(input).includes("/catalog/backfill"))).toBe(false);
@@ -4675,7 +4675,10 @@ describe("SocialAccountProfilePage", () => {
     });
   });
 
-  it("uses browser input events for the bounded month picker and warns on reused comments runs", async () => {
+  it.each([
+    { startMonth: "2026-05", endMonth: "2026-07", dateStart: "2026-05-01T00:00:00.000Z", dateEnd: "2026-07-31T23:59:59.999Z" },
+    { startMonth: "2026-01", endMonth: "2026-12", dateStart: "2026-01-01T00:00:00.000Z", dateEnd: "2026-12-31T23:59:59.999Z" },
+  ])("preserves legacy inclusive month boundaries ($startMonth to $endMonth) and reused-run warnings", async ({ startMonth, endMonth, dateStart, dateEnd }) => {
     let backfillBody: Record<string, unknown> | null = null;
 
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -4724,18 +4727,19 @@ describe("SocialAccountProfilePage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Backfill Posts" }));
     expect(await screen.findByText("Choose what this backfill should run")).toBeInTheDocument();
 
-    fireEvent.input(screen.getByLabelText("Instagram backfill start month"), { target: { value: "2026-05" } });
-    fireEvent.input(screen.getByLabelText("Instagram backfill end month"), { target: { value: "2026-07" } });
+    fireEvent.input(screen.getByLabelText("Instagram backfill start month"), { target: { value: startMonth } });
+    fireEvent.input(screen.getByLabelText("Instagram backfill end month"), { target: { value: endMonth } });
 
     fireEvent.click(screen.getByRole("button", { name: "Start Backfill" }));
 
     await waitFor(() => {
       expect(backfillBody).toMatchObject({
         backfill_scope: "bounded_window",
-        date_start: "2026-05-01T00:00:00.000Z",
-        date_end: "2026-07-31T23:59:59.999Z",
+        date_start: dateStart,
+        date_end: dateEnd,
       });
     });
+    expect(mocks.fetchAdminWithAuth.mock.calls.some(([input, init]) => String(input).includes("/instagram-ingestion/") && init?.method === "POST")).toBe(false);
     expect(await screen.findByText(/Warning: reused existing comments run/i)).toBeInTheDocument();
   });
 
