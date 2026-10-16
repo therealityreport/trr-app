@@ -28,7 +28,7 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
-          java-version: '17'
+          java-version: '21'
       - name: Compile rules via emulator
         env:
           FIREBASE_AUTH_EMULATOR_HOST: localhost:9099
