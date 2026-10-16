@@ -35,7 +35,7 @@ async function guard() {
     }
 
     const data = snap.data();
-    const complete = data && data.username && Array.isArray(data.shows) && data.shows.length >= 3 && data.birthday;
+    const complete = data && data.username && Array.isArray(data.shows) && data.shows.filter((show: unknown) => typeof show === "string").length >= 3 && data.birthday;
     if (!complete) {
       redirect("/auth/finish");
     }

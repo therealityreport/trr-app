@@ -53,6 +53,8 @@ export interface SurveyEpisodeMeta {
 }
 
 export interface SurveyResponse {
+  syncState?: "pending" | "synced" | "error";
+  requestedCompleted?: boolean;
   uid: string;
   showId: string;
   seasonId: string;
@@ -80,6 +82,11 @@ export interface SurveyResponseDraft {
   seasonRating?: number | null;
   completionPct: number;
   completed: boolean;
+}
+
+export interface SurveySaveOutcome {
+  completed: boolean;
+  syncState: "synced";
 }
 
 export type SurveyCtaState = "loading" | "start" | "continue" | "results";

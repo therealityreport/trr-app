@@ -136,7 +136,7 @@ export default function RHOPS10PlayPage() {
       const ranking = rankingIds
         .map((id) => CAST_MEMBERS.find((item) => item.id === id))
         .filter(Boolean) as SurveyRankingItem[];
-      await manager.saveResponse(
+      const outcome = await manager.saveResponse(
         IDENTIFIERS,
         userId,
         {
@@ -147,7 +147,9 @@ export default function RHOPS10PlayPage() {
         { surveyKey: RHOP_SURVEY_ID },
       );
       setSaveState("saved");
-      router.push("/surveys/rhop-s10/results");
+      if (outcome.completed && outcome.syncState === "synced") {
+        router.push("/surveys/rhop-s10/results");
+      }
     } catch (error) {
       console.error("Failed to submit survey", error);
       setSaveState("error");

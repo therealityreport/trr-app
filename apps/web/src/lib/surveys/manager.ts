@@ -16,6 +16,7 @@ import type {
   SurveyResponseDraft,
   SurveyIdentifiers,
   SurveyCtaState,
+  SurveySaveOutcome,
 } from "./types";
 
 const SURVEY_COLLECTION = "surveyResults";
@@ -23,6 +24,7 @@ const SURVEY_COLLECTION = "surveyResults";
 class SurveyManager {
   private static instance: SurveyManager;
   private firestore: Firestore | null = null;
+  private responseSaves = new Map<string, { tail: Promise<void>; latest: Promise<SurveySaveOutcome> | null }>();
 
   private constructor() {}
 
@@ -57,7 +59,6 @@ class SurveyManager {
         isClosed: false,
         ...(defaults ?? {}),
       };
-      await setDoc(metaRef, defaultMeta, { merge: true });
       return defaultMeta;
     }
 
@@ -88,7 +89,44 @@ class SurveyManager {
     uid: string,
     draft: SurveyResponseDraft,
     options?: { surveyKey?: string },
-  ): Promise<void> {
+  ): Promise<SurveySaveOutcome> {
+    if (auth.currentUser?.uid !== uid) throw new Error("Sign in as the response owner before saving.");
+    if (!Array.isArray(draft.ranking) || draft.ranking.length > 20) {
+      throw new Error("This survey supports up to 20 ranked choices. Please reduce your selection and retry.");
+    }
+    // Snapshot mutable UI inputs, then serialize the entire dual write per stable response.
+    const savedIds = { ...ids };
+    const savedDraft = { ...draft, ranking: draft.ranking.map((item) => ({ ...item })) };
+    const savedOptions = options ? { ...options } : undefined;
+    const key = JSON.stringify([uid, ids.showId, ids.seasonId, ids.episodeId]);
+    const queue = this.responseSaves.get(key) ?? { tail: Promise.resolve(), latest: null };
+    const operation = queue.tail.then(() => this.persistResponse(savedIds, uid, savedDraft, savedOptions));
+    queue.latest = operation;
+    queue.tail = operation.then(() => undefined, () => undefined);
+    this.responseSaves.set(key, queue);
+
+    // Overlapping callers settle with the newest queued result, so stale UI callbacks
+    // cannot report saved/error while a newer persistence operation is still running.
+    let observed = operation;
+    for (;;) {
+      const settled = await observed.then(
+        (outcome) => ({ ok: true as const, outcome }),
+        (error: unknown) => ({ ok: false as const, error }),
+      );
+      if (queue.latest && queue.latest !== observed) { observed = queue.latest; continue; }
+      if (this.responseSaves.get(key) === queue) this.responseSaves.delete(key);
+      if (!settled.ok) throw settled.error;
+      return settled.outcome;
+    }
+  }
+
+  private async persistResponse(
+    ids: SurveyIdentifiers,
+    uid: string,
+    draft: SurveyResponseDraft,
+    options?: { surveyKey?: string },
+  ): Promise<SurveySaveOutcome> {
+    if (auth.currentUser?.uid !== uid) throw new Error("Sign in as the response owner before saving.");
     const responseRef = this.getResponseDocRef(ids, uid);
     const existing = await getDoc(responseRef);
     const createdAt = existing.exists()
@@ -99,7 +137,9 @@ class SurveyManager {
       ...ids,
       ranking: draft.ranking,
       completionPct: draft.completionPct,
-      completed: draft.completed,
+      completed: false,
+      requestedCompleted: draft.completed,
+      syncState: "pending",
       updatedAt: serverTimestamp(),
       createdAt,
     };
@@ -108,12 +148,19 @@ class SurveyManager {
     }
 
     await setDoc(responseRef, payload, { merge: true });
-    await this.syncResponseToPostgres(ids, uid, draft, options);
+    try {
+      await this.syncResponseToPostgres(ids, uid, draft, options);
+      await setDoc(responseRef, { completed: draft.completed, syncState: "synced", updatedAt: serverTimestamp() }, { merge: true });
+      return { completed: draft.completed, syncState: "synced" };
+    } catch (error) {
+      await setDoc(responseRef, { completed: false, syncState: "error", updatedAt: serverTimestamp() }, { merge: true });
+      throw new Error("Your answers are saved, but syncing failed. Please submit again to retry.", { cause: error });
+    }
   }
 
   resolveCta(response: SurveyResponse | null): SurveyCtaState {
     if (!response) return "start";
-    if (response.completed) return "results";
+    if (response.completed && (!response.syncState || response.syncState === "synced")) return "results";
     return "continue";
   }
 

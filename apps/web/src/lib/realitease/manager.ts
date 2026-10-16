@@ -1,3 +1,4 @@
+import { syncGameCompletion } from "@/lib/games/completion";
 import {
   Timestamp,
   collection,
@@ -16,7 +17,6 @@ import { getDb } from "@/lib/firebase-db";
 import {
   REALITEASE_DEFAULT_USER_ANALYTICS,
   type RawRealiteaseGuess,
-  type RealiteaseAnalyticsDoc,
   type RealiteaseBoardColumnKey,
   type RealiteaseDailyDoc,
   type RealiteaseGameSnapshot,
@@ -122,7 +122,6 @@ export class RealiteaseManager {
     const puzzleDate = gameDate;
 
     await this.ensureUserAnalyticsDoc(uid);
-    await this.ensureGlobalAnalyticsDoc(puzzleDate);
 
     const dailyRef = this.getDailyDocRef(uid, puzzleDate);
     const dailySnap = await getDoc(dailyRef);
@@ -143,6 +142,7 @@ export class RealiteaseManager {
     }
 
     const freshSnap = hasExistingDoc ? dailySnap : await getDoc(dailyRef);
+    await this.retryCompletionSync(uid, puzzleDate);
     const data = this.parseDailyDoc(
       freshSnap.data() ?? {},
       puzzleDate,
@@ -392,11 +392,11 @@ export class RealiteaseManager {
     const puzzleDate = gameDate;
     const dailyRef = this.getDailyDocRef(uid, puzzleDate);
     const userAnalyticsRef = this.getUserAnalyticsDocRef(uid);
-    const globalAnalyticsRef = this.getGlobalAnalyticsDocRef(puzzleDate);
     const { answerKey, talent: answerTalent } = await this.getPuzzleContext(puzzleDate);
 
     await runTransaction(this.firestore, async (transaction) => {
       const snapshot = await transaction.get(dailyRef);
+      const userAnalyticsSnap = await transaction.get(userAnalyticsRef);
       const existingData = snapshot.exists() ? ((snapshot.data() ?? {}) as Partial<RealiteaseDailyDoc>) : null;
       const guesses: RawRealiteaseGuess[] = Array.isArray(existingData?.guesses)
         ? [...(existingData?.guesses as RawRealiteaseGuess[])]
@@ -441,6 +441,7 @@ export class RealiteaseManager {
         };
         if (completed) {
           update.gameCompleted = true;
+          update.completionSyncState = "pending";
           update.guessNumberSolved = solvedGuessNumber;
         }
         transaction.update(dailyRef, update);
@@ -448,6 +449,7 @@ export class RealiteaseManager {
         transaction.set(dailyRef, {
           puzzleDate,
           gameCompleted: completed,
+          completionSyncState: completed ? "pending" : "synced",
           guessNumberSolved: solvedGuessNumber,
           guesses,
           gameStartedAt: existingData?.gameStartedAt ?? serverTimestampValue,
@@ -456,7 +458,6 @@ export class RealiteaseManager {
       }
 
       if (completed) {
-        const userAnalyticsSnap = await transaction.get(userAnalyticsRef);
         const userAnalytics = (userAnalyticsSnap.data() ?? {}) as Record<string, unknown>;
         const prevAttempts = this.toFiniteNumber(userAnalytics.realitease_puzzlesAttempted);
         const prevWins = this.toFiniteNumber(userAnalytics.realitease_puzzlesWon);
@@ -484,38 +485,10 @@ export class RealiteaseManager {
           { merge: true },
         );
 
-        const globalAnalyticsSnap = await transaction.get(globalAnalyticsRef);
-        const globalAnalytics = (globalAnalyticsSnap.data() ?? {}) as Record<string, unknown>;
-        const globalAttempts = this.toFiniteNumber(globalAnalytics.totalAttempts);
-        const globalWins = this.toFiniteNumber(globalAnalytics.totalWins);
-        const globalAverageGuesses = this.toFiniteNumber(globalAnalytics.averageGuesses);
-        const globalTotalGuesses = globalAverageGuesses * globalAttempts;
-        const nextGlobalAttempts = globalAttempts + 1;
-        const nextGlobalWins = globalWins + (isCorrect ? 1 : 0);
-        const nextGlobalAverageGuesses =
-          nextGlobalAttempts > 0 ? Number(((globalTotalGuesses + nextGuessCount) / nextGlobalAttempts).toFixed(2)) : 0;
-        const nextGuessDistribution = this.normalizeDistribution(
-          (globalAnalytics.guessDistribution ?? {}) as Record<string, unknown>,
-        );
-        if (isCorrect) {
-          const bucket = String(guessNumber);
-          nextGuessDistribution[bucket] = (nextGuessDistribution[bucket] ?? 0) + 1;
-        }
 
-        transaction.set(
-          globalAnalyticsRef,
-          {
-            puzzleDate,
-            totalAttempts: nextGlobalAttempts,
-            totalWins: nextGlobalWins,
-            averageGuesses: nextGlobalAverageGuesses,
-            guessDistribution: nextGuessDistribution,
-            updatedAt: serverTimestampValue,
-          },
-          { merge: true },
-        );
       }
     });
+    await this.retryCompletionSync(uid, puzzleDate);
   }
 
   async getUserStatsSummary(
@@ -708,24 +681,20 @@ export class RealiteaseManager {
     });
   }
 
-  private async ensureGlobalAnalyticsDoc(date: string) {
-    const analyticsRef = this.getGlobalAnalyticsDocRef(date);
-    const snap = await getDoc(analyticsRef);
-    if (snap.exists()) return;
-
-    const defaultDoc: RealiteaseAnalyticsDoc = {
-      puzzleDate: date,
-      totalWins: 0,
-      totalAttempts: 0,
-      averageGuesses: 0,
-      guessDistribution: {},
-    };
-
-    await setDoc(analyticsRef, {
-      ...defaultDoc,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
+  private async retryCompletionSync(uid: string, puzzleDate: string): Promise<void> {
+    const ref = this.getDailyDocRef(uid, puzzleDate);
+    const snapshot = await getDoc(ref);
+    const data = snapshot.data();
+    // Older completed games may already be included in client-written aggregates.
+    // Only new explicit pending/error completions are retried; no implicit historical backfill.
+    if (!data?.gameCompleted || !data.completionSyncState || data.completionSyncState === "synced") return;
+    try {
+      await syncGameCompletion(uid, "realitease", puzzleDate, Array.isArray(data.guesses) ? data.guesses : []);
+      await updateDoc(ref, { completionSyncState: "synced", updatedAt: serverTimestamp() });
+    } catch (error) {
+      await updateDoc(ref, { completionSyncState: "error", updatedAt: serverTimestamp() });
+      throw error;
+    }
   }
 
   private parseDailyDoc(

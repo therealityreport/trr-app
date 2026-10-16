@@ -9,11 +9,9 @@
  * not for application data access. See TRR-APP/CLAUDE.md for the full rule.
  */
 import "server-only";
-import { Buffer } from "node:buffer";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import type { NextRequest } from "next/server";
-import type { DecodedIdToken } from "firebase-admin/auth";
 import { adminAuth } from "@/lib/firebaseAdmin";
 import { DEFAULT_ADMIN_DISPLAY_NAMES } from "@/lib/admin/constants";
 import { normalizeDisplayNameKey } from "@/lib/admin/display-names";
@@ -111,9 +109,6 @@ const AUTH_PROVIDER: AuthProvider =
     : "firebase";
 const AUTH_SHADOW_MODE = (process.env.TRR_AUTH_SHADOW_MODE ?? "false").toLowerCase() === "true";
 
-const USE_EMULATORS = (process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATORS ?? "false").toLowerCase() === "true";
-const HAS_SERVICE_ACCOUNT = Boolean(process.env.FIREBASE_SERVICE_ACCOUNT) || USE_EMULATORS;
-const FIREBASE_WEB_API_KEY = process.env.NEXT_PUBLIC_FIREBASE_API_KEY ?? "";
 const ADMIN_AUTH_EXTERNAL_TIMEOUT_MS = (() => {
   const parsed = Number.parseInt(process.env.ADMIN_AUTH_EXTERNAL_TIMEOUT_MS ?? "3000", 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 3000;
@@ -221,10 +216,6 @@ function parseTokenFromRequest(request: NextRequest): { token: string; kind: Tok
 
 async function verifyFirebaseToken(token: string, kind: TokenKind): Promise<AuthTokenClaims | null> {
   if (!token) return null;
-  if (kind === "id" && !HAS_SERVICE_ACCOUNT) {
-    const fallback = await verifyIdTokenWithoutAdmin(token);
-    if (fallback) return fallback;
-  }
   try {
     if (kind === "session") {
       return (await adminAuth.verifySessionCookie(token, true)) as AuthTokenClaims;
@@ -232,9 +223,6 @@ async function verifyFirebaseToken(token: string, kind: TokenKind): Promise<Auth
     return (await adminAuth.verifyIdToken(token, true)) as AuthTokenClaims;
   } catch (error) {
     console.error("[auth] Failed to verify token", error);
-    if (kind === "id") {
-      return verifyIdTokenWithoutAdmin(token);
-    }
     return null;
   }
 }
@@ -322,66 +310,6 @@ async function getSupabaseVerificationClient(): Promise<SupabaseVerificationClie
   })();
 
   return supabaseVerificationClientPromise;
-}
-
-async function verifyIdTokenWithoutAdmin(token: string): Promise<AuthTokenClaims | null> {
-  if (!FIREBASE_WEB_API_KEY) return null;
-  const payload = decodeJwtPayload(token);
-  if (!payload) return null;
-  const abortController = new AbortController();
-  const timeoutId = setTimeout(() => abortController.abort(), ADMIN_AUTH_EXTERNAL_TIMEOUT_MS);
-  try {
-    const res = await fetch(
-      `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${FIREBASE_WEB_API_KEY}`,
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ idToken: token }),
-        signal: abortController.signal,
-      },
-    );
-    if (!res.ok) {
-      const text = await res.text();
-      console.warn("[auth] Identity Toolkit lookup failed", res.status, text);
-      return null;
-    }
-    const data = (await res.json()) as { users?: Array<{ localId?: string; email?: string }> };
-    const userInfo = data.users?.[0];
-    const uid =
-      (typeof payload.user_id === "string" && payload.user_id) ||
-      (typeof payload.sub === "string" && payload.sub) ||
-      userInfo?.localId;
-    if (!uid) return null;
-    const decoded: DecodedIdToken = {
-      ...(payload as Record<string, unknown>),
-      uid,
-      aud: typeof payload.aud === "string" ? payload.aud : "",
-      auth_time: typeof payload.auth_time === "number" ? payload.auth_time : Math.floor(Date.now() / 1000),
-      exp: typeof payload.exp === "number" ? payload.exp : Math.floor(Date.now() / 1000) + 3600,
-      iat: typeof payload.iat === "number" ? payload.iat : Math.floor(Date.now() / 1000),
-      iss: typeof payload.iss === "string" ? payload.iss : "",
-      sub: typeof payload.sub === "string" ? payload.sub : uid,
-      firebase:
-        (payload.firebase as DecodedIdToken["firebase"]) ??
-        ({
-          identities: {},
-          sign_in_provider: "custom",
-        } as DecodedIdToken["firebase"]),
-    } as DecodedIdToken;
-    if (userInfo?.email || typeof payload.email === "string") {
-      decoded.email = userInfo?.email ?? (payload.email as string);
-    }
-    return decoded as AuthTokenClaims;
-  } catch (error) {
-    if (error instanceof Error && error.name === "AbortError") {
-      console.warn("[auth] Identity Toolkit lookup aborted after timeout");
-      return null;
-    }
-    console.error("[auth] Failed fallback token verification", error);
-    return null;
-  } finally {
-    clearTimeout(timeoutId);
-  }
 }
 
 function _normalizeOptionalString(value: unknown): string | null {
@@ -592,17 +520,6 @@ function buildPropagatedAuthenticatedUser(context: VerifiedAdminContext): Authen
       verified_at: context.verifiedAt,
     },
   };
-}
-
-function decodeJwtPayload(token: string): Record<string, unknown> | null {
-  const parts = token.split(".");
-  if (parts.length !== 3) return null;
-  try {
-    const payload = Buffer.from(parts[1].replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8");
-    return JSON.parse(payload) as Record<string, unknown>;
-  } catch {
-    return null;
-  }
 }
 
 export async function getUserFromRequest(request: NextRequest): Promise<AuthenticatedUser | null> {

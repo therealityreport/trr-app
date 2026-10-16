@@ -3,8 +3,8 @@ import type { AdminApiReferenceInventory } from "@/lib/admin/api-references/type
 export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
   "inventorySchemaVersion": "1.0.0",
   "generatorVersion": "1.0.0",
-  "generatedAt": "2026-09-11T19:35:29.157Z",
-  "sourceCommitSha": "3543affdf70add11f7191d9bc6478d0227f32daa",
+  "generatedAt": "2026-10-04T07:50:55.239Z",
+  "sourceCommitSha": "06cf0986001905c6da6cb8e3a4a277f2331d1fa3",
   "overrideDigest": "ab48dccad1d5b9faafd4ef40e8374574768e133192929e6264ff8727fbaf68e1",
   "nodes": [
     {
@@ -7468,7 +7468,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/colors/image-proxy/route.ts",
       "sourceLocator": {
-        "line": 155,
+        "line": 26,
         "symbol": "GET"
       },
       "provenance": "static_scan",
@@ -7483,12 +7483,12 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "automatic": false,
       "loadsLargeDatasets": false,
       "usesPagination": true,
-      "returnsWideRowsOrBlobsOrRawJson": true,
+      "returnsWideRowsOrBlobsOrRawJson": false,
       "fansOutQueries": false,
       "postgresAccess": "none",
       "viewKinds": [],
       "staticOnly": false,
-      "payloadRisk": "high",
+      "payloadRisk": "low",
       "fanoutRisk": "low"
     },
     {
