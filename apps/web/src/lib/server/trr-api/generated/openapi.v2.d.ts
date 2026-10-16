@@ -2757,6 +2757,12 @@ export interface components {
              * @enum {string}
              */
             engine: "dbos" | "temporal";
+            /**
+             * Execution Placement
+             * @default modal
+             * @enum {string}
+             */
+            execution_placement: "modal" | "local";
             /** Generation */
             generation: number;
             intent: components["schemas"]["InstagramRunIntentV2"];
@@ -2805,6 +2811,12 @@ export interface components {
              * @enum {string}
              */
             engine: "dbos" | "temporal";
+            /**
+             * Execution Placement
+             * @default modal
+             * @enum {string}
+             */
+            execution_placement: "modal" | "local";
             intent: components["schemas"]["InstagramRunIntentV2"];
             /** Last Committed At */
             last_committed_at: string | null;

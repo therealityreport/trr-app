@@ -14,7 +14,7 @@ const runId = "11111111-1111-4111-8111-111111111111";
 const oldId = "22222222-2222-4222-8222-222222222222";
 const evidenceId = "33333333-3333-4333-8333-333333333333";
 const intent: IngestionProgress["intent"] = { platform: "instagram", account: "bravotv", action: "backfill", source_scope: "network", date_start: null, date_end: null, selected_tasks: ["post_details"], scope: "full_history", metadata_ttl_days: 30, metrics_ttl_hours: 24, force: false, policy_version: 1, comments_enable_media_followups: true, comments_max_attempts: 12, enable_cap4_canary: false, listing_max_attempts: 12, media_max_attempts: 3 };
-const progress = (overrides: Partial<IngestionProgress> = {}): IngestionProgress => ({ run_id: runId, account: "bravotv", intent, intent_hash: "hash", engine: "dbos", workflow_version: "instagram-v1", state: "running", generation: 1, last_committed_at: "2026-10-16T10:00:00Z", created_at: "2026-10-16T09:00:00Z", updated_at: "2026-10-16T10:00:00Z", pinned_evidence_count: 1, complete: false, allowed_actions: ["cancel", "replay", "retry_targets"], stages: [{ stage: "post_details", discovery_complete: false, sealed_at: null, total: 10, committed: 4, cached_satisfied: 2, source_unavailable: 1, unresolved: 3, attempts: 30, requests: 100, retry_at: null, blocked_reasons: [], last_committed_at: "2026-10-16T10:00:00Z", complete: false }], ...overrides });
+const progress = (overrides: Partial<IngestionProgress> = {}): IngestionProgress => ({ run_id: runId, account: "bravotv", intent, intent_hash: "hash", engine: "dbos", execution_placement: "modal", workflow_version: "instagram-v1", state: "running", generation: 1, last_committed_at: "2026-10-16T10:00:00Z", created_at: "2026-10-16T09:00:00Z", updated_at: "2026-10-16T10:00:00Z", pinned_evidence_count: 1, complete: false, allowed_actions: ["cancel", "replay", "retry_targets"], stages: [{ stage: "post_details", discovery_complete: false, sealed_at: null, total: 10, committed: 4, cached_satisfied: 2, source_unavailable: 1, unresolved: 3, attempts: 30, requests: 100, retry_at: null, blocked_reasons: [], last_committed_at: "2026-10-16T10:00:00Z", complete: false }], ...overrides });
 const diagnostics: IngestionDiagnostics = { run_id: runId, account: "bravotv", targets: [{ stage: "post_details", target_key: "p1", outcome: "unresolved", attempts: 2, requests: 3, max_attempts: 12, retry_at: null, blocked_reason: "cooldown" }], evidence: [{ evidence_id: evidenceId, stage: "post_details", target_key: "p1", source_identity: "post:1", captured_at: "2026-10-16T09:00:00Z", content_hash: "sha256", available: true, expires_at: "2099-01-01T00:00:00Z", pinned: true, parser_version: "parser-v1", schema_version: 1 }], targets_truncated: false, evidence_truncated: false };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 const capability = (enabled = true) => ({ enabled, account: "bravotv", engine: "dbos", workflow_version: "v1", supported_actions: ["backfill", "sync_recent", "sync_newer"], replay_apply_enabled: false });
@@ -92,6 +92,27 @@ describe("typed ingestion lifecycle", () => {
     fireEvent.click(screen.getByRole("button", { name: "Confirm cancel" })); expect(control).toHaveBeenCalledWith("cancel");
     fireEvent.click(screen.getByText("Retry selected unresolved targets"));
     fireEvent.click(screen.getByRole("checkbox")); fireEvent.click(screen.getByRole("button", { name: "Retry 1 targets" })); expect(retry).toHaveBeenCalledWith("post_details", ["p1"]);
+  });
+  it.each([undefined, "modal"] as const)("keeps API recovery available for Modal placement (%s)", executionPlacement => {
+    const control = vi.fn();
+    render(<RecoveryControls progress={progress({ execution_placement: executionPlacement, allowed_actions: ["resume", "retry_targets"] })} diagnostics={diagnostics} pending={false} onControl={control} onRetry={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Resume Run" }));
+    expect(control).toHaveBeenCalledWith("resume");
+    expect(screen.getByText("Retry selected unresolved targets")).toBeInTheDocument();
+    expect(screen.queryByText(/use the local driver/)).not.toBeInTheDocument();
+  });
+  it("keeps local cancellation usable while directing resume and retries to the local driver", () => {
+    const control = vi.fn(); const retry = vi.fn();
+    render(<RecoveryControls progress={progress({ execution_placement: "local", allowed_actions: ["cancel", "resume", "retry_targets"] })} diagnostics={diagnostics} pending={false} onControl={control} onRetry={retry} />);
+    expect(screen.getByText("Local run: use the local driver to resume or retry.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Resume Run" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Retry selected unresolved targets")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel Run" }));
+    expect(control).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Confirm cancel" }));
+    expect(control).toHaveBeenCalledOnce();
+    expect(control).toHaveBeenCalledWith("cancel");
+    expect(retry).not.toHaveBeenCalled();
   });
   it("defaults replay to dry run, gates apply on reviewed output, and blocks expired evidence", async () => {
     const onReplay = vi.fn().mockResolvedValue({ mode: "dry_run", evidence_id: evidenceId, parser_version: "parser-v1", comparison: { changed: true }, writes: 0, source_requests: 0 });

@@ -28,7 +28,7 @@ const summary = {
 
 export function buildIngestionProgress(overrides: Partial<Progress> = {}): Progress {
   return {
-    run_id: RUN_ID, account: "bravotv", intent_hash: "fixture-intent", engine: "dbos",
+    run_id: RUN_ID, account: "bravotv", intent_hash: "fixture-intent", engine: "dbos", execution_placement: "modal",
     workflow_version: "instagram-fixture-v1", state: "running", generation: 1,
     created_at: NOW, updated_at: NOW, last_committed_at: NOW, pinned_evidence_count: 0,
     complete: false, allowed_actions: ["cancel", "replay", "retry_targets"],
@@ -173,7 +173,12 @@ export class IngestionOperatorFixture {
     if (operation === "runs") {
       const known = this.identities.get(key);
       const runId = known ?? RUN_ID;
-      if (!known) { this.identities.set(key, runId); this.runs.set(runId, buildIngestionProgress({ intent: { ...buildIngestionProgress().intent, ...body as Launch } })); }
+      if (!known) {
+        const defaults = buildIngestionProgress().intent;
+        const launch = body as Launch;
+        this.identities.set(key, runId);
+        this.runs.set(runId, buildIngestionProgress({ intent: { ...defaults, ...launch, comments_enable_media_followups: launch.comments_enable_media_followups ?? defaults.comments_enable_media_followups } }));
+      }
       if (this.loseNextLaunchResponse) { this.loseNextLaunchResponse = false; return route.abort("connectionreset"); }
       return this.json(route, { run_id: runId, state: this.runs.get(runId)!.state, engine: "dbos", workflow_version: "instagram-fixture-v1", generation: 1 }, 202);
     }

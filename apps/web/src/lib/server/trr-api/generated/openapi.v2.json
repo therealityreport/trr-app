@@ -5671,6 +5671,15 @@
             "title": "Engine",
             "type": "string"
           },
+          "execution_placement": {
+            "default": "modal",
+            "enum": [
+              "modal",
+              "local"
+            ],
+            "title": "Execution Placement",
+            "type": "string"
+          },
           "generation": {
             "minimum": 1.0,
             "title": "Generation",
@@ -5772,6 +5781,15 @@
               "temporal"
             ],
             "title": "Engine",
+            "type": "string"
+          },
+          "execution_placement": {
+            "default": "modal",
+            "enum": [
+              "modal",
+              "local"
+            ],
+            "title": "Execution Placement",
             "type": "string"
           },
           "intent": {
