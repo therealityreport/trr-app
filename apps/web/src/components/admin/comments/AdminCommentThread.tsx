@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { CornerDownRight, Heart, MessageCircle } from "lucide-react";
+import { BadgeCheck, CornerDownRight, Heart, MessageCircle } from "lucide-react";
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,7 @@ export type AdminCommentThreadItem = {
   id: string;
   authorName: string;
   authorHandle?: string | null;
+  authorIsVerified?: boolean | null;
   authorRole?: string | null;
   avatarUrl?: string | null;
   avatarAlt?: string | null;
@@ -145,6 +146,9 @@ function AdminCommentItem({
         <div className="min-w-0 flex-1">
           <header className="flex flex-wrap items-center gap-2">
             <span className="text-sm font-semibold text-foreground">{displayName}</span>
+            {item.authorIsVerified === true ? (
+              <BadgeCheck role="img" aria-label="Verified account" className="size-4 text-primary" />
+            ) : null}
             {handle ? <span className="text-xs text-muted-foreground">@{handle}</span> : null}
             {item.authorRole ? (
               <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">

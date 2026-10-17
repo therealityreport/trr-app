@@ -3089,6 +3089,8 @@ describe("SocialAccountProfilePage", () => {
               post_url: "https://www.instagram.com/p/DVfQnTcjsCA/",
               username: "andycohen",
               text: "",
+              author_is_verified: true,
+              author_profile_pic_url_hd: "https://cdn.example.com/andy-hd.jpg",
               likes: 22,
               is_reply: false,
               hosted_media_urls: [
@@ -3206,16 +3208,23 @@ describe("SocialAccountProfilePage", () => {
     expect(within(dialog).queryByText("No text")).not.toBeInTheDocument();
     expect(within(dialog).getByText("Reply saved under parent comment")).toBeInTheDocument();
     expect(within(dialog).queryByText("2 media")).not.toBeInTheDocument();
-    expect(within(dialog).getAllByRole("img", { name: "Comment media" })).toHaveLength(1);
-    expect(within(dialog).getByRole("img", { name: "Comment media" })).toHaveAttribute(
+    expect(within(dialog).getAllByRole("img", { name: "Comment media" })).toHaveLength(2);
+    expect(within(dialog).getAllByRole("img", { name: "Comment media" })[0]).toHaveAttribute(
       "src",
       "https://cdn.example.com/comment-media-1.jpg",
     );
-    const mediaLink = within(dialog).getByRole("link", { name: "Open comment media" });
+    expect(within(dialog).getByRole("link", { name: "Open comment media 2" })).toHaveAttribute(
+      "href", "https://cdn.example.com/comment-media-2.jpg",
+    );
+    expect(within(dialog).getByRole("img", { name: "andycohen avatar" })).toHaveAttribute(
+      "src", "https://cdn.example.com/andy-hd.jpg",
+    );
+    expect(within(dialog).getAllByRole("img", { name: "Verified account" })).toHaveLength(1);
+    const mediaLink = within(dialog).getByRole("link", { name: "Open comment media 1" });
     expect(mediaLink).toHaveAttribute("href", "https://cdn.example.com/comment-media-1.jpg");
     fireEvent.mouseEnter(mediaLink, { clientX: 100, clientY: 100 });
     expect(within(dialog).getByRole("tooltip", { name: "Comment media preview" })).toBeInTheDocument();
-    fireEvent.mouseOut(within(dialog).getByRole("link", { name: "Open comment media" }), {
+    fireEvent.mouseOut(within(dialog).getByRole("link", { name: "Open comment media 1" }), {
       relatedTarget: document.body,
     });
     await waitFor(() => {

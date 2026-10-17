@@ -300,8 +300,11 @@ const getCommentUsername = (item: SocialAccountProfileComment): string | null =>
 const getCommentAvatarUrl = (item: SocialAccountProfileComment): string | null => {
   return (
     item.hosted_author_profile_pic_url ||
+    item.author_profile_pic_url_hd ||
     item.ownerProfilePicUrl ||
     item.author_profile_pic_url ||
+    readRecordString(item.owner, "profile_pic_url_hd") ||
+    readRecordString(item.user, "profile_pic_url_hd") ||
     readRecordString(item.owner, "avatar_url") ||
     readRecordString(item.user, "avatar_url") ||
     null
@@ -410,6 +413,8 @@ const toAdminCommentThreadItem = (item: SocialAccountProfileComment): AdminComme
     authorHandle: getCommentUsername(item),
     authorRole: item.discussion_type ? item.discussion_type.replace(/_/g, " ") : item.is_reply ? "reply" : null,
     avatarUrl: getCommentAvatarUrl(item),
+    authorIsVerified: item.author_is_verified === true ||
+      (item.author_is_verified == null && (item.owner?.is_verified === true || item.user?.is_verified === true)),
     body: String(item.text || "").trim(),
     timestamp: createdAt || null,
     timestampLabel: createdAt ? formatDateTime(createdAt) : null,
@@ -588,36 +593,39 @@ export default function InstagramCommentsPostModal({
     hideMediaPreview();
   };
   const renderInstagramCommentMedia = (item: AdminCommentThreadItem): React.ReactNode => {
-    const previewMediaUrl = item.mediaUrls?.[0] ?? null;
-    if (!previewMediaUrl) return null;
+    const mediaUrls = item.mediaUrls ?? [];
+    if (mediaUrls.length === 0) return null;
     return (
       <div className="mt-2 flex flex-wrap items-center gap-2">
-        <a
-          href={previewMediaUrl}
-          target="_blank"
-          rel="noreferrer"
-          aria-label="Open comment media"
-          data-comment-media-preview-trigger="true"
-          onMouseEnter={(event) => updateMediaPreview(previewMediaUrl, event)}
-          onMouseMove={(event) => updateMediaPreview(previewMediaUrl, event)}
-          onMouseLeave={hideMediaPreview}
-          onMouseOutCapture={hideMediaPreviewWhenLeavingTarget}
-          onFocus={(event) => showMediaPreviewFromElement(previewMediaUrl, event.currentTarget)}
-          onBlur={hideMediaPreview}
-          className="group relative block size-12 overflow-hidden rounded-md border border-border bg-muted"
-        >
-          {isLikelyVideoUrl(previewMediaUrl) ? (
-            <video src={previewMediaUrl} muted playsInline preload="metadata" className="size-full object-cover" />
-          ) : (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={previewMediaUrl}
-              alt="Comment media"
-              loading="lazy"
-              className="size-full object-cover transition group-hover:scale-105"
-            />
-          )}
-        </a>
+        {mediaUrls.map((previewMediaUrl, index) => (
+          <a
+            key={previewMediaUrl}
+            href={previewMediaUrl}
+            target="_blank"
+            rel="noreferrer"
+            aria-label={`Open comment media ${index + 1}`}
+            data-comment-media-preview-trigger="true"
+            onMouseEnter={(event) => updateMediaPreview(previewMediaUrl, event)}
+            onMouseMove={(event) => updateMediaPreview(previewMediaUrl, event)}
+            onMouseLeave={hideMediaPreview}
+            onMouseOutCapture={hideMediaPreviewWhenLeavingTarget}
+            onFocus={(event) => showMediaPreviewFromElement(previewMediaUrl, event.currentTarget)}
+            onBlur={hideMediaPreview}
+            className="group relative block size-12 overflow-hidden rounded-md border border-border bg-muted"
+          >
+            {isLikelyVideoUrl(previewMediaUrl) ? (
+              <video src={previewMediaUrl} muted playsInline preload="metadata" className="size-full object-cover" />
+            ) : (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={previewMediaUrl}
+                alt="Comment media"
+                loading="lazy"
+                className="size-full object-cover transition group-hover:scale-105"
+              />
+            )}
+          </a>
+        ))}
       </div>
     );
   };
