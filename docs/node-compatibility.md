@@ -19,12 +19,18 @@ Corepack 0.36.0 declares Node `^22.22.2 || ^24.15.0 || >=26.0.0` support, so Nod
 
 ```sh
 npm install --global corepack@0.36.0
+export PATH="$(npm prefix --global)/bin:$PATH"
+test "$(corepack --version)" = "0.36.0"
 corepack enable
 corepack prepare pnpm@11.5.2 --activate
 corepack --version  # must report 0.36.0
 pnpm --version      # must report 11.5.2
 pnpm install --frozen-lockfile
 ```
+
+The explicit global-bin path prevents a provider's preinstalled Corepack from
+shadowing the installed pin. The Vercel install command checks the selected
+version before preparing pnpm or installing dependencies.
 
 Node 26 does not supply Corepack. An existing unpinned global pnpm is not proof
 that the declared package manager is active. Keep the explicit pin in the CI
