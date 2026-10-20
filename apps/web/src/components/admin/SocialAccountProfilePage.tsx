@@ -102,6 +102,7 @@ import {
   getCatalogRepairAuthEndpointSegment,
   getNumberFromRecord,
   INSTAGRAM_BACKFILL_DEFAULT_SELECTED_TASKS,
+  INSTAGRAM_V2_PUBLIC_DEFAULT_SELECTED_TASKS,
   INSTAGRAM_BACKFILL_TASK_OPTIONS,
   normalizeCatalogActionScope,
   normalizeInstagramCatalogCapacity,
@@ -2831,6 +2832,8 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   const [instagramBackfillSelectedTasks, setInstagramBackfillSelectedTasks] = useState<CatalogBackfillSelectedTask[]>([
     ...INSTAGRAM_BACKFILL_DEFAULT_SELECTED_TASKS,
   ]);
+  // Where a v2 Instagram backfill runs: Modal (newest page only when logged out) or the Mac worker.
+  const [instagramRunPlacement, setInstagramRunPlacement] = useState<"modal" | "local">("modal");
   const [instagramBackfillDetailWorkerCount, setInstagramBackfillDetailWorkerCount] = useState(
     INSTAGRAM_BACKFILL_DEFAULT_DETAIL_WORKER_COUNT,
   );
@@ -7772,7 +7775,12 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
         }
         setRunningCatalogAction(action);
         try {
-          const launchRequest = ingestionLaunchFromCatalog(action, requestBody, activeCatalogSourceScope);
+          const launchRequest = ingestionLaunchFromCatalog(
+            action,
+            requestBody,
+            activeCatalogSourceScope,
+            action === "backfill" ? instagramRunPlacement : "modal",
+          );
           if (action === "backfill" && launchRequest.backfill_scope === "bounded_window" && launchRequest.date_end) {
             const end = new Date(launchRequest.date_end);
             const nextMonthStart = Date.UTC(end.getUTCFullYear(), end.getUTCMonth() + 1, 1);
@@ -8036,6 +8044,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       activeCatalogSourceScope,
       ingestion,
       ingestionLaunchBlocked,
+      instagramRunPlacement,
       catalogProgressStorageKey,
       commentsProgressStorageKey,
       fetchAdminWithAuth,
@@ -8290,14 +8299,17 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     const defaultWindow = buildInstagramBackfillMonthDefaults();
     setInstagramBackfillCapacity(null);
     setInstagramBackfillCapacityUnavailable(false);
-    setInstagramBackfillSelectedTasks([...INSTAGRAM_BACKFILL_DEFAULT_SELECTED_TASKS]);
+    setInstagramBackfillSelectedTasks([
+      ...(ingestion.enabled ? INSTAGRAM_V2_PUBLIC_DEFAULT_SELECTED_TASKS : INSTAGRAM_BACKFILL_DEFAULT_SELECTED_TASKS),
+    ]);
+    setInstagramRunPlacement("modal");
     setInstagramBackfillDetailWorkerCount(getDefaultInstagramBackfillDetailWorkerCount(handle));
     setInstagramBackfillCommentsWorkerCount(getDefaultInstagramBackfillCommentsWorkerCount(handle));
     setInstagramBackfillCommentMediaFollowups(getDefaultInstagramBackfillCommentMediaFollowups(handle));
     setInstagramBackfillMonthStart(defaultWindow.monthStart);
     setInstagramBackfillMonthEnd(defaultWindow.monthEnd);
     setInstagramBackfillDialogOpen(true);
-  }, [handle]);
+  }, [handle, ingestion.enabled]);
 
   const applyBravoTvFastBackfillPreset = useCallback(() => {
     const defaultWindow = buildInstagramBackfillMonthDefaults();
@@ -12059,6 +12071,9 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
           {instagramBackfillDialogOpen ? (
             <RunLauncher
               handle={handle}
+              runPlacement={ingestion.enabled ? instagramRunPlacement : undefined}
+              setRunPlacement={ingestion.enabled ? setInstagramRunPlacement : undefined}
+              localWorkerOnline={ingestion.capabilities.data?.local_worker_online}
               instagramBackfillSelectedTasks={instagramBackfillSelectedTasks}
               instagramBackfillMonthStart={instagramBackfillMonthStart}
               instagramBackfillMonthEnd={instagramBackfillMonthEnd}

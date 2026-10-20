@@ -406,7 +406,8 @@ describe("SocialAccountProfilePage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Start Backfill" }));
     await waitFor(() => expect(mocks.fetchAdminWithAuth.mock.calls.some(([input, init]) => String(input).endsWith("/instagram-ingestion/bravotv/runs") && init?.method === "POST")).toBe(true));
     const launch = mocks.fetchAdminWithAuth.mock.calls.find(([input, init]) => String(input).endsWith("/instagram-ingestion/bravotv/runs") && init?.method === "POST");
-    expect(JSON.parse(launch![1].body)).toMatchObject({ action: "backfill", source_scope: "network", backfill_scope: "bounded_window", date_start: "2026-01-01T00:00:00.000Z", date_end: "2027-01-01T00:00:00.000Z", selected_tasks: [...INSTAGRAM_BACKFILL_DEFAULT_TASKS], detail_worker_count: 8, comments_worker_count: 8 });
+    // Logged-out v2 runs skip Post Details by default and run on Modal unless This Mac is chosen.
+    expect(JSON.parse(launch![1].body)).toMatchObject({ action: "backfill", source_scope: "network", backfill_scope: "bounded_window", date_start: "2026-01-01T00:00:00.000Z", date_end: "2027-01-01T00:00:00.000Z", selected_tasks: ["comments", "media"], comments_worker_count: 8, execution_placement: "modal" });
     expect(new Headers(launch![1].headers).get("Idempotency-Key")).toBeTruthy();
     await waitFor(() => expect(screen.getAllByText(/Run 11111111 · running/).length).toBeGreaterThan(0));
     expect(mocks.fetchAdminWithAuth.mock.calls.some(([input]) => String(input).includes("/catalog/backfill"))).toBe(false);

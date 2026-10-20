@@ -57,6 +57,9 @@ export const INSTAGRAM_BACKFILL_DEFAULT_SELECTED_TASKS: CatalogBackfillSelectedT
   "comments",
   "media",
 ];
+// Logged-out v2 runs: the listing already supplies every post field, and logged-out
+// permalink details return an empty page, so Post Details stays off by default.
+export const INSTAGRAM_V2_PUBLIC_DEFAULT_SELECTED_TASKS: CatalogBackfillSelectedTask[] = ["comments", "media"];
 export const TIKTOK_BACKFILL_DEFAULT_SELECTED_TASKS: CatalogBackfillSelectedTask[] = [
   "post_details",
   "comments",

@@ -7,6 +7,8 @@ import { StageProgress } from "@/components/admin/social/ingestion/StageProgress
 import { RecoveryControls } from "@/components/admin/social/ingestion/RecoveryControls";
 import { Diagnostics } from "@/components/admin/social/ingestion/Diagnostics";
 import { InstagramIngestionPanel } from "@/components/admin/social/ingestion/InstagramIngestionPanel";
+import { RunLauncher } from "@/components/admin/social/ingestion/RunLauncher";
+import { INSTAGRAM_V2_PUBLIC_DEFAULT_SELECTED_TASKS, describeInstagramCatalogCapacity } from "@/components/admin/social-account-profile/catalog-operations";
 const mocks = vi.hoisted(() => ({ fetch: vi.fn(), devBypass: vi.fn(() => false) }));
 vi.mock("@/lib/admin/client-auth", () => ({ fetchAdminWithAuth: (...args: unknown[]) => mocks.fetch(...args) }));
 vi.mock("@/lib/admin/dev-admin-bypass", () => ({ isDevAdminBypassEnabledClient: mocks.devBypass }));
@@ -185,5 +187,52 @@ describe("typed ingestion lifecycle", () => {
     failProgress = true;
     await act(async () => { await result.current.progress.refetch(); });
     expect(result.current.progress.data?.stages[0].committed).toBe(4); await waitFor(() => expect(result.current.progress.error).toBeInstanceOf(IngestionRequestError));
+  });
+});
+
+describe("logged-out launches and the Mac worker", () => {
+  it("sends Modal by default and This Mac only when chosen", () => {
+    expect(ingestionLaunchFromCatalog("sync_recent", { lookback_days: 1 }, "network")).toMatchObject({ execution_placement: "modal" });
+    expect(ingestionLaunchFromCatalog("backfill", { backfill_scope: "full_history" }, "network", "local")).toMatchObject({ action: "backfill", execution_placement: "local" });
+  });
+
+  const launcherProps = (overrides: Partial<React.ComponentProps<typeof RunLauncher>> = {}): React.ComponentProps<typeof RunLauncher> => ({
+    handle: "bravotv", instagramBackfillSelectedTasks: [...INSTAGRAM_V2_PUBLIC_DEFAULT_SELECTED_TASKS], instagramBackfillMonthStart: "01-2026", instagramBackfillMonthEnd: "10-2026",
+    instagramBackfillDetailWorkerCount: 1, instagramBackfillCommentsWorkerCount: 1, instagramBackfillDisplayedDetailWorkers: 1, instagramBackfillDisplayedCommentsWorkers: 1,
+    instagramBackfillCommentMediaEnabled: true, instagramBackfillIncludesMedia: true, instagramBackfillCapacityLoading: false,
+    instagramBackfillCapacityPresentation: describeInstagramCatalogCapacity(null), instagramBackfillEstimatedWallSeconds: 0, instagramBackfillEstimatedWorkerMinutes: 0,
+    instagramBackfillEstimatedPostTargets: 0, instagramBackfillEstimatedCommentTargets: 0, instagramBackfillPreflightItems: [], catalogLaunchActionsBlocked: false,
+    catalogLaunchGuardMessage: null, runningCatalogAction: null, setInstagramBackfillDialogOpen: vi.fn(), setInstagramBackfillMonthStart: vi.fn(),
+    setInstagramBackfillMonthEnd: vi.fn(), setInstagramBackfillDetailWorkerCount: vi.fn(), setInstagramBackfillCommentsWorkerCount: vi.fn(),
+    setInstagramBackfillCommentMediaFollowups: vi.fn(), toggleInstagramBackfillTask: vi.fn(), applyBravoTvFastBackfillPreset: vi.fn(),
+    submitInstagramBackfillDialog: vi.fn(async () => undefined), formatDurationEstimate: () => null, refreshCapacity: vi.fn(),
+    INSTAGRAM_BACKFILL_DETAIL_WORKER_OPTIONS: [1], INSTAGRAM_BACKFILL_COMMENTS_WORKER_OPTIONS: [1], NYT_DASHBOARD_BUTTON_CLASS: "", NYT_DASHBOARD_PRIMARY_BUTTON_CLASS: "",
+    ...overrides,
+  });
+
+  it("defaults logged-out runs to comments and media", () => {
+    expect(INSTAGRAM_V2_PUBLIC_DEFAULT_SELECTED_TASKS).toEqual(["comments", "media"]);
+  });
+
+  it("hides the Run on choice on the legacy path", () => {
+    render(<RunLauncher {...launcherProps()} />);
+    expect(screen.queryByText("Run on")).toBeNull();
+  });
+
+  it("disables This Mac while the Mac worker is offline", () => {
+    const setRunPlacement = vi.fn();
+    render(<RunLauncher {...launcherProps({ runPlacement: "modal", setRunPlacement, localWorkerOnline: false })} />);
+    const mac = screen.getByRole("radio", { name: /This Mac/ });
+    expect(mac).toBeDisabled();
+    expect(screen.getByText("Mac worker offline")).toBeTruthy();
+    fireEvent.click(mac);
+    expect(setRunPlacement).not.toHaveBeenCalled();
+  });
+
+  it("lets the operator choose This Mac while the worker is online", () => {
+    const setRunPlacement = vi.fn();
+    render(<RunLauncher {...launcherProps({ runPlacement: "modal", setRunPlacement, localWorkerOnline: true })} />);
+    fireEvent.click(screen.getByRole("radio", { name: /This Mac/ }));
+    expect(setRunPlacement).toHaveBeenCalledWith("local");
   });
 });

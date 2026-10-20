@@ -4,8 +4,13 @@ import type { IngestionLaunch } from "@/lib/social/ingestion-client";
 import { INSTAGRAM_BACKFILL_TASK_OPTIONS, formatBackfillTaskLabel, describeInstagramCatalogCapacity } from "@/components/admin/social-account-profile/catalog-operations";
 import { formatInteger, formatMonthYear } from "@/components/admin/social-account-profile/profile-presentation";
 type Task = NonNullable<IngestionLaunch["selected_tasks"]>[number];
+type Placement = NonNullable<IngestionLaunch["execution_placement"]>;
 type Props = {
   handle: string;
+  /** Present only when v2 ingestion is enabled; omitted for the legacy path. */
+  runPlacement?: Placement;
+  setRunPlacement?: (value: Placement) => void;
+  localWorkerOnline?: boolean | null;
   instagramBackfillSelectedTasks: Task[];
   instagramBackfillMonthStart: string;
   instagramBackfillMonthEnd: string;
@@ -43,6 +48,9 @@ type Props = {
 };
 export function RunLauncher({
   handle,
+  runPlacement,
+  setRunPlacement,
+  localWorkerOnline,
   instagramBackfillSelectedTasks,
   instagramBackfillMonthStart,
   instagramBackfillMonthEnd,
@@ -85,8 +93,9 @@ export function RunLauncher({
                     <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">Instagram Backfill</p>
                     <h2 className="mt-2 text-2xl font-semibold text-zinc-900">Choose what this backfill should run</h2>
                     <p className="mt-2 text-sm text-zinc-500">
-                      Post Details, Comments, and Media all run by default inside the selected date window, so a backfill
-                      scrapes every lane to completion. Uncheck a lane only to deliberately scope it out.
+                      {runPlacement
+                        ? "Logged-out runs default to Comments and Media: the post listing already supplies every post field, and logged-out Post Details return nothing."
+                        : "Post Details, Comments, and Media all run by default inside the selected date window, so a backfill scrapes every lane to completion. Uncheck a lane only to deliberately scope it out."}
                     </p>
                   </div>
                   <Button
@@ -123,6 +132,51 @@ export function RunLauncher({
                       );
                     })}
                   </div>
+                  {runPlacement && setRunPlacement ? (
+                    <fieldset className="mt-5 rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-4">
+                      <legend className="sr-only">Run on</legend>
+                      <p className="font-semibold text-zinc-900">Run on</p>
+                      <p className="mt-1 text-sm text-zinc-500">
+                        Logged out, Modal gets only the newest page of posts. Use This Mac for older history.
+                      </p>
+                      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                        {([
+                          { value: "modal", label: "Modal", detail: "Newest posts" },
+                          {
+                            value: "local",
+                            label: "This Mac",
+                            detail: localWorkerOnline ? "Mac worker online" : "Mac worker offline",
+                          },
+                        ] as const).map((option) => {
+                          const disabled = option.value === "local" && localWorkerOnline !== true;
+                          return (
+                            <label
+                              key={option.value}
+                              className={`flex items-start gap-3 rounded-xl border px-3 py-3 ${
+                                runPlacement === option.value ? "border-zinc-900 bg-white" : "border-zinc-200 bg-white"
+                              } ${disabled ? "cursor-not-allowed opacity-60" : "cursor-pointer"}`}
+                            >
+                              <input
+                                type="radio"
+                                name="instagram-run-placement"
+                                value={option.value}
+                                checked={runPlacement === option.value}
+                                disabled={disabled}
+                                onChange={() => {
+                                  if (!disabled) setRunPlacement(option.value);
+                                }}
+                                className="mt-1 h-4 w-4 border-zinc-300 text-zinc-900 focus:ring-zinc-900"
+                              />
+                              <span>
+                                <span className="block text-sm font-semibold text-zinc-900">{option.label}</span>
+                                <span className="block text-xs text-zinc-500">{option.detail}</span>
+                              </span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </fieldset>
+                  ) : null}
                   <div className="mt-5 rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-4">
                   <p className="font-semibold text-zinc-900">Bounded Window</p>
                   <p className="mt-1 text-sm text-zinc-500">

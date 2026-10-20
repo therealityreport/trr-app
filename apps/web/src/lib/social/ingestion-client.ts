@@ -74,6 +74,7 @@ export function ingestionLaunchFromCatalog(
   action: "backfill" | "sync_recent" | "sync_newer",
   request: CatalogBackfillRequest | CatalogSyncRecentRequest | CatalogSyncNewerRequest,
   fallbackScope: NonNullable<IngestionLaunch["source_scope"]>,
+  placement: IngestionLaunch["execution_placement"] = "modal",
 ): IngestionLaunch {
   const requestedScope = "source_scope" in request ? request.source_scope ?? fallbackScope : fallbackScope;
   const sourceScope = requestedScope === "bravo" ? "network" : requestedScope;
@@ -82,6 +83,7 @@ export function ingestionLaunchFromCatalog(
   }
   return {
     action, source_scope: sourceScope,
+    execution_placement: placement,
     force_catalog_rediscovery: false,
     enable_cap4_canary: "enable_cap4_canary" in request ? request.enable_cap4_canary ?? false : false,
     backfill_scope: "backfill_scope" in request ? request.backfill_scope : "full_history",

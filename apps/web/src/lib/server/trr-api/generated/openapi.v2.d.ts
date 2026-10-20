@@ -2606,6 +2606,8 @@ export interface components {
             enabled: boolean;
             /** Engine */
             engine?: ("dbos" | "temporal") | null;
+            /** Local Worker Online */
+            local_worker_online?: boolean | null;
             /**
              * Replay Apply Enabled
              * @default false
@@ -2694,6 +2696,12 @@ export interface components {
              * @default false
              */
             enable_cap4_canary: boolean;
+            /**
+             * Execution Placement
+             * @default modal
+             * @enum {string}
+             */
+            execution_placement: "modal" | "local";
             /**
              * Force Catalog Rediscovery
              * @default false
