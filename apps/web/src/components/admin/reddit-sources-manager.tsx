@@ -1515,8 +1515,15 @@ const toTitleCase = (value: string): string =>
 
 const isSeasonEligibleForRedditSelection = (
   season: ShowSeasonOption,
-  options?: { maxSeasonNumber?: number | null; nowMs?: number },
+  options?: {
+    maxSeasonNumber?: number | null;
+    nowMs?: number;
+    explicitSeasonId?: string | null;
+    explicitSeasonNumber?: number | null;
+  },
 ): boolean => {
+  // Explicit navigation must remain selectable even before episode dates exist.
+  if (season.id === options?.explicitSeasonId || season.season_number === options?.explicitSeasonNumber) return true;
   const hasEpisodeSignal =
     typeof season.episode_airdate_count === "number" && season.episode_airdate_count > 0;
   if (!hasEpisodeSignal) return false;
@@ -2455,7 +2462,7 @@ const resolveRouteRedditCommunityContextFromPath = (
     return { showSlug: null, communitySlug: null, seasonNumber: null };
   }
   const adminMatch = pathname.match(
-    /^\/admin\/social(?:-media)?\/reddit\/([^/]+)\/([^/]+)(?:\/s(\d+))?/i,
+    /^\/(?:admin\/)?social(?:-media)?\/reddit\/([^/]+)\/([^/]+)(?:\/s(\d+))?/i,
   );
   if (adminMatch) {
     const communitySlug = adminMatch[1] ? decodeURIComponent(adminMatch[1]).trim() : null;
@@ -4771,6 +4778,8 @@ export default function RedditSourcesManager({
           .filter((season) =>
             isSeasonEligibleForRedditSelection(season, {
               maxSeasonNumber: maxSeasonNumberForContext,
+              explicitSeasonId: seasonId,
+              explicitSeasonNumber: seasonNumber,
             }),
           )
           .sort((a, b) => b.season_number - a.season_number);
@@ -5414,6 +5423,8 @@ export default function RedditSourcesManager({
           Number.isFinite(season.season_number) &&
           isSeasonEligibleForRedditSelection(season, {
             maxSeasonNumber: seasonSelectionMaxSeasonNumber,
+            explicitSeasonId: seasonId,
+            explicitSeasonNumber: seasonNumber,
           }),
       )
       .sort((a, b) => b.season_number - a.season_number);
@@ -5422,7 +5433,7 @@ export default function RedditSourcesManager({
       return [{ id: `season-${seasonSelectionMaxSeasonNumber}`, season_number: seasonSelectionMaxSeasonNumber }];
     }
     return [];
-  }, [seasonOptions, seasonSelectionMaxSeasonNumber]);
+  }, [seasonOptions, seasonSelectionMaxSeasonNumber, seasonId, seasonNumber]);
   const activeSeasonSelectionCandidate =
     selectedSeasonNumber ??
     (typeof seasonNumber === "number" && Number.isFinite(seasonNumber) ? seasonNumber : null);
@@ -5865,6 +5876,8 @@ export default function RedditSourcesManager({
         const eligible = candidates.filter((season) =>
           isSeasonEligibleForRedditSelection(season, {
             maxSeasonNumber: maxSeasonNumberForContext,
+            explicitSeasonId: seasonId,
+            explicitSeasonNumber: seasonNumber,
           }),
         );
         return (eligible.length > 0 ? eligible : candidates)[0]?.id ?? null;

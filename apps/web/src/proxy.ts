@@ -273,7 +273,7 @@ function isBarePublicShowIdentityPath(pathname: string): boolean {
   if (!first || isReservedRootShowRouteFirstSegment(first)) return false;
   if (!/^[a-z0-9-]+$/.test(first)) return false;
 
-  return segments.length === 1 || (segments.length === 2 && isSeasonToken(segments[1] ?? ""));
+  return segments.length === 1;
 }
 
 function toPathSegments(pathname: string): string[] {
@@ -644,6 +644,11 @@ function mapCanonicalAdminUiRedirect(pathname: string, searchParams?: URLSearchP
 
   if (firstSegment && !isReservedRootShowRouteFirstSegment(normalizedFirst)) {
     const encodedFirstSegment = encodeURIComponent(firstSegment);
+    const legacySeason = normalizedSecond.match(/^season-([0-9]{1,3})$/);
+    if (legacySeason) {
+      const tail = segments.slice(2).map(encodeURIComponent);
+      return appendSearch(`/${encodedFirstSegment}/s${legacySeason[1]}${tail.length ? `/${tail.join("/")}` : ""}`, searchParams);
+    }
     if (segments.length === 2 && canonicalCreditsSegment) {
       return appendSearch(`/${encodedFirstSegment}/${canonicalCreditsSegment}`, searchParams);
     }
@@ -1166,9 +1171,10 @@ export function proxy(request: NextRequest): NextResponse {
 
   if (onCanonicalAdminHost) {
     // A production deployment without a configured admin origin falls back to
-    // treating its own public host as canonical admin. Let only the two bare
-    // public identity aliases and person detail pages reach their data-resolving App Router pages;
-    // configured admin hosts keep their short admin workspace aliases.
+    // treating its own public host as canonical admin. Bare show identities and
+    // person detail pages retain their public App Router pages. Season aliases
+    // use the admin season workspace so public canonical redirects cannot loop
+    // back through /shows/:show/seasons/:number on this host.
     if (
       isSingleHostProductionFallback &&
       (pathname === "/" || isBarePublicShowIdentityRoute || isPublicPersonDetailPath(pathname))

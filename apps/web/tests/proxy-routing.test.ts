@@ -56,6 +56,16 @@ describe("proxy route characterization", () => {
     originalEnv.clear();
   });
 
+  it("normalizes a legacy root season before the generic show rewrite can discard it", () => {
+    const response = runProxy("/rhoslc/season-7?tab=social");
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe("http://admin.localhost:3000/rhoslc/s7?tab=social");
+    const destination = runProxy("/rhoslc/s7?tab=social");
+    expect(destination.status).toBe(200);
+    expect(destination.headers.get("location")).toBeNull();
+    expect(destination.headers.get("x-middleware-rewrite")).toContain("/admin/trr-shows/rhoslc/seasons/7");
+  });
+
   it("rewrites canonical admin-host section routes to their internal admin pages", () => {
     const response = runProxy("/social");
 
@@ -109,7 +119,7 @@ describe("proxy route characterization", () => {
     expect(response.headers.get("location")).toBeNull();
   });
 
-  it.each(["/the-real-housewives-of-beverly-hills", "/the-real-housewives-of-beverly-hills/s15"])(
+  it.each(["/the-real-housewives-of-beverly-hills"])(
     "leaves the bare public identity alias %s for its public App Router page on a single-host production deployment",
     (pathname) => {
       process.env.NODE_ENV = "production";
@@ -127,6 +137,26 @@ describe("proxy route characterization", () => {
       expect(response.headers.get("location")).toBeNull();
     },
   );
+
+  it.each([
+    ["/rhoslc/season-7?tab=social&social_view=reddit", "/rhoslc/s7?tab=social&social_view=reddit"],
+    ["/rhoslc/season-7/social/reddit?view=coverage", "/rhoslc/s7/social/reddit?view=coverage"],
+    ["/shows/the-real-housewives-of-salt-lake-city/seasons/7", "/the-real-housewives-of-salt-lake-city/s7"],
+  ])("ends the single-host season redirect chain for %s in the admin workspace", (legacy, canonical) => {
+    process.env.NODE_ENV = "production";
+    delete process.env.ADMIN_APP_ORIGIN;
+    delete process.env.ADMIN_APP_BASE_DOMAIN;
+    delete process.env.ADMIN_APP_DERIVE_FROM_REQUEST_HOST;
+    delete process.env.PORTLESS_ADMIN_URL;
+    delete process.env.PORTLESS_URL;
+    const first = runPublicDeploymentProxy(legacy);
+    expect(first.status).toBe(307);
+    expect(first.headers.get("location")).toBe(`https://trr-app.vercel.app${canonical}`);
+    const final = runPublicDeploymentProxy(canonical);
+    expect(final.status).toBe(200);
+    expect(final.headers.get("location")).toBeNull();
+    expect(final.headers.get("x-middleware-rewrite")).toContain("/seasons/7");
+  });
 
   it("leaves the public root for its App Router page on a single-host production deployment", () => {
     process.env.NODE_ENV = "production";

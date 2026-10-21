@@ -42,6 +42,7 @@ vi.mock("@/components/admin/reddit-sources-manager", () => ({
   },
 }));
 
+import DedicatedSeasonCommunityPage from "@/app/admin/social/reddit/[communitySlug]/[showSlug]/s[seasonNumber]/page";
 import RedditCommunityViewPage from "@/app/admin/social/reddit/[communitySlug]/page";
 
 describe("reddit community view page", () => {
@@ -117,6 +118,21 @@ describe("reddit community view page", () => {
     );
     expect(rootSeasonAliasSource).toContain("resolveRedditPathContext");
     expect(rootSeasonAliasSource).toContain("/social/reddit/");
+  });
+
+  it.each(["/admin/social/reddit/rhoslc/rhoslc/s7", "/social/reddit/rhoslc/rhoslc/s7"])("renders the dedicated S7 alias at %s without losing an undated explicit season", (pathname) => {
+    const replaceMock = vi.fn();
+    useRouterMock.mockReturnValue({ replace: replaceMock });
+    useAdminGuardMock.mockReturnValue({ user: { uid: "admin" }, checking: false, hasAccess: true });
+    useParamsMock.mockReturnValue({ communitySlug: "rhoslc", showSlug: "rhoslc" });
+    usePathnameMock.mockReturnValue(pathname);
+    useSearchParamsMock.mockReturnValue(new URLSearchParams());
+    render(<DedicatedSeasonCommunityPage />);
+    expect(redditSourcesManagerMock).toHaveBeenLastCalledWith(expect.objectContaining({ initialCommunityId: "rhoslc", seasonNumber: 7, hideCommunityList: true }));
+    const props = redditSourcesManagerMock.mock.calls.at(-1)?.[0] as { onCommunityContextChange: (context: unknown) => void };
+    act(() => props.onCommunityContextChange({ communitySlug: "rhoslc", communityLabel: "r/rhoslc", showSlug: "rhoslc", showLabel: "RHOSLC", showFullName: "The Real Housewives of Salt Lake City", showId: "7782652f-783a-488b-8860-41b97de32e75", seasonNumber: 7, seasonId: "20c4cc05-0ab1-433f-b2fd-848f0d46a250" }));
+    expect(redditSourcesManagerMock).toHaveBeenLastCalledWith(expect.objectContaining({ initialCommunityId: "rhoslc", seasonNumber: 7, seasonId: "20c4cc05-0ab1-433f-b2fd-848f0d46a250" }));
+    expect(replaceMock).not.toHaveBeenCalled();
   });
 
   it("loads focused community and honors return_to back link", () => {

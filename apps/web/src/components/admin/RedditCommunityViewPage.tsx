@@ -46,7 +46,7 @@ const parseRootRedditCommunityPath = (
   pathname: string,
 ): { showSlug: string; communitySlug: string; seasonNumber: number | null } | null => {
   const adminMatch = pathname.match(
-    /^\/admin\/social(?:-media)?\/reddit\/([^/]+)\/([^/]+?)(?:\/s(\d+))?\/?$/i,
+    /^\/(?:admin\/)?social(?:-media)?\/reddit\/([^/]+)\/([^/]+?)(?:\/s(\d+))?\/?$/i,
   );
   if (adminMatch) {
     const firstSegment = decodeURIComponent(adminMatch[1] ?? "").trim();
@@ -62,7 +62,7 @@ const parseRootRedditCommunityPath = (
       seasonNumber: Number.isFinite(seasonNumber) && seasonNumber !== null ? seasonNumber : null,
     };
   }
-  if (/^\/admin\/social(?:-media)?\/reddit(?:\/|$)/i.test(pathname)) {
+  if (/^\/(?:admin\/)?social(?:-media)?\/reddit(?:\/|$)/i.test(pathname)) {
     return null;
   }
   const match = pathname.match(/^\/(?:shows\/)?([^/]+)\/social\/reddit\/([^/]+?)(?:\/s(\d+))?\/?$/i);
@@ -109,7 +109,7 @@ export default function RedditCommunityViewPage() {
   }>();
   const searchParams = useSearchParams();
   const canonicalRedirectRef = useRef<string | null>(null);
-  const isAdminCommunityRoute = /^\/admin\/social(?:-media)?\/reddit(?:\/|$)/i.test(pathname);
+  const isAdminCommunityRoute = /^\/(?:admin\/)?social(?:-media)?\/reddit(?:\/|$)/i.test(pathname);
 
   const initialCommunityKey =
     typeof params.communitySlug === "string"
@@ -143,8 +143,9 @@ export default function RedditCommunityViewPage() {
     return parsed;
   })();
   const routeSeasonNumber = (() => {
-    if (typeof params.seasonNumber !== "string") return null;
-    const parsed = Number.parseInt(params.seasonNumber, 10);
+    const token = typeof params.seasonNumber === "string" ? params.seasonNumber.replace(/^s/i, "") : null;
+    if (!token) return rootPathContext?.seasonNumber ?? null;
+    const parsed = Number.parseInt(token, 10);
     if (!Number.isFinite(parsed) || parsed <= 0) return null;
     return parsed;
   })();
@@ -191,7 +192,9 @@ export default function RedditCommunityViewPage() {
       })
     : backHref;
   const effectiveBackHref = showSlug ? showHref : backHref;
-  const prefersPublicCommunityRoute = Boolean(pathnameShowSlug || queryShowSlug || returnPathContext?.showSlug);
+  const prefersPublicCommunityRoute =
+    !(isAdminCommunityRoute && rootPathContext?.seasonNumber != null) &&
+    Boolean(pathnameShowSlug || queryShowSlug || returnPathContext?.showSlug);
   const canonicalCommunityHref = useMemo(() => {
     if (!showSlug || !communitySlug) return null;
     if (!prefersPublicCommunityRoute && isAdminCommunityRoute) {
