@@ -143,7 +143,9 @@ export async function getOrCreateAdminSnapshot<T>(options: CacheOptions<T>): Pro
 
   const promiseKey = options.forceRefresh ? `${options.cacheKey}:refresh` : options.cacheKey;
   const existing = SNAPSHOT_IN_FLIGHT.get(promiseKey) as Promise<SnapshotCacheEntry<T>> | undefined;
-  const runFetch =
+  // Called only after the loader's first await, once the flight is registered.
+  const isCurrentFlight = (): boolean => SNAPSHOT_IN_FLIGHT.get(promiseKey) === runFetch;
+  const runFetch: Promise<SnapshotCacheEntry<T>> =
     existing ??
     (async () => {
       const data = await options.fetcher();
@@ -154,7 +156,9 @@ export async function getOrCreateAdminSnapshot<T>(options: CacheOptions<T>): Pro
         expiresAtMs: generatedAtMs + ttlMs,
         staleUntilMs: generatedAtMs + ttlMs + staleIfErrorTtlMs,
       };
-      if (!CACHE_DISABLED) {
+      // Invalidation removes this flight. Its original callers may finish,
+      // but it must not repopulate the cache or overwrite a newer snapshot.
+      if (!CACHE_DISABLED && isCurrentFlight()) {
         SNAPSHOT_CACHE.set(options.cacheKey, entry as SnapshotCacheEntry<unknown>);
         pruneSnapshotCache();
       }
