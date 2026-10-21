@@ -92,6 +92,9 @@ describe("Reddit capture tools", () => {
     fireEvent.click(screen.getByRole("button", { name: "View work targets" }));
     expect(await screen.findByText("child123")).toBeInTheDocument();
     expect(screen.queryByText("Do not dump raw checkpoint content")).not.toBeInTheDocument();
+    expect(screen.getByText("Not scheduled")).toBeInTheDocument();
+    expect(screen.getAllByText("Not recorded").length).toBeGreaterThan(0);
+    expect(screen.queryByText("No results yet.")).not.toBeInTheDocument();
   });
 
 });
