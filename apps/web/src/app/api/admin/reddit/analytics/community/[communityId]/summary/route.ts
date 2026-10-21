@@ -58,7 +58,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         return payload;
       },
     });
-    return NextResponse.json(payload, cacheHit ? { headers: { "x-trr-cache": "hit" } } : undefined);
+    return NextResponse.json(payload, { headers: { "Cache-Control": "no-store", ...(cacheHit ? { "x-trr-cache": "hit" } : {}) } });
   } catch (error) {
     return socialProxyErrorResponse(error, "[api] Failed to fetch reddit analytics summary via TRR-Backend");
   }

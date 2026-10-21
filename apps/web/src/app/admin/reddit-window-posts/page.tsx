@@ -18,6 +18,7 @@ import {
 } from "@/lib/admin/run-session";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 import { useAdminOperationUnloadGuard } from "@/lib/admin/use-operation-unload-guard";
+import RedditCapturePanel from "@/components/admin/RedditCapturePanel";
 import RedditAdminShell from "@/components/admin/RedditAdminShell";
 import { buildSeasonSocialBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
 import type { SeasonAdminTab, SocialAnalyticsViewSlug } from "@/lib/admin/show-admin-routes";
@@ -2414,6 +2415,7 @@ function AdminRedditWindowPostsPageContent() {
             )}
           </section>
         )}
+      {context && <RedditCapturePanel key={`${context.communityId}:${context.seasonId}`} communityId={context.communityId} seasonId={context.seasonId} periodStart={context.periodStart} periodEnd={context.periodEnd} containerKey={context.containerKey} />}
     </RedditAdminShell>
   );
 }

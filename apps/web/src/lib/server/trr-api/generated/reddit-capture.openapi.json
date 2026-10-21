@@ -1,0 +1,355 @@
+{
+  "components": {
+    "schemas": {
+      "RedditCaptureEvidence": {
+        "additionalProperties": true,
+        "properties": {
+          "attempted_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Attempted At"
+          },
+          "evidence": {
+            "additionalProperties": true,
+            "title": "Evidence",
+            "type": "object"
+          },
+          "next_retry_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Next Retry At"
+          },
+          "state": {
+            "enum": [
+              "pending",
+              "running",
+              "retry_wait",
+              "committed",
+              "source_unavailable",
+              "failed",
+              "cancelled"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "successful_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Successful At"
+          }
+        },
+        "required": [
+          "state"
+        ],
+        "title": "RedditCaptureEvidence",
+        "type": "object"
+      },
+      "RedditCoverageEvidence": {
+        "additionalProperties": true,
+        "properties": {
+          "state": {
+            "enum": [
+              "unknown",
+              "partial",
+              "complete",
+              "not_requested"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state"
+        ],
+        "title": "RedditCoverageEvidence",
+        "type": "object"
+      },
+      "RedditPhaseOutcome": {
+        "properties": {
+          "requested": {
+            "minimum": 0,
+            "title": "Requested",
+            "type": "integer"
+          },
+          "satisfied": {
+            "minimum": 0,
+            "title": "Satisfied",
+            "type": "integer"
+          },
+          "states": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "propertyNames": {
+              "enum": [
+                "pending",
+                "running",
+                "retry_wait",
+                "committed",
+                "source_unavailable",
+                "failed",
+                "cancelled"
+              ]
+            },
+            "title": "States",
+            "type": "object"
+          },
+          "unresolved": {
+            "minimum": 0,
+            "title": "Unresolved",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "requested",
+          "satisfied",
+          "unresolved",
+          "states"
+        ],
+        "title": "RedditPhaseOutcome",
+        "type": "object"
+      },
+      "RedditPostCapture": {
+        "properties": {
+          "capture_state": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/RedditCaptureEvidence"
+            },
+            "title": "Capture State",
+            "type": "object"
+          },
+          "reddit_post_id": {
+            "title": "Reddit Post Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reddit_post_id",
+          "capture_state"
+        ],
+        "title": "RedditPostCapture",
+        "type": "object"
+      },
+      "RedditRunCaptureContract": {
+        "properties": {
+          "contract_version": {
+            "const": 2,
+            "default": 2,
+            "title": "Contract Version",
+            "type": "integer"
+          },
+          "control_state": {
+            "enum": [
+              "active",
+              "paused",
+              "cancel_requested",
+              "cancelled"
+            ],
+            "title": "Control State",
+            "type": "string"
+          },
+          "coverage": {
+            "$ref": "#/components/schemas/RedditCoverageEvidence"
+          },
+          "outcomes": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/RedditPhaseOutcome"
+            },
+            "propertyNames": {
+              "enum": [
+                "discovery",
+                "comments",
+                "media"
+              ]
+            },
+            "title": "Outcomes",
+            "type": "object"
+          },
+          "requested": {
+            "minimum": 0,
+            "title": "Requested",
+            "type": "integer"
+          },
+          "requested_phases": {
+            "items": {
+              "enum": [
+                "discovery",
+                "comments",
+                "media"
+              ],
+              "type": "string"
+            },
+            "title": "Requested Phases",
+            "type": "array"
+          },
+          "retry_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Retry At"
+          },
+          "satisfied": {
+            "minimum": 0,
+            "title": "Satisfied",
+            "type": "integer"
+          },
+          "unresolved": {
+            "minimum": 0,
+            "title": "Unresolved",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "control_state",
+          "requested",
+          "satisfied",
+          "unresolved",
+          "outcomes",
+          "coverage",
+          "requested_phases"
+        ],
+        "title": "RedditRunCaptureContract",
+        "type": "object"
+      },
+      "RedditWorkTarget": {
+        "additionalProperties": true,
+        "properties": {
+          "attempt_count": {
+            "default": 0,
+            "title": "Attempt Count",
+            "type": "integer"
+          },
+          "checkpoint": {
+            "additionalProperties": true,
+            "title": "Checkpoint",
+            "type": "object"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Error"
+          },
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Id"
+          },
+          "kind": {
+            "enum": [
+              "discovery",
+              "comments",
+              "media"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "next_retry_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Next Retry At"
+          },
+          "reddit_post_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Reddit Post Id"
+          },
+          "result": {
+            "additionalProperties": true,
+            "title": "Result",
+            "type": "object"
+          },
+          "state": {
+            "enum": [
+              "pending",
+              "running",
+              "retry_wait",
+              "committed",
+              "source_unavailable",
+              "failed",
+              "cancelled"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "target_key": {
+            "title": "Target Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "target_key",
+          "state"
+        ],
+        "title": "RedditWorkTarget",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "title": "Reddit Capture",
+    "version": "2"
+  },
+  "openapi": "3.1.0",
+  "paths": {}
+}

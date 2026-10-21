@@ -73,7 +73,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       );
     }
 
-    return NextResponse.json(upstream.data);
+    return NextResponse.json(upstream.data, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     console.error("[api] Failed to fetch reddit post details", error);
     return buildAdminProxyErrorResponse(error);

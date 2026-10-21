@@ -233,39 +233,6 @@ const parseContainerKey = (value: string | null): string | null => {
   return normalized.slice(0, 96);
 };
 
-const buildRunConfigHash = (input: {
-  mode: "sync_posts" | "sync_details" | "sync_full";
-  coverageMode: CoverageMode;
-  maxPages: number | null;
-  exhaustiveWindow: boolean;
-  searchBackfill: boolean;
-  analysisFlairs: string[];
-  analysisAllFlairs: string[];
-  forceIncludeFlairs: string[];
-  seedPostUrls: string[];
-  periodStart: string | null;
-  periodEnd: string | null;
-  fetchComments: boolean;
-  commentDeltaOnly: boolean;
-}): string => {
-  const canonical = {
-    mode: input.mode,
-    coverage_mode: input.coverageMode,
-    max_pages: input.maxPages ?? null,
-    exhaustive_window: input.exhaustiveWindow,
-    search_backfill: input.searchBackfill,
-    analysis_flairs: [...input.analysisFlairs].map((value) => value.trim()).filter(Boolean).sort(),
-    analysis_all_flairs: [...input.analysisAllFlairs].map((value) => value.trim()).filter(Boolean).sort(),
-    force_include_flairs: [...input.forceIncludeFlairs].map((value) => value.trim()).filter(Boolean).sort(),
-    seed_post_urls: [...input.seedPostUrls].map((value) => value.trim()).filter(Boolean).sort(),
-    period_start: input.periodStart,
-    period_end: input.periodEnd,
-    fetch_comments: input.fetchComments,
-    comment_delta_only: input.commentDeltaOnly,
-  };
-  return createHash("sha1").update(JSON.stringify(canonical)).digest("hex");
-};
-
 const parsePeriodLabel = (value: string | null): string | null => {
   if (!value) return null;
   const normalized = value.trim();
@@ -863,6 +830,11 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     const exhaustiveWindow = parseBoolean(request.nextUrl.searchParams.get("exhaustive"));
     const searchBackfill = parseBoolean(request.nextUrl.searchParams.get("search_backfill"));
     const forceRefresh = parseBoolean(request.nextUrl.searchParams.get("refresh"));
+    const refreshPolicy = request.nextUrl.searchParams.get("refresh_policy");
+    const forceRescrape = parseBoolean(request.nextUrl.searchParams.get("force_rescrape"));
+    if (forceRescrape && refreshPolicy && refreshPolicy !== "force") return NextResponse.json({ error: "force_rescrape conflicts with refresh_policy" }, { status: 400 });
+    if (refreshPolicy && !["missing", "stale", "force"].includes(refreshPolicy)) return NextResponse.json({ error: "Invalid refresh policy" }, { status: 400 });
+    if (request.nextUrl.searchParams.getAll("requested_phases").some(phase => !["discovery", "comments", "media"].includes(phase))) return NextResponse.json({ error: "Invalid requested phase" }, { status: 400 });
     const waitForCompletion = parseBoolean(request.nextUrl.searchParams.get("wait"));
     const maxPages = parseMaxPages(request.nextUrl.searchParams.get("max_pages"));
     const requestedCoverageMode = parseCoverageMode(request.nextUrl.searchParams.get("coverage_mode"));
@@ -1002,22 +974,6 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     const commentDeltaOnly = true;
     const tabSessionId = request.headers.get("x-trr-tab-session-id")?.trim() || undefined;
     const flowKey = request.headers.get("x-trr-flow-key")?.trim() || undefined;
-    const runConfigHash = buildRunConfigHash({
-      mode: effectiveMode,
-      coverageMode,
-      maxPages: effectiveMaxPages,
-      exhaustiveWindow,
-      searchBackfill,
-      analysisFlairs,
-      analysisAllFlairs,
-      forceIncludeFlairs,
-      seedPostUrls,
-      periodStart: parsedPeriodStart.value,
-      periodEnd: parsedPeriodEnd.value,
-      fetchComments,
-      commentDeltaOnly,
-    });
-
     const runStartPayload = {
       community_id: communityId,
       season_id: resolvedSeasonId,
@@ -1041,7 +997,10 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       search_backfill: searchBackfill,
       seed_post_urls: seedPostUrls,
       coverage_mode: coverageMode,
-      run_config_hash: runConfigHash,
+      refresh_policy: refreshPolicy ?? (forceRescrape ? "force" : "missing"),
+      selected_post_ids: request.nextUrl.searchParams.getAll("selected_post_ids"),
+      ...(request.nextUrl.searchParams.has("requested_phases") ? { requested_phases: request.nextUrl.searchParams.getAll("requested_phases") } : {}),
+      force_rescrape: forceRescrape,
       fetch_comments: fetchComments,
       comment_delta_only: commentDeltaOnly,
       max_pages: effectiveMaxPages,
@@ -1182,4 +1141,28 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
   } catch (error) {
     return socialProxyErrorResponse(error, "[api] Failed to discover reddit threads via TRR-Backend");
   }
+}
+
+// POST is the preferred mutation route; GET remains a compatibility adapter.
+export async function POST(request: NextRequest, context: RouteParams) {
+  try {
+    await requireAdmin(request);
+    const body = await request.json();
+    if (!body || typeof body !== "object" || Array.isArray(body)) return NextResponse.json({ error: "A JSON object is required" }, { status: 400 });
+    if (body.refresh_policy !== undefined && !["missing", "stale", "force"].includes(body.refresh_policy)) return NextResponse.json({ error: "Invalid refresh policy" }, { status: 400 });
+    for (const key of ["selected_post_ids", "requested_phases"]) {
+      if (body[key] !== undefined && (!Array.isArray(body[key]) || body[key].some((value: unknown) => typeof value !== "string"))) return NextResponse.json({ error: `${key} must be an array of strings` }, { status: 400 });
+    }
+    if (Array.isArray(body.requested_phases) && body.requested_phases.length === 0) return NextResponse.json({ error: "Select at least one capture phase" }, { status: 400 });
+    const url = new URL(request.url);
+    for (const key of ["season_id", "period_start", "period_end", "container_key", "mode", "refresh_policy", "force_rescrape", "wait", "coverage_mode", "search_backfill", "max_pages", "period_label"]) {
+      if (body[key] !== undefined) url.searchParams.set(key, String(body[key]));
+    }
+    if (body.exhaustive_window !== undefined) url.searchParams.set("exhaustive", String(body.exhaustive_window));
+    for (const key of ["selected_post_ids", "requested_phases"]) {
+      if (Array.isArray(body[key])) for (const value of body[key]) if (typeof value === "string") url.searchParams.append(key, value);
+    }
+    url.searchParams.set("refresh", "true");
+    return GET(new NextRequest(url, { headers: request.headers }), context);
+  } catch (error) { return socialProxyErrorResponse(error, "[api] Failed to start Reddit discovery"); }
 }

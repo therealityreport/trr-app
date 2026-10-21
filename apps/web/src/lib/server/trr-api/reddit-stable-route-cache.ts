@@ -2,10 +2,7 @@ import "server-only";
 
 import {
   buildUserScopedRouteCacheKey,
-  getOrCreateRouteResponsePromise,
-  getRouteResponseCache,
   parseCacheTtlMs,
-  setRouteResponseCache,
 } from "@/lib/server/admin/route-response-cache";
 
 export const REDDIT_STABLE_LIST_CACHE_NAMESPACE = "admin-reddit-stable-list";
@@ -27,14 +24,11 @@ export const REDDIT_STABLE_SUMMARY_CACHE_TTL_MS = parseCacheTtlMs(
   5_000,
 );
 
-export async function getCachedStableRead<T>({
-  namespace,
-  cacheKey,
-  promiseKey,
-  ttlMs,
-  forceRefresh = false,
-  loader,
-}: {
+/** Canonical Reddit content must reflect lifecycle redactions on every read.
+ * Keep the route adapter signature while bypassing both response caches and
+ * shared in-flight reads; local invalidation cannot cover other app processes.
+ */
+export async function getCachedStableRead<T>({ loader }: {
   namespace: string;
   cacheKey: string;
   promiseKey?: string;
@@ -42,24 +36,7 @@ export async function getCachedStableRead<T>({
   forceRefresh?: boolean;
   loader: () => Promise<T>;
 }): Promise<{ payload: T; cacheHit: boolean }> {
-  if (!forceRefresh) {
-    const cached = getRouteResponseCache<T>(namespace, cacheKey);
-    if (cached) {
-      return { payload: cached, cacheHit: true };
-    }
-  }
-
-  const resolved = await getOrCreateRouteResponsePromise(
-    namespace,
-    promiseKey ?? cacheKey,
-    loader,
-  );
-
-  if (!forceRefresh) {
-    setRouteResponseCache(namespace, cacheKey, resolved, ttlMs);
-  }
-
-  return { payload: resolved, cacheHit: false };
+  return { payload: await loader(), cacheHit: false };
 }
 
 export { buildUserScopedRouteCacheKey };

@@ -1,4 +1,6 @@
 "use client";
+
+import RedditCapturePanel from "@/components/admin/RedditCapturePanel";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import {
@@ -7169,7 +7171,7 @@ export default function RedditSourcesManager({
         const response = await fetchWithTimeout(
           `/api/admin/reddit/communities/${selectedCommunity.id}/episode-discussions/refresh?${params.toString()}`,
           {
-            method: "GET",
+            method: "POST",
             headers,
             cache: "no-store",
             timeoutMs: REQUEST_TIMEOUT_MS.episodeRefresh,
@@ -8372,6 +8374,8 @@ export default function RedditSourcesManager({
           </div>
         )}
       </div>
+
+      {selectedCommunity && episodeSeasonId && <RedditCapturePanel key={`${selectedCommunity.id}:${episodeSeasonId}`} communityId={selectedCommunity.id} seasonId={episodeSeasonId} />}
 
       {error && (
         <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>

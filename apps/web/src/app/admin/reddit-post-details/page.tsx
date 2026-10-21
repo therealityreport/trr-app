@@ -23,6 +23,7 @@ import {
   AdminCommentThread,
   type AdminCommentThreadItem,
 } from "@/components/admin/comments/AdminCommentThread";
+import RedditCapturePanel from "@/components/admin/RedditCapturePanel";
 import RedditAdminShell from "@/components/admin/RedditAdminShell";
 import { buildSeasonSocialBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
 import { parseRedditDetailSlug } from "@/lib/admin/reddit-detail-slug";
@@ -1857,6 +1858,7 @@ function AdminRedditPostDetailsPageContent() {
             )}
           </section>
         )}
+      {context && <RedditCapturePanel key={`${context.communityId}:${context.seasonId}:${context.postId}`} communityId={context.communityId} seasonId={context.seasonId} postId={context.postId} containerKey={context.containerKey} />}
     </RedditAdminShell>
   );
 }

@@ -1,0 +1,6 @@
+import { NextRequest } from "next/server";
+import { operatorProxy } from "@/app/api/admin/reddit/operator-proxy";
+export const dynamic = "force-dynamic";
+export async function GET(request: NextRequest, { params }: { params: Promise<{ runId: string }> }) {
+  return operatorProxy(request, params, "targets");
+}

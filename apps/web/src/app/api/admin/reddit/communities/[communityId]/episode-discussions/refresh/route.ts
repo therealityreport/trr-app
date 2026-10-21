@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { resolveEpisodeRequiredFlairs } from "@/lib/admin/reddit-flair-targeting";
 import { requireAdmin } from "@/lib/server/auth";
 import {
-  RedditDiscoveryError,
   discoverEpisodeDiscussionThreads,
   type RedditListingSort,
 } from "@/lib/server/admin/reddit-discovery-service";
@@ -11,7 +10,7 @@ import {
   createRedditThread,
   getRedditCommunityById,
 } from "@/lib/server/admin/reddit-sources-repository";
-import { resolveEpisodeDiscussionRules } from "@/lib/server/admin/reddit-episode-rules";
+import { socialProxyErrorResponse } from "@/lib/server/trr-api/social-admin-proxy";
 import {
   getEpisodesBySeasonId,
   getEpisodesByShowAndSeason,
@@ -175,16 +174,6 @@ const normalizeAirDateKey = (value: unknown): string | null => {
   return formatDateKeyInTimeZone(trimmed, EPISODE_SYNC_TIME_ZONE);
 };
 
-const addDaysToDateKey = (dateKey: string, days: number): string | null => {
-  const parsed = new Date(`${dateKey}T00:00:00.000Z`);
-  if (Number.isNaN(parsed.getTime())) return null;
-  parsed.setUTCDate(parsed.getUTCDate() + days);
-  const year = parsed.getUTCFullYear();
-  const month = String(parsed.getUTCMonth() + 1).padStart(2, "0");
-  const day = String(parsed.getUTCDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-};
-
 const normalizeEpisodeNumber = (value: unknown): number | null => {
   const parsed =
     typeof value === "number"
@@ -225,74 +214,6 @@ const mergeEpisodeAirDateRows = (
   return [...byEpisodeNumber.entries()]
     .sort((a, b) => a[0] - b[0])
     .map((entry) => entry[1]);
-};
-
-const evaluateEpisodeSyncEligibility = (input: {
-  author: string | null;
-  title: string;
-  postedAt: string | null;
-  episodeAirDateKey: string | null;
-  discussionType: "live" | "post" | "weekly";
-  episodeNumber: number | null;
-  seasonNumber: number;
-}): { eligible: boolean; reason: string; reasonCode: SyncCandidateReasonCode } => {
-  if ((input.author ?? "").trim().toLowerCase() !== "automoderator") {
-    return {
-      eligible: false,
-      reason: "Author is not AutoModerator.",
-      reasonCode: "author_not_automoderator",
-    };
-  }
-  if (!/episode discussion/i.test(input.title)) {
-    return {
-      eligible: false,
-      reason: "Title does not include 'Episode Discussion'.",
-      reasonCode: "title_missing_episode_discussion",
-    };
-  }
-  if (!input.postedAt || !input.episodeAirDateKey) {
-    if (!input.episodeAirDateKey) {
-      return {
-        eligible: false,
-        reason:
-          input.episodeNumber !== null
-            ? `No episode air date found for parsed episode number ${input.episodeNumber} in season ${input.seasonNumber}.`
-            : `No episode air date found for parsed episode number in season ${input.seasonNumber}.`,
-        reasonCode: "missing_episode_air_date",
-      };
-    }
-    return {
-      eligible: false,
-      reason: "Post timestamp is missing.",
-      reasonCode: "missing_post_timestamp",
-    };
-  }
-  const postedDateKey = formatDateKeyInTimeZone(input.postedAt, EPISODE_SYNC_TIME_ZONE);
-  if (!postedDateKey) {
-    return {
-      eligible: false,
-      reason: "Post timestamp is invalid.",
-      reasonCode: "invalid_post_timestamp",
-    };
-  }
-  const weeklyNextDayKey =
-    input.discussionType === "weekly" ? addDaysToDateKey(input.episodeAirDateKey, 1) : null;
-  const dateMatchesEpisode =
-    postedDateKey === input.episodeAirDateKey ||
-    (weeklyNextDayKey !== null && postedDateKey === weeklyNextDayKey);
-
-  if (!dateMatchesEpisode) {
-    return {
-      eligible: false,
-      reason: `Post date ${postedDateKey} does not match episode air date ${input.episodeAirDateKey} (${EPISODE_SYNC_TIME_ZONE}).`,
-      reasonCode: "posted_date_mismatch",
-    };
-  }
-  return {
-    eligible: true,
-    reason: "Eligible for auto-sync.",
-    reasonCode: "auto_saved_success",
-  };
 };
 
 export async function GET(request: NextRequest, { params }: RouteParams) {
@@ -442,24 +363,26 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       seasonId: resolvedSeason.id,
     });
 
-    const resolvedRules = resolveEpisodeDiscussionRules({
+    const rules = {
       subreddit: community.subreddit,
       showName: show.name,
       showAliases: show.alternative_names,
       isShowFocused: community.is_show_focused,
       episodeTitlePatterns: community.episode_title_patterns,
       analysisAllFlairs: episodeFlairTargets.requiredFlairs,
-    });
+    };
 
     const discovery = await discoverEpisodeDiscussionThreads({
+      communityId,
+      rules,
       subreddit: community.subreddit,
       showName: show.name,
       showAliases: show.alternative_names,
       seasonNumber: resolvedSeason.season_number,
       seasonEpisodes,
       resolvedSeasonId: resolvedSeason.id,
-      episodeTitlePatterns: resolvedRules.effectiveEpisodeTitlePatterns,
-      episodeRequiredFlairs: resolvedRules.effectiveRequiredFlairs,
+      episodeTitlePatterns: community.episode_title_patterns,
+      episodeRequiredFlairs: episodeFlairTargets.requiredFlairs,
       episodeFlairAssignments: episodeFlairTargets.episodeFlairAssignments,
       isShowFocused: community.is_show_focused,
       periodStart: parsedPeriodStart.value,
@@ -467,6 +390,9 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       sortModes: parseSortModes(request.nextUrl.searchParams.get("sort")),
       limitPerMode: parseLimit(request.nextUrl.searchParams.get("limit")),
     });
+
+    const resolvedRules = discovery.resolved_rules;
+    if (!resolvedRules || !Array.isArray(discovery.candidates)) throw new Error("Episode discovery returned an incomplete response");
 
     const selectedPeriodLabels = sanitizePeriodLabels(
       request.nextUrl.searchParams.getAll("period_label"),
@@ -491,25 +417,14 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     let syncSkippedIneligibleCount = 0;
     if (syncRequested) {
       for (const candidate of discovery.candidates) {
-        const candidateEpisodeNumber = normalizeEpisodeNumber(candidate.episode_number);
-        const episodeAirDateKey = candidateEpisodeNumber
-          ? (episodeAirDateByNumber.get(candidateEpisodeNumber) ?? null)
-          : null;
-        const evaluation = evaluateEpisodeSyncEligibility({
-          author: candidate.author,
-          title: candidate.title,
-          postedAt: candidate.posted_at,
-          episodeAirDateKey,
-          discussionType: candidate.discussion_type,
-          episodeNumber: candidateEpisodeNumber,
-          seasonNumber: resolvedSeason.season_number,
-        });
+        const evaluation = candidate.sync_eligibility;
+        if (!evaluation || typeof evaluation.eligible !== "boolean") throw new Error("Episode discovery is missing candidate eligibility");
         if (!evaluation.eligible) {
           syncSkippedIneligibleCount += 1;
           syncCandidateResults.push({
             reddit_post_id: candidate.reddit_post_id,
             status: "not_eligible",
-            reason_code: evaluation.reasonCode,
+            reason_code: evaluation.reason_code,
             reason: evaluation.reason,
           });
           continue;
@@ -621,12 +536,10 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     });
   } catch (error) {
     console.error("[api] Failed to refresh reddit episode discussions", error);
-    if (error instanceof RedditDiscoveryError) {
-      return NextResponse.json({ error: error.message }, { status: error.status });
-    }
-    const message = error instanceof Error ? error.message : "failed";
-    const status =
-      message === "unauthorized" ? 401 : message === "forbidden" ? 403 : 500;
-    return NextResponse.json({ error: message }, { status });
+    return socialProxyErrorResponse(error, "[api] Failed to refresh Reddit episode discussions");
   }
+}
+
+export async function POST(request: NextRequest, context: RouteParams) {
+  return GET(request, context);
 }

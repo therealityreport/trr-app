@@ -18,7 +18,7 @@
     "validate:quick": "pnpm run generated:check && pnpm exec vitest run -c vitest.config.mts tests/proxy-routing.test.ts tests/public-identity-contract.test.ts tests/public-route-boundary.test.ts",
     "lint": "NODE_OPTIONS=--max-old-space-size=8192 eslint",
     "clean": "rm -rf .next .next-e2e .next-e2e-debug .next-e2e-public test-results *.tsbuildinfo",
-    "generated:check": "node scripts/generate-admin-api-references.mjs --check && node scripts/generate-brand-font-artifacts.mjs --check && node scripts/generate-trr-v2-api-types.mjs --check && node scripts/generate-nyt-homepage-preview-fragments.mjs --check",
+    "generated:check": "node scripts/generate-admin-api-references.mjs --check && node scripts/generate-brand-font-artifacts.mjs --check && node scripts/generate-trr-v2-api-types.mjs --check && node scripts/generate-nyt-homepage-preview-fragments.mjs --check && node scripts/generate-reddit-capture-contract.mjs --check",
     "generate:nyt-homepage-preview-fragments": "node scripts/generate-nyt-homepage-preview-fragments.mjs",
     "generate:trr-v2-api-types": "node scripts/generate-trr-v2-api-types.mjs",
     "generated:trr-v2-api-types:check": "node scripts/generate-trr-v2-api-types.mjs --check",
@@ -44,7 +44,10 @@
     "test:e2e:cast": "playwright test -c playwright.config.ts tests/e2e/admin-cast-tabs-smoke.spec.ts",
     "test:e2e:cast:live": "E2E_CAST_LIVE=1 playwright test -c playwright.config.ts tests/e2e/admin-cast-tabs-live-smoke.spec.ts",
     "test:e2e:headed": "playwright test -c playwright.config.ts --headed",
-    "db:migrate": "node ./scripts/run-migrations.mjs"
+    "db:migrate": "node ./scripts/run-migrations.mjs",
+    "generate:reddit-capture-contract": "node scripts/generate-reddit-capture-contract.mjs --export",
+    "generated:reddit-capture-contract:check": "node scripts/generate-reddit-capture-contract.mjs --check",
+    "generated:reddit-capture-contract:source-check": "node scripts/generate-reddit-capture-contract.mjs --check-source"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

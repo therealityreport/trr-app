@@ -3,8 +3,8 @@ import type { AdminApiReferenceInventory } from "@/lib/admin/api-references/type
 export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
   "inventorySchemaVersion": "1.0.0",
   "generatorVersion": "1.0.0",
-  "generatedAt": "2026-10-16T08:12:31.218Z",
-  "sourceCommitSha": "55beadba24609d91eb011f3aac56ba4fa687a569",
+  "generatedAt": "2026-10-21T21:15:31.619Z",
+  "sourceCommitSha": "81c578bc0ea55c9974b2863320f103d2adc9613b",
   "overrideDigest": "ab48dccad1d5b9faafd4ef40e8374574768e133192929e6264ff8727fbaf68e1",
   "nodes": [
     {
@@ -8726,6 +8726,40 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "fanoutRisk": "low"
     },
     {
+      "id": "route:GET:/api/admin/reddit/communities/[communityId]/coverage",
+      "kind": "api_route",
+      "title": "GET /api/admin/reddit/communities/[communityId]/coverage",
+      "pathPattern": "/api/admin/reddit/communities/[communityId]/coverage",
+      "symbol": "GET",
+      "sourceFile": "src/app/api/admin/reddit/communities/[communityId]/coverage/route.ts",
+      "sourceLocator": {
+        "line": 4,
+        "symbol": "GET"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:app_api_route"
+      ],
+      "usageTier": "manual",
+      "polls": false,
+      "pollCadenceMs": null,
+      "automatic": false,
+      "loadsLargeDatasets": true,
+      "usesPagination": false,
+      "returnsWideRowsOrBlobsOrRawJson": false,
+      "fansOutQueries": false,
+      "postgresAccess": "none",
+      "viewKinds": [
+        "list",
+        "detail"
+      ],
+      "staticOnly": false,
+      "payloadRisk": "high",
+      "fanoutRisk": "low"
+    },
+    {
       "id": "route:GET:/api/admin/reddit/communities/[communityId]/discover",
       "kind": "api_route",
       "title": "GET /api/admin/reddit/communities/[communityId]/discover",
@@ -8733,7 +8767,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/reddit/communities/[communityId]/discover/route.ts",
       "sourceLocator": {
-        "line": 809,
+        "line": 776,
         "symbol": "GET"
       },
       "provenance": "static_scan",
@@ -8767,7 +8801,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/reddit/communities/[communityId]/episode-discussions/refresh/route.ts",
       "sourceLocator": {
-        "line": 298,
+        "line": 219,
         "symbol": "GET"
       },
       "provenance": "static_scan",
@@ -8782,6 +8816,40 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "automatic": false,
       "loadsLargeDatasets": true,
       "usesPagination": true,
+      "returnsWideRowsOrBlobsOrRawJson": false,
+      "fansOutQueries": false,
+      "postgresAccess": "none",
+      "viewKinds": [
+        "list",
+        "detail"
+      ],
+      "staticOnly": false,
+      "payloadRisk": "high",
+      "fanoutRisk": "low"
+    },
+    {
+      "id": "route:GET:/api/admin/reddit/communities/[communityId]/legacy-inventory",
+      "kind": "api_route",
+      "title": "GET /api/admin/reddit/communities/[communityId]/legacy-inventory",
+      "pathPattern": "/api/admin/reddit/communities/[communityId]/legacy-inventory",
+      "symbol": "GET",
+      "sourceFile": "src/app/api/admin/reddit/communities/[communityId]/legacy-inventory/route.ts",
+      "sourceLocator": {
+        "line": 4,
+        "symbol": "GET"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:app_api_route"
+      ],
+      "usageTier": "manual",
+      "polls": false,
+      "pollCadenceMs": null,
+      "automatic": false,
+      "loadsLargeDatasets": true,
+      "usesPagination": false,
       "returnsWideRowsOrBlobsOrRawJson": false,
       "fansOutQueries": false,
       "postgresAccess": "none",
@@ -8836,6 +8904,40 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "sourceFile": "src/app/api/admin/reddit/communities/[communityId]/posts/resolve/route.ts",
       "sourceLocator": {
         "line": 39,
+        "symbol": "GET"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:app_api_route"
+      ],
+      "usageTier": "manual",
+      "polls": false,
+      "pollCadenceMs": null,
+      "automatic": false,
+      "loadsLargeDatasets": true,
+      "usesPagination": false,
+      "returnsWideRowsOrBlobsOrRawJson": false,
+      "fansOutQueries": false,
+      "postgresAccess": "none",
+      "viewKinds": [
+        "list",
+        "detail"
+      ],
+      "staticOnly": false,
+      "payloadRisk": "high",
+      "fanoutRisk": "low"
+    },
+    {
+      "id": "route:GET:/api/admin/reddit/communities/[communityId]/settings",
+      "kind": "api_route",
+      "title": "GET /api/admin/reddit/communities/[communityId]/settings",
+      "pathPattern": "/api/admin/reddit/communities/[communityId]/settings",
+      "symbol": "GET",
+      "sourceFile": "src/app/api/admin/reddit/communities/[communityId]/settings/route.ts",
+      "sourceLocator": {
+        "line": 4,
         "symbol": "GET"
       },
       "provenance": "static_scan",
@@ -8930,6 +9032,39 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "fanoutRisk": "low"
     },
     {
+      "id": "route:GET:/api/admin/reddit/jobs/[jobId]",
+      "kind": "api_route",
+      "title": "GET /api/admin/reddit/jobs/[jobId]",
+      "pathPattern": "/api/admin/reddit/jobs/[jobId]",
+      "symbol": "GET",
+      "sourceFile": "src/app/api/admin/reddit/jobs/[jobId]/route.ts",
+      "sourceLocator": {
+        "line": 4,
+        "symbol": "GET"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:app_api_route"
+      ],
+      "usageTier": "manual",
+      "polls": false,
+      "pollCadenceMs": null,
+      "automatic": false,
+      "loadsLargeDatasets": false,
+      "usesPagination": false,
+      "returnsWideRowsOrBlobsOrRawJson": false,
+      "fansOutQueries": false,
+      "postgresAccess": "none",
+      "viewKinds": [
+        "detail"
+      ],
+      "staticOnly": false,
+      "payloadRisk": "low",
+      "fanoutRisk": "low"
+    },
+    {
       "id": "route:GET:/api/admin/reddit/runs",
       "kind": "api_route",
       "title": "GET /api/admin/reddit/runs",
@@ -8972,6 +9107,74 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "sourceFile": "src/app/api/admin/reddit/runs/[runId]/route.ts",
       "sourceLocator": {
         "line": 15,
+        "symbol": "GET"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:app_api_route"
+      ],
+      "usageTier": "manual",
+      "polls": false,
+      "pollCadenceMs": null,
+      "automatic": false,
+      "loadsLargeDatasets": false,
+      "usesPagination": false,
+      "returnsWideRowsOrBlobsOrRawJson": false,
+      "fansOutQueries": false,
+      "postgresAccess": "none",
+      "viewKinds": [
+        "list",
+        "detail"
+      ],
+      "staticOnly": false,
+      "payloadRisk": "low",
+      "fanoutRisk": "low"
+    },
+    {
+      "id": "route:GET:/api/admin/reddit/runs/[runId]/compare",
+      "kind": "api_route",
+      "title": "GET /api/admin/reddit/runs/[runId]/compare",
+      "pathPattern": "/api/admin/reddit/runs/[runId]/compare",
+      "symbol": "GET",
+      "sourceFile": "src/app/api/admin/reddit/runs/[runId]/compare/route.ts",
+      "sourceLocator": {
+        "line": 4,
+        "symbol": "GET"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:app_api_route"
+      ],
+      "usageTier": "manual",
+      "polls": false,
+      "pollCadenceMs": null,
+      "automatic": false,
+      "loadsLargeDatasets": false,
+      "usesPagination": false,
+      "returnsWideRowsOrBlobsOrRawJson": false,
+      "fansOutQueries": false,
+      "postgresAccess": "none",
+      "viewKinds": [
+        "list",
+        "detail"
+      ],
+      "staticOnly": false,
+      "payloadRisk": "low",
+      "fanoutRisk": "low"
+    },
+    {
+      "id": "route:GET:/api/admin/reddit/runs/[runId]/targets",
+      "kind": "api_route",
+      "title": "GET /api/admin/reddit/runs/[runId]/targets",
+      "pathPattern": "/api/admin/reddit/runs/[runId]/targets",
+      "symbol": "GET",
+      "sourceFile": "src/app/api/admin/reddit/runs/[runId]/targets/route.ts",
+      "sourceLocator": {
+        "line": 4,
         "symbol": "GET"
       },
       "provenance": "static_scan",
@@ -13859,6 +14062,40 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "fanoutRisk": "low"
     },
     {
+      "id": "route:PATCH:/api/admin/reddit/communities/[communityId]/settings",
+      "kind": "api_route",
+      "title": "PATCH /api/admin/reddit/communities/[communityId]/settings",
+      "pathPattern": "/api/admin/reddit/communities/[communityId]/settings",
+      "symbol": "PATCH",
+      "sourceFile": "src/app/api/admin/reddit/communities/[communityId]/settings/route.ts",
+      "sourceLocator": {
+        "line": 7,
+        "symbol": "PATCH"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:app_api_route"
+      ],
+      "usageTier": "manual",
+      "polls": false,
+      "pollCadenceMs": null,
+      "automatic": false,
+      "loadsLargeDatasets": true,
+      "usesPagination": false,
+      "returnsWideRowsOrBlobsOrRawJson": false,
+      "fansOutQueries": false,
+      "postgresAccess": "none",
+      "viewKinds": [
+        "list",
+        "detail"
+      ],
+      "staticOnly": false,
+      "payloadRisk": "high",
+      "fanoutRisk": "low"
+    },
+    {
       "id": "route:PATCH:/api/admin/reddit/post-matches",
       "kind": "api_route",
       "title": "PATCH /api/admin/reddit/post-matches",
@@ -14773,6 +15010,40 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "fanoutRisk": "low"
     },
     {
+      "id": "route:POST:/api/admin/reddit/communities/[communityId]/analysis",
+      "kind": "api_route",
+      "title": "POST /api/admin/reddit/communities/[communityId]/analysis",
+      "pathPattern": "/api/admin/reddit/communities/[communityId]/analysis",
+      "symbol": "POST",
+      "sourceFile": "src/app/api/admin/reddit/communities/[communityId]/analysis/route.ts",
+      "sourceLocator": {
+        "line": 4,
+        "symbol": "POST"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:app_api_route"
+      ],
+      "usageTier": "manual",
+      "polls": false,
+      "pollCadenceMs": null,
+      "automatic": false,
+      "loadsLargeDatasets": true,
+      "usesPagination": false,
+      "returnsWideRowsOrBlobsOrRawJson": false,
+      "fansOutQueries": false,
+      "postgresAccess": "none",
+      "viewKinds": [
+        "list",
+        "detail"
+      ],
+      "staticOnly": false,
+      "payloadRisk": "high",
+      "fanoutRisk": "low"
+    },
+    {
       "id": "route:POST:/api/admin/reddit/communities/[communityId]/auto-categorize-flairs",
       "kind": "api_route",
       "title": "POST /api/admin/reddit/communities/[communityId]/auto-categorize-flairs",
@@ -14795,6 +15066,74 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "automatic": false,
       "loadsLargeDatasets": true,
       "usesPagination": false,
+      "returnsWideRowsOrBlobsOrRawJson": false,
+      "fansOutQueries": false,
+      "postgresAccess": "none",
+      "viewKinds": [
+        "list",
+        "detail"
+      ],
+      "staticOnly": false,
+      "payloadRisk": "high",
+      "fanoutRisk": "low"
+    },
+    {
+      "id": "route:POST:/api/admin/reddit/communities/[communityId]/discover",
+      "kind": "api_route",
+      "title": "POST /api/admin/reddit/communities/[communityId]/discover",
+      "pathPattern": "/api/admin/reddit/communities/[communityId]/discover",
+      "symbol": "POST",
+      "sourceFile": "src/app/api/admin/reddit/communities/[communityId]/discover/route.ts",
+      "sourceLocator": {
+        "line": 1147,
+        "symbol": "POST"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:app_api_route"
+      ],
+      "usageTier": "manual",
+      "polls": false,
+      "pollCadenceMs": null,
+      "automatic": false,
+      "loadsLargeDatasets": true,
+      "usesPagination": true,
+      "returnsWideRowsOrBlobsOrRawJson": true,
+      "fansOutQueries": true,
+      "postgresAccess": "none",
+      "viewKinds": [
+        "list",
+        "detail"
+      ],
+      "staticOnly": false,
+      "payloadRisk": "high",
+      "fanoutRisk": "high"
+    },
+    {
+      "id": "route:POST:/api/admin/reddit/communities/[communityId]/episode-discussions/refresh",
+      "kind": "api_route",
+      "title": "POST /api/admin/reddit/communities/[communityId]/episode-discussions/refresh",
+      "pathPattern": "/api/admin/reddit/communities/[communityId]/episode-discussions/refresh",
+      "symbol": "POST",
+      "sourceFile": "src/app/api/admin/reddit/communities/[communityId]/episode-discussions/refresh/route.ts",
+      "sourceLocator": {
+        "line": 543,
+        "symbol": "POST"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:app_api_route"
+      ],
+      "usageTier": "manual",
+      "polls": false,
+      "pollCadenceMs": null,
+      "automatic": false,
+      "loadsLargeDatasets": true,
+      "usesPagination": true,
       "returnsWideRowsOrBlobsOrRawJson": false,
       "fansOutQueries": false,
       "postgresAccess": "none",
@@ -14872,6 +15211,108 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       ],
       "staticOnly": false,
       "payloadRisk": "high",
+      "fanoutRisk": "low"
+    },
+    {
+      "id": "route:POST:/api/admin/reddit/communities/[communityId]/lifecycle",
+      "kind": "api_route",
+      "title": "POST /api/admin/reddit/communities/[communityId]/lifecycle",
+      "pathPattern": "/api/admin/reddit/communities/[communityId]/lifecycle",
+      "symbol": "POST",
+      "sourceFile": "src/app/api/admin/reddit/communities/[communityId]/lifecycle/route.ts",
+      "sourceLocator": {
+        "line": 4,
+        "symbol": "POST"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:app_api_route"
+      ],
+      "usageTier": "manual",
+      "polls": false,
+      "pollCadenceMs": null,
+      "automatic": false,
+      "loadsLargeDatasets": true,
+      "usesPagination": false,
+      "returnsWideRowsOrBlobsOrRawJson": false,
+      "fansOutQueries": false,
+      "postgresAccess": "none",
+      "viewKinds": [
+        "list",
+        "detail"
+      ],
+      "staticOnly": false,
+      "payloadRisk": "high",
+      "fanoutRisk": "low"
+    },
+    {
+      "id": "route:POST:/api/admin/reddit/communities/[communityId]/reclassify",
+      "kind": "api_route",
+      "title": "POST /api/admin/reddit/communities/[communityId]/reclassify",
+      "pathPattern": "/api/admin/reddit/communities/[communityId]/reclassify",
+      "symbol": "POST",
+      "sourceFile": "src/app/api/admin/reddit/communities/[communityId]/reclassify/route.ts",
+      "sourceLocator": {
+        "line": 4,
+        "symbol": "POST"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:app_api_route"
+      ],
+      "usageTier": "manual",
+      "polls": false,
+      "pollCadenceMs": null,
+      "automatic": false,
+      "loadsLargeDatasets": true,
+      "usesPagination": false,
+      "returnsWideRowsOrBlobsOrRawJson": false,
+      "fansOutQueries": false,
+      "postgresAccess": "none",
+      "viewKinds": [
+        "list",
+        "detail"
+      ],
+      "staticOnly": false,
+      "payloadRisk": "high",
+      "fanoutRisk": "low"
+    },
+    {
+      "id": "route:POST:/api/admin/reddit/runs/[runId]/control",
+      "kind": "api_route",
+      "title": "POST /api/admin/reddit/runs/[runId]/control",
+      "pathPattern": "/api/admin/reddit/runs/[runId]/control",
+      "symbol": "POST",
+      "sourceFile": "src/app/api/admin/reddit/runs/[runId]/control/route.ts",
+      "sourceLocator": {
+        "line": 4,
+        "symbol": "POST"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:app_api_route"
+      ],
+      "usageTier": "manual",
+      "polls": false,
+      "pollCadenceMs": null,
+      "automatic": false,
+      "loadsLargeDatasets": false,
+      "usesPagination": false,
+      "returnsWideRowsOrBlobsOrRawJson": false,
+      "fansOutQueries": false,
+      "postgresAccess": "none",
+      "viewKinds": [
+        "list",
+        "detail"
+      ],
+      "staticOnly": false,
+      "payloadRisk": "low",
       "fanoutRisk": "low"
     },
     {
@@ -20915,7 +21356,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/reddit-window-posts/page.tsx",
       "sourceLocator": {
-        "line": 1696,
+        "line": 1697,
         "matchedText": "\"/api/admin/reddit/post-matches\""
       },
       "provenance": "static_scan",
@@ -24112,14 +24553,20 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
         "route:GET:/api/admin/reddit/communities",
         "route:GET:/api/admin/reddit/communities/[communityId]",
         "route:GET:/api/admin/reddit/communities/[communityId]/backfill/snapshot",
+        "route:GET:/api/admin/reddit/communities/[communityId]/coverage",
         "route:GET:/api/admin/reddit/communities/[communityId]/discover",
         "route:GET:/api/admin/reddit/communities/[communityId]/episode-discussions/refresh",
+        "route:GET:/api/admin/reddit/communities/[communityId]/legacy-inventory",
         "route:GET:/api/admin/reddit/communities/[communityId]/posts/[postId]/details",
         "route:GET:/api/admin/reddit/communities/[communityId]/posts/resolve",
+        "route:GET:/api/admin/reddit/communities/[communityId]/settings",
         "route:GET:/api/admin/reddit/communities/[communityId]/stored-post-counts",
         "route:GET:/api/admin/reddit/communities/[communityId]/stored-posts",
+        "route:GET:/api/admin/reddit/jobs/[jobId]",
         "route:GET:/api/admin/reddit/runs",
         "route:GET:/api/admin/reddit/runs/[runId]",
+        "route:GET:/api/admin/reddit/runs/[runId]/compare",
+        "route:GET:/api/admin/reddit/runs/[runId]/targets",
         "route:GET:/api/admin/reddit/threads",
         "route:GET:/api/admin/reddit/threads/[threadId]",
         "route:GET:/api/admin/shows",
@@ -24264,6 +24711,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
         "route:PATCH:/api/admin/flashback/quizzes/[quizId]",
         "route:PATCH:/api/admin/networks-streaming/overrides/[id]",
         "route:PATCH:/api/admin/reddit/communities/[communityId]",
+        "route:PATCH:/api/admin/reddit/communities/[communityId]/settings",
         "route:PATCH:/api/admin/reddit/post-matches",
         "route:PATCH:/api/admin/reddit/threads/[threadId]",
         "route:PATCH:/api/admin/trr-api/brands/families/[familyId]",
@@ -24291,9 +24739,15 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
         "route:POST:/api/admin/recent-people",
         "route:POST:/api/admin/reddit/auto-categorize-flairs-batch",
         "route:POST:/api/admin/reddit/communities",
+        "route:POST:/api/admin/reddit/communities/[communityId]/analysis",
         "route:POST:/api/admin/reddit/communities/[communityId]/auto-categorize-flairs",
+        "route:POST:/api/admin/reddit/communities/[communityId]/discover",
+        "route:POST:/api/admin/reddit/communities/[communityId]/episode-discussions/refresh",
         "route:POST:/api/admin/reddit/communities/[communityId]/episode-discussions/save",
         "route:POST:/api/admin/reddit/communities/[communityId]/flairs/refresh",
+        "route:POST:/api/admin/reddit/communities/[communityId]/lifecycle",
+        "route:POST:/api/admin/reddit/communities/[communityId]/reclassify",
+        "route:POST:/api/admin/reddit/runs/[runId]/control",
         "route:POST:/api/admin/reddit/runs/backfill",
         "route:POST:/api/admin/reddit/threads",
         "route:POST:/api/admin/scrape/import",
@@ -24817,11 +25271,11 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "renders_view": []
     },
     "summary": {
-      "totalNodes": 596,
+      "totalNodes": 609,
       "totalEdges": 212,
       "nodesByKind": {
         "ui_surface": 57,
-        "api_route": 405,
+        "api_route": 418,
         "backend_endpoint": 129,
         "repository_surface": 1,
         "polling_loop": 4

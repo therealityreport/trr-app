@@ -114,7 +114,7 @@ export async function GET(request: NextRequest) {
       },
     });
 
-    return NextResponse.json(payload, cacheHit ? { headers: { "x-trr-cache": "hit" } } : undefined);
+    return NextResponse.json(payload, { headers: { "Cache-Control": "no-store", ...(cacheHit ? { "x-trr-cache": "hit" } : {}) } });
   } catch (error) {
     console.error("[api] Failed to list reddit threads", error);
     const message = error instanceof Error ? error.message : "failed";
