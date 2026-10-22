@@ -17,6 +17,10 @@ import {
 } from "@/lib/server/trr-api/admin-read-proxy";
 import type { VerifiedAdminContext } from "@/lib/server/trr-api/internal-admin-auth";
 
+// A stored window is a primary content read; a backend cold start can exceed
+// the five-second budget used for small metadata and polling requests.
+const REDDIT_WINDOW_READ_TIMEOUT_MS = 25_000;
+
 export interface RedditCommunityRow {
   id: string;
   trr_show_id: string;
@@ -815,7 +819,7 @@ export async function getStoredWindowPostsByCommunityAndSeason(
     apiVersion: "v2",
     adminContext: options.adminContext,
     queryString: query.toString(),
-    timeoutMs: ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
+    timeoutMs: REDDIT_WINDOW_READ_TIMEOUT_MS,
     routeName: "reddit-sources:post-windows",
   });
   if (upstream.status !== 200) {

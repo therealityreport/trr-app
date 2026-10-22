@@ -819,7 +819,7 @@ const REQUEST_TIMEOUT_MS = {
   discoverRefresh: 180_000,
   runStatus: 30_000,
   seasonContext: 75_000,
-  periodOptions: 20_000,
+  periodOptions: 30_000,
   episodeRefresh: 90_000,
   episodeSave: 90_000,
 } as const;
@@ -2627,7 +2627,6 @@ export default function RedditSourcesManager({
   const seasonOptionsCacheRef = useRef<Map<string, ShowSeasonOption[]>>(new Map());
   const seasonEpisodesRef = useRef<SeasonEpisodeRow[]>([]);
   const periodOptionsCacheRef = useRef<Map<string, EpisodePeriodOption[]>>(new Map());
-  const periodOptionsByShowCacheRef = useRef<Map<string, EpisodePeriodOption[]>>(new Map());
   const periodOptionsRef = useRef<EpisodePeriodOption[]>([]);
   const seasonIdByShowAndNumberRef = useRef<Map<string, string>>(new Map());
   const showMetadataCacheRef = useRef<Map<string, { showLabel: string; showSlug: string | null }>>(
@@ -4039,9 +4038,9 @@ export default function RedditSourcesManager({
   }, [episodeWindowBoundsByContainer]);
 
   useEffect(() => {
-    if (!storedCountsCommunityId || !episodeSeasonId) {
+    if (!storedCountsCommunityId || !episodeSeasonId || periodsLoading || periodOptions.length === 0) {
       setRedditAnalyticsSummary(null);
-      setRedditAnalyticsLoading(false);
+      setRedditAnalyticsLoading(periodsLoading);
       return;
     }
     const controller = new AbortController();
@@ -4078,7 +4077,7 @@ export default function RedditSourcesManager({
     return () => {
       controller.abort();
     };
-  }, [episodeSeasonId, fetchWithTimeout, redditAnalyticsWindows, storedCountsCommunityId, storedCountsRefreshNonce]);
+  }, [episodeSeasonId, fetchWithTimeout, periodOptions.length, periodsLoading, redditAnalyticsWindows, storedCountsCommunityId, storedCountsRefreshNonce]);
 
   const seasonalBoundaryPeriods = useMemo(
     () =>
@@ -4402,8 +4401,12 @@ export default function RedditSourcesManager({
           setPeriodOptions(cachedPeriods);
           setSelectedPeriodKey("all-periods");
         }
-        periodOptionsByShowCacheRef.current.set(community.trr_show_id, cachedPeriods);
         return;
+      }
+
+      if (isEpisodeContextRequestActive(requestToken, options?.signal)) {
+        periodOptionsRef.current = [];
+        setPeriodOptions([]);
       }
 
       const headers = await getAuthHeaders();
@@ -4414,7 +4417,7 @@ export default function RedditSourcesManager({
         inFlightPeriodOptions ??
         (async (): Promise<EpisodePeriodOption[] | null> => {
           const analyticsResponse = await fetchWithTimeout(
-            `/api/admin/trr-api/shows/${community.trr_show_id}/seasons/${season.season_number}/social/analytics?${analyticsParams.toString()}`,
+            `/api/admin/trr-api/shows/${community.trr_show_id}/seasons/${season.season_number}/social/analytics/periods?${analyticsParams.toString()}`,
             {
               headers,
               cache: "no-store",
@@ -4482,27 +4485,6 @@ export default function RedditSourcesManager({
           }
           return true;
         }
-        if (periodOptionsRef.current.length > 0) {
-          if (isEpisodeContextRequestActive(requestToken, options?.signal)) {
-            setPeriodOptions(periodOptionsRef.current);
-            setSelectedPeriodKey((current) =>
-              periodOptionsRef.current.some((period) => period.key === current)
-                ? current
-                : "all-periods",
-            );
-          }
-          return true;
-        }
-        const showCached = periodOptionsByShowCacheRef.current.get(community.trr_show_id);
-        if (Array.isArray(showCached) && showCached.length > 0) {
-          if (isEpisodeContextRequestActive(requestToken, options?.signal)) {
-            setPeriodOptions(showCached);
-            setSelectedPeriodKey((current) =>
-              showCached.some((period) => period.key === current) ? current : "all-periods",
-            );
-          }
-          return true;
-        }
         return false;
       };
       let resolvedPeriods: EpisodePeriodOption[] | null = null;
@@ -4521,11 +4503,12 @@ export default function RedditSourcesManager({
         if (isEpisodeContextRequestActive(requestToken, options?.signal)) {
           const preserved = preserveKnownPeriodsForSeason();
           if (!preserved) {
+            appendEpisodeContextWarning("Season period dates could not load. Reload the page to retry.");
             console.warn("[reddit_period_options_unavailable]", {
               show_id: community.trr_show_id,
               season_id: season.id,
               season_number: season.season_number,
-              reason: "social_analytics_unavailable",
+              reason: "season_periods_unavailable",
             });
           }
         }
@@ -4534,7 +4517,6 @@ export default function RedditSourcesManager({
       const periods = resolvedPeriods;
       if (periods.length > 0) {
         periodOptionsCacheRef.current.set(periodCacheKey, periods);
-        periodOptionsByShowCacheRef.current.set(community.trr_show_id, periods);
         periodOptionsRef.current = periods;
         if (isEpisodeContextRequestActive(requestToken, options?.signal)) {
           setPeriodOptions(periods);
@@ -4545,6 +4527,7 @@ export default function RedditSourcesManager({
       if (isEpisodeContextRequestActive(requestToken, options?.signal)) {
         const preserved = preserveKnownPeriodsForSeason();
         if (!preserved) {
+          appendEpisodeContextWarning("Season period dates could not load. Reload the page to retry.");
           console.warn("[reddit_period_options_empty]", {
             show_id: community.trr_show_id,
             season_id: season.id,
@@ -4554,6 +4537,7 @@ export default function RedditSourcesManager({
       }
     },
     [
+      appendEpisodeContextWarning,
       fetchWithTimeout,
       getAuthHeaders,
       isEpisodeContextRequestActive,
@@ -4822,23 +4806,21 @@ export default function RedditSourcesManager({
             return;
           }
           console.warn("[reddit_period_options_background_failed]", err);
+          appendEpisodeContextWarning("Season period dates could not load. Reload the page to retry.");
         });
-        await loadSeasonEpisodesForSeason(resolvedSeason.id, {
-          ...options,
-          requestToken,
-        });
+        await Promise.all([
+          periodOptionsPromise,
+          loadSeasonEpisodesForSeason(resolvedSeason.id, { ...options, requestToken }),
+        ]);
         logRedditPerfTiming("core_context_ready", startedAt, {
           community_id: community.id,
           season_id: resolvedSeason.id,
           season_number: resolvedSeason.season_number,
         });
-        void periodOptionsPromise.then(() => {
-          if (!isEpisodeContextRequestActive(requestToken, options?.signal)) return;
-          logRedditPerfTiming("full_context_ready", startedAt, {
-            community_id: community.id,
-            season_id: resolvedSeason.id,
-            season_number: resolvedSeason.season_number,
-          });
+        logRedditPerfTiming("full_context_ready", startedAt, {
+          community_id: community.id,
+          season_id: resolvedSeason.id,
+          season_number: resolvedSeason.season_number,
         });
       } finally {
         if (isEpisodeContextRequestActive(requestToken, options?.signal)) {
@@ -4847,6 +4829,7 @@ export default function RedditSourcesManager({
       }
     },
     [
+      appendEpisodeContextWarning,
       fetchWithTimeout,
       getAuthHeaders,
       isEpisodeContextRequestActive,
@@ -7365,9 +7348,7 @@ export default function RedditSourcesManager({
       if (season) {
         const requestToken = episodeContextRequestTokenRef.current + 1;
         episodeContextRequestTokenRef.current = requestToken;
-        if (!isDedicatedCommunityView) {
-          setPeriodsLoading(true);
-        }
+        setPeriodsLoading(true);
         setSelectedPeriodKey("all-periods");
         void Promise.all([
           loadSeasonEpisodesForSeason(season.id, {
@@ -7396,7 +7377,6 @@ export default function RedditSourcesManager({
       }
     },
     [
-      isDedicatedCommunityView,
       loadPeriodOptionsForSeason,
       loadSeasonEpisodesForSeason,
       seasonOptions,

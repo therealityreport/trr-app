@@ -1,6 +1,6 @@
 import React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 const { fetchMock, pathnameMock } = vi.hoisted(() => ({ fetchMock: vi.fn(), pathnameMock: vi.fn() }));
 vi.mock("next/navigation", () => ({ usePathname: pathnameMock, useRouter: () => ({ push: vi.fn(), replace: vi.fn() }) }));
 vi.mock("@/lib/admin/client-auth", () => ({ fetchAdminWithAuth: fetchMock, getClientAuthHeaders: async () => ({}) }));
@@ -21,6 +21,7 @@ describe("explicit undated Reddit season selection", () => {
       if (/\/reddit\/communities\?/.test(url)) body = { communities: [{ ...community, id: "other-community", subreddit: "BravoRealHousewives", display_name: "Other community" }, community] };
       else if (url.includes("/seasons?")) body = { seasons };
       else if (url.includes("/episodes")) body = { episodes: [{ id: "undated-episode", episode_number: 1, air_date: null }] };
+      else if (url.includes("/social/analytics/periods?")) body = { weekly: [{ week_index: 0, label: "Pre-Season", start: "2026-09-10T00:00:00Z", end: "2026-09-16T23:59:59.999999Z" }] };
       else if (url === `/api/admin/trr-api/shows/${showId}`) body = { show: { id: showId, name: "RHOSLC", alternative_names: ["RHOSLC"], slug: "rhoslc" } };
       return new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
     });
@@ -43,6 +44,8 @@ describe("explicit undated Reddit season selection", () => {
   });
   it("uses displayed bounds and renders partial/future counts without a stale badge", async () => {
     const fallback = fetchMock.getMockImplementation()!;
+    let releasePeriods!: (response: Response) => void;
+    const periodsResponse = new Promise<Response>((resolve) => { releasePeriods = resolve; });
     fetchMock.mockImplementation(async (input: string | URL, init?: RequestInit) => {
       const url = String(input);
       let body: unknown;
@@ -55,12 +58,18 @@ describe("explicit undated Reddit season selection", () => {
         };
       } else if (url.includes("/episodes")) {
         body = { episodes: [{ id: "ep1", episode_number: 1, air_date: "2026-09-16" }] };
-      } else if (url.includes("/social/analytics?")) {
-        body = { weekly: [{ week_index: 1, label: "Episode 1", start: "2026-09-16T23:00:00Z", end: "2026-09-23T23:00:00Z" }] };
+      } else if (url.includes("/social/analytics/periods?")) {
+        return periodsResponse;
       } else return fallback(input, init);
       return new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
     });
     render(<RedditSourcesManager mode="global" showSlug="rhoslc" seasonNumber={7} initialCommunityId="rhoslc" hideCommunityList />);
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/social/analytics/periods?"))).toBe(true));
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/reddit/analytics/community/"))).toBe(false);
+    await act(async () => releasePeriods(new Response(JSON.stringify({ weekly: [
+      { week_index: 0, label: "Pre-Season", week_type: "preseason", episode_number: null, start: "2026-09-10T00:00:00Z", end: "2026-09-16T23:59:59.999999Z" },
+      { week_index: 1, label: "Week 1", week_type: "episode", episode_number: 1, start: "2026-09-17T00:00:00Z", end: "2026-09-23T23:59:59.999999Z" },
+    ] }), { status: 200 })));
     expect(await screen.findByText("5 covered · 2 partial · 7 upcoming")).toBeInTheDocument();
     expect(screen.getByText(/Captured through/)).toHaveTextContent("10/21/2026");
     await waitFor(() => {
@@ -69,8 +78,21 @@ describe("explicit undated Reddit season selection", () => {
       expect(requests.length).toBeGreaterThan(0);
       const windows = JSON.parse(requests.at(-1)!.searchParams.get("windows")!);
       expect(windows).toContainEqual(expect.objectContaining({ key: "episode-1", start: "2026-09-16T23:01:01.000Z" }));
+      expect(windows).toContainEqual(expect.objectContaining({ key: "period-preseason", start: "2026-09-10T00:00:00.000Z", end: "2026-09-16T23:00:00.000Z" }));
     });
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/social/analytics?"))).toBe(false);
     expect(screen.queryByRole("button", { name: /Rerun Stale Windows/ })).not.toBeInTheDocument();
+  });
+
+  it("does not report coverage against fallback dates when period metadata fails", async () => {
+    const fallback = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((input: string | URL, init?: RequestInit) =>
+      String(input).includes("/social/analytics/periods?")
+        ? Promise.resolve(new Response("{}", { status: 504 }))
+        : fallback(input, init));
+    render(<RedditSourcesManager mode="global" showSlug="rhoslc" seasonNumber={7} initialCommunityId="rhoslc" hideCommunityList episodeDiscussionsPlacement="inline" />);
+    expect(await screen.findByText("Season period dates could not load. Reload the page to retry.")).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/reddit/analytics/community/"))).toBe(false);
   });
 
 });
