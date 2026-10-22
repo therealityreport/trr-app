@@ -1772,8 +1772,9 @@ function AdminRedditWindowPostsPageContent() {
     if (pathname !== canonicalPath && canonicalRedirectRef.current !== canonicalPath) {
       canonicalRedirectRef.current = canonicalPath;
       router.replace(canonicalPath as Route);
-      return;
     }
+    // The public-facing admin alias can normalize back to the same pathname.
+    // Start the read here rather than waiting for a navigation effect that may not run.
     void loadWindowPosts(false);
   }, [context, hasAccess, isDirectWindowHelperRoute, loadWindowPosts, pathname, router, user]);
 
@@ -1857,13 +1858,7 @@ function AdminRedditWindowPostsPageContent() {
       if (!context) return null;
       const normalizedPostId = thread.reddit_post_id.trim();
       if (!normalizedPostId) return null;
-      const windowHref = buildAdminRedditCommunityWindowUrl({
-        communitySlug: context.communitySlug,
-        showSlug: context.showSlug,
-        seasonNumber: context.seasonNumber,
-        windowKey: toCanonicalWindowToken(context.containerKey),
-      });
-      const detailHref = buildAdminRedditCommunityWindowPostUrl({
+      return buildAdminRedditCommunityWindowPostUrl({
         communitySlug: context.communitySlug,
         showSlug: context.showSlug,
         seasonNumber: context.seasonNumber,
@@ -1872,9 +1867,6 @@ function AdminRedditWindowPostsPageContent() {
         title: thread.title,
         author: thread.author,
       });
-      if (detailHref === windowHref) return detailHref;
-      const detailSlug = detailHref.slice(windowHref.length + 1);
-      return `${windowHref}/${encodeURIComponent(normalizedPostId)}/${detailSlug}`;
     },
     [context],
   );
