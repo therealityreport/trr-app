@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { NextConfig } from "next";
 import { withSentryConfig } from "@sentry/nextjs";
+import { sentryEnvironment } from "./src/lib/observability/sentry-options";
 
 const IS_DEV = process.env.NODE_ENV === "development";
 const DIST_DIR = process.env.NEXT_DIST_DIR?.trim() || ".next";
@@ -53,6 +54,15 @@ const firebaseAliases = Object.fromEntries(
 );
 
 const nextConfig: NextConfig = {
+  // Only public metadata is projected here. Upload credentials stay server-only.
+  env: {
+    NEXT_PUBLIC_SENTRY_ENVIRONMENT: sentryEnvironment(
+      process.env.VERCEL_ENV,
+      process.env.NEXT_PUBLIC_TRR_ENV || process.env.TRR_ENV || process.env.APP_ENV,
+      process.env.NODE_ENV,
+    ),
+    NEXT_PUBLIC_SENTRY_RELEASE: process.env.SENTRY_RELEASE || process.env.VERCEL_GIT_COMMIT_SHA || "",
+  },
   // Preserve RSC cache keys through canonical admin redirects and rewrites.
   skipProxyUrlNormalize: true,
   reactStrictMode: true,
@@ -317,10 +327,10 @@ const nextConfig: NextConfig = {
 // export the plain `nextConfig` untouched so the build/runtime is unchanged and
 // the Sentry webpack/turbopack plugin never runs. Source map upload only happens
 // when an auth token + org/project are provided; otherwise it is skipped.
-const SENTRY_DSN = process.env.SENTRY_DSN;
-const SENTRY_ORG = process.env.SENTRY_ORG;
-const SENTRY_PROJECT = process.env.SENTRY_PROJECT;
-const SENTRY_AUTH_TOKEN = process.env.SENTRY_AUTH_TOKEN;
+const SENTRY_DSN = process.env.SENTRY_DSN || process.env.NEXT_PUBLIC_SENTRY_DSN || process.env.NEXT_PUBLIC_TRR_SENTRY_VIA_VERCEL_SENTRY_DSN;
+const SENTRY_ORG = process.env.SENTRY_ORG || process.env.TRR_SENTRY_VIA_VERCEL_SENTRY_ORG;
+const SENTRY_PROJECT = process.env.SENTRY_PROJECT || process.env.TRR_SENTRY_VIA_VERCEL_SENTRY_PROJECT;
+const SENTRY_AUTH_TOKEN = process.env.SENTRY_AUTH_TOKEN || process.env.TRR_SENTRY_VIA_VERCEL_SENTRY_AUTH_TOKEN;
 
 const config: NextConfig = SENTRY_DSN
   ? withSentryConfig(nextConfig, {
@@ -329,13 +339,15 @@ const config: NextConfig = SENTRY_DSN
       org: SENTRY_ORG,
       project: SENTRY_PROJECT,
       authToken: SENTRY_AUTH_TOKEN,
-      // Suppress all Sentry CLI build logs.
-      silent: true,
-      // Never fail the build because of Sentry (e.g. missing auth token).
-      errorHandler: () => {},
+      silent: false,
+      telemetry: false,
+      release: { name: process.env.SENTRY_RELEASE || process.env.VERCEL_GIT_COMMIT_SHA },
+      // Keep the app available while making upload failures visible to operators.
+      errorHandler: () => { console.warn("[Sentry] Source-map upload failed. Check the Sentry integration and upload credentials."); },
       // Skip source map upload entirely unless full upload creds are present.
       sourcemaps: {
         disable: !(SENTRY_AUTH_TOKEN && SENTRY_ORG && SENTRY_PROJECT),
+        deleteSourcemapsAfterUpload: true,
       },
       // Avoid extra route handlers/work when not explicitly enabled.
       disableLogger: true,
