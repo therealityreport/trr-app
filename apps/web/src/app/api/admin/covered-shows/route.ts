@@ -1,3 +1,4 @@
+import { fetchAdminPrimaryRead } from "@/lib/server/trr-api/primary-read";
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin, toVerifiedAdminContext } from "@/lib/server/auth";
 import {
@@ -57,10 +58,9 @@ export async function GET(request: NextRequest) {
       COVERED_SHOWS_CACHE_NAMESPACE,
       cacheKey,
       async () => {
-        const upstream = await fetchAdminBackendJson("/admin/covered-shows", {
+        const upstream = await fetchAdminPrimaryRead("/admin/covered-shows", {
           apiVersion: "v2",
           adminContext,
-          timeoutMs: ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
           routeName: "covered-shows:list",
         });
         if (upstream.status !== 200) {

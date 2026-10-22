@@ -34,15 +34,6 @@ const PUBLIC_ROUTE_FILES = [
   "src/app/[showId]/s[seasonNumber]/social/reddit/[communitySlug]/[windowKey]/post/[postId]/page.tsx",
 ];
 
-// The season workspace renders directly to preserve explicit season context.
-// Its behavior is covered by reddit-community-view-page.test.tsx; only the
-// legacy window/detail routes below remain redirect shims.
-const LEGACY_ADMIN_REDDIT_WINDOW_ROUTE_FILES = [
-  "src/app/admin/social/reddit/[communitySlug]/[showSlug]/s[seasonNumber]/[windowKey]/page.tsx",
-  "src/app/admin/social/reddit/[communitySlug]/[showSlug]/s[seasonNumber]/[windowKey]/post/[postId]/page.tsx",
-  "src/app/admin/social/reddit/[communitySlug]/[showSlug]/s[seasonNumber]/[windowKey]/[detailSlug]/page.tsx",
-];
-
 describe("public route boundary", () => {
   it("moves only the general season page and shares the reserved-root guard with proxy routing", () => {
     const appRoot = path.resolve(process.cwd(), "src/app/[showId]");
@@ -108,16 +99,4 @@ describe("public route boundary", () => {
     },
   );
 
-  it.each(LEGACY_ADMIN_REDDIT_WINDOW_ROUTE_FILES)(
-    "keeps %s as a redirect shim instead of an admin page re-export",
-    (relativePath) => {
-      const filePath = path.resolve(process.cwd(), relativePath);
-      const source = fs.readFileSync(filePath, "utf8");
-
-      expect(source).toMatch(/from "next\/navigation"/);
-      expect(source).toMatch(/redirect\(/);
-      expect(source).not.toMatch(/export \{ default \} from "@\/app\/admin\//);
-      expect(source).not.toMatch(/export \{ default \} from "@\/components\/admin\//);
-    },
-  );
 });

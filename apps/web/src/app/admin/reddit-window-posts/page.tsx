@@ -1001,7 +1001,7 @@ function AdminRedditWindowPostsPageContent() {
         error?: string;
       }>({
         url: "/api/admin/reddit/communities?include_inactive=1&include_assigned_threads=0",
-        timeoutMs: 8_000,
+        timeoutMs: 30_000,
         preferredUser: user,
         signal: resolveController.signal,
       });
@@ -1035,7 +1035,7 @@ function AdminRedditWindowPostsPageContent() {
         error?: string;
       }>({
         url: `/api/admin/trr-api/shows/${selectedCommunity.trr_show_id}/seasons?limit=100&include_episode_signal=true`,
-        timeoutMs: 8_000,
+        timeoutMs: 30_000,
         preferredUser: user,
         signal: resolveController.signal,
       });
@@ -1082,7 +1082,7 @@ function AdminRedditWindowPostsPageContent() {
             error?: string;
           }>({
             url: `/api/admin/trr-api/seasons/${resolvedSeason.id}/episodes?limit=250&offset=0`,
-            timeoutMs: 8_000,
+            timeoutMs: 30_000,
             preferredUser: user,
             signal: resolveController.signal,
           }),

@@ -859,7 +859,7 @@ function AdminRedditPostDetailsPageContent() {
         error?: string;
       }>({
         url: `/api/admin/trr-api/shows/${selectedCommunity.trr_show_id}/seasons?limit=100&include_episode_signal=true`,
-        timeoutMs: 8_000,
+        timeoutMs: 30_000,
         preferredUser: user,
         signal: resolveController.signal,
       });

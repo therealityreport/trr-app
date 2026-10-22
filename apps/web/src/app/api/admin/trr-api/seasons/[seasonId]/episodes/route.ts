@@ -1,3 +1,4 @@
+import { fetchAdminPrimaryRead } from "@/lib/server/trr-api/primary-read";
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
 import {
@@ -7,9 +8,8 @@ import {
   setRouteResponseCache,
 } from "@/lib/server/admin/route-response-cache";
 import {
-  ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
   buildAdminProxyErrorResponse,
-  fetchAdminBackendJson,
+  buildAdminBackendStatusError,
 } from "@/lib/server/trr-api/admin-read-proxy";
 import {
   TRR_SEASON_EPISODES_CACHE_NAMESPACE,
@@ -70,21 +70,20 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       TRR_SEASON_EPISODES_CACHE_NAMESPACE,
       cacheKey,
       async () => {
-        const upstream = await fetchAdminBackendJson(
+        const upstream = await fetchAdminPrimaryRead(
           `/admin/trr-api/seasons/${seasonId}/episodes?${upstreamParams.toString()}`,
           {
-            timeoutMs: ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
             routeName: "season-episodes",
           },
         );
         if (upstream.status !== 200) {
-          throw new Error(
-            typeof upstream.data.error === "string"
-              ? upstream.data.error
-              : typeof upstream.data.detail === "string"
-                ? upstream.data.detail
-                : "Failed to get TRR episodes",
-          );
+          throw buildAdminBackendStatusError({
+            status: upstream.status,
+            data: upstream.data,
+            fallbackMessage: "Failed to get TRR episodes",
+            routeName: "season-episodes",
+            requestRole: "primary",
+          });
         }
         setRouteResponseCache(
           TRR_SEASON_EPISODES_CACHE_NAMESPACE,

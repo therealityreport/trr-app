@@ -562,7 +562,7 @@ function discoverRequestTargets(source: string): DiscoveredRequestTarget[] {
   }
 
   for (const match of source.matchAll(
-    /fetchAdminBackendJson\s*\(\s*([`'"][\s\S]*?[`'"])\s*,\s*\{([\s\S]*?)\n\s*\}\s*\)/g,
+    /fetchAdmin(?:BackendJson|PrimaryRead)\s*\(\s*([`'"][\s\S]*?[`'"])\s*,\s*\{([\s\S]*?)\n\s*\}\s*\)/g,
   )) {
     const literal = match[1];
     const suffix = literal ? normalizeStringPathPattern(literal) : null;
@@ -583,7 +583,9 @@ function discoverRequestTargets(source: string): DiscoveredRequestTarget[] {
       provenance: "static_scan",
       confidence: "high",
       verificationStatus: "verified",
-      basis: ["static_scan:fetchAdminBackendJson:explicit_api_version"],
+      basis: [match[0].startsWith("fetchAdminPrimaryRead")
+        ? "static_scan:fetchAdminPrimaryRead:explicit_api_version"
+        : "static_scan:fetchAdminBackendJson:explicit_api_version"],
       routeMethod: method,
     });
   }

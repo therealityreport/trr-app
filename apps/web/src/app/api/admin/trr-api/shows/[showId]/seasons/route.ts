@@ -1,9 +1,8 @@
+import { fetchAdminPrimaryRead } from "@/lib/server/trr-api/primary-read";
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
 import {
-  ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
   buildAdminProxyErrorResponse,
-  fetchAdminBackendJson,
 } from "@/lib/server/trr-api/admin-read-proxy";
 import {
   buildUserScopedRouteCacheKey,
@@ -117,10 +116,9 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       cacheKey,
       async () => {
         try {
-          const upstream = await fetchAdminBackendJson(
+          const upstream = await fetchAdminPrimaryRead(
             `/admin/trr-api/shows/${showId}/seasons?${upstreamParams.toString()}`,
             {
-              timeoutMs: ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
               routeName: "show-seasons",
             },
           );

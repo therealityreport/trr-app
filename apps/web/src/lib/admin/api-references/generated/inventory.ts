@@ -3,9 +3,9 @@ import type { AdminApiReferenceInventory } from "@/lib/admin/api-references/type
 export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
   "inventorySchemaVersion": "1.0.0",
   "generatorVersion": "1.0.0",
-  "generatedAt": "2026-10-21T22:53:51.781Z",
-  "sourceCommitSha": "0e673fd11c1df1737dd5f094571afdfeae71e2a2",
-  "overrideDigest": "f1e3bf9c51ea456fc5bcdcb1874f0132b823ef8c38539df9bc92c3f87e9961d3",
+  "generatedAt": "2026-10-22T07:21:12.010Z",
+  "sourceCommitSha": "ea63cdb6be387101aa34bed6a9a58e73faacac03",
+  "overrideDigest": "45a4759bd47a0c80cfa12afe9b325647fe7e09833ec1687dc2accb459108c24c",
   "nodes": [
     {
       "id": "backend:DELETE:/api/v1/admin/brands/logos/options/saved/[assetId]",
@@ -1365,14 +1365,14 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/covered-shows/route.ts",
       "sourceLocator": {
-        "line": 60,
+        "line": 61,
         "matchedText": "\"/admin/covered-shows\""
       },
       "provenance": "static_scan",
       "confidence": "high",
       "verificationStatus": "verified",
       "basis": [
-        "static_scan:fetchAdminBackendJson:explicit_api_version"
+        "static_scan:fetchAdminPrimaryRead:explicit_api_version"
       ],
       "usageTier": "manual",
       "polls": false,
@@ -5912,6 +5912,111 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "fanoutRisk": "low"
     },
     {
+      "id": "page:/admin/social/reddit/[communitySlug]/[showSlug]/s[seasonNumber]/[windowKey]",
+      "kind": "ui_surface",
+      "title": "Admin / Social / Reddit / CommunitySlug / ShowSlug / S[seasonNumber] / WindowKey",
+      "pathPattern": "/admin/social/reddit/[communitySlug]/[showSlug]/s[seasonNumber]/[windowKey]",
+      "symbol": "page",
+      "sourceFile": "src/app/admin/social/reddit/[communitySlug]/[showSlug]/s[seasonNumber]/[windowKey]/page.tsx",
+      "sourceLocator": {
+        "line": 1,
+        "symbol": "page"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:admin_page",
+        "derived:static_only_page"
+      ],
+      "usageTier": "manual",
+      "polls": false,
+      "pollCadenceMs": null,
+      "automatic": false,
+      "loadsLargeDatasets": true,
+      "usesPagination": false,
+      "returnsWideRowsOrBlobsOrRawJson": false,
+      "fansOutQueries": false,
+      "postgresAccess": "none",
+      "viewKinds": [
+        "list",
+        "detail"
+      ],
+      "staticOnly": true,
+      "payloadRisk": "high",
+      "fanoutRisk": "low"
+    },
+    {
+      "id": "page:/admin/social/reddit/[communitySlug]/[showSlug]/s[seasonNumber]/[windowKey]/[detailSlug]",
+      "kind": "ui_surface",
+      "title": "Admin / Social / Reddit / CommunitySlug / ShowSlug / S[seasonNumber] / WindowKey / DetailSlug",
+      "pathPattern": "/admin/social/reddit/[communitySlug]/[showSlug]/s[seasonNumber]/[windowKey]/[detailSlug]",
+      "symbol": "page",
+      "sourceFile": "src/app/admin/social/reddit/[communitySlug]/[showSlug]/s[seasonNumber]/[windowKey]/[detailSlug]/page.tsx",
+      "sourceLocator": {
+        "line": 1,
+        "symbol": "page"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:admin_page",
+        "derived:static_only_page"
+      ],
+      "usageTier": "manual",
+      "polls": false,
+      "pollCadenceMs": null,
+      "automatic": false,
+      "loadsLargeDatasets": true,
+      "usesPagination": false,
+      "returnsWideRowsOrBlobsOrRawJson": false,
+      "fansOutQueries": false,
+      "postgresAccess": "none",
+      "viewKinds": [
+        "list",
+        "detail"
+      ],
+      "staticOnly": true,
+      "payloadRisk": "high",
+      "fanoutRisk": "low"
+    },
+    {
+      "id": "page:/admin/social/reddit/[communitySlug]/[showSlug]/s[seasonNumber]/[windowKey]/post/[postId]",
+      "kind": "ui_surface",
+      "title": "Admin / Social / Reddit / CommunitySlug / ShowSlug / S[seasonNumber] / WindowKey / Post / PostId",
+      "pathPattern": "/admin/social/reddit/[communitySlug]/[showSlug]/s[seasonNumber]/[windowKey]/post/[postId]",
+      "symbol": "page",
+      "sourceFile": "src/app/admin/social/reddit/[communitySlug]/[showSlug]/s[seasonNumber]/[windowKey]/post/[postId]/page.tsx",
+      "sourceLocator": {
+        "line": 1,
+        "symbol": "page"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:admin_page",
+        "derived:static_only_page"
+      ],
+      "usageTier": "manual",
+      "polls": false,
+      "pollCadenceMs": null,
+      "automatic": false,
+      "loadsLargeDatasets": true,
+      "usesPagination": false,
+      "returnsWideRowsOrBlobsOrRawJson": false,
+      "fansOutQueries": false,
+      "postgresAccess": "none",
+      "viewKinds": [
+        "list",
+        "detail"
+      ],
+      "staticOnly": true,
+      "payloadRisk": "high",
+      "fanoutRisk": "low"
+    },
+    {
       "id": "page:/admin/survey-responses",
       "kind": "ui_surface",
       "title": "Admin / Survey Responses",
@@ -7534,7 +7639,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/covered-shows/route.ts",
       "sourceLocator": {
-        "line": 39,
+        "line": 40,
         "symbol": "GET"
       },
       "provenance": "manual_override",
@@ -11617,7 +11722,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/trr-api/shows/[showId]/seasons/route.ts",
       "sourceLocator": {
-        "line": 63,
+        "line": 62,
         "symbol": "GET"
       },
       "provenance": "static_scan",
@@ -22183,14 +22288,14 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/api/admin/covered-shows/route.ts",
       "sourceLocator": {
-        "line": 60,
+        "line": 61,
         "matchedText": "\"/admin/covered-shows\""
       },
       "provenance": "static_scan",
       "confidence": "high",
       "verificationStatus": "verified",
       "basis": [
-        "static_scan:fetchAdminBackendJson:explicit_api_version"
+        "static_scan:fetchAdminPrimaryRead:explicit_api_version"
       ]
     },
     {
@@ -24507,6 +24612,9 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
         "page:/admin/social/reddit/[communitySlug]/[showSlug]/[windowKey]/[detailSlug]",
         "page:/admin/social/reddit/[communitySlug]/[showSlug]/[windowKey]/post/[postId]",
         "page:/admin/social/reddit/[communitySlug]/[showSlug]/s[seasonNumber]",
+        "page:/admin/social/reddit/[communitySlug]/[showSlug]/s[seasonNumber]/[windowKey]",
+        "page:/admin/social/reddit/[communitySlug]/[showSlug]/s[seasonNumber]/[windowKey]/[detailSlug]",
+        "page:/admin/social/reddit/[communitySlug]/[showSlug]/s[seasonNumber]/[windowKey]/post/[postId]",
         "page:/admin/survey-responses",
         "page:/admin/surveys",
         "page:/admin/surveys/[surveyKey]",
@@ -25307,10 +25415,10 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "renders_view": []
     },
     "summary": {
-      "totalNodes": 610,
+      "totalNodes": 613,
       "totalEdges": 212,
       "nodesByKind": {
-        "ui_surface": 58,
+        "ui_surface": 61,
         "api_route": 418,
         "backend_endpoint": 129,
         "repository_surface": 1,
