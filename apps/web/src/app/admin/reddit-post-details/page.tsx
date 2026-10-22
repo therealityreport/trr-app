@@ -1757,7 +1757,7 @@ function AdminRedditPostDetailsPageContent() {
                       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
                         {post.media.map((item) => (
                           <article key={item.id} className="overflow-hidden rounded-xl border border-zinc-200 bg-white text-xs shadow-sm">
-                            <div className="aspect-[4/3] bg-zinc-100">
+                            <div className="relative aspect-[4/3] bg-zinc-100">
                               {(() => {
                                 const previewUrl = getMediaPreviewUrl(item);
                                 if (!previewUrl) {
@@ -1787,6 +1787,7 @@ function AdminRedditPostDetailsPageContent() {
                                     loading="lazy"
                                     sizes="(max-width: 768px) 100vw, 240px"
                                     src={previewUrl}
+                                    unoptimized={Boolean(item.hosted_url)}
                                   />
                                 );
                               })()}

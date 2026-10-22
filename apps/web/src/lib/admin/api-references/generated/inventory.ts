@@ -3,8 +3,8 @@ import type { AdminApiReferenceInventory } from "@/lib/admin/api-references/type
 export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
   "inventorySchemaVersion": "1.0.0",
   "generatorVersion": "1.0.0",
-  "generatedAt": "2026-10-22T07:38:30.866Z",
-  "sourceCommitSha": "090ab6ac08fe048ce5354ac7cf7f255de35e1551",
+  "generatedAt": "2026-10-22T18:08:46.649Z",
+  "sourceCommitSha": "d8dae43f8d3c84f5a68eb95a63f7735b59071164",
   "overrideDigest": "45a4759bd47a0c80cfa12afe9b325647fe7e09833ec1687dc2accb459108c24c",
   "nodes": [
     {
@@ -11928,6 +11928,40 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "sourceFile": "src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/mirror-coverage/route.ts",
       "sourceLocator": {
         "line": 22,
+        "symbol": "GET"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:app_api_route"
+      ],
+      "usageTier": "manual",
+      "polls": false,
+      "pollCadenceMs": null,
+      "automatic": false,
+      "loadsLargeDatasets": true,
+      "usesPagination": false,
+      "returnsWideRowsOrBlobsOrRawJson": false,
+      "fansOutQueries": false,
+      "postgresAccess": "none",
+      "viewKinds": [
+        "list",
+        "detail"
+      ],
+      "staticOnly": false,
+      "payloadRisk": "high",
+      "fanoutRisk": "low"
+    },
+    {
+      "id": "route:GET:/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/periods",
+      "kind": "api_route",
+      "title": "GET /api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/periods",
+      "pathPattern": "/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/periods",
+      "symbol": "GET",
+      "sourceFile": "src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/periods/route.ts",
+      "sourceLocator": {
+        "line": 16,
         "symbol": "GET"
       },
       "provenance": "static_scan",
@@ -24788,6 +24822,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
         "route:GET:/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics",
         "route:GET:/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/comments-coverage",
         "route:GET:/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/mirror-coverage",
+        "route:GET:/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/periods",
         "route:GET:/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/posts/[platform]/[sourceId]",
         "route:GET:/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/snapshot",
         "route:GET:/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/week/[weekIndex]",
@@ -25415,11 +25450,11 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "renders_view": []
     },
     "summary": {
-      "totalNodes": 613,
+      "totalNodes": 614,
       "totalEdges": 212,
       "nodesByKind": {
         "ui_surface": 61,
-        "api_route": 418,
+        "api_route": 419,
         "backend_endpoint": 129,
         "repository_surface": 1,
         "polling_loop": 4
