@@ -41,6 +41,11 @@ the Sentry build wrapper is disabled. Missing upload credentials skip source-map
 uploads. Upload failures emit an operator warning without failing the app build.
 Uploaded source maps are removed from the build output.
 
+Vercel Preview and Production set `TRR_BUILD_HEAP_MB=8192` for the existing
+16 GB build machine. The Sentry-enabled webpack build exceeded the wrapper's
+3 GB local default. This hosted override keeps the supported build wrapper and
+does not raise the default memory budget for local development.
+
 ## Verification and release
 
 1. Run `make app-validate-quick` from the workspace, the focused Sentry tests,
