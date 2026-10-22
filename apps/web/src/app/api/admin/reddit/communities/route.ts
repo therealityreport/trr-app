@@ -1,12 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/server/auth";
+import { requireAdmin, toVerifiedAdminContext } from "@/lib/server/auth";
 import type { AuthContext } from "@/lib/server/postgres";
 import { invalidateRouteResponseCache } from "@/lib/server/admin/route-response-cache";
 import {
   createRedditCommunity,
   isValidSubreddit,
-  listRedditCommunities,
-  listRedditCommunitiesWithThreads,
   normalizeSubreddit,
 } from "@/lib/server/admin/reddit-sources-repository";
 import {
@@ -15,7 +13,8 @@ import {
   REDDIT_STABLE_LIST_CACHE_NAMESPACE,
   REDDIT_STABLE_LIST_CACHE_TTL_MS,
 } from "@/lib/server/trr-api/reddit-stable-route-cache";
-import { loadStableRedditRead } from "@/lib/server/trr-api/reddit-stable-read";
+import { fetchAdminPrimaryRead } from "@/lib/server/trr-api/primary-read";
+import { buildAdminBackendStatusError, buildAdminProxyErrorResponse } from "@/lib/server/trr-api/admin-read-proxy";
 import { isValidUuid } from "@/lib/server/validation/identifiers";
 
 export const dynamic = "force-dynamic";
@@ -83,34 +82,17 @@ export async function GET(request: NextRequest) {
         );
         query.set("include_assigned_threads", includeAssignedThreads ? "true" : "false");
 
-        const resolved = await loadStableRedditRead<{ communities?: Array<Record<string, unknown>> }>({
-          backendPath: "/admin/reddit/communities",
+        const upstream = await fetchAdminPrimaryRead("/admin/reddit/communities", {
           routeName: "reddit-communities:list",
           queryString: query.toString(),
-          fallback: async () => {
-            const communities = includeAssignedThreads
-              ? await listRedditCommunitiesWithThreads({
-                  trrShowId,
-                  trrSeasonId: trrSeasonId ?? null,
-                  includeInactive,
-                  includeGlobalThreadsForSeason,
-                })
-              : (
-                  await listRedditCommunities({
-                    trrShowId,
-                    includeInactive,
-                  })
-                ).map((community) => ({
-                  ...community,
-                  assigned_thread_count: 0,
-                  assigned_threads: [],
-                }));
-            return { communities: communities as unknown as Array<Record<string, unknown>> };
-          },
+          adminContext: toVerifiedAdminContext(user),
         });
-
-        const communities = Array.isArray(resolved.payload.communities)
-          ? resolved.payload.communities
+        if (upstream.status !== 200) {
+          throw buildAdminBackendStatusError({ status: upstream.status, data: upstream.data,
+            fallbackMessage: "Failed to list reddit communities", routeName: "reddit-communities:list" });
+        }
+        const communities = Array.isArray(upstream.data.communities)
+          ? upstream.data.communities as Array<Record<string, unknown>>
           : [];
         return { communities: normalizeCommunities(communities, includeAssignedThreads) };
       },
@@ -119,10 +101,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(payload, { headers: { "Cache-Control": "no-store", ...(cacheHit ? { "x-trr-cache": "hit" } : {}) } });
   } catch (error) {
     console.error("[api] Failed to list reddit communities", error);
-    const message = error instanceof Error ? error.message : "failed";
-    const status =
-      message === "unauthorized" ? 401 : message === "forbidden" ? 403 : 500;
-    return NextResponse.json({ error: message }, { status });
+    return buildAdminProxyErrorResponse(error);
   }
 }
 

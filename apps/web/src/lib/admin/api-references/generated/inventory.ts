@@ -3,8 +3,8 @@ import type { AdminApiReferenceInventory } from "@/lib/admin/api-references/type
 export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
   "inventorySchemaVersion": "1.0.0",
   "generatorVersion": "1.0.0",
-  "generatedAt": "2026-10-22T07:21:12.010Z",
-  "sourceCommitSha": "ea63cdb6be387101aa34bed6a9a58e73faacac03",
+  "generatedAt": "2026-10-22T07:38:30.866Z",
+  "sourceCommitSha": "090ab6ac08fe048ce5354ac7cf7f255de35e1551",
   "overrideDigest": "45a4759bd47a0c80cfa12afe9b325647fe7e09833ec1687dc2accb459108c24c",
   "nodes": [
     {
@@ -8771,7 +8771,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/reddit/communities/route.ts",
       "sourceLocator": {
-        "line": 45,
+        "line": 44,
         "symbol": "GET"
       },
       "provenance": "static_scan",
@@ -15123,7 +15123,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "POST",
       "sourceFile": "src/app/api/admin/reddit/communities/route.ts",
       "sourceLocator": {
-        "line": 129,
+        "line": 108,
         "symbol": "POST"
       },
       "provenance": "static_scan",

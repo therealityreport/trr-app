@@ -24,19 +24,19 @@ import PostDetails from "@/app/admin/reddit-post-details/page";
 
 afterEach(() => { cleanup(); vi.useRealTimers(); });
 
-it("keeps post context alive while a slow season read recovers beyond eight seconds", async () => {
+it.each(["/communities?", "/seasons?"])("keeps post context alive while %s recovers beyond eight seconds", async (slowPath) => {
   vi.useFakeTimers();
   let seasonSignal: AbortSignal | undefined;
   fetchMock.mockImplementation(async (url: string, options: { signal: AbortSignal }) => {
-    if (url.includes("/communities?")) return Response.json({ communities: [{ id: "community", subreddit: "rhoslc", trr_show_id: "show", trr_show_name: "RHOSLC" }] });
-    if (url.includes("/seasons?")) {
+    if (url.includes(slowPath)) {
       seasonSignal = options.signal;
       await new Promise<void>((resolve, reject) => {
         setTimeout(resolve, 15_000);
         options.signal.addEventListener("abort", () => reject(options.signal.reason), { once: true });
       });
-      return Response.json({ seasons: [{ id: "season", season_number: 7 }] });
     }
+    if (url.includes("/communities?")) return Response.json({ communities: [{ id: "community", subreddit: "rhoslc", trr_show_id: "show", trr_show_name: "RHOSLC" }] });
+    if (url.includes("/seasons?")) return Response.json({ seasons: [{ id: "season", season_number: 7 }] });
     return Response.json({ error: "Reached post resolver after season recovery" }, { status: 404 });
   });
   render(<PostDetails />);

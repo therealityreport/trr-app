@@ -825,7 +825,7 @@ function AdminRedditPostDetailsPageContent() {
         error?: string;
       }>({
         url: "/api/admin/reddit/communities?include_inactive=1&include_assigned_threads=0",
-        timeoutMs: 8_000,
+        timeoutMs: 30_000,
         preferredUser: user,
         signal: resolveController.signal,
       });

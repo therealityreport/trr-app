@@ -2,13 +2,15 @@ import { NextRequest } from "next/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { read, guard } = vi.hoisted(() => ({ read: vi.fn(), guard: vi.fn() }));
-vi.mock("@/lib/server/auth", () => ({ requireAdmin: guard }));
+vi.mock("@/lib/server/auth", () => ({ requireAdmin: guard, toVerifiedAdminContext: (user: unknown) => user }));
 vi.mock("@/lib/server/trr-api/admin-read-proxy", async (original) => ({
   ...await original<typeof import("@/lib/server/trr-api/admin-read-proxy")>(),
   fetchAdminBackendJson: read,
 }));
 
 import { GET } from "@/app/api/admin/trr-api/seasons/[seasonId]/episodes/route";
+import { GET as getCommunities } from "@/app/api/admin/reddit/communities/route";
+import { REDDIT_STABLE_LIST_CACHE_NAMESPACE } from "@/lib/server/trr-api/reddit-stable-route-cache";
 import { AdminReadProxyError } from "@/lib/server/trr-api/admin-read-proxy";
 import { fetchAdminPrimaryRead } from "@/lib/server/trr-api/primary-read";
 import { invalidateRouteResponseCache } from "@/lib/server/admin/route-response-cache";
@@ -25,6 +27,7 @@ describe("required season reads", () => {
     read.mockReset();
     guard.mockReset().mockResolvedValue({ uid: "admin" });
     invalidateRouteResponseCache(TRR_SEASON_EPISODES_CACHE_NAMESPACE);
+    invalidateRouteResponseCache(REDDIT_STABLE_LIST_CACHE_NAMESPACE);
   });
   afterEach(() => vi.useRealTimers());
 
@@ -68,5 +71,18 @@ describe("required season reads", () => {
     guard.mockRejectedValue(new Error("unauthorized"));
     expect((await GET(request(), context)).status).toBe(401);
     expect(read).not.toHaveBeenCalled();
+  });
+
+  it("recovers the required community lookup once and preserves disabled settings and query options", async () => {
+    const data = { communities: [{ id: "community", schedule_enabled: false, ai_enabled: false, scheduled_analysis_enabled: false }] };
+    read.mockRejectedValueOnce(new AdminReadProxyError("timeout", 504, { retryable: true }))
+      .mockResolvedValueOnce({ status: 200, data, durationMs: 20 });
+    const pending = getCommunities(new NextRequest("https://admin.trr.localhost/api/admin/reddit/communities?include_inactive=1&include_assigned_threads=0"));
+    await vi.runAllTimersAsync();
+    const response = await pending;
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ communities: [{ ...data.communities[0], assigned_thread_count: 0, assigned_threads: [] }] });
+    expect(read).toHaveBeenCalledTimes(2);
+    expect(read).toHaveBeenLastCalledWith("/admin/reddit/communities", expect.objectContaining({ requestRole: "primary", adminContext: { uid: "admin" }, queryString: "include_inactive=true&include_global_threads_for_season=true&include_assigned_threads=false" }));
   });
 });
