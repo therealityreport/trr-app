@@ -1,5 +1,6 @@
 "use client";
 
+import { describeRedditWindowCoverage, formatRedditWindowCoverage, type RedditWindowCoverageCounts } from "@/lib/admin/reddit-window-coverage";
 import RedditCapturePanel from "@/components/admin/RedditCapturePanel";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
@@ -489,6 +490,9 @@ interface RedditAnalyticsContainerStatus {
   operator_hint?: string | null;
   stale?: boolean;
   stale_reason_code?: string | null;
+  coverage_state?: "covered" | "partial" | "uncovered" | "upcoming" | "unknown";
+  covered_through?: string | null;
+  evidence_run_ids?: string[];
   tracked_post_count?: number;
   matched_post_count?: number;
   show_match_post_count?: number;
@@ -513,7 +517,7 @@ interface RedditAnalyticsSummaryResponse {
     latest_run_timestamp?: string | null;
     latest_run_status?: string | null;
   };
-  coverage?: {
+  coverage?: RedditWindowCoverageCounts & {
     tracked_post_count?: number;
     detail_scraped_post_count?: number;
     comment_saved_post_count?: number;
@@ -1879,12 +1883,8 @@ const renderEpisodeMatrixCards = (
           <p className="mt-1 text-[11px] text-blue-700">{progress.message}</p>
         )}
         {!isContainerRefreshActive(progress) && analyticsStatus && (
-          <p className={`mt-1 text-[11px] ${analyticsStatus.stale ? "text-amber-700" : "text-emerald-700"}`}>
-            {analyticsStatus.stale
-              ? `Stale window · ${analyticsStatus.failure_reason_code ?? analyticsStatus.stale_reason_code ?? "needs rerun"}`
-              : analyticsStatus.failure_reason_code === "coverage_incomplete"
-                ? "Recovered with coverage incomplete"
-                : "Recovered analytics window"}
+          <p className={`mt-1 text-[11px] ${analyticsStatus.coverage_state === "covered" ? "text-emerald-700" : analyticsStatus.coverage_state === "partial" || analyticsStatus.stale ? "text-amber-700" : "text-zinc-500"}`}>
+            {describeRedditWindowCoverage(analyticsStatus, fmtDateTime)}
           </p>
         )}
         {pendingFlairGroups.length > 0 && (
@@ -2049,12 +2049,8 @@ const renderEpisodeMatrixCards = (
             <p className="mt-2 text-[11px] text-blue-700">{progress.message}</p>
           )}
           {!isContainerRefreshActive(progress) && analyticsStatus && (
-            <p className={`mt-2 text-[11px] ${analyticsStatus.stale ? "text-amber-700" : "text-emerald-700"}`}>
-              {analyticsStatus.stale
-                ? `Stale window · ${analyticsStatus.failure_reason_code ?? analyticsStatus.stale_reason_code ?? "needs rerun"}`
-                : analyticsStatus.failure_reason_code === "coverage_incomplete"
-                  ? "Recovered with coverage incomplete"
-                  : "Recovered analytics window"}
+            <p className={`mt-2 text-[11px] ${analyticsStatus.coverage_state === "covered" ? "text-emerald-700" : analyticsStatus.coverage_state === "partial" || analyticsStatus.stale ? "text-amber-700" : "text-zinc-500"}`}>
+              {describeRedditWindowCoverage(analyticsStatus, fmtDateTime)}
             </p>
           )}
           {pendingFlairGroups.length > 0 && (
@@ -3455,44 +3451,6 @@ export default function RedditSourcesManager({
     };
   }, [storedCountsCommunityId, episodeSeasonId, storedCountsRefreshNonce]);
 
-  useEffect(() => {
-    if (!storedCountsCommunityId || !episodeSeasonId) {
-      setRedditAnalyticsSummary(null);
-      setRedditAnalyticsLoading(false);
-      return;
-    }
-    const controller = new AbortController();
-    setRedditAnalyticsLoading(true);
-    void (async () => {
-      try {
-        const response = await fetchWithTimeout(
-          `/api/admin/reddit/analytics/community/${storedCountsCommunityId}/summary?scope=season&season_id=${episodeSeasonId}`,
-          {
-            signal: controller.signal,
-            timeoutMs: REQUEST_TIMEOUT_MS.default,
-          },
-        );
-        if (controller.signal.aborted) return;
-        if (!response.ok) {
-          throw new Error("Failed to fetch reddit analytics summary");
-        }
-        const data = (await response.json()) as RedditAnalyticsSummaryResponse;
-        if (!controller.signal.aborted) {
-          setRedditAnalyticsSummary(data);
-        }
-      } catch {
-        if (controller.signal.aborted) return;
-        setRedditAnalyticsSummary(null);
-      } finally {
-        if (!controller.signal.aborted) {
-          setRedditAnalyticsLoading(false);
-        }
-      }
-    })();
-    return () => {
-      controller.abort();
-    };
-  }, [episodeSeasonId, fetchWithTimeout, storedCountsCommunityId, storedCountsRefreshNonce]);
 
   const selectedCommunityFlairModes = useMemo(
     () =>
@@ -3665,9 +3623,6 @@ export default function RedditSourcesManager({
     const commentCount = coverage?.comment_saved_post_count ?? 0;
     const mediaCount = coverage?.media_post_count ?? 0;
     const staleCount = coverage?.stale_container_count ?? staleRedditContainers.length;
-    const recoveredCount =
-      coverage?.recovered_container_count ??
-      Math.max(0, (coverage?.container_count ?? redditAnalyticsSummary?.container_statuses?.length ?? 0) - staleCount);
     const activeBackfillSummary = backfillRunning ? backfillOperationPayload?.summary : null;
     const detailRefreshRunning = backfillRunning && backfillOperationPayload?.detail_refresh === true;
     const activeBackfillText =
@@ -3684,13 +3639,14 @@ export default function RedditSourcesManager({
     return (
       <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4" data-testid="reddit-analytics-summary">
         <article className="rounded-xl border border-zinc-200 bg-white px-3 py-2">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500">Window Recovery</p>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500">Window Coverage</p>
           <p className="mt-1 text-sm font-semibold text-zinc-900">
             {redditAnalyticsLoading
               ? "Loading..."
-              : activeBackfillText ?? `${fmtNum(recoveredCount)} recovered · ${fmtNum(staleCount)} stale`}
+              : activeBackfillText ?? formatRedditWindowCoverage(coverage)}
           </p>
           <p className="mt-1 text-[11px] text-zinc-500">
+            {coverage?.proven_through ? `Captured through ${fmtDateTime(coverage.proven_through)}. ` : ""}
             {recoverySubtext}
           </p>
         </article>
@@ -4073,6 +4029,56 @@ export default function RedditSourcesManager({
     periodOptions,
     windowDiscoveryByContainer,
   ]);
+
+  const redditAnalyticsWindows = useMemo(() => {
+    const windows = [...episodeWindowBoundsByContainer.values()]
+      .filter((window) => window.start && window.end && Date.parse(window.start) < Date.parse(window.end))
+      .map((window) => ({ key: window.key, start: window.start, end: window.end }))
+      .sort((a, b) => a.key.localeCompare(b.key));
+    return windows.length > 0 && windows.length <= 64 ? JSON.stringify(windows) : null;
+  }, [episodeWindowBoundsByContainer]);
+
+  useEffect(() => {
+    if (!storedCountsCommunityId || !episodeSeasonId) {
+      setRedditAnalyticsSummary(null);
+      setRedditAnalyticsLoading(false);
+      return;
+    }
+    const controller = new AbortController();
+    setRedditAnalyticsLoading(true);
+    setRedditAnalyticsSummary(null);
+    void (async () => {
+      try {
+        const query = new URLSearchParams({ scope: "season", season_id: episodeSeasonId });
+        if (redditAnalyticsWindows) query.set("windows", redditAnalyticsWindows);
+        const response = await fetchWithTimeout(
+          `/api/admin/reddit/analytics/community/${storedCountsCommunityId}/summary?${query}`,
+          {
+            signal: controller.signal,
+            timeoutMs: REQUEST_TIMEOUT_MS.default,
+          },
+        );
+        if (controller.signal.aborted) return;
+        if (!response.ok) {
+          throw new Error("Failed to fetch reddit analytics summary");
+        }
+        const data = (await response.json()) as RedditAnalyticsSummaryResponse;
+        if (!controller.signal.aborted) {
+          setRedditAnalyticsSummary(data);
+        }
+      } catch {
+        if (controller.signal.aborted) return;
+        setRedditAnalyticsSummary(null);
+      } finally {
+        if (!controller.signal.aborted) {
+          setRedditAnalyticsLoading(false);
+        }
+      }
+    })();
+    return () => {
+      controller.abort();
+    };
+  }, [episodeSeasonId, fetchWithTimeout, redditAnalyticsWindows, storedCountsCommunityId, storedCountsRefreshNonce]);
 
   const seasonalBoundaryPeriods = useMemo(
     () =>

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { formatRedditWindowCoverage } from "@/lib/admin/reddit-window-coverage";
 import type { Route } from "next";
 import {
   formatPercent,
@@ -167,11 +168,13 @@ export function SeasonSocialOverview({
             {platformTab === "overview" && analytics?.reddit && (
               <article className="rounded-2xl border border-orange-200 bg-white p-5 shadow-sm" data-testid="reddit-freshness-card">
                 <p className="text-xs font-semibold uppercase tracking-[0.25em] text-orange-600">Reddit Freshness</p>
-                <p className="mt-2 text-3xl font-bold text-zinc-900">
-                  {formatCompactInteger(Number(analytics.reddit.coverage?.recovered_container_count ?? 0))}
+                <p className="mt-2 text-lg font-bold text-zinc-900">
+                  {formatRedditWindowCoverage(analytics.reddit.coverage)}
                 </p>
                 <p className="mt-1 text-xs text-zinc-600">
-                  recovered windows · {formatCompactInteger(Number(analytics.reddit.coverage?.stale_container_count ?? 0))} stale
+                  {analytics.reddit.coverage?.proven_through
+                    ? `Captured through ${formatDateTime(analytics.reddit.coverage.proven_through)}`
+                    : "Open Reddit Manager for window coverage"}
                 </p>
                 <p className="mt-1 text-xs text-zinc-500">
                   Latest Reddit run {formatDateTime(analytics.reddit.freshness?.latest_run_timestamp ?? null)}

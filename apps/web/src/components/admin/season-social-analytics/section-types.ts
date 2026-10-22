@@ -1,3 +1,4 @@
+import type { RedditWindowCoverageCounts } from "@/lib/admin/reddit-window-coverage";
 import type { DisplayThumbnailVariants } from "@/components/admin/social-week/social-media-thumbnails";
 import type { PhotoMetadata } from "@/lib/photo-metadata";
 
@@ -385,7 +386,7 @@ export type AnalyticsResponse = {
       latest_run_timestamp?: string | null;
       latest_run_status?: string | null;
     };
-    coverage?: {
+    coverage?: RedditWindowCoverageCounts & {
       tracked_post_count?: number;
       detail_scraped_post_count?: number;
       comment_saved_post_count?: number;

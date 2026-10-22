@@ -41,4 +41,36 @@ describe("explicit undated Reddit season selection", () => {
     });
     expect(screen.getByRole("button", { name: "Season 7" })).toBeInTheDocument();
   });
+  it("uses displayed bounds and renders partial/future counts without a stale badge", async () => {
+    const fallback = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (input: string | URL, init?: RequestInit) => {
+      const url = String(input);
+      let body: unknown;
+      if (url.includes("/reddit/analytics/community/")) {
+        body = {
+          coverage: { covered_container_count: 5, partial_container_count: 2, upcoming_container_count: 7,
+            stale_container_count: 0, proven_through: "2026-10-21T23:06:47.895435Z" },
+          freshness: { latest_run_status: "completed", latest_run_timestamp: "2026-10-22T01:00:00Z" },
+          container_statuses: [{ container_key: "episode-1", coverage_state: "covered", stale: false }],
+        };
+      } else if (url.includes("/episodes")) {
+        body = { episodes: [{ id: "ep1", episode_number: 1, air_date: "2026-09-16" }] };
+      } else if (url.includes("/social/analytics?")) {
+        body = { weekly: [{ week_index: 1, label: "Episode 1", start: "2026-09-16T23:00:00Z", end: "2026-09-23T23:00:00Z" }] };
+      } else return fallback(input, init);
+      return new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
+    });
+    render(<RedditSourcesManager mode="global" showSlug="rhoslc" seasonNumber={7} initialCommunityId="rhoslc" hideCommunityList />);
+    expect(await screen.findByText("5 covered · 2 partial · 7 upcoming")).toBeInTheDocument();
+    expect(screen.getByText(/Captured through/)).toHaveTextContent("10/21/2026");
+    await waitFor(() => {
+      const requests = fetchMock.mock.calls.map(([url]) => new URL(String(url), "http://localhost"))
+        .filter(url => url.pathname.includes("/reddit/analytics/community/") && url.searchParams.has("windows"));
+      expect(requests.length).toBeGreaterThan(0);
+      const windows = JSON.parse(requests.at(-1)!.searchParams.get("windows")!);
+      expect(windows).toContainEqual(expect.objectContaining({ key: "episode-1", start: "2026-09-16T23:01:01.000Z" }));
+    });
+    expect(screen.queryByRole("button", { name: /Rerun Stale Windows/ })).not.toBeInTheDocument();
+  });
+
 });

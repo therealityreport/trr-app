@@ -33,6 +33,10 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     const scope = searchParams.get("scope") === "all" ? "all" : "season";
     const seasonId = searchParams.get("season_id");
+    const windows = searchParams.get("windows");
+    if (windows && windows.length > 12_000) {
+      return NextResponse.json({ error: "windows is too large" }, { status: 400 });
+    }
     if (scope === "season" && (!seasonId || !isValidUuid(seasonId))) {
       return NextResponse.json({ error: "season_id must be a valid UUID" }, { status: 400 });
     }
@@ -48,6 +52,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         const query = new URLSearchParams();
         query.set("scope", scope);
         if (seasonId) query.set("season_id", seasonId);
+        if (windows) query.set("windows", windows);
 
         const payload = await fetchSocialBackendJson(`/reddit/analytics/community/${communityId}/summary`, {
           queryString: query.toString(),
