@@ -62,7 +62,6 @@ export const INSTAGRAM_BACKFILL_DEFAULT_SELECTED_TASKS: CatalogBackfillSelectedT
 export const INSTAGRAM_V2_PUBLIC_DEFAULT_SELECTED_TASKS: CatalogBackfillSelectedTask[] = ["comments", "media"];
 export const TIKTOK_BACKFILL_DEFAULT_SELECTED_TASKS: CatalogBackfillSelectedTask[] = [
   "post_details",
-  "comments",
   "media",
 ];
 const INSTAGRAM_POSTS_ACCELERATION_FLAG_NAMES = [

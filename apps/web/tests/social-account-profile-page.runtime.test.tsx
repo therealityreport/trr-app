@@ -305,7 +305,7 @@ const healthyCookieHealth = (platform: string) => ({
 });
 
 const INSTAGRAM_BACKFILL_DEFAULT_TASKS = ["post_details", "comments", "media"] as const;
-const TIKTOK_BACKFILL_DEFAULT_TASKS = ["post_details", "comments", "media"] as const;
+const TIKTOK_BACKFILL_DEFAULT_TASKS = ["post_details", "media"] as const;
 
 const createStorageMock = (): Storage => {
   const values = new Map<string, string>();
@@ -4992,7 +4992,7 @@ describe("SocialAccountProfilePage", () => {
     fireEvent.click(button);
 
     await waitFor(() => {
-      expect(screen.getByText("TikTok backfill queued for Post Details, Comments, Media. Catalog catalog-.")).toBeInTheDocument();
+      expect(screen.getByText("TikTok backfill queued for Post Details, Media. Catalog catalog-.")).toBeInTheDocument();
     });
   });
 
@@ -5062,7 +5062,7 @@ describe("SocialAccountProfilePage", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Backfill Posts" }));
 
     await waitFor(() => {
-      expect(screen.getByText("TikTok backfill queued for Post Details, Comments, Media. Catalog catalog-.")).toBeInTheDocument();
+      expect(screen.getByText("TikTok backfill queued for Post Details, Media. Catalog catalog-.")).toBeInTheDocument();
     });
   });
 
