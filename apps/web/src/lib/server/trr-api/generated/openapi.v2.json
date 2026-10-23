@@ -938,6 +938,14 @@
             ],
             "title": "Canonical Flair Key"
           },
+          "capture_state": {
+            "additionalProperties": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Capture State",
+            "type": "object"
+          },
           "comment_summary": {
             "additionalProperties": true,
             "title": "Comment Summary",

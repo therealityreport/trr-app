@@ -1449,6 +1449,12 @@ export interface components {
             author_flair_text?: string | null;
             /** Canonical Flair Key */
             canonical_flair_key?: string | null;
+            /** Capture State */
+            capture_state?: {
+                [key: string]: {
+                    [key: string]: unknown;
+                };
+            };
             /** Comment Summary */
             comment_summary: {
                 [key: string]: unknown;
