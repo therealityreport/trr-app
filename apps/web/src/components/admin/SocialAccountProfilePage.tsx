@@ -2560,6 +2560,10 @@ const mergeCatalogProgressUpdate = (
   current: SocialAccountCatalogRunProgressSnapshot | null,
   next: SocialAccountCatalogRunProgressSnapshot,
 ): SocialAccountCatalogRunProgressSnapshot => {
+  // Cached account snapshots can still report the predecessor after a pivot.
+  if (current && next.run_id !== current.run_id && next.worker_runtime?.replacement_run_id === current.run_id) {
+    return current;
+  }
   if (
     !isAuthoritativeCatalogProgress(next) &&
     current?.run_id === next.run_id &&
@@ -5749,15 +5753,25 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       `Run ${shortRunId(currentRunId)} was superseded. Following replacement ${shortRunId(replacementRunId)}.`,
     );
     setCatalogProgressRunId(replacementRunId);
-    setCatalogRunProgress(null);
+    // Keep the replacement selected while its fresh snapshot is still loading.
+    // A stale summary does not contain it yet and would otherwise clear selection.
+    setCatalogRunProgress(
+      buildProvisionalCatalogRunProgress({
+        runId: replacementRunId,
+        status: catalogAutoRequeueStatus,
+        sourceScope: catalogRunProgress?.source_scope,
+      }),
+    );
     setCatalogRunProgressError(null);
     setCatalogLogsExpanded(false);
     catalogTerminalSummaryRefreshRunIdRef.current = null;
     void refreshProfileSnapshotNow({ runId: replacementRunId }).catch(() => {});
   }, [
     catalogAutoRequeueActive,
+    catalogAutoRequeueStatus,
     catalogReplacementRunId,
     catalogRunProgress?.run_id,
+    catalogRunProgress?.source_scope,
     displayedCatalogRunId,
     refreshProfileSnapshotNow,
   ]);

@@ -10318,7 +10318,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
     });
   });
 
-  it("auto-pivots only when the currently displayed run is superseded and a replacement run exists", async () => {
+  it.each(["fresh", "delayed", "stale"])("keeps the superseding run selected with %s snapshot", async (snapshotState) => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes("/summary")) {
@@ -10351,6 +10351,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
         });
       }
       if (url.includes("/snapshot") && url.includes("run_id=run-new-2")) {
+        if (snapshotState === "delayed") return new Promise<Response>(() => {});
         return jsonResponse({
           data: {
             summary: {
@@ -10360,7 +10361,12 @@ it("prefers terminal cancelled status labels over stale recovering state", async
                 { run_id: "run-old-1", status: "cancelled", created_at: "2026-04-20T17:09:36.000Z" },
               ],
             },
-            catalog_run_progress: {
+            catalog_run_progress: snapshotState === "stale" ? {
+              run_id: "run-old-1",
+              run_status: "cancelled",
+              worker_runtime: { replacement_run_id: "run-new-2", auto_requeue_status: "queued" },
+              stages: {}, per_handle: [], recent_log: [],
+            } : {
               run_id: "run-new-2",
               run_status: "queued",
               run_state: "discovering",
@@ -10388,6 +10394,8 @@ it("prefers terminal cancelled status labels over stale recovering state", async
       expect(
         mocks.fetchAdminWithAuth.mock.calls.some(([url]: [RequestInfo | URL]) => String(url).includes("run_id=run-new-2")),
       ).toBe(true);
+      expect(screen.getByRole("button", { name: "Cancel Run" })).toBeEnabled();
+      expect(screen.getByText(/^Run run-new.* is /)).toBeInTheDocument();
     });
   });
 
