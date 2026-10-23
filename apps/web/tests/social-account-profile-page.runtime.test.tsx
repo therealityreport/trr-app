@@ -11959,7 +11959,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
     expect(screen.queryByText("No hashtags found yet.")).not.toBeInTheDocument();
   });
 
-  it("treats scrape-complete classify backlog as completed for actions and status copy", async () => {
+  it.each(["completed", "cancelled", "failed"])("uses accurate terminal %s status copy and unlocks actions", async (status) => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes("/summary")) {
@@ -11979,7 +11979,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
       if (url.includes("/catalog/runs/run-scrape-complete-1/progress")) {
         return jsonResponse({
           run_id: "run-scrape-complete-1",
-          run_status: "completed",
+          run_status: status,
           source_scope: "network",
           stages: {
             shared_account_discovery: {
@@ -12027,8 +12027,8 @@ it("prefers terminal cancelled status labels over stale recovering state", async
             matched_posts: 16474,
             total_posts: 16475,
           },
-          scrape_complete: true,
-          classify_incomplete: true,
+          scrape_complete: status === "completed",
+          classify_incomplete: status === "completed",
           summary: {
             total_jobs: 502,
             completed_jobs: 82,
@@ -12046,14 +12046,16 @@ it("prefers terminal cancelled status labels over stale recovering state", async
     await waitFor(() => {
       expect(
         screen.getByText(
-          "Run run-scra is scrape-complete. New backfills are unlocked while classification continues in the background.",
+          status === "completed"
+            ? "Run run-scra is scrape-complete. New backfills are unlocked while classification continues in the background."
+            : `Run run-scra is ${status === "cancelled" ? "Cancelled" : "Failed"}. New backfills are unlocked.`,
         ),
       ).toBeInTheDocument();
     });
 
     expect(screen.queryByRole("button", { name: "Cancel Run" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Backfill Posts" })).toBeEnabled();
-    expect(screen.getByText("Background")).toBeInTheDocument();
+    if (status === "completed") expect(screen.getByText("Background")).toBeInTheDocument();
   });
 
   it("falls back to catalog posts preview when summary catalog totals are zero", async () => {

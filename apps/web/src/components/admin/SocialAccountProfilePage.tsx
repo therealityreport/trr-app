@@ -9385,7 +9385,9 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                                   ? `${catalogDispatchStatusMessage.text} `
                                   : ""
                               }Start buttons unlock after it finishes or cancel is confirmed. Cancel is best-effort after a worker claims work.`
-                            : `Run ${shortRunId(cancellableCatalogRunId)} is scrape-complete. New backfills are unlocked while classification continues in the background.`}
+                            : cancellableCatalogRunStatus === "completed"
+                              ? `Run ${shortRunId(cancellableCatalogRunId)} is scrape-complete. New backfills are unlocked while classification continues in the background.`
+                              : `Run ${shortRunId(cancellableCatalogRunId)} is ${cancellableCatalogRunStatusLabel}. New backfills are unlocked.`}
                         </span>
                       ) : null}
                       {!cancellableCatalogRunId && activeCommentsRunBlocksActions && activeCommentsRunId ? (
