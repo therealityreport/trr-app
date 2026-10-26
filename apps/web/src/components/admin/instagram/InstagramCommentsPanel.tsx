@@ -32,7 +32,6 @@ import type {
   SocialAccountCommentsShardProgress,
   SocialAccountCommentsDryRunPreviewResponse,
   SocialAccountCommentsScrapeRequest,
-  SocialAccountCommentsScrapeResponse,
   SocialAccountCommentsTargetProgressRow,
   SocialAccountCommentBreakdown,
   SocialAccountProfilePost,
@@ -50,6 +49,9 @@ type Props = {
   handle: string;
   summary: SocialAccountProfileSummary | null;
   onSummaryRefresh?: () => Promise<void> | void;
+  onOpenBoundedBackfill?: () => void;
+  boundedBackfillDisabled?: boolean;
+  boundedBackfillGuardMessage?: string | null;
   hideActiveRunProgress?: boolean;
   onCoverageMetricsChange?: (metrics: {
     availablePosts: number;
@@ -429,12 +431,12 @@ const formatCommentsTerminalError = (progress: SocialAccountCommentsRunProgress,
     if (progress.cancellation_summary?.resume_recommendation === "stale_or_missing") {
       const resumeHint =
         remainingTargets > 0
-          ? `${formatInteger(remainingTargets)} targets remain; use Incomplete Fill to continue only unfinished posts.`
-          : "Use Incomplete Fill to resume unfinished posts.";
+          ? `${formatInteger(remainingTargets)} targets remain; choose a bounded ingestion run for unfinished posts.`
+          : "Choose a bounded ingestion run for unfinished posts.";
       return `${cleanBaseMessage} ${resumeHint}`;
     }
     return remainingTargets > 0
-      ? `${cleanBaseMessage} ${formatInteger(remainingTargets)} targets were left unfinished; use Incomplete Fill to continue only unfinished posts.`
+      ? `${cleanBaseMessage} ${formatInteger(remainingTargets)} targets were left unfinished; choose a bounded ingestion run for unfinished posts.`
       : cleanBaseMessage;
   }
   if (progress.cancellation_summary?.resume_recommendation !== "stale_or_missing") {
@@ -443,8 +445,8 @@ const formatCommentsTerminalError = (progress: SocialAccountCommentsRunProgress,
   const remainingTargets = readFiniteNumber(progress.cancellation_summary.remaining_target_source_ids_count) ?? 0;
   const resumeHint =
     remainingTargets > 0
-      ? `${formatInteger(remainingTargets)} targets remain; use Incomplete Fill to continue only unfinished posts.`
-      : "Use Incomplete Fill to resume unfinished posts.";
+      ? `${formatInteger(remainingTargets)} targets remain; choose a bounded ingestion run for unfinished posts.`
+      : "Choose a bounded ingestion run for unfinished posts.";
   return `${baseMessage} ${resumeHint}`;
 };
 
@@ -617,16 +619,6 @@ const readProgressString = (value: unknown): string | null => {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 };
 
-const formatCommentsLaunchQueuedMessage = (
-  data: Pick<SocialAccountCommentsScrapeResponse, "auth_repair_attempted" | "auth_repair_status">,
-  fallback: string,
-): string => {
-  if (data.auth_repair_attempted && data.auth_repair_status === "succeeded") {
-    return `Manual Instagram Auth validated. ${fallback}`;
-  }
-  return fallback;
-};
-
 const getIncompleteFillPreviewSummary = (
   data: SocialAccountCommentsDryRunPreviewResponse,
 ): IncompleteFillPreviewSummary => {
@@ -694,7 +686,7 @@ const getCommentsRunScopeNotice = (progress?: SocialAccountCommentsRunProgress |
 
   if (mode === "single_post") {
     const targetLabel = firstSourceId ? ` for ${firstSourceId}` : "";
-    return `Single-post repair${targetLabel}: this run only updates one post and will not close the account-wide comments gap. Run Incomplete Fill after it finishes to target every incomplete post.`;
+    return `Single-post repair${targetLabel}: this run only updates one post and will not close the account-wide comments gap. Choose a bounded ingestion run after it finishes to review unfinished posts.`;
   }
   if (targetFilter === "incomplete" || incompleteFill) {
     return targetCount && targetCount > 0
@@ -742,6 +734,9 @@ export default function InstagramCommentsPanel({
   handle,
   summary,
   onSummaryRefresh,
+  onOpenBoundedBackfill,
+  boundedBackfillDisabled = false,
+  boundedBackfillGuardMessage,
   hideActiveRunProgress = false,
   onCoverageMetricsChange,
 }: Props) {
@@ -774,7 +769,6 @@ export default function InstagramCommentsPanel({
   const [scrapeRunId, setScrapeRunId] = useState<string | null>(null);
   const [incompleteFillPreview, setIncompleteFillPreview] =
     useState<SocialAccountCommentsDryRunPreviewResponse | null>(null);
-  const [commentsLaunchPending, setCommentsLaunchPending] = useState(false);
   const [commentsPreviewPending, setCommentsPreviewPending] = useState(false);
   const [cancelPending, setCancelPending] = useState(false);
   const [cancelRequestedRunId, setCancelRequestedRunId] = useState<string | null>(null);
@@ -993,99 +987,8 @@ export default function InstagramCommentsPanel({
     }
   }, [buildPublicRelayCommentsScrapeBody, fetchAdminWithAuth, handle, platform, user]);
 
-  const startProfileScrape = useCallback(async () => {
-    if (!user) return;
-    setScrapeError(null);
-    setIncompleteFillPreview(null);
-    setScrapeMessage("Preparing public comments relay sync...");
-    setCommentsLaunchPending(true);
-    handledTerminalRunRef.current = null;
-    setCancelRequestedRunId(null);
-    const body = buildPublicRelayCommentsScrapeBody();
-    try {
-      const response = await fetchAdminWithAuth(
-        `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/comments/scrape`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        },
-        { preferredUser: user },
-      );
-      const data = (await response.json().catch(() => ({}))) as SocialAccountCommentsScrapeResponse & ProxyErrorPayload;
-      if (!response.ok) {
-        const activeRunId =
-          (response.status === 409 && readCommentsRunId(data.upstream_detail)) ||
-          (response.status === 409 && readCommentsRunId(data));
-        if (activeRunId) {
-          setScrapeRunId(activeRunId);
-          setScrapeMessage(`Comments sync already running. Run ${activeRunId.slice(0, 8)}.`);
-          return;
-        }
-        throw new Error(readInstagramCommentsErrorMessage(data, "Failed to start comments sync"));
-      }
-      const runId = String(data.run_id || "").trim();
-      setScrapeRunId(runId || null);
-      setScrapeMessage(
-        formatCommentsLaunchQueuedMessage(
-          data,
-          runId ? `Comments sync queued. Run ${runId.slice(0, 8)}.` : "Comments sync queued.",
-        ),
-      );
-    } catch (error) {
-      setScrapeError(error instanceof Error ? error.message : "Failed to start comments sync");
-    } finally {
-      setCommentsLaunchPending(false);
-    }
-  }, [buildPublicRelayCommentsScrapeBody, fetchAdminWithAuth, handle, platform, user]);
-
-  const startIncompleteFillScrape = useCallback(async () => {
-    if (!user) return;
-    setScrapeError(null);
-    setIncompleteFillPreview(null);
-    setScrapeMessage("Preparing public comments relay incomplete fill...");
-    setCommentsLaunchPending(true);
-    handledTerminalRunRef.current = null;
-    setCancelRequestedRunId(null);
-    const body = buildPublicRelayCommentsScrapeBody({ target_filter: "incomplete" });
-    try {
-      const response = await fetchAdminWithAuth(
-        `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/comments/scrape`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        },
-        { preferredUser: user },
-      );
-      const data = (await response.json().catch(() => ({}))) as SocialAccountCommentsScrapeResponse & ProxyErrorPayload;
-      if (!response.ok) {
-        const activeRunId =
-          (response.status === 409 && readCommentsRunId(data.upstream_detail)) ||
-          (response.status === 409 && readCommentsRunId(data));
-        if (activeRunId) {
-          setScrapeRunId(activeRunId);
-          setScrapeMessage(`Comments sync already running. Run ${activeRunId.slice(0, 8)}.`);
-          return;
-        }
-        throw new Error(readInstagramCommentsErrorMessage(data, "Failed to start incomplete fill"));
-      }
-      const runId = String(data.run_id || "").trim();
-      setScrapeRunId(runId || null);
-      setScrapeMessage(
-        formatCommentsLaunchQueuedMessage(
-          data,
-          runId ? `Incomplete Fill queued. Run ${runId.slice(0, 8)}.` : "Incomplete Fill queued.",
-        ),
-      );
-    } catch (error) {
-      setScrapeError(error instanceof Error ? error.message : "Failed to start incomplete fill");
-    } finally {
-      setCommentsLaunchPending(false);
-    }
-  }, [buildPublicRelayCommentsScrapeBody, fetchAdminWithAuth, handle, platform, user]);
-
   const startRelayCheckpointRecovery = useCallback(async () => {
+    if (platform === "instagram") return;
     if (!user) return;
     setScrapeError(null);
     setIncompleteFillPreview(null);
@@ -1161,6 +1064,7 @@ export default function InstagramCommentsPanel({
 
   const rerunRelayCheckpointTarget = useCallback(
     async (row: SocialAccountCommentsRelayCheckpointRetryRow) => {
+      if (platform === "instagram") return;
       if (!user || !row.shortcode) return;
       setScrapeError(null);
       setIncompleteFillPreview(null);
@@ -1237,6 +1141,12 @@ export default function InstagramCommentsPanel({
   );
 
   const startCatalogRefresh = useCallback(async () => {
+    if (platform === "instagram") {
+      if (boundedBackfillDisabled) return;
+      if (onOpenBoundedBackfill) onOpenBoundedBackfill();
+      else setScrapeMessage("Open Catalog and choose Backfill Posts to select a bounded date window and tasks.");
+      return;
+    }
     if (!user) return;
     setScrapeError(null);
     setIncompleteFillPreview(null);
@@ -1277,7 +1187,7 @@ export default function InstagramCommentsPanel({
     } finally {
       setCatalogRefreshPending(false);
     }
-  }, [fetchAdminWithAuth, handle, onSummaryRefresh, platform, refreshPosts, user]);
+  }, [boundedBackfillDisabled, fetchAdminWithAuth, handle, onOpenBoundedBackfill, onSummaryRefresh, platform, refreshPosts, user]);
 
   const cancelCommentsRun = useCallback(async () => {
     if (!user || !scrapeRunId) return;
@@ -1450,8 +1360,7 @@ export default function InstagramCommentsPanel({
     !hasAccess ||
     commentsProgressControlsLocked ||
     cancelRequestedRunId === scrapeRunId;
-  const commentsActionDisabled = commentsLaunchPending || commentsPreviewPending || isScraping || checking || !user || !hasAccess;
-  const commentsPreviewDisabled = commentsPreviewPending || commentsLaunchPending || isScraping || checking || !user || !hasAccess;
+  const commentsPreviewDisabled = commentsPreviewPending || isScraping || checking || !user || !hasAccess;
   const incompleteFillPreviewSummary = useMemo(
     () => (incompleteFillPreview ? getIncompleteFillPreviewSummary(incompleteFillPreview) : null),
     [incompleteFillPreview],
@@ -1468,6 +1377,7 @@ export default function InstagramCommentsPanel({
   );
   const relayCheckpointRecoveryActiveRunId = readCommentsRunId(relayCheckpointRecovery?.active_run);
   const relayCheckpointActionDisabled =
+    platform === "instagram" ||
     relayCheckpointRecoveryPending ||
     Boolean(relayCheckpointRerunShortcode) ||
     relayCheckpointRecoveryLoading ||
@@ -1475,8 +1385,8 @@ export default function InstagramCommentsPanel({
     checking ||
     !user ||
     !hasAccess;
-  const catalogActionDisabled = catalogRefreshPending || checking || !user || !hasAccess;
-  const primaryActionPending = supportsInlineCommentsSync ? commentsLaunchPending || isScraping : catalogRefreshPending;
+  const catalogActionDisabled = (platform === "instagram" && (boundedBackfillDisabled || isScraping)) || catalogRefreshPending || checking || !user || !hasAccess;
+  const primaryActionPending = catalogRefreshPending;
   const emptyPostsLabel = supportsInlineCommentsSync
     ? commentsPostFilter === "incomplete"
       ? `No incomplete ${platformLabel} comment totals are saved for this account.`
@@ -1485,18 +1395,12 @@ export default function InstagramCommentsPanel({
       : `No ${platformLabel} posts with comments are saved for this account yet.`
     : `No saved ${platformLabel} posts with discussion are available for this account yet.`;
   const panelTitle = supportsInlineCommentsSync ? `${platformLabel} Comments` : `${platformLabel} Discussion`;
-  const panelDescription = supportsInlineCommentsSync
-    ? `Review parent-thread coverage and run a full-account comments sync across saved ${platformLabel} posts.`
+  const panelDescription = platform === "instagram"
+    ? "Review saved discussion coverage. Choose a bounded date window and tasks in Backfill Posts to refresh public Instagram comments."
     : `Review saved discussion coverage and queue a catalog-driven refresh for post details, comments, and media across saved ${platformLabel} posts.`;
-  const primaryActionLabel = supportsInlineCommentsSync
-    ? primaryActionPending
-      ? commentsLaunchPending
-        ? "Starting..."
-        : "Syncing Comments..."
-      : "Sync Comments"
-    : primaryActionPending
-      ? "Queuing Refresh..."
-      : "Refresh Details + Comments + Media";
+  const primaryActionLabel = platform === "instagram"
+    ? "Choose Bounded Backfill"
+    : primaryActionPending ? "Queuing Refresh..." : "Refresh Details + Comments + Media";
   const progressWarning = useMemo(
     () => (hideActiveRunProgress ? null : formatCommentsProgressWarning(displayedRunProgress)),
     [displayedRunProgress, hideActiveRunProgress],
@@ -1603,18 +1507,11 @@ export default function InstagramCommentsPanel({
           <div>
             <h2 className="text-lg font-semibold text-zinc-900">{panelTitle}</h2>
             <p className="text-sm text-zinc-500">{panelDescription}</p>
+            {platform === "instagram" && boundedBackfillGuardMessage ? <p role="status" className="mt-2 text-xs text-amber-800">{boundedBackfillGuardMessage}</p> : null}
           </div>
           <div className="flex flex-wrap gap-2">
             {supportsInlineCommentsSync ? (
               <>
-                <button
-                  type="button"
-                  onClick={() => void startIncompleteFillScrape()}
-                  disabled={commentsActionDisabled}
-                  className={SECONDARY_BUTTON_CLASS}
-                >
-                  Incomplete Fill
-                </button>
                 <button
                   type="button"
                   onClick={() => void previewIncompleteFillScrape()}
@@ -1625,8 +1522,8 @@ export default function InstagramCommentsPanel({
                 </button>
                 <button
                   type="button"
-                  onClick={() => void startProfileScrape()}
-                  disabled={commentsActionDisabled}
+                  onClick={() => void startCatalogRefresh()}
+                  disabled={catalogActionDisabled}
                   className={PRIMARY_BUTTON_CLASS}
                 >
                   {primaryActionLabel}
@@ -1688,8 +1585,8 @@ export default function InstagramCommentsPanel({
             <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-sky-800">Streaming Order</p>
             <div className="mt-2 grid gap-2 text-xs text-sky-900 md:grid-cols-3">
               <p>Posts save first, then comments can start streaming as soon as those saved posts exist.</p>
-              <p>Public-first recovery stays default for open gaps, retries, and checkpoint resumptions.</p>
-              <p>Auth-backed comments work is last resort and should only cover leftover blocked posts.</p>
+              <p>Use a bounded ingestion run for open gaps and supported target retries.</p>
+              <p>Collection uses public, logged-out Instagram pages.</p>
             </div>
           </div>
         ) : null}
@@ -1706,8 +1603,7 @@ export default function InstagramCommentsPanel({
                   {relayCheckpointRecoveryActiveRunId ? ` / active run ${relayCheckpointRecoveryActiveRunId.slice(0, 8)}` : ""}
                 </p>
                 <p className="mt-2 max-w-2xl text-xs text-zinc-500">
-                  Public relay uses logged-out Instagram pages. Checkpoint recovery resumes saved relay checkpoints for focused repairs.
-                  Rate limits still apply, so a live run can slow down or split work after preview identifies the targets.
+                  Saved relay checkpoints remain available for inspection. To recover public comments, choose a bounded ingestion run; use its supported target retry controls for unresolved work.
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">

@@ -180,7 +180,7 @@ export function RunLauncher({
                   <div className="mt-5 rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-4">
                   <p className="font-semibold text-zinc-900">Bounded Window</p>
                   <p className="mt-1 text-sm text-zinc-500">
-                    Backfill only posts published from the start month through the end month.
+                    Choose both months. Backfill only posts published from the start month through the end month.
                   </p>
                   <div className="mt-3 grid gap-3 sm:grid-cols-2">
                     <label className="block">
@@ -189,6 +189,7 @@ export function RunLauncher({
                       </span>
                       <input
                         type="month"
+                        required
                         value={instagramBackfillMonthStart}
                         aria-label="Instagram backfill start month"
                         onChange={(event) => setInstagramBackfillMonthStart(event.currentTarget.value)}
@@ -202,6 +203,7 @@ export function RunLauncher({
                       </span>
                       <input
                         type="month"
+                        required
                         value={instagramBackfillMonthEnd}
                         aria-label="Instagram backfill end month"
                         onChange={(event) => setInstagramBackfillMonthEnd(event.currentTarget.value)}
@@ -408,6 +410,8 @@ export function RunLauncher({
                     <Button
                       onClick={() => void submitInstagramBackfillDialog()}
                       disabled={
+                        !instagramBackfillMonthStart ||
+                        !instagramBackfillMonthEnd ||
                         instagramBackfillSelectedTasks.length === 0 ||
                         catalogLaunchActionsBlocked ||
                         instagramBackfillCapacityPresentation.blocked

@@ -2771,6 +2771,8 @@ export interface components {
              * @enum {string}
              */
             engine: "dbos" | "temporal";
+            /** Execution Hold Reason */
+            execution_hold_reason?: string | null;
             /**
              * Execution Placement
              * @default modal

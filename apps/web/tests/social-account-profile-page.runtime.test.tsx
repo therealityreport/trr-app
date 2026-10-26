@@ -114,13 +114,10 @@ import SocialAccountProfilePage, {
 import { __resetSharedLiveResourceRegistryForTests } from "@/lib/admin/shared-live-resource";
 import * as devAdminBypass from "@/lib/admin/dev-admin-bypass";
 
-const expectInstagramBackfillQueuedMessage = () => {
+const expectInstagramIngestionAccepted = () => {
   const pageText = document.body.textContent?.replace(/\s+/g, " ").trim() ?? "";
-  const queuedCopyVisible = pageText.includes("Instagram backfill queued for ") && pageText.includes("Catalog catalog-");
-  const backfillRequestSent = mocks.fetchAdminWithAuth.mock.calls.some(([input]) =>
-    String(input).includes("/catalog/backfill"),
-  );
-  expect(queuedCopyVisible || backfillRequestSent).toBe(true);
+  expect(pageText).toContain("Instagram ingestion accepted.");
+  expect(mocks.fetchAdminWithAuth.mock.calls.some(([input, init]) => String(input).includes("/catalog/backfill") && init?.method === "POST")).toBe(false);
 };
 
 const jsonResponse = (body: unknown, status = 200): Response =>
@@ -128,6 +125,17 @@ const jsonResponse = (body: unknown, status = 200): Response =>
     status,
     headers: { "Content-Type": "application/json" },
   });
+
+const boundedIngestionRead = (url: string): Response | null => {
+  if (!url.includes("/instagram-ingestion/")) return null;
+  const account = url.split("/instagram-ingestion/")[1].split("/")[0];
+  if (url.endsWith("/capabilities")) return jsonResponse({ enabled: true, account, supported_actions: ["backfill", "sync_newer", "sync_recent"], replay_apply_enabled: false });
+  if (url.includes("/runs/recent")) return jsonResponse({ runs: [] });
+  if (url.endsWith("/runs")) return null;
+  const runId = url.split("/runs/")[1]?.split(/[/?]/)[0];
+  if (url.includes("/diagnostics")) return jsonResponse({ run_id: runId, account, targets: [], evidence: [], targets_truncated: false, evidence_truncated: false });
+  return jsonResponse({ run_id: runId, account, state: "completed", stages: [], complete: true, allowed_actions: [], generation: 1, engine: "dbos", workflow_version: "v1", last_committed_at: null });
+};
 
 const profileSnapshotResponse = (summary: Record<string, unknown>): Response =>
   jsonResponse({
@@ -420,6 +428,64 @@ describe("SocialAccountProfilePage", () => {
     expect(mocks.fetchAdminWithAuth.mock.calls.some(([input]) => String(input).includes("/snapshot") && String(input).includes(newRunId))).toBe(false);
   });
 
+  it("opens bounded ingestion from Instagram comments without launching legacy work", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: true, account: "bravotv", supported_actions: ["backfill"], replay_apply_enabled: false });
+      if (url.includes("/runs/recent")) return jsonResponse({ runs: [] });
+      if (url.includes("/snapshot")) return profileSnapshotResponse(baseSummary);
+      if (url.includes("/summary")) return jsonResponse(baseSummary);
+      if (url.includes("/posts?")) return jsonResponse({ items: [], pagination: { page: 1, page_size: 25, total: 0, total_pages: 1 } });
+      if (url.includes("/catalog/capacity")) return jsonResponse({ available: true, blocked: false });
+      return jsonResponse({});
+    });
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="comments" />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Choose Bounded Backfill" })).toBeEnabled());
+    expect(screen.queryByRole("button", { name: "Sync Comments", exact: true })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Incomplete Fill", exact: true })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Queue Checkpoint Targets" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Choose Bounded Backfill" }));
+    expect(await screen.findByText("Choose what this backfill should run")).toBeInTheDocument();
+    expect(screen.getByLabelText("Instagram backfill start month")).toBeInTheDocument();
+    expect(screen.getByLabelText("Instagram backfill end month")).toBeInTheDocument();
+    expect(mocks.fetchAdminWithAuth.mock.calls.some(([input, init]) => init?.method === "POST" && /comments\/scrape|catalog\/backfill|audit-cursor-retries/.test(String(input)))).toBe(false);
+  });
+
+  it("prevents legacy catalog launch while capabilities load or fail", async () => {
+    const capabilityResponse = deferredResponse();
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/capabilities")) return capabilityResponse.promise;
+      if (url.includes("/snapshot")) return profileSnapshotResponse(baseSummary);
+      if (url.includes("/summary")) return jsonResponse(baseSummary);
+      return jsonResponse({});
+    });
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
+    expect(await screen.findByRole("button", { name: "Backfill Posts" })).toBeDisabled();
+    expect(screen.getByRole("region", { name: "Durable Instagram ingestion" })).toBeInTheDocument();
+    await act(async () => { capabilityResponse.resolve(jsonResponse({ detail: { code: "CAPABILITIES_UNAVAILABLE", message: "Try again later." } }, 503)); });
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("capabilities could not be loaded"));
+    expect(screen.getByRole("button", { name: "Backfill Posts" })).toBeDisabled();
+    expect(mocks.fetchAdminWithAuth.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+  });
+
+  it("fails closed for disabled Instagram capabilities and displays the disabled reason", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", disabled_reason: "operator_maintenance", supported_actions: [], replay_apply_enabled: false });
+      if (url.includes("/runs/recent")) return jsonResponse({ runs: [] });
+      if (url.includes("/snapshot")) return profileSnapshotResponse(baseSummary);
+      if (url.includes("/summary")) return jsonResponse(baseSummary);
+      return jsonResponse({});
+    });
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
+    await screen.findByText(/New ingestion launches are disabled.*operator_maintenance/);
+    expect(screen.getByRole("button", { name: "Backfill Posts" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Backfill Posts" }));
+    expect(screen.queryByText("Choose what this backfill should run")).not.toBeInTheDocument();
+    expect(mocks.fetchAdminWithAuth.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+  });
+
   it("shows the combined Instagram DB worker budget in catalog diagnostics", () => {
     const progress = {
       db_session_capacity: {
@@ -453,6 +519,7 @@ describe("SocialAccountProfilePage", () => {
     const catalogRequests: string[] = [];
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
@@ -501,6 +568,8 @@ describe("SocialAccountProfilePage", () => {
     let backfillCalls = 0;
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      const ingestionRead = boundedIngestionRead(url);
+      if (ingestionRead) return ingestionRead;
       if (url.includes("/catalog/capacity")) {
         capacityCalls += 1;
         return jsonResponse({
@@ -517,7 +586,7 @@ describe("SocialAccountProfilePage", () => {
           nonterminal_remote_call_ids: [],
         });
       }
-      if (url.includes("/catalog/backfill")) {
+      if (url.endsWith("/instagram-ingestion/bravotv/runs")) {
         backfillCalls += 1;
         return jsonResponse({ run_id: "catalog-capacity-run", status: "queued" });
       }
@@ -538,7 +607,8 @@ describe("SocialAccountProfilePage", () => {
     });
 
     render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
-    fireEvent.click(await screen.findByRole("button", { name: "Backfill Posts" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Backfill Posts" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Backfill Posts" }));
 
     await waitFor(() => {
       expect(screen.getAllByText(/2 backend-effective · 8 requested/).length).toBeGreaterThan(0);
@@ -555,6 +625,7 @@ describe("SocialAccountProfilePage", () => {
   it("renders the catalog page without a backgroundCatalogRunId initialization error", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse({ ...baseSummary, network_name: "Bravo" });
       }
@@ -589,6 +660,7 @@ describe("SocialAccountProfilePage", () => {
 
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse(tiktokSummary);
       }
@@ -616,6 +688,7 @@ describe("SocialAccountProfilePage", () => {
   it("renders comment-row and media-file totals in the top summary tiles", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse({ ...baseSummary, network_name: "Bravo" });
       }
@@ -710,6 +783,7 @@ describe("SocialAccountProfilePage", () => {
 
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       requestUrls.push(url);
       if (url.includes("/snapshot")) {
         if (url.includes("run_id=")) {
@@ -781,6 +855,7 @@ describe("SocialAccountProfilePage", () => {
     const requestUrls: string[] = [];
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       requestUrls.push(url);
       if (url.includes("/snapshot")) {
         return jsonResponse({
@@ -818,6 +893,7 @@ describe("SocialAccountProfilePage", () => {
   it("renders supported-platform catalog actions on the stats tab", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse({ ...baseSummary, network_name: "Bravo" });
       }
@@ -855,6 +931,7 @@ describe("SocialAccountProfilePage", () => {
 
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/snapshot")) {
         return profileSnapshotResponse(twitterSummary);
       }
@@ -906,6 +983,7 @@ describe("SocialAccountProfilePage", () => {
 
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       requestUrls.push(url);
       if (url.includes("/snapshot")) {
         return await snapshotSpy();
@@ -943,6 +1021,7 @@ describe("SocialAccountProfilePage", () => {
 
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       requestUrls.push(url);
       if (url.includes("/snapshot")) {
         return jsonResponse({
@@ -1020,6 +1099,7 @@ describe("SocialAccountProfilePage", () => {
 
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: true, account: "bravotv", supported_actions: ["backfill", "sync_recent", "sync_newer"], replay_apply_enabled: false });
       requestUrls.push(url);
       if (url.includes("/snapshot")) {
         return jsonResponse({
@@ -1080,6 +1160,7 @@ describe("SocialAccountProfilePage", () => {
   it("renders stale dashboard data as degraded but usable", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/snapshot")) {
         return jsonResponse({
           data: {
@@ -1111,6 +1192,7 @@ describe("SocialAccountProfilePage", () => {
   it("renders cached summary data when dashboard freshness is error", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/snapshot")) {
         return jsonResponse({
           data: {
@@ -1155,6 +1237,7 @@ describe("SocialAccountProfilePage", () => {
 
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       requestUrls.push(url);
       if (url.includes("/summary?detail=lite")) {
         return jsonResponse(liteSummary);
@@ -1203,6 +1286,7 @@ describe("SocialAccountProfilePage", () => {
     const requestUrls: string[] = [];
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       requestUrls.push(url);
       if (url.includes("/snapshot")) {
         return jsonResponse({
@@ -1239,6 +1323,7 @@ describe("SocialAccountProfilePage", () => {
     const cookieHealthUrls: string[] = [];
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/snapshot")) {
         return jsonResponse({
           summary: baseSummary,
@@ -1280,6 +1365,7 @@ describe("SocialAccountProfilePage", () => {
   it("allows a new Instagram backfill when a stale blocked-auth run has verified Modal posts auth", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: true, account: "bravotv", supported_actions: ["backfill", "sync_recent", "sync_newer"], replay_apply_enabled: false });
       if (url.includes("/snapshot")) {
         return jsonResponse({
           summary: {
@@ -1382,6 +1468,7 @@ describe("SocialAccountProfilePage", () => {
 
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/snapshot")) {
         return jsonResponse({
           summary: liteSummary,
@@ -1432,6 +1519,7 @@ describe("SocialAccountProfilePage", () => {
     let commentsPostsCalls = 0;
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: true, account: "bravotv", supported_actions: ["backfill", "sync_recent", "sync_newer"], replay_apply_enabled: false });
       if (url.includes("/snapshot")) {
         return new Promise<Response>(() => undefined);
       }
@@ -1448,8 +1536,8 @@ describe("SocialAccountProfilePage", () => {
     render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="comments" />);
 
     expect(await screen.findByText(/Loading account summary/)).toBeInTheDocument();
-    expect(await screen.findByRole("button", { name: "Sync Comments" })).toBeEnabled();
-    expect(screen.getByRole("button", { name: "Incomplete Fill" })).toBeEnabled();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Choose Bounded Backfill" })).toBeEnabled());
+    expect(screen.queryByRole("button", { name: "Incomplete Fill", exact: true })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Repair gaps" })).not.toBeInTheDocument();
     await waitFor(() => {
       expect(commentsPostsCalls).toBe(1);
@@ -1460,6 +1548,7 @@ describe("SocialAccountProfilePage", () => {
   it("hydrates the account total from the live Instagram profile after the page loads", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/snapshot")) {
         return jsonResponse(
           { error: "Social account profile not found." },
@@ -1493,6 +1582,7 @@ describe("SocialAccountProfilePage", () => {
   it("replaces a stale cached account total with the live Instagram profile total", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/snapshot")) {
         return jsonResponse({
           summary: {
@@ -1540,6 +1630,8 @@ describe("SocialAccountProfilePage", () => {
 
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+      const ingestionRead = boundedIngestionRead(url);
+      if (ingestionRead) return ingestionRead;
       if (url.includes("/snapshot")) {
         snapshotCalls += 1;
         const progressOnlyRunSnapshot = url.includes("run_id=catalog-run-12345678");
@@ -1592,12 +1684,12 @@ describe("SocialAccountProfilePage", () => {
           live_total_posts_current: 436,
         });
       }
-      if (url.includes("/catalog/backfill")) {
+      if (url.endsWith("/instagram-ingestion/thetraitorsus/runs")) {
         expect(init?.method).toBe("POST");
         return jsonResponse({
           run_id: "catalog-run-12345678",
           catalog_run_id: "catalog-run-12345678",
-          status: "queued",
+          status: "queued", state: "running", engine: "dbos", workflow_version: "v1", generation: 1,
           selected_tasks: [...INSTAGRAM_BACKFILL_DEFAULT_TASKS],
           effective_selected_tasks: [...INSTAGRAM_BACKFILL_DEFAULT_TASKS],
         });
@@ -1624,7 +1716,7 @@ describe("SocialAccountProfilePage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Start Backfill" }));
 
     await waitFor(() => {
-      expectInstagramBackfillQueuedMessage();
+      expectInstagramIngestionAccepted();
     });
     await waitFor(() => {
       expect(screen.getByText("Saved Posts", { selector: "p" }).parentElement?.textContent?.replace(/\s+/g, " ").trim()).toContain(
@@ -1640,6 +1732,8 @@ describe("SocialAccountProfilePage", () => {
 
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+      const ingestionRead = boundedIngestionRead(url);
+      if (ingestionRead) return ingestionRead;
       if (url.includes("/snapshot")) {
         snapshotCalls += 1;
         return jsonResponse({
@@ -1692,12 +1786,12 @@ describe("SocialAccountProfilePage", () => {
           live_total_posts_current: 436,
         });
       }
-      if (url.includes("/catalog/backfill")) {
+      if (url.endsWith("/instagram-ingestion/thetraitorsus/runs")) {
         expect(init?.method).toBe("POST");
         return jsonResponse({
           run_id: "catalog-run-retry-total",
           catalog_run_id: "catalog-run-retry-total",
-          status: "queued",
+          status: "queued", state: "running", engine: "dbos", workflow_version: "v1", generation: 1,
           selected_tasks: [...INSTAGRAM_BACKFILL_DEFAULT_TASKS],
           effective_selected_tasks: [...INSTAGRAM_BACKFILL_DEFAULT_TASKS],
         });
@@ -1735,6 +1829,7 @@ describe("SocialAccountProfilePage", () => {
   it("shows an empty-state banner instead of an error when the account has never been loaded", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/snapshot")) {
         return jsonResponse(
           { error: "Social account profile not found." },
@@ -1773,6 +1868,7 @@ describe("SocialAccountProfilePage", () => {
   it("shows the SocialBlade tab only for supported platforms", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         if (url.includes("/facebook/")) {
           return jsonResponse({ ...baseSummary, platform: "facebook" });
@@ -1807,6 +1903,7 @@ describe("SocialAccountProfilePage", () => {
   it("falls back to a supported tab when the account switcher target cannot render the current tab", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse({ ...baseSummary, network_name: "Bravo" });
       }
@@ -1841,6 +1938,7 @@ describe("SocialAccountProfilePage", () => {
   it("shows the Comments tab only for platforms with saved discussion support", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         if (url.includes("/facebook/")) {
           return jsonResponse({ ...baseSummary, platform: "facebook" });
@@ -1872,148 +1970,8 @@ describe("SocialAccountProfilePage", () => {
     });
   });
 
-  it("queues a profile comments scrape from the comments tab", async () => {
-    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input);
-      if (url.includes("/summary")) {
-        return jsonResponse(baseSummary);
-      }
-      if (url.includes("/posts?page=1&page_size=25&comments_only=true")) {
-        return jsonResponse({
-          items: [],
-          pagination: { page: 1, page_size: 25, total: 0, total_pages: 1 },
-        });
-      }
-      if (url.includes("/comments/scrape")) {
-        expect(init?.method).toBe("POST");
-        expect(init?.body).toBe(
-          JSON.stringify({
-            mode: "profile",
-            source_scope: "network",
-            refresh_policy: "stale_or_missing",
-            max_comments_per_post: 0,
-            comments_load_strategy: "public_relay",
-            date_start: null,
-            date_end: null,
-          }),
-        );
-        return jsonResponse({ run_id: "comments-run-12345678", status: "queued" });
-      }
-      if (url.includes("/comments/runs/comments-run-12345678/progress")) {
-        return jsonResponse({
-          run_id: "comments-run-12345678",
-          platform: "instagram",
-          account_handle: "bravotv",
-          run_status: "completed",
-          job_status: "completed",
-          target_source_ids: ["C123"],
-        });
-      }
-      throw new Error(`Unhandled request: ${url}`);
-    });
 
-    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="comments" />);
 
-    expect(await screen.findByText("Available Posts")).toBeInTheDocument();
-    expect(screen.getByText("Commentable now: 12")).toBeInTheDocument();
-
-    const button = await screen.findByRole("button", { name: "Sync Comments" });
-    fireEvent.click(button);
-
-    await waitFor(() => {
-      expect(
-        mocks.fetchAdminWithAuth.mock.calls.some(([input]) =>
-          String(input).includes("/api/admin/trr-api/social/profiles/instagram/bravotv/comments/scrape"),
-        ),
-      ).toBe(true);
-    });
-  });
-
-  it("reattaches sync comments to an active comments run conflict", async () => {
-    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input);
-      if (url.includes("/summary")) {
-        return jsonResponse(baseSummary);
-      }
-      if (url.includes("/posts?page=1&page_size=25&comments_only=true")) {
-        return jsonResponse({
-          items: [],
-          pagination: { page: 1, page_size: 25, total: 0, total_pages: 1 },
-        });
-      }
-      if (url.includes("/comments/scrape") && init?.method === "POST") {
-        return jsonResponse(
-          {
-            detail: {
-              active_run_id: "incactv1-87654321",
-            },
-          },
-          409,
-        );
-      }
-      if (url.includes("/comments/runs/incactv1-87654321/progress")) {
-        return jsonResponse({
-          run_id: "incactv1-87654321",
-          platform: "instagram",
-          account_handle: "bravotv",
-          run_status: "running",
-          job_status: "running",
-          target_filter: "incomplete",
-        });
-      }
-      throw new Error(`Unhandled request: ${url}`);
-    });
-
-    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="comments" />);
-
-    fireEvent.click(await screen.findByRole("button", { name: "Sync Comments" }));
-
-    expect(await screen.findByText("Comments sync already running. Run incactv1.")).toBeInTheDocument();
-  });
-
-  it("queues an incomplete fill comments scrape from the comments tab", async () => {
-    const scrapeCalls: Array<Record<string, unknown>> = [];
-    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input);
-      if (url.includes("/summary")) {
-        return jsonResponse(baseSummary);
-      }
-      if (url.includes("/posts?page=1&page_size=25&comments_only=true")) {
-        return jsonResponse({
-          items: [],
-          pagination: { page: 1, page_size: 25, total: 0, total_pages: 1 },
-        });
-      }
-      if (url.includes("/comments/scrape")) {
-        expect(init?.method).toBe("POST");
-        const body = init?.body && typeof init.body === "string" ? JSON.parse(init.body) : {};
-        scrapeCalls.push(body as Record<string, unknown>);
-        return jsonResponse({
-          status: "queued",
-        });
-      }
-      throw new Error(`Unhandled request: ${url}`);
-    });
-
-    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="comments" />);
-
-    fireEvent.click(await screen.findByRole("button", { name: "Incomplete Fill" }));
-
-    await waitFor(() => {
-      expect(scrapeCalls).toHaveLength(1);
-    });
-    expect(scrapeCalls[0]).toMatchObject({
-      mode: "profile",
-      source_scope: "network",
-      refresh_policy: "stale_or_missing",
-      target_filter: "incomplete",
-      max_comments_per_post: 0,
-      comments_load_strategy: "public_relay",
-      date_start: null,
-      date_end: null,
-    });
-    expect(scrapeCalls[0]).not.toHaveProperty("dry_run");
-  });
 
   it("previews incomplete fill with public relay without enqueueing a run", async () => {
     const scrapeCalls: Array<{ url: string; body: Record<string, unknown> }> = [];
@@ -2023,6 +1981,7 @@ describe("SocialAccountProfilePage", () => {
 
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse(baseSummary);
       }
@@ -2082,7 +2041,7 @@ describe("SocialAccountProfilePage", () => {
     expect(screen.queryByText(/Run incfill/i)).not.toBeInTheDocument();
   });
 
-  it("keeps incomplete fill clickable when no incomplete comment targets are known", async () => {
+  it("keeps bounded backfill available when no incomplete comment targets are known", async () => {
     const coveredSummary = {
       ...baseSummary,
       comments_coverage: {
@@ -2094,6 +2053,7 @@ describe("SocialAccountProfilePage", () => {
 
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: true, account: "bravotv", supported_actions: ["backfill", "sync_recent", "sync_newer"], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse(coveredSummary);
       }
@@ -2108,13 +2068,14 @@ describe("SocialAccountProfilePage", () => {
 
     render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="comments" />);
 
-    expect(await screen.findByRole("button", { name: "Sync Comments" })).toBeEnabled();
-    expect(screen.getByRole("button", { name: "Incomplete Fill" })).toBeEnabled();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Choose Bounded Backfill" })).toBeEnabled());
+    expect(screen.queryByRole("button", { name: "Incomplete Fill", exact: true })).not.toBeInTheDocument();
   });
 
   it("hides catalog progress chrome on the comments tab", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse(baseSummary);
       }
@@ -2146,6 +2107,7 @@ describe("SocialAccountProfilePage", () => {
 
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/snapshot")) {
         return profileSnapshotResponse(activeSummary);
       }
@@ -2236,7 +2198,7 @@ describe("SocialAccountProfilePage", () => {
 
     render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="comments" />);
 
-    expect(await screen.findByRole("button", { name: "Syncing Comments..." })).toBeDisabled();
+    expect(await screen.findByRole("button", { name: "Choose Bounded Backfill" })).toBeDisabled();
     await waitFor(() => {
       expect(
         mocks.fetchAdminWithAuth.mock.calls.some(([input]) =>
@@ -2255,7 +2217,7 @@ describe("SocialAccountProfilePage", () => {
     expect(await screen.findByRole("heading", { name: "Active Comments Run" })).toBeInTheDocument();
   });
 
-  it("offers a public-only guarded restart for an active comments run and posts the public-relay window", async () => {
+  it("prevents a new legacy guarded restart for an active Instagram comments run", async () => {
     const runId = "comments-run-active-restart-1234";
     const restartCalls: { url: string; body: Record<string, unknown> }[] = [];
     const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
@@ -2271,6 +2233,7 @@ describe("SocialAccountProfilePage", () => {
 
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/snapshot")) {
         return profileSnapshotResponse(activeSummary);
       }
@@ -2309,38 +2272,14 @@ describe("SocialAccountProfilePage", () => {
 
     render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="comments" />);
 
-    const restartButton = await screen.findByTestId("restart-comments-run-button");
-    expect(restartButton).toBeInTheDocument();
-    expect(restartButton).toHaveTextContent("Restart Comments Run");
-
-    // public-only proof copy must be visible.
-    const proof = await screen.findByTestId("restart-comments-run-public-only-proof");
-    expect(proof.textContent).toMatch(/public relay only/i);
-    expect(proof.textContent).toMatch(/no cookies/i);
-    expect(proof.textContent).toMatch(/no Decodo/i);
-
-    fireEvent.click(restartButton);
-
-    await waitFor(() => {
-      expect(restartCalls.length).toBe(1);
-    });
-    const restartCall = restartCalls[0];
-    expect(restartCall.url).toContain(
-      `/api/admin/trr-api/social/profiles/instagram/bravotv/comments/runs/${runId}/guarded-restart`,
-    );
-    expect(restartCall.body).toMatchObject({
-      date_start: "2025-01-01T00:00:00Z",
-      date_end: "2027-01-01T00:00:00Z",
-      comments_worker_count: 12,
-      comments_target_batch_size: 10,
-      comments_load_strategy: "public_relay",
-      target_filter: "incomplete",
-    });
+    await screen.findByRole("button", { name: "Choose Bounded Backfill" });
+    expect(screen.queryByTestId("restart-comments-run-button")).not.toBeInTheDocument();
+    expect(restartCalls).toHaveLength(0);
 
     confirmSpy.mockRestore();
   });
 
-  it("offers the guarded restart for a public-blocked-paused comments run and surfaces the pause reason", async () => {
+  it("prevents a new legacy guarded restart for a paused Instagram comments run", async () => {
     const runId = "comments-run-paused-restart-5678";
     const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
     const pausedSummary = {
@@ -2355,6 +2294,7 @@ describe("SocialAccountProfilePage", () => {
 
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/snapshot")) {
         return profileSnapshotResponse(pausedSummary);
       }
@@ -2387,14 +2327,8 @@ describe("SocialAccountProfilePage", () => {
 
     render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="comments" />);
 
-    const restartButton = await screen.findByTestId("restart-comments-run-button");
-    expect(restartButton).toBeInTheDocument();
-
-    const proof = await screen.findByTestId("restart-comments-run-public-only-proof");
-    expect(proof.textContent).toMatch(/public blocks paused this run/i);
-    expect(proof.textContent).toMatch(/public relay only/i);
-    expect(proof.textContent).toMatch(/no cookies/i);
-    expect(proof.textContent).toMatch(/no Decodo/i);
+    await screen.findByRole("button", { name: "Choose Bounded Backfill" });
+    expect(screen.queryByTestId("restart-comments-run-button")).not.toBeInTheDocument();
 
     confirmSpy.mockRestore();
   });
@@ -2420,6 +2354,7 @@ describe("SocialAccountProfilePage", () => {
 
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse(activeSummary);
       }
@@ -2534,6 +2469,7 @@ describe("SocialAccountProfilePage", () => {
 
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/snapshot")) {
         return profileSnapshotResponse(activeSummary);
       }
@@ -2632,6 +2568,7 @@ describe("SocialAccountProfilePage", () => {
 
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/snapshot")) {
         return profileSnapshotResponse({
           ...baseSummary,
@@ -2695,7 +2632,7 @@ describe("SocialAccountProfilePage", () => {
 
     render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="comments" />);
 
-    expect(await screen.findByRole("button", { name: "Syncing Comments..." })).toBeDisabled();
+    expect(await screen.findByRole("button", { name: "Choose Bounded Backfill" })).toBeDisabled();
     expect(screen.queryByText(/\[SSL: WRONG_VERSION_NUMBER\]/)).not.toBeInTheDocument();
     expect(
       await screen.findByText((content) => content.includes("Shard 5 of 8") && content.includes("fresh-sh")),
@@ -2707,6 +2644,7 @@ describe("SocialAccountProfilePage", () => {
   it("warns when an active comments run predates sharding", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/snapshot")) {
         return profileSnapshotResponse({
           ...baseSummary,
@@ -2772,6 +2710,7 @@ describe("SocialAccountProfilePage", () => {
     const runId = "comments-run-single-post-1234";
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
@@ -2813,17 +2752,18 @@ describe("SocialAccountProfilePage", () => {
 
     render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="comments" />);
 
-    expect(await screen.findByRole("button", { name: "Syncing Comments..." })).toBeDisabled();
+    expect(await screen.findByRole("button", { name: "Choose Bounded Backfill" })).toBeDisabled();
     expect(
       await screen.findByText(
-        "Single-post repair for DVfQnTcjsCA: this run only updates one post and will not close the account-wide comments gap. Run Incomplete Fill after it finishes to target every incomplete post.",
+        "Single-post repair for DVfQnTcjsCA: this run only updates one post and will not close the account-wide comments gap. Choose a bounded ingestion run after it finishes to review unfinished posts.",
       ),
     ).toBeInTheDocument();
   });
 
-  it("shows a Sync Comments resume hint for cancelled comments runs", async () => {
+  it("shows a bounded ingestion hint for cancelled comments runs", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
@@ -2862,7 +2802,7 @@ describe("SocialAccountProfilePage", () => {
     render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="comments" />);
 
     expect(
-      await screen.findByText("Stopped by operator. 7 targets remain; use Incomplete Fill to continue only unfinished posts."),
+      await screen.findByText("Stopped by operator. 7 targets remain; choose a bounded ingestion run for unfinished posts."),
     ).toBeInTheDocument();
   });
 
@@ -2872,6 +2812,7 @@ describe("SocialAccountProfilePage", () => {
     let progressRequests = 0;
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         summaryRequests += 1;
         return jsonResponse({
@@ -2912,19 +2853,20 @@ describe("SocialAccountProfilePage", () => {
     const { unmount } = render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="comments" />);
 
     expect(
-      await screen.findByText("Stopped by operator. 7 targets remain; use Incomplete Fill to continue only unfinished posts."),
+      await screen.findByText("Stopped by operator. 7 targets remain; choose a bounded ingestion run for unfinished posts."),
     ).toBeInTheDocument();
     await waitFor(() => {
       expect(summaryRequests).toBeGreaterThanOrEqual(2);
     });
     expect(progressRequests).toBe(1);
-    expect(screen.getByRole("button", { name: "Syncing Comments..." })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Choose Bounded Backfill" })).toBeDisabled();
     unmount();
   });
 
   it("queues a catalog-driven discussion refresh from the comments tab for TikTok", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse({ ...baseSummary, platform: "tiktok" });
       }
@@ -2969,6 +2911,7 @@ describe("SocialAccountProfilePage", () => {
 
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/snapshot")) {
         return profileSnapshotResponse(baseSummary);
       }
@@ -3012,6 +2955,7 @@ describe("SocialAccountProfilePage", () => {
   it("renders one row per post and opens a post comments modal from the post link", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/snapshot")) {
         return profileSnapshotResponse(baseSummary);
       }
@@ -3238,6 +3182,7 @@ describe("SocialAccountProfilePage", () => {
     let commentFetches = 0;
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/snapshot")) {
         return profileSnapshotResponse(baseSummary);
       }
@@ -3303,6 +3248,7 @@ describe("SocialAccountProfilePage", () => {
 
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse(baseSummary);
       }
@@ -3368,6 +3314,7 @@ describe("SocialAccountProfilePage", () => {
     setWindowLocation("https://admin.therealityreport.com/social/instagram/bravotv/comments?post=DVfQnTcjsCA");
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse(baseSummary);
       }
@@ -3445,6 +3392,7 @@ describe("SocialAccountProfilePage", () => {
     const postsRequests: string[] = [];
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse(baseSummary);
       }
@@ -3510,6 +3458,7 @@ describe("SocialAccountProfilePage", () => {
 
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse(baseSummary);
       }
@@ -3617,6 +3566,7 @@ describe("SocialAccountProfilePage", () => {
     };
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse(divergentSummary);
       }
@@ -3655,6 +3605,7 @@ describe("SocialAccountProfilePage", () => {
     };
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse(fallbackSummary);
       }
@@ -3697,6 +3648,7 @@ describe("SocialAccountProfilePage", () => {
 
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse(summary);
       }
@@ -3732,6 +3684,7 @@ describe("SocialAccountProfilePage", () => {
 
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse(summary);
       }
@@ -3776,6 +3729,7 @@ describe("SocialAccountProfilePage", () => {
     // a specific message with the launch command, not a generic 503.
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse(baseSummary);
       }
@@ -3801,7 +3755,7 @@ describe("SocialAccountProfilePage", () => {
 
     render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="comments" />);
 
-    const button = await screen.findByRole("button", { name: "Sync Comments" });
+    const button = await screen.findByRole("button", { name: "Preview Incomplete Fill" });
     fireEvent.click(button);
 
     await waitFor(() => {
@@ -3813,6 +3767,7 @@ describe("SocialAccountProfilePage", () => {
   it("shows Modal-specific guidance when comments scrape requires Modal dispatch", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse(baseSummary);
       }
@@ -3841,7 +3796,7 @@ describe("SocialAccountProfilePage", () => {
 
     render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="comments" />);
 
-    const button = await screen.findByRole("button", { name: "Sync Comments" });
+    const button = await screen.findByRole("button", { name: "Preview Incomplete Fill" });
     fireEvent.click(button);
 
     await waitFor(() => {
@@ -3852,6 +3807,7 @@ describe("SocialAccountProfilePage", () => {
   it("routes the legacy posts tab to catalog actions for Instagram accounts", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse(baseSummary);
       }
@@ -3908,6 +3864,7 @@ describe("SocialAccountProfilePage", () => {
   it("surfaces comments scrape worker errors on the comments tab", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse(baseSummary);
       }
@@ -3925,7 +3882,7 @@ describe("SocialAccountProfilePage", () => {
 
     render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="comments" />);
 
-    const button = await screen.findByRole("button", { name: "Sync Comments" });
+    const button = await screen.findByRole("button", { name: "Preview Incomplete Fill" });
     fireEvent.click(button);
 
     await waitFor(() => {
@@ -3936,6 +3893,7 @@ describe("SocialAccountProfilePage", () => {
   it("surfaces classified comments read-path errors instead of collapsing to the generic fallback", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse(baseSummary);
       }
@@ -3967,6 +3925,7 @@ describe("SocialAccountProfilePage", () => {
     let refreshResolver: ((value: Response) => void) | null = null;
     mocks.fetchAdminWithAuth.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return Promise.resolve(jsonResponse(baseSummary));
       }
@@ -4010,6 +3969,7 @@ describe("SocialAccountProfilePage", () => {
   it("renders SocialBlade chart and table rows chronologically when the response order is reversed", async () => {
     mocks.fetchAdminWithAuth.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return Promise.resolve(jsonResponse(baseSummary));
       }
@@ -4059,6 +4019,7 @@ describe("SocialAccountProfilePage", () => {
 
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse(scopedSummary);
       }
@@ -4131,6 +4092,7 @@ describe("SocialAccountProfilePage", () => {
   it("does not offer another following page when fallback pagination has no continuation signal", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse(baseSummary);
       }
@@ -4176,6 +4138,7 @@ describe("SocialAccountProfilePage", () => {
   it("surfaces SocialBlade refresh errors on the account tab", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse(baseSummary);
       }
@@ -4205,6 +4168,7 @@ describe("SocialAccountProfilePage", () => {
   it("does not fan out secondary reads while the summary is saturated", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse(
           {
@@ -4244,6 +4208,7 @@ describe("SocialAccountProfilePage", () => {
     let liveSummaryCalls = 0;
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/snapshot")) {
         return jsonResponse(
           {
@@ -4283,6 +4248,7 @@ describe("SocialAccountProfilePage", () => {
 
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         liveSummaryCalls += 1;
         return jsonResponse(
@@ -4314,6 +4280,7 @@ describe("SocialAccountProfilePage", () => {
   it("shows a timeout-specific summary banner when the lite summary fallback also times out", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/snapshot")) {
         return jsonResponse(
           {
@@ -4357,6 +4324,7 @@ describe("SocialAccountProfilePage", () => {
     const requestUrls: string[] = [];
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       requestUrls.push(url);
       if (url.includes("/snapshot")) {
         return profileSnapshotResponse({
@@ -4402,6 +4370,7 @@ describe("SocialAccountProfilePage", () => {
     let liveSummaryCalls = 0;
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/snapshot")) {
         return jsonResponse({
           summary: null,
@@ -4436,6 +4405,7 @@ describe("SocialAccountProfilePage", () => {
     let resolveSummary: ((value: Response) => void) | null = null;
     mocks.fetchAdminWithAuth.mockImplementation((input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/snapshot")) {
         throw new Error(`Unhandled request: ${url}`);
       }
@@ -4473,6 +4443,7 @@ describe("SocialAccountProfilePage", () => {
   it("renders collaborator-backed Instagram catalog posts without requiring a new run", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
@@ -4537,162 +4508,16 @@ describe("SocialAccountProfilePage", () => {
     );
   });
 
-  it("queues a full-history catalog backfill from the primary CTA", async () => {
-    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input);
-      if (url.includes("/summary")) {
-        return jsonResponse({
-          ...baseSummary,
-          source_status: [{ source_scope: "creator" }],
-        });
-      }
-      if (url.includes("/cookies/health")) {
-        return jsonResponse({
-          platform: "instagram",
-          required: true,
-          healthy: true,
-          reason: null,
-          refresh_supported: true,
-          refresh_available: true,
-          refresh_action: "instagram_auth_repair",
-          refresh_label: "Manual Instagram Auth",
-          source_kind: "default_file",
-        });
-      }
-      if (url.includes("/catalog/backfill")) {
-        expect(init?.method).toBe("POST");
-        expect(init?.body).toBe(
-          JSON.stringify({
-            source_scope: "creator",
-            backfill_scope: "full_history",
-            selected_tasks: [...INSTAGRAM_BACKFILL_DEFAULT_TASKS],
-            detail_worker_count: 8,
-          comments_worker_count: 8,
-          comments_enable_media_followups: true,
-          }),
-        );
-        return jsonResponse({ run_id: "catalog-run-12345678", status: "queued" });
-      }
-      throw new Error(`Unhandled request: ${url}`);
-    });
-
-    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
-
-    await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Backfill Posts" })).toBeInTheDocument();
-    });
-
-    fireEvent.click(screen.getByRole("button", { name: "Backfill Posts" }));
-
-    expect(await screen.findByText("Choose what this backfill should run")).toBeInTheDocument();
-    const checkboxes = screen.getAllByRole("checkbox");
-    expect(checkboxes).toHaveLength(4);
-    expect(checkboxes[0]).toBeChecked();
-    expect(checkboxes[1]).toBeChecked();
-    // Media is now checked by default (all three lanes run by default).
-    expect(checkboxes[2]).toBeChecked();
-
-    fireEvent.click(screen.getByRole("button", { name: "Start Backfill" }));
-
-    await waitFor(() => {
-      expect(mocks.fetchAdminWithAuth.mock.calls.some(([input]) => String(input).includes("/catalog/backfill"))).toBe(true);
-    });
-  });
-
-  it("shows provisional launch copy once instagram kickoff returns a run id", async () => {
-    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input);
-      if (url.includes("/summary")) {
-        return jsonResponse(baseSummary);
-      }
-      if (url.includes("/cookies/health")) {
-        return jsonResponse(healthyCookieHealth("instagram"));
-      }
-      if (url.includes("/snapshot")) {
-        return jsonResponse({
-          summary: baseSummary,
-          catalog_run_progress: url.includes("run_id=catalog-run-pending-12345678")
-            ? {
-                run_id: "catalog-run-pending-12345678",
-                run_status: "queued",
-                launch_state: "pending",
-                source_scope: "network",
-                selected_tasks: [...INSTAGRAM_BACKFILL_DEFAULT_TASKS],
-                effective_selected_tasks: [...INSTAGRAM_BACKFILL_DEFAULT_TASKS],
-                stages: {},
-                per_handle: [],
-                recent_log: [],
-                summary: { total_jobs: 0, completed_jobs: 0, failed_jobs: 0, active_jobs: 0 },
-              }
-            : null,
-          generated_at: "2026-05-03T15:31:47.000Z",
-        });
-      }
-      if (url.includes("/catalog/runs/catalog-run-pending-12345678/progress")) {
-        return jsonResponse({
-          run_id: "catalog-run-pending-12345678",
-          run_status: "queued",
-          launch_state: "pending",
-          source_scope: "network",
-          selected_tasks: [...INSTAGRAM_BACKFILL_DEFAULT_TASKS],
-          effective_selected_tasks: [...INSTAGRAM_BACKFILL_DEFAULT_TASKS],
-          stages: {},
-          per_handle: [],
-          recent_log: [],
-          summary: { total_jobs: 0, completed_jobs: 0, failed_jobs: 0, active_jobs: 0 },
-        });
-      }
-      if (url.includes("/catalog/backfill")) {
-        expect(init?.method).toBe("POST");
-        const body = typeof init?.body === "string" ? JSON.parse(init.body) : {};
-        expect(body).toEqual({
-          source_scope: "network",
-          backfill_scope: "full_history",
-          selected_tasks: [...INSTAGRAM_BACKFILL_DEFAULT_TASKS],
-          detail_worker_count: 8,
-          comments_worker_count: 8,
-          comments_enable_media_followups: true,
-        });
-        return jsonResponse({
-          run_id: "catalog-run-pending-12345678",
-          status: "queued",
-          catalog_run_id: "catalog-run-pending-12345678",
-          launch_group_id: "launch-group-12345678",
-          launch_state: "pending",
-          launch_task_resolution_pending: true,
-        });
-      }
-      throw new Error(`Unhandled request: ${url}`);
-    });
-
-    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
-
-    await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Backfill Posts" })).toBeInTheDocument();
-    });
-
-    fireEvent.click(screen.getByRole("button", { name: "Backfill Posts" }));
-    expect(await screen.findByText("Choose what this backfill should run")).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "Start Backfill" }));
-
-    await waitFor(() => {
-      expect(
-        mocks.fetchAdminWithAuth.mock.calls.some(([input]) =>
-          String(input).includes("/catalog/backfill"),
-        ),
-      ).toBe(true);
-    });
-  });
-
   it.each([
     { startMonth: "2026-05", endMonth: "2026-07", dateStart: "2026-05-01T00:00:00.000Z", dateEnd: "2026-07-31T23:59:59.999Z" },
     { startMonth: "2026-01", endMonth: "2026-12", dateStart: "2026-01-01T00:00:00.000Z", dateEnd: "2026-12-31T23:59:59.999Z" },
-  ])("preserves legacy inclusive month boundaries ($startMonth to $endMonth) and reused-run warnings", async ({ startMonth, endMonth, dateStart, dateEnd }) => {
+  ])("preserves month boundaries in bounded v2 payloads ($startMonth to $endMonth)", async ({ startMonth, endMonth, dateStart, dateEnd }) => {
     let backfillBody: Record<string, unknown> | null = null;
 
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+      const ingestionRead = boundedIngestionRead(url);
+      if (ingestionRead) return ingestionRead;
       if (url.includes("/summary")) {
         return jsonResponse(baseSummary);
       }
@@ -4706,12 +4531,12 @@ describe("SocialAccountProfilePage", () => {
           generated_at: "2026-07-08T12:00:00.000Z",
         });
       }
-      if (url.includes("/catalog/backfill")) {
+      if (url.endsWith("/instagram-ingestion/bravotv/runs")) {
         expect(init?.method).toBe("POST");
         backfillBody = typeof init?.body === "string" ? JSON.parse(init.body) : {};
         return jsonResponse({
           run_id: "catalog-run-reused-comments",
-          status: "queued",
+          status: "queued", state: "running", engine: "dbos", workflow_version: "v1", generation: 1,
           catalog_run_id: "catalog-run-reused-comments",
           comments_run_id: "comments-run-existing",
           comments_reused_existing_run: true,
@@ -4731,7 +4556,7 @@ describe("SocialAccountProfilePage", () => {
     render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Backfill Posts" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Backfill Posts" })).toBeEnabled();
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Backfill Posts" }));
@@ -4746,214 +4571,16 @@ describe("SocialAccountProfilePage", () => {
       expect(backfillBody).toMatchObject({
         backfill_scope: "bounded_window",
         date_start: dateStart,
-        date_end: dateEnd,
+        date_end: new Date(Date.parse(dateEnd) + 1).toISOString(),
       });
     });
-    expect(mocks.fetchAdminWithAuth.mock.calls.some(([input, init]) => String(input).includes("/instagram-ingestion/") && init?.method === "POST")).toBe(false);
-    expect(await screen.findByText(/Warning: reused existing comments run/i)).toBeInTheDocument();
-  });
-
-  it("requires explicit Live APPLY before a 2025 Instagram backfill is finalized", async () => {
-    const runId = "11111111-1111-4111-8111-111111111111";
-    const requiredConfirmation = `APPLY INSTAGRAM 2025 BACKFILL ${runId}`;
-    const backfillRequests: Array<Record<string, unknown>> = [];
-
-    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input);
-      if (url.includes("/summary")) {
-        return jsonResponse(baseSummary);
-      }
-      if (url.includes("/cookies/health")) {
-        return jsonResponse(healthyCookieHealth("instagram"));
-      }
-      if (url.includes("/snapshot")) {
-        return jsonResponse({
-          summary: baseSummary,
-          catalog_run_progress: null,
-          generated_at: "2026-05-03T15:31:47.000Z",
-        });
-      }
-      if (url.includes(`/catalog/runs/${runId}/progress`)) {
-        return jsonResponse({
-          run_id: runId,
-          run_status: "queued",
-          launch_state: "pending_apply_confirmation",
-          source_scope: "network",
-          selected_tasks: [...INSTAGRAM_BACKFILL_DEFAULT_TASKS],
-          effective_selected_tasks: [...INSTAGRAM_BACKFILL_DEFAULT_TASKS],
-          stages: {},
-          per_handle: [],
-          recent_log: [],
-          summary: { total_jobs: 0, completed_jobs: 0, failed_jobs: 0, active_jobs: 0 },
-        });
-      }
-      if (url.includes("/catalog/backfill")) {
-        expect(init?.method).toBe("POST");
-        const body = typeof init?.body === "string" ? JSON.parse(init.body) : {};
-        backfillRequests.push(body);
-        if (!body.apply_run_id) {
-          expect(body).toMatchObject({
-            source_scope: "network",
-            backfill_scope: "bounded_window",
-            date_start: "2025-01-01T00:00:00.000Z",
-            date_end: "2025-12-31T23:59:59.999Z",
-            selected_tasks: [...INSTAGRAM_BACKFILL_DEFAULT_TASKS],
-          });
-          return jsonResponse({
-            run_id: runId,
-            status: "queued",
-            catalog_run_id: runId,
-            launch_state: "pending_apply_confirmation",
-            launch_task_resolution_pending: true,
-            requires_apply_confirmation: true,
-            apply_required: true,
-            apply_run_id: runId,
-            required_confirmation: requiredConfirmation,
-          });
-        }
-        expect(body).toMatchObject({
-          apply_run_id: runId,
-          operator_confirmation: requiredConfirmation,
-        });
-        return jsonResponse({
-          run_id: runId,
-          status: "queued",
-          catalog_run_id: runId,
-          launch_state: "finalizing",
-          launch_task_resolution_pending: true,
-          requires_apply_confirmation: false,
-          apply_required: false,
-        });
-      }
-      throw new Error(`Unhandled request: ${url}`);
-    });
-
-    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
-
-    await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Backfill Posts" })).toBeInTheDocument();
-    });
-
-    fireEvent.click(screen.getByRole("button", { name: "Backfill Posts" }));
-    expect(await screen.findByText("Choose what this backfill should run")).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("Start month (MM-YYYY)"), { target: { value: "2025-01" } });
-    fireEvent.change(screen.getByLabelText("End month (MM-YYYY)"), { target: { value: "2025-12" } });
-    fireEvent.click(screen.getByRole("button", { name: "Start Backfill" }));
-
-    expect(await screen.findByText("Live APPLY Required")).toBeInTheDocument();
-    expect(screen.getByText(requiredConfirmation)).toBeInTheDocument();
-    expect(backfillRequests).toHaveLength(1);
-    expect(backfillRequests[0].apply_run_id).toBeUndefined();
-
-    fireEvent.click(screen.getByRole("button", { name: "Confirm Live APPLY" }));
-
-    await waitFor(() => {
-      expect(backfillRequests).toHaveLength(2);
-    });
-    expect(backfillRequests[1]).toMatchObject({
-      apply_run_id: runId,
-      operator_confirmation: requiredConfirmation,
-    });
-  });
-
-  it("replaces accepted Instagram launch copy with active progress and keeps launch buttons locked", async () => {
-    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input);
-      if (url.includes("/summary")) {
-        return jsonResponse(baseSummary);
-      }
-      if (url.includes("/cookies/health")) {
-        return jsonResponse(healthyCookieHealth("instagram"));
-      }
-      if (url.includes("/catalog/runs/catalog-run-running-12345678/progress")) {
-        return jsonResponse({
-          run_id: "catalog-run-running-12345678",
-          run_status: "running",
-          run_state: "fetching",
-          operational_state: "fetching",
-          launch_group_id: "launch-group-running-12345678",
-          launch_state: "ready",
-          source_scope: "network",
-          selected_tasks: [...INSTAGRAM_BACKFILL_DEFAULT_TASKS],
-          effective_selected_tasks: [...INSTAGRAM_BACKFILL_DEFAULT_TASKS],
-          stages: {
-            shared_account_posts: {
-              jobs_total: 1,
-              jobs_completed: 0,
-              jobs_failed: 0,
-              jobs_active: 1,
-              jobs_running: 1,
-              jobs_waiting: 0,
-              scraped_count: 66,
-              saved_count: 66,
-            },
-          },
-          per_handle: [],
-          recent_log: [
-            {
-              id: "log-running",
-              timestamp: "2026-05-03T17:46:35.000Z",
-              platform: "instagram",
-              account_handle: "bravotv",
-              stage: "shared_account_posts",
-              status: "running",
-              line: "Instagram @bravotv shared account scrape running · scraped 66",
-            },
-          ],
-          post_progress: {
-            completed_posts: 66,
-            matched_posts: 66,
-            total_posts: 437,
-          },
-          summary: {
-            total_jobs: 1,
-            completed_jobs: 0,
-            failed_jobs: 0,
-            active_jobs: 1,
-          },
-        });
-      }
-      if (url.includes("/catalog/backfill")) {
-        expect(init?.method).toBe("POST");
-        return jsonResponse({
-          run_id: "catalog-run-running-12345678",
-          status: "queued",
-          catalog_run_id: "catalog-run-running-12345678",
-          launch_group_id: "launch-group-running-12345678",
-          launch_state: "pending",
-          launch_task_resolution_pending: true,
-        });
-      }
-      throw new Error(`Unhandled request: ${url}`);
-    });
-
-    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
-
-    await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Backfill Posts" })).toBeInTheDocument();
-    });
-
-    fireEvent.click(screen.getByRole("button", { name: "Backfill Posts" }));
-    expect(await screen.findByText("Choose what this backfill should run")).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "Start Backfill" }));
-
-    await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Backfill Posts" })).toBeDisabled();
-      expect(screen.getByRole("button", { name: "Fill Missing Posts" })).toBeDisabled();
-    });
-
-    await waitFor(() => {
-      expect(screen.queryByText(/Instagram backfill accepted\./)).not.toBeInTheDocument();
-      expect(screen.getAllByText("Post Details outcome unknown (legacy or incomplete report)").length).toBeGreaterThan(0);
-      expect(screen.queryByText("66 / 437 posts checked")).not.toBeInTheDocument();
-      expect(screen.getAllByText(/Run catalog- · Post Details outcome unknown/).length).toBeGreaterThan(0);
-    });
+    expect(mocks.fetchAdminWithAuth.mock.calls.some(([input]) => String(input).includes("/catalog/backfill"))).toBe(false);
   });
 
   it("queues a TikTok full-history catalog backfill with all selected tasks from one click", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
@@ -5011,6 +4638,7 @@ describe("SocialAccountProfilePage", () => {
 
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
@@ -5069,6 +4697,7 @@ describe("SocialAccountProfilePage", () => {
   it("starts Threads backfill without cookie preflight", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       expect(url).not.toContain("/cookies/health");
       expect(url).not.toContain("/cookies/refresh");
       if (url.includes("/summary")) {
@@ -5114,26 +4743,22 @@ describe("SocialAccountProfilePage", () => {
   it("preserves deselection in the Instagram backfill dialog and launch copy", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+      const ingestionRead = boundedIngestionRead(url);
+      if (ingestionRead) return ingestionRead;
       if (url.includes("/summary")) {
         return jsonResponse(baseSummary);
       }
       if (url.includes("/cookies/health")) {
         return jsonResponse(healthyCookieHealth("instagram"));
       }
-      if (url.includes("/catalog/backfill")) {
+      if (url.endsWith("/instagram-ingestion/bravotv/runs")) {
         expect(init?.method).toBe("POST");
         const body = typeof init?.body === "string" ? JSON.parse(init.body) : {};
-        expect(body).toEqual({
-          source_scope: "network",
-          backfill_scope: "full_history",
-          selected_tasks: ["post_details", "comments", "media"],
-          detail_worker_count: 8,
-          comments_worker_count: 8,
-          comments_enable_media_followups: true,
-        });
+        expect(body).toMatchObject({ action: "backfill", source_scope: "network", backfill_scope: "bounded_window", selected_tasks: ["media"] });
+
         return jsonResponse({
           run_id: "catalog-run-abcdef12",
-          status: "queued",
+          status: "queued", state: "running", engine: "dbos", workflow_version: "v1", generation: 1,
           selected_tasks: body.selected_tasks,
         });
       }
@@ -5143,118 +4768,29 @@ describe("SocialAccountProfilePage", () => {
     render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Backfill Posts" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Backfill Posts" })).toBeEnabled();
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Backfill Posts" }));
 
     const checkboxes = screen.getAllByRole("checkbox");
-    expect(checkboxes).toHaveLength(4);
-    expect(checkboxes[0]).toBeChecked();
+    expect(checkboxes[0]).not.toBeChecked();
     expect(checkboxes[1]).toBeChecked();
-    // Media is now checked by default (all three lanes run by default), so no click needed.
     expect(checkboxes[2]).toBeChecked();
-
-    const selectedSummary = Array.from(document.querySelectorAll("p"))
-      .map((element) => element.textContent?.replace(/\s+/g, " ").trim() ?? "")
-      .find((text) => text.startsWith("Selected: "));
-    expect(selectedSummary).toContain("Post Details, Comments, Media");
-    expect(selectedSummary).toContain("8 detail workers");
-    expect(selectedSummary).toContain("8 comments workers");
-    expect(selectedSummary).toContain("comment media on");
-
+    fireEvent.click(checkboxes[1]);
+    expect(screen.getByText(/Selected: .* · Media/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Start Backfill" }));
 
     await waitFor(() => {
-      expect(mocks.fetchAdminWithAuth.mock.calls.some(([input]) => String(input).includes("/catalog/backfill"))).toBe(true);
+      expect(mocks.fetchAdminWithAuth.mock.calls.some(([input, init]) => String(input).endsWith("/instagram-ingestion/bravotv/runs") && init?.method === "POST")).toBe(true);
+      expect(mocks.fetchAdminWithAuth.mock.calls.some(([input]) => String(input).includes("/catalog/backfill"))).toBe(false);
     });
-  });
-
-  it("renders actual execution copy when post details are skipped because posts are already materialized", async () => {
-    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input);
-      if (url.includes("/summary")) {
-        return jsonResponse(baseSummary);
-      }
-      if (url.includes("/cookies/health")) {
-        return jsonResponse(healthyCookieHealth("instagram"));
-      }
-      if (url.includes("/catalog/backfill")) {
-        expect(init?.method).toBe("POST");
-        return jsonResponse({
-          run_id: "catalog-run-12345678",
-          status: "queued",
-          launch_group_id: "launch-group-1",
-          catalog_run_id: "catalog-run-12345678",
-          comments_run_id: "comments-run-12345679",
-          effective_selected_tasks: ["comments", "media"],
-          post_details_skipped_reason: "already_materialized",
-        });
-      }
-      throw new Error(`Unhandled request: ${url}`);
-    });
-
-    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
-
-    fireEvent.click(await screen.findByRole("button", { name: "Backfill Posts" }));
-    fireEvent.click(screen.getByRole("button", { name: "Start Backfill" }));
-
-    expect(await screen.findByText(/Instagram backfill queued for Comments, Media\./)).toBeInTheDocument();
-    expect(
-      screen.getByText(/Post Details skipped because all catalog posts are already materialized\./),
-    ).toBeInTheDocument();
-  });
-
-  it("shows reused comments and attached media in Instagram launch copy", async () => {
-    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input);
-      if (url.includes("/summary")) {
-        return jsonResponse(baseSummary);
-      }
-      if (url.includes("/cookies/health")) {
-        return jsonResponse(healthyCookieHealth("instagram"));
-      }
-      if (url.includes("/catalog/backfill")) {
-        expect(init?.method).toBe("POST");
-        return jsonResponse({
-          run_id: "catalog-run-12345678",
-          status: "queued",
-          launch_group_id: "launch-group-1",
-          catalog_run_id: "catalog-run-12345678",
-          comments_run_id: "comments-run-12345679",
-          effective_selected_tasks: ["comments", "media"],
-          attached_followups: {
-            comments: {
-              run_id: "comments-run-12345679",
-              state: "running",
-              status: "running",
-              source: "reused_run",
-            },
-            media: {
-              attachment_id: "media-launch-group-1",
-              state: "pending",
-              status: "queued",
-              source: "catalog_media_mirror",
-              enqueued_job_ids: ["media-job-1"],
-              enqueued_job_count: 1,
-            },
-          },
-        });
-      }
-      throw new Error(`Unhandled request: ${url}`);
-    });
-
-    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
-
-    fireEvent.click(await screen.findByRole("button", { name: "Backfill Posts" }));
-    fireEvent.click(screen.getByRole("button", { name: "Start Backfill" }));
-
-    expect(await screen.findByText(/comments comments.*\(reused\) · media attached\./i)).toBeInTheDocument();
   });
 
   it("renders deferred attached lanes on recent Instagram catalog runs", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
@@ -5336,6 +4872,7 @@ describe("SocialAccountProfilePage", () => {
   it("uses attached follow-up state for the recent backfill aggregate label", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
@@ -5379,6 +4916,7 @@ describe("SocialAccountProfilePage", () => {
   it("dedupes catalog recent runs and keeps the displayed active run out of history", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
@@ -5460,6 +4998,7 @@ describe("SocialAccountProfilePage", () => {
   it("does not mark cancelled historical catalog runs as still running because a follow-up lane is pending", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
@@ -5513,6 +5052,7 @@ describe("SocialAccountProfilePage", () => {
   it("does not mark failed historical catalog runs as still running because a follow-up lane is pending", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
@@ -5567,6 +5107,7 @@ describe("SocialAccountProfilePage", () => {
   it("does not render stale active launch or follow-up states on terminal catalog runs", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
@@ -5697,6 +5238,7 @@ describe("SocialAccountProfilePage", () => {
 
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
@@ -5772,6 +5314,7 @@ describe("SocialAccountProfilePage", () => {
 
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
@@ -5887,6 +5430,7 @@ describe("SocialAccountProfilePage", () => {
 
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
@@ -6045,6 +5589,7 @@ describe("SocialAccountProfilePage", () => {
 
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
@@ -6150,6 +5695,7 @@ describe("SocialAccountProfilePage", () => {
 
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
@@ -6239,6 +5785,7 @@ describe("SocialAccountProfilePage", () => {
     const calls: string[] = [];
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       calls.push(url);
       if (url.includes("/summary")) {
         return jsonResponse({
@@ -6303,6 +5850,7 @@ describe("SocialAccountProfilePage", () => {
   it("opens the Instagram catalog detail modal from a catalog row", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse(baseSummary);
       }
@@ -6412,6 +5960,7 @@ describe("SocialAccountProfilePage", () => {
     const staleDetail = deferredResponse();
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse(baseSummary);
       }
@@ -6499,6 +6048,7 @@ describe("SocialAccountProfilePage", () => {
   it("renders catalog detail media from media_urls and thumbnail-only assets", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse(baseSummary);
       }
@@ -6579,6 +6129,7 @@ describe("SocialAccountProfilePage", () => {
   it("renders saved discussion inside catalog detail for supported non-instagram platforms", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse({ ...baseSummary, platform: "tiktok" });
       }
@@ -6661,6 +6212,7 @@ describe("SocialAccountProfilePage", () => {
   it("renders Manual Instagram Auth CTA in the cookie preflight card when cookies are unhealthy", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse(baseSummary);
       }
@@ -6693,6 +6245,7 @@ describe("SocialAccountProfilePage", () => {
 
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse(baseSummary);
       }
@@ -6751,6 +6304,7 @@ describe("SocialAccountProfilePage", () => {
 
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse(baseSummary);
       }
@@ -6785,186 +6339,12 @@ describe("SocialAccountProfilePage", () => {
     expect(screen.queryByText("Checking cookies…")).not.toBeInTheDocument();
   });
 
-  it("starts Instagram backfill without auto-repairing local auth first", async () => {
-    let cookieHealthChecks = 0;
-    const backfillBodies: unknown[] = [];
-
-    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input);
-      if (url.includes("/summary")) {
-        return jsonResponse(baseSummary);
-      }
-      if (url.includes("/cookies/health")) {
-        cookieHealthChecks += 1;
-        return jsonResponse({
-          platform: "instagram",
-          required: true,
-          healthy: cookieHealthChecks > 1,
-          reason: cookieHealthChecks > 1 ? null : "expired",
-          refresh_supported: true,
-          refresh_available: true,
-          refresh_action: "instagram_auth_repair",
-          refresh_label: "Manual Instagram Auth",
-          source_kind: "default_file",
-        });
-      }
-      if (url.includes("/cookies/refresh")) {
-        throw new Error("Manual Instagram auth should require confirmation");
-      }
-      if (url.includes("/catalog/backfill")) {
-        backfillBodies.push(typeof init?.body === "string" ? JSON.parse(init.body) : init?.body);
-        return jsonResponse({ run_id: "catalog-run-after-repair", status: "queued" });
-      }
-      if (url.includes("/snapshot")) {
-        return jsonResponse({
-          summary: baseSummary,
-          catalog_run_progress: null,
-          generated_at: "2026-04-21T00:00:00.000Z",
-        });
-      }
-      throw new Error(`Unhandled request: ${url}`);
-    });
-
-    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
-
-    const backfillButton = await screen.findByRole("button", { name: "Backfill Posts" });
-    fireEvent.click(backfillButton);
-    fireEvent.click(await screen.findByRole("button", { name: "Start Backfill" }));
-
-    await waitFor(() => {
-      expect(backfillBodies).toHaveLength(1);
-    });
-    expect(screen.queryByText(/Backfill was not started/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/Manual Instagram auth can surface CAPTCHA/i)).not.toBeInTheDocument();
-  });
-
-  it("starts Instagram backfill when local auth is unhealthy during pre-launch checks", async () => {
-    let backfillCalled = false;
-
-    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url.includes("/summary")) {
-        return jsonResponse(baseSummary);
-      }
-      if (url.includes("/cookies/health")) {
-        return jsonResponse({
-          platform: "instagram",
-          required: true,
-          healthy: false,
-          reason: "expired",
-          refresh_supported: true,
-          refresh_available: true,
-          refresh_action: "instagram_auth_repair",
-          refresh_label: "Manual Instagram Auth",
-          source_kind: "default_file",
-        });
-      }
-      if (url.includes("/cookies/refresh")) {
-        throw new Error("Manual Instagram auth should require confirmation");
-      }
-      if (url.includes("/catalog/backfill")) {
-        backfillCalled = true;
-        return jsonResponse({ run_id: "should-not-run", status: "queued" });
-      }
-      throw new Error(`Unhandled request: ${url}`);
-    });
-
-    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
-
-    const backfillButton = await screen.findByRole("button", { name: "Backfill Posts" });
-    fireEvent.click(backfillButton);
-    fireEvent.click(await screen.findByRole("button", { name: "Start Backfill" }));
-
-    await waitFor(() => {
-      expect(backfillCalled).toBe(true);
-    });
-    expect(screen.queryByText(/Backfill was not started/i)).not.toBeInTheDocument();
-  });
-
-  it("starts Instagram backfill on non-local runtimes without local manual-auth gating", async () => {
-    let backfillCalled = false;
-
-    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url.includes("/summary")) {
-        return jsonResponse(baseSummary);
-      }
-      if (url.includes("/cookies/health")) {
-        return jsonResponse({
-          platform: "instagram",
-          required: true,
-          healthy: false,
-          reason: "expired",
-          refresh_supported: true,
-          refresh_available: false,
-          refresh_action: "instagram_auth_repair",
-          refresh_label: "Manual Instagram Auth",
-          source_kind: "default_file",
-        });
-      }
-      if (url.includes("/catalog/backfill")) {
-        backfillCalled = true;
-        return jsonResponse({ run_id: "should-not-run", status: "queued" });
-      }
-      throw new Error(`Unhandled request: ${url}`);
-    });
-
-    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
-
-    const backfillButton = await screen.findByRole("button", { name: "Backfill Posts" });
-    fireEvent.click(backfillButton);
-    fireEvent.click(await screen.findByRole("button", { name: "Start Backfill" }));
-
-    await waitFor(() => {
-      expect(backfillCalled).toBe(true);
-    });
-    expect(screen.queryByText(/Manual Instagram Auth is completed from a local TRR-Backend host/i)).not.toBeInTheDocument();
-  });
-
-  it("surfaces structured backfill startup errors from the proxy", async () => {
-    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input);
-      if (url.includes("/summary")) {
-        return jsonResponse(baseSummary);
-      }
-      if (url.includes("/cookies/health")) {
-        return jsonResponse(healthyCookieHealth("instagram"));
-      }
-      if (url.includes("/catalog/backfill")) {
-        expect(init?.method).toBe("POST");
-        return jsonResponse(
-          {
-            error: "Local TRR-Backend is saturated. Showing last successful data while retrying.",
-            code: "BACKEND_SATURATED",
-            retryable: true,
-            retry_after_seconds: 2,
-            upstream_status: 503,
-          },
-          503,
-        );
-      }
-      throw new Error(`Unhandled request: ${url}`);
-    });
-
-    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
-
-    await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Backfill Posts" })).toBeInTheDocument();
-    });
-
-    fireEvent.click(screen.getByRole("button", { name: "Backfill Posts" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Start Backfill" }));
-
-    await waitFor(() => {
-      expect(screen.getByText("Backfill start is retryable while the backend is busy.")).toBeInTheDocument();
-    });
-  });
-
   it("renders fill-missing and backfill copy buttons on catalog-enabled platforms", async () => {
     const writeText = installClipboardMock();
 
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
@@ -7007,6 +6387,7 @@ describe("SocialAccountProfilePage", () => {
   it("renders Twitter env-cookie source without a stale refresh warning when refresh auto-syncs env JSON", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
@@ -7056,6 +6437,7 @@ describe("SocialAccountProfilePage", () => {
 
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/snapshot")) {
         return jsonResponse({
           summary: activeSummary,
@@ -7112,6 +6494,7 @@ describe("SocialAccountProfilePage", () => {
 
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/snapshot")) {
         return jsonResponse({
           summary: activeSummary,
@@ -7176,6 +6559,7 @@ describe("SocialAccountProfilePage", () => {
 
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/snapshot")) {
         return jsonResponse({
           summary: activeSummary,
@@ -7295,6 +6679,7 @@ describe("SocialAccountProfilePage", () => {
 
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/snapshot")) {
         return jsonResponse({
           summary: activeSummary,
@@ -7339,6 +6724,7 @@ describe("SocialAccountProfilePage", () => {
 
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/snapshot")) {
         return jsonResponse({
           summary: activeSummary,
@@ -7375,6 +6761,7 @@ describe("SocialAccountProfilePage", () => {
   it("routes Fill Missing Posts to sync-newer for head gaps", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
@@ -7437,6 +6824,7 @@ describe("SocialAccountProfilePage", () => {
   it("routes Fill Missing Posts to full-history backfill for tail gaps", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
@@ -7499,6 +6887,7 @@ describe("SocialAccountProfilePage", () => {
   it("routes Fill Missing Posts to bounded-window backfill for interior gaps", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
@@ -7571,6 +6960,7 @@ describe("SocialAccountProfilePage", () => {
 
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
@@ -7621,131 +7011,10 @@ describe("SocialAccountProfilePage", () => {
     expect(syncNewerCalled).toBe(false);
   });
 
-  it("shows tail-gap guidance and queues backfill posts from the integrity banner", async () => {
-    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input);
-      if (url.includes("/summary")) {
-        return jsonResponse({
-          ...baseSummary,
-          total_posts: 12,
-          catalog_total_posts: 10,
-          catalog_recent_runs: [
-            {
-              run_id: "run-tail-1",
-              status: "completed",
-              created_at: "2026-03-20T12:00:00.000Z",
-            },
-          ],
-        });
-      }
-      if (url.includes("/cookies/health")) {
-        return jsonResponse(healthyCookieHealth("instagram"));
-      }
-      if (url.includes("/catalog/posts")) {
-        return jsonResponse({
-          items: [],
-          pagination: { page: 1, page_size: 25, total: 0, total_pages: 1 },
-        });
-      }
-      if (url.includes("/catalog/freshness")) {
-        return jsonResponse({
-          platform: "instagram",
-          account_handle: "bravotv",
-          eligible: true,
-          checked_at: "2026-03-20T12:30:00.000Z",
-          stored_total_posts: 10,
-          live_total_posts_current: 12,
-          delta_posts: 2,
-          needs_recent_sync: false,
-          has_resumable_frontier: true,
-        });
-      }
-      if (url.includes("/catalog/gap-analysis/run")) {
-        expect(init?.method).toBe("POST");
-        return jsonResponse({
-          platform: "instagram",
-          account_handle: "bravotv",
-          status: "queued",
-          operation_id: "gap-op-tail-1",
-          result: null,
-          stale: false,
-        });
-      }
-      if (url.includes("/catalog/gap-analysis")) {
-        return jsonResponse({
-          platform: "instagram",
-          account_handle: "bravotv",
-          status: "completed",
-          operation_id: "gap-op-tail-1",
-          stale: false,
-          result: {
-            platform: "instagram",
-            account_handle: "bravotv",
-            gap_type: "tail_gap",
-            catalog_posts: 10,
-            materialized_posts: 12,
-            expected_total_posts: 12,
-            live_total_posts_current: 12,
-            missing_from_catalog_count: 2,
-            sample_missing_source_ids: ["old-post-1"],
-            has_resumable_frontier: true,
-            needs_recent_sync: false,
-            recommended_action: "backfill_posts",
-            latest_catalog_run_status: "completed",
-            active_run_status: null,
-          },
-        });
-      }
-      if (url.includes("/catalog/backfill")) {
-        expect(init?.method).toBe("POST");
-        expect(init?.body).toBe(
-          JSON.stringify({
-            source_scope: "network",
-            backfill_scope: "full_history",
-            selected_tasks: [...INSTAGRAM_BACKFILL_DEFAULT_TASKS],
-            detail_worker_count: 8,
-          comments_worker_count: 8,
-          comments_enable_media_followups: true,
-          }),
-        );
-        return jsonResponse({
-          run_id: "catalog-run-tail-12345678",
-          status: "queued",
-          catalog_action: "backfill",
-          catalog_action_scope: "full_history",
-          backfill_mode: "resume_frontier",
-          resumed_from_cursor: true,
-        });
-      }
-      throw new Error(`Unhandled request: ${url}`);
-    });
-
-    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
-
-    await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Run Gap Analysis" })).toBeInTheDocument();
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Run Gap Analysis" }));
-
-    await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Backfill Posts Now" })).toBeInTheDocument();
-    });
-
-    fireEvent.click(screen.getByRole("button", { name: "Backfill Posts Now" }));
-
-    await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Start Backfill" })).toBeInTheDocument();
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Start Backfill" }));
-
-    await waitFor(() => {
-      expectInstagramBackfillQueuedMessage();
-    });
-  });
-
   it("shows head-gap guidance and queues sync newer from the integrity banner", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
@@ -7852,6 +7121,8 @@ describe("SocialAccountProfilePage", () => {
   it("shows interior-gap guidance and queues a bounded repair window", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+      const ingestionRead = boundedIngestionRead(url);
+      if (ingestionRead) return ingestionRead;
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
@@ -7893,7 +7164,7 @@ describe("SocialAccountProfilePage", () => {
         return jsonResponse({
           platform: "instagram",
           account_handle: "bravotv",
-          status: "queued",
+          status: "queued", state: "running", engine: "dbos", workflow_version: "v1", generation: 1,
           operation_id: "gap-op-window-1",
           result: null,
           stale: false,
@@ -7928,20 +7199,10 @@ describe("SocialAccountProfilePage", () => {
           },
         });
       }
-      if (url.includes("/catalog/backfill")) {
+      if (url.endsWith("/instagram-ingestion/bravotv/runs")) {
         expect(init?.method).toBe("POST");
-        expect(init?.body).toBe(
-          JSON.stringify({
-            source_scope: "network",
-            backfill_scope: "bounded_window",
-            date_start: "2026-03-01T12:00:00Z",
-            date_end: "2026-03-02T12:00:00Z",
-            selected_tasks: [...INSTAGRAM_BACKFILL_DEFAULT_TASKS],
-            detail_worker_count: 8,
-          comments_worker_count: 8,
-          comments_enable_media_followups: true,
-          }),
-        );
+        expect(JSON.parse(String(init?.body))).toMatchObject({ action: "backfill", source_scope: "network", backfill_scope: "bounded_window", date_start: "2026-03-01T12:00:00Z", date_end: "2026-03-02T12:00:00Z", selected_tasks: ["comments", "media"] });
+
         return jsonResponse({ run_id: "catalog-run-window-12345678", status: "queued" });
       }
       throw new Error(`Unhandled request: ${url}`);
@@ -7961,13 +7222,14 @@ describe("SocialAccountProfilePage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Repair Missing Window" }));
 
     await waitFor(() => {
-      expectInstagramBackfillQueuedMessage();
+      expectInstagramIngestionAccepted();
     });
   });
 
   it("renders TikTok catalog actions and skips the Instagram-only hashtag timeline fetch", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
@@ -8019,6 +7281,7 @@ describe("SocialAccountProfilePage", () => {
     let receivedBackfillBody: Record<string, unknown> | null = null;
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
@@ -8085,6 +7348,7 @@ describe("SocialAccountProfilePage", () => {
   it("expands caption search without switching tabs and shows backend search results", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
@@ -8157,6 +7421,7 @@ describe("SocialAccountProfilePage", () => {
 
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
@@ -8246,6 +7511,7 @@ describe("SocialAccountProfilePage", () => {
   it("shows the caption search control beside the tab pills before any tab change", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
@@ -8268,6 +7534,7 @@ describe("SocialAccountProfilePage", () => {
   it("renders separate collaborator, tagged account, and mention columns", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
@@ -8333,6 +7600,7 @@ describe("SocialAccountProfilePage", () => {
   it("renders YouTube catalog actions and skips the Instagram-only hashtag timeline fetch", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
@@ -8444,6 +7712,7 @@ describe("SocialAccountProfilePage", () => {
 
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/snapshot")) {
         return profileSnapshotResponse(activeSummary);
       }
@@ -8548,6 +7817,7 @@ describe("SocialAccountProfilePage", () => {
 
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/snapshot")) {
         return jsonResponse({
           summary,
@@ -8593,6 +7863,7 @@ describe("SocialAccountProfilePage", () => {
 
       mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
         const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
         if (url.includes("/snapshot") && url.includes("run_id=run-saturated-1")) {
           return jsonResponse(
             {
@@ -8700,6 +7971,7 @@ describe("SocialAccountProfilePage", () => {
   it("renders frontier-mode labels and suppresses shard copy for newest-first runs", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
@@ -8804,6 +8076,7 @@ describe("SocialAccountProfilePage", () => {
   it("blocks duplicate backfill actions while the same profile already has an active run", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
@@ -8855,6 +8128,7 @@ describe("SocialAccountProfilePage", () => {
   it("blocks duplicate backfill actions while an attached comments run is active", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
@@ -8892,6 +8166,7 @@ describe("SocialAccountProfilePage", () => {
   it("prefers live polled status over stale summary status for the displayed run", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
@@ -8979,6 +8254,7 @@ describe("SocialAccountProfilePage", () => {
 
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/snapshot")) {
         return jsonResponse({
           summary: blockedSummary,
@@ -9056,6 +8332,7 @@ describe("SocialAccountProfilePage", () => {
 
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
@@ -9155,6 +8432,7 @@ describe("SocialAccountProfilePage", () => {
   it("uses live progress status in the action banner when summary status is stale", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
@@ -9206,6 +8484,7 @@ describe("SocialAccountProfilePage", () => {
   it("shows waiting for Modal capacity when a queued catalog job is pending inside Modal", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
@@ -9283,6 +8562,7 @@ describe("SocialAccountProfilePage", () => {
   it("keeps waiting for Modal worker when the backend has no live remote invocation yet", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
@@ -9358,6 +8638,7 @@ describe("SocialAccountProfilePage", () => {
   it("shows background classification instead of a queued rerun when fetch is already complete", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
@@ -9494,6 +8775,7 @@ describe("SocialAccountProfilePage", () => {
 it("shows recovering catalog state details when the backend is waiting on a recovery handoff", async () => {
   mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
     const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
     if (url.includes("/summary")) {
       return jsonResponse({
         ...baseSummary,
@@ -9915,7 +9197,7 @@ it("sends the explicit local TikTok backfill payload when Retry Locally is click
 
   fireEvent.click(screen.getByRole("button", { name: "View Details" }));
 
-  const retryButton = await screen.findByRole("button", { name: "Retry Locally" });
+  const retryButton = await screen.findByRole("button", { name: "Choose Bounded Retry" });
   fireEvent.click(retryButton);
 
   await waitFor(() => {
@@ -10025,6 +9307,7 @@ it("shows the direct fallback recovery copy for active TikTok recovery handoffs"
 it("prefers terminal cancelled status labels over stale recovering state", async () => {
   mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
     const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
     if (url.includes("/summary")) {
       return jsonResponse({
         ...baseSummary,
@@ -10207,6 +9490,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
     };
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/snapshot")) {
         return jsonResponse({
           summary: alertsSummary,
@@ -10263,6 +9547,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
 
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
@@ -10321,6 +9606,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
   it.each(["fresh", "delayed", "stale"])("keeps the superseding run selected with %s snapshot", async (snapshotState) => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: true, account: "bravotv", supported_actions: ["backfill", "sync_recent", "sync_newer"], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
@@ -10402,6 +9688,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
   it("does not auto-pivot away from unrelated runs", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
@@ -10446,6 +9733,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
   it("hides manual remediation only after auto-requeue has a replacement run in queued or running state", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
@@ -10513,6 +9801,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
   it("keeps manual remediation visible when auto-requeue failed or is unknown", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
@@ -10558,6 +9847,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
   it("uses shared-profile network metadata in the header and source status", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
@@ -10592,6 +9882,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
   it("uses catalog run status when source scrape status has never been recorded", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
@@ -10683,6 +9974,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
 
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/snapshot")) {
         return jsonResponse({
           summary: blockedSummary,
@@ -10722,6 +10014,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
   it("shows retrying remote dispatch when the backend is recovering stale unclaimed Modal dispatches", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
@@ -10791,6 +10084,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
   it("renders single-runner fallback shared-account posts as catalog fetch with checked counts", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
@@ -10916,6 +10210,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
   it("shows an explicit stale-dispatch failure message instead of leaving the page in a fake active state", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
@@ -11006,6 +10301,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
 
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/snapshot")) {
         snapshotCalls += 1;
         // First snapshot returns the running run; later snapshots time out so the
@@ -11124,6 +10420,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
 
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/snapshot")) {
         // Before the cancel attempt, snapshot polling shows the run as running. After
         // the user clicks Cancel and the reconcile flow discovers the upstream
@@ -11235,6 +10532,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
 
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/snapshot")) {
         return jsonResponse({
           summary: buildSummary(),
@@ -11289,6 +10587,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
     async () => {
       mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
         if (url.includes("/summary")) {
           return jsonResponse({
             ...baseSummary,
@@ -11345,6 +10644,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
   it("shows restart backfill after a terminal catalog run", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
@@ -11468,6 +10768,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
     };
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/snapshot")) {
         return jsonResponse({
           summary: frontierSummary,
@@ -11511,6 +10812,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
 
       mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
         const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
         if (url.includes("/summary")) {
           summaryCalls += 1;
           return jsonResponse({
@@ -11603,6 +10905,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
 
       mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
         const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
         if (url.includes("/summary")) {
           summaryCalls += 1;
           if (summaryCalls === 1) {
@@ -11656,6 +10959,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
   it("clears stale summary content when switching to a different handle", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         if (url.includes("/bravotv/summary")) {
           return jsonResponse({
@@ -11699,6 +11003,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
   it("loads authoritative all-time hashtags on the Instagram stats tab from the hashtags endpoint", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/snapshot")) {
         return profileSnapshotResponse({
           ...baseSummary,
@@ -11744,6 +11049,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
   it("updates stats-tab hashtags when operators change the window selector", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/snapshot")) {
         return profileSnapshotResponse({
           ...baseSummary,
@@ -11836,6 +11142,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
   it("shows stats-tab hashtag request errors instead of falling back to the summary preview", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/snapshot")) {
         return profileSnapshotResponse({
           ...baseSummary,
@@ -11877,6 +11184,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
 
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/snapshot")) {
         return profileSnapshotResponse(baseSummary);
       }
@@ -11970,6 +11278,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
   it.each(["completed", "cancelled", "failed"])("uses accurate terminal %s status copy and unlocks actions", async (status) => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: true, account: "bravotv", supported_actions: ["backfill", "sync_recent", "sync_newer"], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
@@ -12069,6 +11378,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
   it("falls back to catalog posts preview when summary catalog totals are zero", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
@@ -12169,6 +11479,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
   it("falls back to the account total when inspecting a terminal run with no catalog denominator", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
@@ -12303,6 +11614,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
 
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/snapshot")) {
         return jsonResponse({
           summary,
@@ -12347,6 +11659,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
 
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/snapshot")) {
         return jsonResponse({
           summary,
@@ -12405,6 +11718,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
     };
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/retry-targets")) return jsonResponse({ resumed: true, run_id: runId });
       if (url.includes("/snapshot")) return jsonResponse({ summary: { ...baseSummary,
         catalog_recent_runs: [{ run_id: runId, status: "running" }] }, catalog_run_progress: progress });
@@ -12428,6 +11742,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
   it("does not auto-display completed catalog runs as progress without an active polling target", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/snapshot") && url.includes("run_id=4485bca3-ebdc-4a6c-8696-1df2263f7cbf")) {
         return jsonResponse({
           summary: {
@@ -12535,6 +11850,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
     const cancelledRunId = "d9e548f3-3d1e-474f-bb0c-894ea216c973";
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/snapshot") && url.includes(`run_id=${cancelledRunId}`)) {
         throw new Error("Cancelled catalog progress should not be hydrated automatically");
       }
@@ -12599,6 +11915,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
   it("does not auto-display completed runs with no stage telemetry", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/snapshot") && url.includes("run_id=run-completed-no-stage-telemetry")) {
         return jsonResponse({
           summary: {
@@ -12691,6 +12008,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
   it("treats completed sync-newer runs as bounded progress instead of full-history coverage", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/snapshot")) {
         return jsonResponse({
           summary: {
@@ -12826,6 +12144,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
   it("shows at least 1% for full-history runs that checked some posts", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/snapshot")) {
         return jsonResponse({
           summary: {
@@ -13061,6 +12380,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
     };
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/snapshot")) {
         return jsonResponse({
           summary: discoveryMismatchSummary,
@@ -13096,6 +12416,7 @@ it("renders blocked-auth manual-auth controls and starts the sync flow", async (
 	  try {
 	    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
 	      const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/snapshot")) {
         return jsonResponse({
           summary: {
@@ -13286,6 +12607,7 @@ it("routes blocked-auth cookie refresh runs to the repair-auth endpoint", () => 
   it("keeps catalog launch actions enabled for a generic discovery empty first page failure", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: true, account: "bravotv", supported_actions: ["backfill", "sync_recent", "sync_newer"], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
@@ -13358,7 +12680,7 @@ it("routes blocked-auth cookie refresh runs to the repair-auth endpoint", () => 
   ).not.toBeInTheDocument();
 });
 
-it("shows Retry Locally for failed Instagram blocked-auth runs on local dev and sends the inline fallback payload", async () => {
+it("opens bounded retry for failed Instagram runs without sending an inline full-history fallback", async () => {
   setWindowLocation("http://localhost:3000/admin/social");
   const localHostSpy = vi.spyOn(devAdminBypass, "isLocalDevHostname").mockReturnValue(true);
 
@@ -13367,6 +12689,7 @@ it("shows Retry Locally for failed Instagram blocked-auth runs on local dev and 
   try {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(String(input), "http://localhost");
+      if (url.pathname.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.pathname.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
@@ -13494,23 +12817,14 @@ it("shows Retry Locally for failed Instagram blocked-auth runs on local dev and 
 
     fireEvent.click(screen.getByRole("button", { name: "View Details" }));
 
-    const retryButton = await screen.findByRole("button", { name: "Retry Locally" });
+    const retryButton = await screen.findByRole("button", { name: "Choose Bounded Retry" });
     fireEvent.click(retryButton);
 
-    await waitFor(() => {
-      expect(backfillBodies).toEqual([
-        {
-          source_scope: "network",
-          backfill_scope: "full_history",
-          allow_inline_dev_fallback: true,
-          execution_preference: "prefer_local_inline",
-          selected_tasks: [...INSTAGRAM_BACKFILL_DEFAULT_TASKS],
-          detail_worker_count: 8,
-          comments_worker_count: 8,
-          comments_enable_media_followups: true,
-        },
-      ]);
-    });
+    expect(await screen.findByText("Choose what this backfill should run")).toBeInTheDocument();
+    expect(screen.getByLabelText("Instagram backfill start month")).toBeInTheDocument();
+    expect(screen.getByLabelText("Instagram backfill end month")).toBeInTheDocument();
+    expect(backfillBodies).toEqual([]);
+
   } finally {
     localHostSpy.mockRestore();
   }
@@ -13519,6 +12833,7 @@ it("shows Retry Locally for failed Instagram blocked-auth runs on local dev and 
 it("uses the newest inspected catalog run from the summary when discovery outranks an older failed posts run", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/snapshot")) {
         return jsonResponse({
           summary: {
@@ -13640,6 +12955,7 @@ it("uses the newest inspected catalog run from the summary when discovery outran
 
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
@@ -13686,6 +13002,7 @@ it("uses the newest inspected catalog run from the summary when discovery outran
 
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
@@ -13806,6 +13123,7 @@ it("uses the newest inspected catalog run from the summary when discovery outran
   it("renders Facebook catalog actions with the shared profile UI", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
@@ -13845,6 +13163,7 @@ it("uses the newest inspected catalog run from the summary when discovery outran
   it("automatically probes instagram catalog freshness after a completed backfill", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
@@ -13905,6 +13224,7 @@ it("uses the newest inspected catalog run from the summary when discovery outran
   it("keeps gap analysis deferred on the stats tab until operators request it", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
@@ -13952,9 +13272,11 @@ it("uses the newest inspected catalog run from the summary when discovery outran
     ).toBe(false);
   });
 
-  it("offers a full backfill when gap analysis finds only unclassified total drift", async () => {
+  it("opens bounded v2 backfill when gap analysis finds only unclassified total drift", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+      const ingestionRead = boundedIngestionRead(url);
+      if (ingestionRead) return ingestionRead;
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
@@ -13989,7 +13311,7 @@ it("uses the newest inspected catalog run from the summary when discovery outran
         return jsonResponse({
           platform: "instagram",
           account_handle: "bravotv",
-          status: "queued",
+          status: "queued", state: "running", engine: "dbos", workflow_version: "v1", generation: 1,
           operation_id: "gap-op-drift-1",
           result: null,
           stale: false,
@@ -14023,22 +13345,21 @@ it("uses the newest inspected catalog run from the summary when discovery outran
       if (url.includes("/cookies/health")) {
         return jsonResponse(healthyCookieHealth("instagram"));
       }
-      if (url.includes("/catalog/backfill")) {
+      if (url.endsWith("/instagram-ingestion/bravotv/runs")) {
         expect(init?.method).toBe("POST");
         const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
         expect(body).toMatchObject({
           source_scope: "network",
           backfill_scope: "bounded_window",
           date_start: "2025-11-01T00:00:00.000Z",
-          date_end: "2026-06-30T23:59:59.999Z",
-          selected_tasks: [...INSTAGRAM_BACKFILL_DEFAULT_TASKS],
-          detail_worker_count: 8,
+          date_end: "2026-07-01T00:00:00.000Z",
+          selected_tasks: ["comments", "media"],
           comments_worker_count: 8,
           comments_enable_media_followups: true,
         });
         return jsonResponse({
           run_id: "catalog-run-drift-12345678",
-          status: "queued",
+          status: "queued", state: "running", engine: "dbos", workflow_version: "v1", generation: 1,
           catalog_action: "backfill",
           catalog_action_scope: "bounded_window",
         });
@@ -14073,7 +13394,7 @@ it("uses the newest inspected catalog run from the summary when discovery outran
     fireEvent.click(screen.getByRole("button", { name: "Start Backfill" }));
 
     await waitFor(() => {
-      expectInstagramBackfillQueuedMessage();
+      expectInstagramIngestionAccepted();
     });
   });
 
@@ -14082,6 +13403,7 @@ it("uses the newest inspected catalog run from the summary when discovery outran
 
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
@@ -14184,6 +13506,8 @@ it("uses the newest inspected catalog run from the summary when discovery outran
 
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+      const ingestionRead = boundedIngestionRead(url);
+      if (ingestionRead) return ingestionRead;
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
@@ -14218,7 +13542,7 @@ it("uses the newest inspected catalog run from the summary when discovery outran
         return jsonResponse({
           platform: "instagram",
           account_handle: "bravotv",
-          status: "queued",
+          status: "queued", state: "running", engine: "dbos", workflow_version: "v1", generation: 1,
           operation_id: "gap-op-current",
           result: null,
           stale: false,
@@ -14275,11 +13599,11 @@ it("uses the newest inspected catalog run from the summary when discovery outran
           },
         });
       }
-      if (url.includes("/catalog/sync-newer")) {
+      if (url.endsWith("/instagram-ingestion/bravotv/runs") && JSON.parse(String(init?.body)).action === "sync_newer") {
         syncNewerCalled = true;
         return jsonResponse({
           run_id: "catalog-run-current-12345678",
-          status: "queued",
+          status: "queued", state: "running", engine: "dbos", workflow_version: "v1", generation: 1,
           catalog_action: "sync_newer",
           catalog_action_scope: "head_gap",
         });
@@ -14287,7 +13611,7 @@ it("uses the newest inspected catalog run from the summary when discovery outran
       if (url.includes("/cookies/health")) {
         return jsonResponse(healthyCookieHealth("instagram"));
       }
-      if (url.includes("/catalog/backfill")) {
+      if (url.endsWith("/instagram-ingestion/bravotv/runs")) {
         backfillCalled = true;
         return jsonResponse({ run_id: "catalog-run-stale-12345678", status: "queued" });
       }
@@ -14338,6 +13662,7 @@ it("uses the newest inspected catalog run from the summary when discovery outran
   it("groups catalog diagnostic failures without rendering duplicate raw backend banners", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
@@ -14431,6 +13756,7 @@ it("uses the newest inspected catalog run from the summary when discovery outran
   it("scopes catalog post timeouts to the gallery instead of showing the raw backend timeout", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
@@ -14467,6 +13793,7 @@ it("uses the newest inspected catalog run from the summary when discovery outran
   it("renders the catalog tab empty state", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse(baseSummary);
       }
@@ -14490,6 +13817,7 @@ it("uses the newest inspected catalog run from the summary when discovery outran
   it("lets operators resolve unknown hashtags with a show-only assignment", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: true, account: "bravotv", supported_actions: ["backfill", "sync_recent", "sync_newer"], replay_apply_enabled: false });
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,

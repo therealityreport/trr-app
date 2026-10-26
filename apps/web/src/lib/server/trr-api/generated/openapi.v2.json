@@ -5769,6 +5769,17 @@
           "workflow_version": {
             "title": "Workflow Version",
             "type": "string"
+          },
+          "execution_hold_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Execution Hold Reason"
           }
         },
         "required": [

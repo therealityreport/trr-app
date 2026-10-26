@@ -907,7 +907,7 @@ const getCommentsShardAttentionRecommendation = (
     return "Some remaining comments need an approved account-backed follow-up; public recovery is no longer the next step for those posts.";
   }
   if (action === "retry_cursor_deadline_targets" || reasonText.includes("pagination deadline")) {
-    return "Cursor deadline gaps are retryable; start Incomplete Fill to auto-queue cursor continuation jobs, or use Retry Cursor Targets for only those posts.";
+    return "Cursor deadline gaps remain unresolved. Choose a bounded ingestion run and use its supported retry controls for unresolved posts.";
   }
   if (action === "retry_network_stopped_targets") {
     return "Network-stopped targets are retryable; queue cursor recovery for those posts instead of cancelling the whole run.";
@@ -919,7 +919,7 @@ const getCommentsShardAttentionRecommendation = (
     return "Only cancel or recover shards with stale heartbeats; do not cancel the whole comments run.";
   }
   if (action === "retry_largest_gaps" || action === "retry_incomplete_targets") {
-    return "Continue with Incomplete Fill so unfinished posts are targeted without rerunning completed posts.";
+    return "Choose a bounded ingestion run to review unfinished posts and its supported target retry controls.";
   }
   return "Cancel only a shard that is stale or no longer moving; failed or retrying shards do not mean the whole comments run is dead.";
 };
@@ -1593,7 +1593,7 @@ const getActiveCommentsRunScopeNotice = (progress?: SocialAccountCommentsRunProg
 
   if (mode === "single_post") {
     const targetLabel = firstSourceId ? ` for ${firstSourceId}` : "";
-    return `Single-post repair${targetLabel}: this run only updates one post and will not close the account-wide comments gap. Run Incomplete Fill after it finishes to target every incomplete post.`;
+    return `Single-post repair${targetLabel}: this run only updates one post and will not close the account-wide comments gap. Choose a bounded ingestion run after it finishes to review unfinished posts.`;
   }
   if (targetFilter === "incomplete" || incompleteFill) {
     return targetCount && targetCount > 0
@@ -5397,7 +5397,9 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
 
   const activeCommentsRunCanCancel =
     Boolean(activeCommentsRunId) && activeCommentsRunIsActive && !rawActiveCommentsRunProgressIsStale;
+  const legacyCommentsLaunchAllowed = platform !== "instagram";
   const activeCommentsRunCanResume =
+    legacyCommentsLaunchAllowed &&
     Boolean(activeCommentsRunId) &&
     ["cancelled", "failed"].includes(activeCommentsRunEffectiveStatus) &&
     !rawActiveCommentsRunProgressIsStale;
@@ -5406,21 +5408,9 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     () => isCommentsRunPublicBlockedPaused(activeCommentsRunProgressData),
     [activeCommentsRunProgressData],
   );
-  // Guarded restart is offered for active runs (e.g. a stuck/blocked run the operator
-  // wants to relaunch) and for runs paused with reason public_blocked_repeated.
-  const activeCommentsRunCanRestart =
-    platform === "instagram" &&
-    Boolean(activeCommentsRunId) &&
-    !rawActiveCommentsRunProgressIsStale &&
-    (activeCommentsRunIsActive || activeCommentsRunIsPublicBlockedPaused);
-  const activeCommentsRunCanRepairAuth =
-    platform === "instagram" &&
-    Boolean(activeCommentsRunId) &&
-    !rawActiveCommentsRunProgressIsStale &&
-    (activeCommentsRunProgressData?.manual_auth_required === true ||
-      String(activeCommentsRunProgressData?.operational_state || "").trim().toLowerCase() === "blocked_auth" ||
-      String(activeCommentsRunProgressData?.recommended_next_action || "").trim().toLowerCase() ===
-        "repair_auth_then_retry");
+  // New Instagram launches belong to bounded ingestion; legacy jobs remain readable and cancellable.
+  const activeCommentsRunCanRestart = false;
+  const activeCommentsRunCanRepairAuth = false;
   const activeCommentsRunDateWindow = useMemo(
     () => readCommentsRunDateWindow(activeCommentsRunProgressData),
     [activeCommentsRunProgressData],
@@ -5506,7 +5496,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       if (status !== "cancelled") return baseMessage;
       const remainingTargets = readFiniteNumber(progress?.cancellation_summary?.remaining_target_source_ids_count);
       return remainingTargets !== null && remainingTargets > 0
-        ? `${baseMessage} ${formatInteger(remainingTargets)} targets remain; use Incomplete Fill to continue only unfinished posts.`
+        ? `${baseMessage} ${formatInteger(remainingTargets)} targets remain; choose a bounded ingestion run for unfinished posts.`
         : baseMessage;
     })();
     return {
@@ -5624,7 +5614,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     dateEnd: instagramBackfillMonthEnd,
     actor: user?.uid,
   }, platform === "instagram" && hasAccess && !checking && Boolean(user));
-  const ingestionLaunchBlocked = ingestion.pending || Boolean(ingestion.uncertainLaunch) || isIngestionActive(ingestion.active?.state);
+  const ingestionLaunchBlocked = (platform === "instagram" && !ingestion.enabled) || ingestion.pending || Boolean(ingestion.uncertainLaunch) || isIngestionActive(ingestion.active?.state);
   const ingestionTerminalRefreshRef = useRef<string | null>(null);
   useEffect(() => {
     const run = ingestion.active;
@@ -5638,8 +5628,16 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
 
 
   const catalogLaunchGuardMessage = useMemo(() => {
+    if (platform === "instagram" && ingestion.capabilitiesUnavailable) {
+      return ingestion.capabilities.isError
+        ? "Instagram ingestion capabilities are unavailable. Refresh Instagram Ingestion before launching a run."
+        : "Loading Instagram ingestion capabilities before launches are available.";
+    }
+    if (platform === "instagram" && !ingestion.enabled) {
+      return `Instagram ingestion launches are disabled.${ingestion.capabilities.data?.disabled_reason ? ` ${ingestion.capabilities.data.disabled_reason}` : ""}`;
+    }
     return getCatalogLaunchGuardMessage(catalogRunProgress, cookieHealth);
-  }, [catalogRunProgress, cookieHealth]);
+  }, [catalogRunProgress, cookieHealth, platform, ingestion.enabled, ingestion.capabilitiesUnavailable, ingestion.capabilities.isError, ingestion.capabilities.data?.disabled_reason]);
   const instagramCommentsModalAuthActive = useMemo(() => {
     if (platform !== "instagram") return false;
     const activeCommentsStatus = String(activeCommentsRunProgressData?.run_status || "").trim().toLowerCase();
@@ -7742,7 +7740,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       commentsMediaFollowups?: boolean,
     ): CatalogBackfillRequest => {
       const defaultSelectedTasks =
-        platform === "instagram" ? [...INSTAGRAM_BACKFILL_DEFAULT_SELECTED_TASKS]
+        platform === "instagram" ? [...INSTAGRAM_V2_PUBLIC_DEFAULT_SELECTED_TASKS]
         : platform === "tiktok" ? [...TIKTOK_BACKFILL_DEFAULT_SELECTED_TASKS]
         : undefined;
       const resolvedSelectedTasks = selectedTasks ?? defaultSelectedTasks;
@@ -7780,6 +7778,10 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       action: "backfill" | "sync_recent" | "sync_newer",
       requestBody: CatalogBackfillRequest | CatalogSyncRecentRequest | CatalogSyncNewerRequest,
     ) => {
+      if (platform === "instagram" && !ingestion.enabled) {
+        setCatalogActionMessage(catalogLaunchGuardMessage || "Instagram ingestion launches are unavailable. Refresh Instagram Ingestion to retry.");
+        return;
+      }
       // Saved legacy runs and their apply confirmation remain on their original path.
       // New run IDs are owned only by the ingestion controller and never enter legacy polling state.
       if (platform === "instagram" && ingestion.enabled && !("apply_run_id" in requestBody && requestBody.apply_run_id)) {
@@ -7804,6 +7806,8 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
             }
           }
           const result = await ingestion.launch(launchRequest);
+          liveProfileTotalProbeKeyRef.current = null;
+          setLiveProfileTotalRequestNonce((nonce) => nonce + 1);
           setCatalogActionMessage(`Instagram ingestion accepted. Run ${result.run_id.slice(0, 8)} · ${result.state}.`);
         } catch (error) {
           setCatalogActionMessage(ingestionErrorMessage(error));
@@ -8057,6 +8061,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     [
       activeCatalogSourceScope,
       ingestion,
+      catalogLaunchGuardMessage,
       ingestionLaunchBlocked,
       instagramRunPlacement,
       catalogProgressStorageKey,
@@ -8074,6 +8079,17 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     requestBody: CatalogBackfillRequest | CatalogSyncRecentRequest | CatalogSyncNewerRequest,
   ) => {
     if (!user) return;
+    if (platform === "instagram" && !ingestion.enabled) {
+      setCatalogActionMessage(catalogLaunchGuardMessage || "Instagram ingestion launches are unavailable. Refresh Instagram Ingestion to retry.");
+      return;
+    }
+    const savedApply = "apply_run_id" in requestBody && Boolean(requestBody.apply_run_id);
+    if (platform === "instagram" && handle.replace(/^@/, "").trim().toLowerCase() === "bravotv" && action === "backfill" && !savedApply) {
+      if (!("backfill_scope" in requestBody) || requestBody.backfill_scope !== "bounded_window" || !("date_start" in requestBody) || !requestBody.date_start || !("date_end" in requestBody) || !requestBody.date_end) {
+        setCatalogActionMessage("Choose Backfill Posts and select an explicit bounded date window. Full-history backfill is unavailable.");
+        return;
+      }
+    }
     const actionLabel =
       action === "backfill" ? "backfill"
       : action === "sync_newer" ? "sync newer"
@@ -8184,9 +8200,11 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     await startCatalogActionRequest(action, requestBody);
   }, [
     catalogLaunchGuardMessage,
+    ingestion.enabled,
     cookieHealth,
     fetchCookieHealth,
     handleCookieRefresh,
+    handle,
     platform,
     platformRequiresCookies,
     startCatalogActionRequest,
@@ -8314,7 +8332,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     setInstagramBackfillCapacity(null);
     setInstagramBackfillCapacityUnavailable(false);
     setInstagramBackfillSelectedTasks([
-      ...(ingestion.enabled ? INSTAGRAM_V2_PUBLIC_DEFAULT_SELECTED_TASKS : INSTAGRAM_BACKFILL_DEFAULT_SELECTED_TASKS),
+      ...INSTAGRAM_V2_PUBLIC_DEFAULT_SELECTED_TASKS,
     ]);
     setInstagramRunPlacement("modal");
     setInstagramBackfillDetailWorkerCount(getDefaultInstagramBackfillDetailWorkerCount(handle));
@@ -8323,7 +8341,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     setInstagramBackfillMonthStart(defaultWindow.monthStart);
     setInstagramBackfillMonthEnd(defaultWindow.monthEnd);
     setInstagramBackfillDialogOpen(true);
-  }, [handle, ingestion.enabled]);
+  }, [handle]);
 
   const applyBravoTvFastBackfillPreset = useCallback(() => {
     const defaultWindow = buildInstagramBackfillMonthDefaults();
@@ -10545,19 +10563,23 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                       )}
                     {canRetryCatalogLocally ? (
                       <Button
-                        onClick={() =>
+                        onClick={() => {
+                          if (platform === "instagram") {
+                            openInstagramBackfillDialog();
+                            return;
+                          }
                           void runCatalogAction("backfill", {
                             ...buildFullHistoryBackfillRequest(),
                             allow_inline_dev_fallback: true,
                             execution_preference: "prefer_local_inline",
-                          })
-                        }
+                          });
+                        }}
                         disabled={catalogActionsBlocked}
                         size="sm"
                         variant="secondary"
                         className={NYT_DASHBOARD_BUTTON_CLASS}
                       >
-                        {runningCatalogAction === "backfill" ? "Retrying Locally…" : "Retry Locally"}
+                        {runningCatalogAction === "backfill" ? "Preparing Retry…" : platform === "instagram" ? "Choose Bounded Retry" : "Retry Locally"}
                       </Button>
                     ) : null}
                   </div>
@@ -11503,6 +11525,9 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
               handle={handle}
               summary={summary}
               onSummaryRefresh={refreshCommentsSummary}
+              onOpenBoundedBackfill={platform === "instagram" ? openInstagramBackfillDialog : undefined}
+              boundedBackfillDisabled={catalogLaunchActionsBlocked}
+              boundedBackfillGuardMessage={catalogLaunchGuardMessage}
               hideActiveRunProgress={Boolean(activeCommentsRunId)}
               onCoverageMetricsChange={handleInstagramCommentsCoverageMetricsChange}
             />
@@ -12087,8 +12112,8 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
           {instagramBackfillDialogOpen ? (
             <RunLauncher
               handle={handle}
-              runPlacement={ingestion.enabled ? instagramRunPlacement : undefined}
-              setRunPlacement={ingestion.enabled ? setInstagramRunPlacement : undefined}
+              runPlacement={instagramRunPlacement}
+              setRunPlacement={setInstagramRunPlacement}
               localWorkerOnline={ingestion.capabilities.data?.local_worker_online}
               instagramBackfillSelectedTasks={instagramBackfillSelectedTasks}
               instagramBackfillMonthStart={instagramBackfillMonthStart}

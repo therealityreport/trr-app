@@ -83,9 +83,13 @@ export function useInstagramIngestion(view: IngestionView, enabled: boolean) {
     refetchInterval: query => ingestionPollInterval({ visible, progress: query.state.data, error: query.state.error, failures: query.state.errorUpdateCount }),
     refetchIntervalInBackground: false,
   }, client);
+  const diagnosticsSnapshot = progress.data;
+  const diagnosticsHeaders = {
+    "X-Ingestion-View-Scope": JSON.stringify([viewIdentity, diagnosticsSnapshot?.generation, diagnosticsSnapshot?.state, diagnosticsSnapshot?.last_committed_at]),
+  };
   const diagnostics = ingestionApi.useQuery("get", `${INGESTION_BASE}/runs/{run_id}/diagnostics`, {
-    params: { path: { handle: account, run_id: selectedRunId ?? "" }, query: { limit: 100 } }, headers,
-  }, { enabled: enabled && Boolean(selectedRunId) }, client);
+    params: { path: { handle: account, run_id: selectedRunId ?? "" }, query: { limit: 100 } }, headers: diagnosticsHeaders,
+  }, { enabled: enabled && Boolean(selectedRunId) && diagnosticsSnapshot?.run_id === selectedRunId }, client);
   const refresh = useCallback(async () => { await client.invalidateQueries(); }, [client]);
   const launchMutation = ingestionApi.useMutation("post", `${INGESTION_BASE}/runs`, { retry: false }, client);
   const cancelMutation = ingestionApi.useMutation("post", `${INGESTION_BASE}/runs/{run_id}/cancel`, { retry: false }, client);
@@ -93,8 +97,19 @@ export function useInstagramIngestion(view: IngestionView, enabled: boolean) {
   const retryMutation = ingestionApi.useMutation("post", `${INGESTION_BASE}/runs/{run_id}/retry-targets`, { retry: false }, client);
   const replayMutation = ingestionApi.useMutation("post", `${INGESTION_BASE}/runs/{run_id}/replay`, { retry: false }, client);
   const launch = async (body: IngestionLaunch) => {
-    if (!capabilities.data?.enabled) throw new Error("New ingestion launches are disabled.");
+    if (capabilities.isPending || capabilities.isError) throw new Error("Instagram ingestion capabilities must be available before launching.");
+    if (!capabilities.data?.enabled) throw new IngestionRequestError({ code: "INGESTION_DISABLED", status: 409, retryable: false, message: `New ingestion launches are disabled.${capabilities.data?.disabled_reason ? ` ${capabilities.data.disabled_reason}` : ""}` });
     if (!capabilities.data.supported_actions?.includes(body.action ?? "backfill")) throw new Error("This ingestion action is not supported.");
+    if (account === "bravotv") {
+      if (body.action === "resume_tail") throw new IngestionRequestError({ code: "BOUNDED_WINDOW_REQUIRED", status: 409, retryable: false, message: "Instagram history-tail launches are unavailable. Choose a bounded backfill." });
+      if ((body.action ?? "backfill") === "backfill") {
+        const start = Date.parse(body.date_start ?? "");
+        const end = Date.parse(body.date_end ?? "");
+        if (body.backfill_scope !== "bounded_window" || !Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+          throw new IngestionRequestError({ code: "BOUNDED_WINDOW_REQUIRED", status: 409, retryable: false, message: "Choose an explicit bounded date window before launching Instagram backfill." });
+        }
+      }
+    }
     const command = `launch:${account}`;
     if (uncertainLaunch && JSON.stringify(uncertainLaunch) !== JSON.stringify(body)) {
       throw new Error("Confirm the previous launch request before starting another run.");
@@ -132,8 +147,9 @@ export function useInstagramIngestion(view: IngestionView, enabled: boolean) {
   const pending = [launchMutation, cancelMutation, resumeMutation, retryMutation, replayMutation].some(mutation => mutation.isPending);
   return { capabilities, recent, progress, diagnostics, launch, control, retryTargets, replay, pending, refresh, uncertainLaunch,
     activeRunId: currentActiveRunId, active, inspectedRunId, inspect: setInspectedRunId, selectedRunId,
-    enabled: capabilities.data?.enabled === true,
-    showPanel: capabilities.data?.enabled === true || Boolean(recent.data?.runs?.length || activeRunId || uncertainLaunch),
+    enabled: capabilities.data?.enabled === true && capabilities.isSuccess,
+    capabilitiesUnavailable: capabilities.isPending || capabilities.isError,
+    showPanel: enabled || Boolean(recent.data?.runs?.length || activeRunId || uncertainLaunch),
   };
 }
 export type InstagramIngestionController = ReturnType<typeof useInstagramIngestion>;

@@ -87,6 +87,53 @@ describe("typed ingestion lifecycle", () => {
     expect(screen.getByText(/Requests 100/)).toBeInTheDocument();
     expect(screen.getByText(/Work remains/)).toBeInTheDocument();
   });
+  it("describes resolved outcomes with unavailable counts and a safe execution hold code", () => {
+    const run = progress({ state: "completed", complete: true, execution_hold_reason: "worker_offline" });
+    run.stages = [{ ...run.stages[0], discovery_complete: true, complete: true, unresolved: 0, source_unavailable: 4 }];
+    render(<StageProgress progress={run} />);
+    expect(screen.getByText(/All selected stages resolved · 4 source unavailable/)).toBeInTheDocument();
+    expect(screen.getByText("Resolved · 4 source unavailable")).toBeInTheDocument();
+    expect(screen.getByText("Execution hold: worker_offline")).toBeInTheDocument();
+  });
+  it("refreshes actionable diagnostics when generation, state, or committed results change", async () => {
+    let run = progress();
+    let outcome: IngestionDiagnostics["targets"][number]["outcome"] = "unresolved";
+    mocks.fetch.mockImplementation(async (url: string) => {
+      if (url.endsWith("/capabilities")) return json(capability());
+      if (url.includes("/runs/recent")) return json({ runs: [{ ...run, intent }] });
+      if (url.includes("/diagnostics")) return json({ ...diagnostics, targets: [{ ...diagnostics.targets[0], outcome }] });
+      return json(run);
+    });
+    const { result } = renderHook(() => useInstagramIngestion({ account: "bravotv", sourceScope: "network" }, true));
+    await waitFor(() => expect(result.current.diagnostics.data?.targets[0].outcome).toBe("unresolved"));
+    const count = () => mocks.fetch.mock.calls.filter(([url]) => String(url).includes("/diagnostics")).length;
+    for (const change of [{ generation: 2 }, { state: "blocked" as const }, { last_committed_at: "2026-10-16T11:00:00Z" }]) {
+      const before = count();
+      run = { ...run, ...change };
+      await act(async () => { await result.current.progress.refetch(); });
+      await waitFor(() => expect(count()).toBe(before + 1));
+    }
+    outcome = "committed";
+    run = { ...run, state: "completed", complete: true };
+    await act(async () => { await result.current.progress.refetch(); });
+    await waitFor(() => expect(result.current.diagnostics.data?.targets[0].outcome).toBe("committed"));
+  });
+  it("keeps capability loading and failure visible and blocks launches until recovery", async () => {
+    let finish!: (response: Response) => void;
+    const pending = new Promise<Response>(resolve => { finish = resolve; });
+    mocks.fetch.mockImplementation(async () => pending);
+    const { result } = renderHook(() => useInstagramIngestion({ account: "bravotv", sourceScope: "network" }, true));
+    const { rerender } = render(<InstagramIngestionPanel controller={result.current} />);
+    expect(screen.getByText(/Loading Instagram ingestion capabilities/)).toBeInTheDocument();
+    expect(result.current.capabilitiesUnavailable).toBe(true);
+    await expect(result.current.launch(ingestionLaunchFromCatalog("sync_recent", {}, "network"))).rejects.toThrow("capabilities");
+    await act(async () => { finish(json({ detail: { code: "BUSY", message: "Capabilities unavailable.", retryable: true } }, 503)); });
+    await waitFor(() => expect(result.current.capabilities.isError).toBe(true));
+    rerender(<InstagramIngestionPanel controller={result.current} />);
+    expect(screen.getByRole("alert")).toHaveTextContent("Instagram ingestion capabilities could not be loaded");
+    expect(result.current.showPanel).toBe(true);
+    expect(mocks.fetch.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+  });
   it("requires cancellation confirmation and retries only selected unresolved targets", () => {
     const control = vi.fn(); const retry = vi.fn();
     render(<RecoveryControls progress={progress()} diagnostics={diagnostics} pending={false} onControl={control} onRetry={retry} />);
@@ -137,12 +184,15 @@ describe("typed ingestion lifecycle", () => {
     await waitFor(() => expect(result.current.recent.isSuccess).toBe(true));
     expect(result.current.enabled).toBe(false);
   });
-  it("leaves the legacy surface unchanged when disabled without saved runs", async () => {
-    mocks.fetch.mockImplementation(async (url: string) => json(url.endsWith("/capabilities") ? capability(false) : { runs: [] }));
+  it("shows the disabled reason and blocks launches without saved runs", async () => {
+    mocks.fetch.mockImplementation(async (url: string) => json(url.endsWith("/capabilities") ? { ...capability(false), disabled_reason: "operator_maintenance" } : { runs: [] }));
     const { result } = renderHook(() => useInstagramIngestion({ account: "bravotv", sourceScope: "network" }, true));
     await waitFor(() => expect(result.current.recent.isSuccess).toBe(true));
     render(<InstagramIngestionPanel controller={result.current} />);
-    expect(screen.queryByRole("region", { name: "Durable Instagram ingestion" })).not.toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Durable Instagram ingestion" })).toBeInTheDocument();
+    expect(screen.getByText(/operator_maintenance/)).toBeInTheDocument();
+    await expect(result.current.launch({ action: "sync_recent" })).rejects.toThrow("operator_maintenance");
+    expect(mocks.fetch.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
     expect(result.current.enabled).toBe(false);
   });
   it("keeps rollback history readable and active recovery separate from inspected history", async () => {
@@ -166,6 +216,15 @@ describe("typed ingestion lifecycle", () => {
     await waitFor(() => expect(mocks.fetch.mock.calls.some(([url, init]) => String(url).endsWith(`/runs/${runId}/cancel`) && init?.method === "POST")).toBe(true));
     expect(mocks.fetch.mock.calls.some(([url]) => String(url).endsWith(`/runs/${oldId}/cancel`))).toBe(false);
   });
+  it("blocks bravotv full-history and history-tail launches even if stale capabilities offer them", async () => {
+    mocks.fetch.mockImplementation(async (url: string) => json(url.endsWith("/capabilities") ? { ...capability(), supported_actions: ["backfill", "resume_tail"] } : { runs: [] }));
+    const { result } = renderHook(() => useInstagramIngestion({ account: "bravotv", sourceScope: "network" }, true));
+    await waitFor(() => expect(result.current.enabled).toBe(true));
+    await expect(result.current.launch({ action: "backfill", backfill_scope: "full_history" })).rejects.toThrow("bounded date window");
+    await expect(result.current.launch({ action: "backfill", backfill_scope: "bounded_window" })).rejects.toThrow("bounded date window");
+    await expect(result.current.launch({ action: "resume_tail" })).rejects.toThrow("history-tail");
+    expect(mocks.fetch.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+  });
   it("retains committed progress after transient failure and reuses a launch key on explicit retry without automatic retries", async () => {
     let failProgress = false; let launches = 0;
     mocks.fetch.mockImplementation(async (url: string, init?: RequestInit) => {
@@ -177,7 +236,7 @@ describe("typed ingestion lifecycle", () => {
     });
     const { result } = renderHook(() => useInstagramIngestion({ account: "bravotv", sourceScope: "network" }, true));
     await waitFor(() => expect(result.current.enabled).toBe(true));
-    const body = ingestionLaunchFromCatalog("backfill", { backfill_scope: "full_history", selected_tasks: ["comments"], comments_worker_count: 4 }, "network");
+    const body = ingestionLaunchFromCatalog("backfill", { backfill_scope: "bounded_window", date_start: "2026-01-01T00:00:00Z", date_end: "2026-02-01T00:00:00Z", selected_tasks: ["comments"], comments_worker_count: 4 }, "network");
     await act(async () => { await expect(result.current.launch(body)).rejects.toThrow(); }); expect(launches).toBe(1);
     await act(async () => { await result.current.launch(body); });
     const requests = mocks.fetch.mock.calls.filter(([, init]) => init?.method === "POST");
@@ -210,6 +269,13 @@ describe("logged-out launches and the Mac worker", () => {
     ...overrides,
   });
 
+  it.each(["instagramBackfillMonthStart", "instagramBackfillMonthEnd"] as const)("requires an explicit bounded window when %s is empty", field => {
+    const submitInstagramBackfillDialog = vi.fn(async () => undefined);
+    render(<RunLauncher {...launcherProps({ [field]: "", submitInstagramBackfillDialog })} />);
+    fireEvent.click(screen.getByRole("button", { name: "Start Backfill" }));
+    expect(screen.getByRole("button", { name: "Start Backfill" })).toBeDisabled();
+    expect(submitInstagramBackfillDialog).not.toHaveBeenCalled();
+  });
   it("defaults logged-out runs to comments and media", () => {
     expect(INSTAGRAM_V2_PUBLIC_DEFAULT_SELECTED_TASKS).toEqual(["comments", "media"]);
   });
