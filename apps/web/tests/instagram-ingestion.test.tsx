@@ -142,7 +142,7 @@ describe("typed ingestion lifecycle", () => {
     fireEvent.click(screen.getByText("Retry selected unresolved targets"));
     fireEvent.click(screen.getByRole("checkbox")); fireEvent.click(screen.getByRole("button", { name: "Retry 1 targets" })); expect(retry).toHaveBeenCalledWith("post_details", ["p1"]);
   });
-  it.each([undefined, "modal"] as const)("keeps API recovery available for Modal placement (%s)", executionPlacement => {
+  it.each([undefined, "modal", "local"] as const)("keeps API recovery available for placement (%s)", executionPlacement => {
     const control = vi.fn();
     render(<RecoveryControls progress={progress({ execution_placement: executionPlacement, allowed_actions: ["resume", "retry_targets"] })} diagnostics={diagnostics} pending={false} onControl={control} onRetry={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "Resume Run" }));
@@ -150,12 +150,11 @@ describe("typed ingestion lifecycle", () => {
     expect(screen.getByText("Retry selected unresolved targets")).toBeInTheDocument();
     expect(screen.queryByText(/use the local driver/)).not.toBeInTheDocument();
   });
-  it("keeps local cancellation usable while directing resume and retries to the local driver", () => {
+  it("keeps local cancellation confirmation and server-advertised recovery controls", () => {
     const control = vi.fn(); const retry = vi.fn();
     render(<RecoveryControls progress={progress({ execution_placement: "local", allowed_actions: ["cancel", "resume", "retry_targets"] })} diagnostics={diagnostics} pending={false} onControl={control} onRetry={retry} />);
-    expect(screen.getByText("Local run: use the local driver to resume or retry.")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Resume Run" })).not.toBeInTheDocument();
-    expect(screen.queryByText("Retry selected unresolved targets")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Resume Run" })).toBeInTheDocument();
+    expect(screen.getByText("Retry selected unresolved targets")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Cancel Run" }));
     expect(control).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Confirm cancel" }));
