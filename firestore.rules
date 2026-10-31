@@ -173,6 +173,20 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // Editable drafts are separate from PostgreSQL submitted responses.
+    match /surveyResults/{showId}/seasons/{seasonId}/episodes/{episodeId}/drafts/{uid} {
+      allow read, delete: if isOwner(uid);
+      allow create, update: if isOwner(uid)
+        && request.resource.data.keys().hasOnly(["uid", "showId", "seasonId", "episodeId", "ranking", "seasonRating", "completionPct", "createdAt", "updatedAt"])
+        && request.resource.data.uid == uid && request.resource.data.showId == showId
+        && request.resource.data.seasonId == seasonId && request.resource.data.episodeId == episodeId
+        && validRanking(request.resource.data.ranking)
+        && request.resource.data.completionPct is number && request.resource.data.completionPct >= 0 && request.resource.data.completionPct <= 100
+        && (!('seasonRating' in request.resource.data) || request.resource.data.seasonRating == null ||
+          (request.resource.data.seasonRating is number && request.resource.data.seasonRating >= 0 && request.resource.data.seasonRating <= 10))
+        && request.resource.data.createdAt is timestamp && request.resource.data.updatedAt is timestamp;
+    }
+
     // User-scoped analytics + game docs
     match /user_analytics/{userId} {
       allow read, write: if isOwner(userId);

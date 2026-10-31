@@ -27,6 +27,7 @@ import {
 } from "@/lib/admin/screenalytics-routes";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 import { getAllowedReviewTransitions, getExecutionStatusLabel, getRunOverviewMessage } from "./run-state";
+import PrivateVideoPlayer from "./PrivateVideoPlayer";
 
 type OwnerScope = "show" | "season" | "episode";
 type VideoClass = "episode" | "trailer" | "extras";
@@ -2031,6 +2032,8 @@ export default function CastScreentimePageClient() {
             </div>
           </div>
         </section>
+
+        {activeVideoAssetId ? <PrivateVideoPlayer key={activeVideoAssetId} assetId={activeVideoAssetId} /> : null}
 
         <section className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm" aria-labelledby="source-subtitles-heading">
           <div className="flex flex-wrap items-start justify-between gap-3">
