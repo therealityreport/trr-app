@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
-import { useRouter, usePathname } from "next/navigation";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { fetchAdminWithAuth } from "@/lib/admin/client-auth";
 import { useSideMenu } from "@/components/SideMenuProvider";
 import { logout } from "@/lib/firebase";
@@ -12,7 +13,6 @@ import { isClientAdmin } from "@/lib/admin/client-access";
 
 export default function GlobalHeader() {
   const router = useRouter();
-  const pathname = usePathname();
   const { openMenu, isOpen: isSideMenuOpen } = useSideMenu();
   const [user, setUser] = useState<User | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -94,11 +94,6 @@ export default function GlobalHeader() {
     };
   }, [isSettingsOpen]);
 
-  // Hide header on landing page
-  if (pathname === "/") {
-    return null;
-  }
-
   return (
     <header className="relative flex h-20 w-full items-center justify-center border-b border-black bg-white">
       {/* Left - Hamburger menu */}
@@ -118,7 +113,7 @@ export default function GlobalHeader() {
       {/* Center - Logo */}
       <button
         type="button"
-        onClick={() => router.push("/hub")}
+        onClick={() => router.push("/")}
         className="transition hover:opacity-80"
         aria-label="Go to home"
       >
@@ -128,9 +123,18 @@ export default function GlobalHeader() {
           width={320}
           height={70}
           priority
-          className="w-80 h-[70.2px]"
+          className="h-auto w-40 sm:w-64 lg:w-80"
         />
       </button>
+
+      {!user && (
+        <Link
+          href="/login"
+          className="absolute right-4 rounded-full border border-zinc-300 px-3 py-2 text-sm font-semibold text-zinc-800 transition hover:bg-zinc-50"
+        >
+          Sign in
+        </Link>
+      )}
 
       {/* Right - Profile & Settings (only when logged in) */}
       {user && (
