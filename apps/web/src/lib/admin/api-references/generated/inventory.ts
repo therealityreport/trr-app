@@ -19835,6 +19835,39 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "fanoutRisk": "low"
     },
     {
+      "id": "route:POST:/api/admin/trr-api/social/twitter/search",
+      "kind": "api_route",
+      "title": "POST /api/admin/trr-api/social/twitter/search",
+      "pathPattern": "/api/admin/trr-api/social/twitter/search",
+      "symbol": "POST",
+      "sourceFile": "src/app/api/admin/trr-api/social/twitter/search/route.ts",
+      "sourceLocator": {
+        "line": 7,
+        "symbol": "POST"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:app_api_route"
+      ],
+      "usageTier": "manual",
+      "polls": false,
+      "pollCadenceMs": null,
+      "automatic": false,
+      "loadsLargeDatasets": false,
+      "usesPagination": false,
+      "returnsWideRowsOrBlobsOrRawJson": false,
+      "fansOutQueries": false,
+      "postgresAccess": "none",
+      "viewKinds": [
+        "detail"
+      ],
+      "staticOnly": false,
+      "payloadRisk": "low",
+      "fanoutRisk": "low"
+    },
+    {
       "id": "route:PUT:/api/admin/design-system/typography/assignments",
       "kind": "api_route",
       "title": "PUT /api/admin/design-system/typography/assignments",
@@ -25055,6 +25088,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
         "route:POST:/api/admin/trr-api/social/profiles/[platform]/[handle]/socialblade/refresh",
         "route:POST:/api/admin/trr-api/social/shared/ingest",
         "route:POST:/api/admin/trr-api/social/shared/review-queue/[itemId]/resolve",
+        "route:POST:/api/admin/trr-api/social/twitter/search",
         "route:PUT:/api/admin/design-system/typography/assignments",
         "route:PUT:/api/admin/design-system/typography/sets/[setId]",
         "route:PUT:/api/admin/images/[imageType]/[imageId]/archive",
@@ -25450,11 +25484,11 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "renders_view": []
     },
     "summary": {
-      "totalNodes": 614,
+      "totalNodes": 615,
       "totalEdges": 212,
       "nodesByKind": {
         "ui_surface": 61,
-        "api_route": 419,
+        "api_route": 420,
         "backend_endpoint": 129,
         "repository_surface": 1,
         "polling_loop": 4
