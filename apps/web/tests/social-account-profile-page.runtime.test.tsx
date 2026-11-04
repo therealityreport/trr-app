@@ -11045,11 +11045,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
     });
 
     render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="stats" />);
-    await waitForSecondaryReadsToOpen();
-
-    await waitFor(() => {
-      expect(screen.getByText("#alltime")).toBeInTheDocument();
-    });
+    expect(await screen.findByText("#alltime")).toBeInTheDocument();
     expect(screen.queryByText("#summaryonly")).not.toBeInTheDocument();
     expect(
       mocks.fetchAdminWithAuth.mock.calls.some(([input]) =>
