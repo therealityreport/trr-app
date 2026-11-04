@@ -176,12 +176,6 @@ const installClipboardMock = () => {
   return writeText;
 };
 
-const waitForSecondaryReadsToOpen = async (): Promise<void> => {
-  await act(async () => {
-    await new Promise((resolve) => window.setTimeout(resolve, 75));
-  });
-};
-
 const baseSummary = {
   summary_detail: "full" as const,
   platform: "instagram",
@@ -6359,6 +6353,10 @@ describe("SocialAccountProfilePage", () => {
 
     render(<SocialAccountProfilePage platform="twitter" handle="bravotv" activeTab="catalog" />);
 
+    expect(await screen.findByRole("link", { name: "Open public profile" })).toHaveAttribute(
+      "href",
+      "https://x.com/BravoTV",
+    );
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Backfill Posts" })).toBeInTheDocument();
     });
@@ -11113,8 +11111,6 @@ it("prefers terminal cancelled status labels over stale recovering state", async
     });
 
     render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="stats" />);
-    await waitForSecondaryReadsToOpen();
-
     await waitFor(() => {
       expect(screen.getByText("#alltime")).toBeInTheDocument();
     });
@@ -11179,8 +11175,6 @@ it("prefers terminal cancelled status labels over stale recovering state", async
     });
 
     render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="stats" />);
-    await waitForSecondaryReadsToOpen();
-
     await waitFor(() => {
       expect(screen.getByText("Hashtag data is retryable while the backend is busy.")).toBeInTheDocument();
     });
@@ -11258,8 +11252,6 @@ it("prefers terminal cancelled status labels over stale recovering state", async
     });
 
     render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="hashtags" />);
-    await waitForSecondaryReadsToOpen();
-
     await waitFor(() => {
       expect(screen.getByText("#alltime")).toBeInTheDocument();
     });
