@@ -83,7 +83,8 @@ jobs:
         run: pnpm run typecheck
       - name: Install Playwright Chromium
         if: matrix.lane == 'full'
-        run: pnpm exec playwright install --with-deps chromium
+        timeout-minutes: 5
+        run: pnpm exec playwright install chromium
       - name: Run unit tests (Node 24 full lane)
         if: matrix.lane == 'full'
         run: pnpm run test:ci

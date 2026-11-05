@@ -105,7 +105,7 @@ export default function RhoslcSurveyPlayPage() {
         const ids = next?.ranking?.map((item) => item.id) ?? [];
         setRankingIds(ids);
         setSeasonRating(next?.seasonRating ?? null);
-      });
+      }, { mode: "editable" });
     };
 
     bootstrap();

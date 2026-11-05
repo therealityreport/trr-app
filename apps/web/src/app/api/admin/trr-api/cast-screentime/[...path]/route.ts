@@ -35,7 +35,7 @@ async function forward(request: NextRequest, method: string, { params }: RoutePa
       headers.set("Content-Type", incomingContentType);
     }
 
-    const init: RequestInit = { method, headers };
+    const init: RequestInit = { method, headers, cache: "no-store" };
     if (!["GET", "HEAD"].includes(method)) {
       const bodyText = await request.text();
       if (bodyText.length > 0) {
@@ -53,7 +53,10 @@ async function forward(request: NextRequest, method: string, { params }: RoutePa
         body = { raw: text };
       }
     }
-    return NextResponse.json(body, { status: backendResponse.status });
+    return NextResponse.json(body, {
+      status: backendResponse.status,
+      headers: { "Cache-Control": "private, no-store" },
+    });
   } catch (error) {
     console.error("[api] Cast screentime proxy failed", error);
     const message = error instanceof Error ? error.message : "failed";

@@ -1,22 +1,16 @@
-import { requireDb } from "@/lib/firebase-db";
-import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
+import { auth } from "@/lib/firebase";
+import { Timestamp } from "firebase/firestore";
 import type { User } from "firebase/auth";
 import type { SurveyXResponses, SurveyXState } from "@/lib/validation/user";
 
 export async function getSurveyXState(uid: string): Promise<SurveyXState | null> {
-  const ref = doc(requireDb(), "users", uid);
-  const snap = await getDoc(ref);
-  if (!snap.exists()) return null;
-
-  const data = snap.data() as { surveyX?: SurveyXState };
-  if (!data?.surveyX) return null;
-
-  const { completed = false, completedAt, responses } = data.surveyX;
-  return {
-    completed: Boolean(completed),
-    completedAt,
-    responses,
-  };
+  const user = auth.currentUser;
+  if (!user || user.uid !== uid) throw new Error("Sign in as the survey owner.");
+  const res = await fetch("/api/surveys/x", { headers: { authorization: `Bearer ${await user.getIdToken()}` }, cache: "no-store" });
+  if (!res.ok) throw new Error("Unable to load your submitted survey.");
+  const { state } = await res.json() as { state: (Omit<SurveyXState, "completedAt"> & { completedAt?: string }) | null };
+  if (!state) return null;
+  return { ...state, completedAt: state.completedAt ? Timestamp.fromDate(new Date(state.completedAt)) : undefined };
 }
 
 const surveyXSaves = new Map<string, { tail: Promise<void>; latest: Promise<void> }>();
@@ -45,79 +39,11 @@ export async function saveSurveyXResponses(user: User, responses: SurveyXRespons
 }
 
 async function persistSurveyXResponses(user: User, responses: SurveyXResponses): Promise<void> {
-  const uid = user.uid;
-  const ref = doc(requireDb(), "users", uid);
-  const existing = await getDoc(ref);
-  const existingData = existing.exists() ? (existing.data() as { username?: string | null }) : null;
-  const username = typeof existingData?.username === "string" ? existingData.username : null;
-  await setDoc(
-    ref,
-    {
-      surveyX: {
-        completed: false,
-        syncState: "pending",
-        completedAt: serverTimestamp(),
-        responses,
-      },
-      surveyXLastUpdatedAt: serverTimestamp(),
-    },
-    { merge: true },
-  );
-
-  try {
-    await syncSurveyXResponses(user, responses, username);
-    await syncGlobalProfileSurvey(user, responses, username);
-    await setDoc(ref, { surveyX: { completed: true, syncState: "synced" }, surveyXLastUpdatedAt: serverTimestamp() }, { merge: true });
-  } catch (error) {
-    await setDoc(ref, { surveyX: { completed: false, syncState: "error" }, surveyXLastUpdatedAt: serverTimestamp() }, { merge: true });
-    throw new Error("Your answers are saved, but syncing failed. Please submit again to retry.", { cause: error });
-  }
-}
-
-async function syncSurveyXResponses(user: User, responses: SurveyXResponses, username: string | null): Promise<void> {
-  const idToken = await user.getIdToken();
-  const payload = {
-    view_live_tv_household: responses.view_live_tv_household ?? null,
-    view_platforms_subscriptions: responses.view_platforms_subscriptions ?? [],
-    primaryPlatform: responses.primaryPlatform ?? null,
-    watchFrequency: responses.watchFrequency ?? null,
-    watchMode: responses.watchMode ?? null,
-    view_reality_cowatch: responses.view_reality_cowatch ?? null,
-    view_live_chats_social: responses.view_live_chats_social ?? null,
-    view_devices_reality: responses.view_devices_reality ?? [],
-    username,
-  };
+  if (auth.currentUser?.uid !== user.uid) throw new Error("Sign in as the survey owner.");
   const res = await fetch("/api/surveys/x", {
     method: "POST",
-    headers: {
-      "content-type": "application/json",
-      authorization: `Bearer ${idToken}`,
-    },
-    body: JSON.stringify(payload),
+    headers: { "content-type": "application/json", authorization: `Bearer ${await user.getIdToken()}` },
+    body: JSON.stringify({ responses }),
   });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Failed to persist Survey X responses: ${res.status} ${text}`);
-  }
-}
-
-async function syncGlobalProfileSurvey(user: User, responses: SurveyXResponses, username: string | null): Promise<void> {
-  const idToken = await user.getIdToken();
-  const payload = {
-    responses,
-    profileEmail: user.email ?? null,
-    username,
-  };
-  const res = await fetch("/api/surveys/global-profile", {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      authorization: `Bearer ${idToken}`,
-    },
-    body: JSON.stringify(payload),
-  });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Failed to persist survey in Postgres: ${res.status} ${text}`);
-  }
+  if (!res.ok) throw new Error("Your survey was not submitted. Please retry.");
 }

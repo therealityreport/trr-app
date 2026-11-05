@@ -176,12 +176,6 @@ const installClipboardMock = () => {
   return writeText;
 };
 
-const waitForSecondaryReadsToOpen = async (): Promise<void> => {
-  await act(async () => {
-    await new Promise((resolve) => window.setTimeout(resolve, 75));
-  });
-};
-
 const baseSummary = {
   summary_detail: "full" as const,
   platform: "instagram",
@@ -1183,7 +1177,7 @@ describe("SocialAccountProfilePage", () => {
 
     render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="stats" />);
 
-    const statusRow = await screen.findByRole("status");
+    const statusRow = (await screen.findByText("Data status: Cached")).closest('[role="status"]');
     expect(statusRow).toHaveTextContent("Data status: Cached");
     expect(statusRow).toHaveTextContent("updated 2 minutes ago");
     expect(screen.getByText("All-time Saved Comments")).toBeInTheDocument();
@@ -1215,7 +1209,7 @@ describe("SocialAccountProfilePage", () => {
 
     render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="stats" />);
 
-    const statusRow = await screen.findByRole("status");
+    const statusRow = (await screen.findByText("Data status: Degraded")).closest('[role="status"]');
     expect(statusRow).toHaveTextContent("Data status: Degraded");
     expect(statusRow).toHaveTextContent("showing the last successful profile data");
     expect(screen.getByText("All-time Saved Comments")).toBeInTheDocument();
@@ -3946,7 +3940,7 @@ describe("SocialAccountProfilePage", () => {
       expect(screen.getByText("Followers Growth")).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    fireEvent.click(screen.getByTitle("Re-scrape SocialBlade data. Historical totals older than one day are preserved."));
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Refreshing..." })).toBeInTheDocument();
     });
@@ -4064,7 +4058,7 @@ describe("SocialAccountProfilePage", () => {
       expect(screen.getByText("Followers Growth")).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    fireEvent.click(screen.getByTitle("Re-scrape SocialBlade data. Historical totals older than one day are preserved."));
 
     await waitFor(() => {
       expect(refreshBodies).toContainEqual({ force: false, source_scope: "creator" });
@@ -4157,7 +4151,7 @@ describe("SocialAccountProfilePage", () => {
       expect(screen.getByText("Followers Growth")).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    fireEvent.click(screen.getByTitle("Re-scrape SocialBlade data. Historical totals older than one day are preserved."));
 
     await waitFor(() => {
       expect(screen.getByText(/Refresh failed:/)).toBeInTheDocument();
@@ -6359,6 +6353,10 @@ describe("SocialAccountProfilePage", () => {
 
     render(<SocialAccountProfilePage platform="twitter" handle="bravotv" activeTab="catalog" />);
 
+    expect(await screen.findByRole("link", { name: "Open public profile" })).toHaveAttribute(
+      "href",
+      "https://x.com/BravoTV",
+    );
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Backfill Posts" })).toBeInTheDocument();
     });
@@ -7012,9 +7010,20 @@ describe("SocialAccountProfilePage", () => {
   });
 
   it("shows head-gap guidance and queues sync newer from the integrity banner", async () => {
+    const ingestionRunId = "11111111-1111-4111-8111-111111111112";
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
+      const ingestionRead = boundedIngestionRead(url);
+      if (ingestionRead) return ingestionRead;
+      if (url.endsWith("/instagram-ingestion/bravotv/runs") && init?.method === "POST") {
+        return jsonResponse({
+          run_id: ingestionRunId,
+          state: "queued",
+          engine: "dbos",
+          workflow_version: "v1",
+          generation: 1,
+        }, 202);
+      }
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
@@ -7087,16 +7096,6 @@ describe("SocialAccountProfilePage", () => {
           },
         });
       }
-      if (url.includes("/catalog/sync-newer")) {
-        expect(init?.method).toBe("POST");
-        expect(init?.body).toBe(JSON.stringify({ source_scope: "network" }));
-        return jsonResponse({
-          run_id: "catalog-run-head-12345678",
-          status: "queued",
-          catalog_action: "sync_newer",
-          catalog_action_scope: "head_gap",
-        });
-      }
       throw new Error(`Unhandled request: ${url}`);
     });
 
@@ -7108,14 +7107,25 @@ describe("SocialAccountProfilePage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Run Gap Analysis" }));
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Sync Newer Now" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Sync Newer Now" })).toBeEnabled();
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Sync Newer Now" }));
 
     await waitFor(() => {
-      expect(screen.getByText("Sync newer posts queued (catalog-).")).toBeInTheDocument();
+      expect(screen.getByText(`Instagram ingestion accepted. Run ${ingestionRunId.slice(0, 8)} · queued.`)).toBeInTheDocument();
     });
+    const launch = mocks.fetchAdminWithAuth.mock.calls.find(([input, init]) =>
+      String(input).endsWith("/instagram-ingestion/bravotv/runs") && init?.method === "POST",
+    );
+    expect(launch).toBeDefined();
+    expect(JSON.parse(String(launch![1].body))).toMatchObject({
+      action: "sync_newer",
+      source_scope: "network",
+      execution_placement: "modal",
+    });
+    expect(new Headers(launch![1].headers).get("Idempotency-Key")).toBeTruthy();
+    expect(mocks.fetchAdminWithAuth.mock.calls.some(([input]) => String(input).includes("/catalog/sync-newer"))).toBe(false);
   });
 
   it("shows interior-gap guidance and queues a bounded repair window", async () => {
@@ -9197,7 +9207,7 @@ it("sends the explicit local TikTok backfill payload when Retry Locally is click
 
   fireEvent.click(screen.getByRole("button", { name: "View Details" }));
 
-  const retryButton = await screen.findByRole("button", { name: "Choose Bounded Retry" });
+  const retryButton = await screen.findByRole("button", { name: "Retry Locally" });
   fireEvent.click(retryButton);
 
   await waitFor(() => {
@@ -11033,11 +11043,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
     });
 
     render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="stats" />);
-    await waitForSecondaryReadsToOpen();
-
-    await waitFor(() => {
-      expect(screen.getByText("#alltime")).toBeInTheDocument();
-    });
+    expect(await screen.findByText("#alltime")).toBeInTheDocument();
     expect(screen.queryByText("#summaryonly")).not.toBeInTheDocument();
     expect(
       mocks.fetchAdminWithAuth.mock.calls.some(([input]) =>
@@ -11105,8 +11111,6 @@ it("prefers terminal cancelled status labels over stale recovering state", async
     });
 
     render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="stats" />);
-    await waitForSecondaryReadsToOpen();
-
     await waitFor(() => {
       expect(screen.getByText("#alltime")).toBeInTheDocument();
     });
@@ -11171,8 +11175,6 @@ it("prefers terminal cancelled status labels over stale recovering state", async
     });
 
     render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="stats" />);
-    await waitForSecondaryReadsToOpen();
-
     await waitFor(() => {
       expect(screen.getByText("Hashtag data is retryable while the backend is busy.")).toBeInTheDocument();
     });
@@ -11250,8 +11252,6 @@ it("prefers terminal cancelled status labels over stale recovering state", async
     });
 
     render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="hashtags" />);
-    await waitForSecondaryReadsToOpen();
-
     await waitFor(() => {
       expect(screen.getByText("#alltime")).toBeInTheDocument();
     });

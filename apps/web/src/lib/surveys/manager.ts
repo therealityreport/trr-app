@@ -1,6 +1,7 @@
 import {
   Timestamp,
   doc,
+  runTransaction,
   getDoc,
   onSnapshot,
   serverTimestamp,
@@ -25,6 +26,8 @@ class SurveyManager {
   private static instance: SurveyManager;
   private firestore: Firestore | null = null;
   private responseSaves = new Map<string, { tail: Promise<void>; latest: Promise<SurveySaveOutcome> | null }>();
+
+  private responseReaders = new Map<string, Set<() => Promise<void>>>();
 
   private constructor() {}
 
@@ -72,16 +75,67 @@ class SurveyManager {
     ids: SurveyIdentifiers,
     uid: string,
     onChange: (response: SurveyResponse | null) => void,
+    options?: { mode?: "submitted" | "editable" },
   ): Unsubscribe {
-    const responseRef = this.getResponseDocRef(ids, uid);
-    return onSnapshot(responseRef, (snapshot) => {
-      if (!snapshot.exists()) {
-        onChange(null);
-        return;
+    const editableMode = options?.mode === "editable";
+    let active = true;
+    let submitted: SurveyResponse | null = null;
+    let draft: SurveyResponse | null = null;
+    let legacy: SurveyResponse | null = null;
+    const emit = () => {
+      if (!active) return;
+      // Results/CTA see only submitted PostgreSQL answers. Editors can resume a
+      // separate draft, whose content never inherits the submission's completion.
+      const editable = editableMode ? draft ?? (!submitted ? legacy : null) : null;
+      onChange(editable ? { ...editable, completed: false, syncState: "synced" } : submitted);
+    };
+    const refresh = async () => {
+      try {
+        const user = auth.currentUser;
+        if (!user || user.uid !== uid) throw new Error("Sign in as the response owner.");
+        const query = new URLSearchParams({ surveyKey: deriveSurveyKey(ids), seasonId: ids.seasonId, episodeId: ids.episodeId });
+        const res = await fetch(`/api/surveys/show-responses?${query}`, {
+          headers: { authorization: `Bearer ${await user.getIdToken()}` }, cache: "no-store",
+        });
+        if (!res.ok) throw new Error("Unable to load submitted survey.");
+        const { response } = await res.json() as { response: Record<string, unknown> | null };
+        if (!active) return;
+        submitted = response ? {
+          uid, ...ids, ranking: (response.ranking ?? []) as SurveyResponse["ranking"],
+          completionPct: Number(response.completion_pct ?? 100), completed: response.completed === true,
+          seasonRating: response.season_rating == null ? null : Number(response.season_rating), syncState: "synced",
+          createdAt: Timestamp.fromDate(new Date(String(response.created_at))),
+          updatedAt: Timestamp.fromDate(new Date(String(response.updated_at))),
+        } : null;
+        emit();
+      } catch (error) {
+        if (active) { submitted = null; emit(); console.error("Failed to load submitted survey", error); }
       }
-      const data = snapshot.data() as SurveyResponse;
-      onChange(data);
-    });
+    };
+    const key = this.responseKey(ids, uid);
+    const readers = this.responseReaders.get(key) ?? new Set<() => Promise<void>>();
+    readers.add(refresh);
+    this.responseReaders.set(key, readers);
+    let unsubscribe: Unsubscribe = () => {};
+    if (editableMode) {
+      unsubscribe = onSnapshot(this.getDraftDocRef(ids, uid), (snapshot) => {
+        draft = snapshot.exists() ? { ...snapshot.data(), uid, ...ids, completed: false } as SurveyResponse : null;
+        emit();
+      });
+      // Recover old local answers only for editing, never for submitted results.
+      void getDoc(this.getResponseDocRef(ids, uid)).then((snapshot) => {
+        if (!active) return;
+        legacy = snapshot.exists() ? { ...snapshot.data(), completed: false } as SurveyResponse : null;
+        emit();
+      }).catch((error) => console.error("Failed to load legacy survey draft", error));
+    }
+    void refresh();
+    return () => {
+      active = false;
+      unsubscribe();
+      readers.delete(refresh);
+      if (!readers.size) this.responseReaders.delete(key);
+    };
   }
 
   async saveResponse(
@@ -94,7 +148,7 @@ class SurveyManager {
     if (!Array.isArray(draft.ranking) || draft.ranking.length > 20) {
       throw new Error("This survey supports up to 20 ranked choices. Please reduce your selection and retry.");
     }
-    // Snapshot mutable UI inputs, then serialize the entire dual write per stable response.
+    // Snapshot mutable UI inputs, then serialize draft saves and submissions per stable response.
     const savedIds = { ...ids };
     const savedDraft = { ...draft, ranking: draft.ranking.map((item) => ({ ...item })) };
     const savedOptions = options ? { ...options } : undefined;
@@ -127,40 +181,36 @@ class SurveyManager {
     options?: { surveyKey?: string },
   ): Promise<SurveySaveOutcome> {
     if (auth.currentUser?.uid !== uid) throw new Error("Sign in as the response owner before saving.");
-    const responseRef = this.getResponseDocRef(ids, uid);
-    const existing = await getDoc(responseRef);
-    const createdAt = existing.exists()
-      ? (existing.data()?.createdAt as Timestamp | undefined) ?? serverTimestamp()
-      : serverTimestamp();
-    const payload: Partial<SurveyResponse> = {
-      uid,
-      ...ids,
-      ranking: draft.ranking,
-      completionPct: draft.completionPct,
-      completed: false,
-      requestedCompleted: draft.completed,
-      syncState: "pending",
+    const draftRef = this.getDraftDocRef(ids, uid);
+    const existing = await getDoc(draftRef);
+    const payload = {
+      uid, ...ids, ranking: draft.ranking, completionPct: draft.completionPct,
+      seasonRating: draft.seasonRating ?? null,
+      createdAt: existing.exists() ? existing.data().createdAt ?? serverTimestamp() : serverTimestamp(),
       updatedAt: serverTimestamp(),
-      createdAt,
     };
-    if (Object.prototype.hasOwnProperty.call(draft, "seasonRating")) {
-      payload.seasonRating = draft.seasonRating ?? null;
-    }
-
-    await setDoc(responseRef, payload, { merge: true });
+    // Draft writes contain no submitted/completed state and survive a failed submission.
+    await setDoc(draftRef, payload);
+    if (!draft.completed) return { completed: false, syncState: "synced" };
+    await this.syncResponseToPostgres(ids, uid, draft, options);
+    await Promise.all([...this.responseReaders.get(this.responseKey(ids, uid)) ?? []].map((refresh) => refresh()));
+    // PostgreSQL has accepted the submission; draft cleanup is best effort.
     try {
-      await this.syncResponseToPostgres(ids, uid, draft, options);
-      await setDoc(responseRef, { completed: draft.completed, syncState: "synced", updatedAt: serverTimestamp() }, { merge: true });
-      return { completed: draft.completed, syncState: "synced" };
-    } catch (error) {
-      await setDoc(responseRef, { completed: false, syncState: "error", updatedAt: serverTimestamp() }, { merge: true });
-      throw new Error("Your answers are saved, but syncing failed. Please submit again to retry.", { cause: error });
-    }
+      await runTransaction(this.getFirestore(), async (transaction) => {
+        const current = await transaction.get(draftRef);
+        const data = current.exists() ? current.data() : null;
+        // Another tab can save a newer draft while this submission is in flight.
+        if (data && JSON.stringify(data.ranking) === JSON.stringify(draft.ranking)
+          && (data.seasonRating ?? null) === (draft.seasonRating ?? null)
+          && data.completionPct === draft.completionPct) transaction.delete(draftRef);
+      });
+    } catch (error) { console.warn("Submitted survey draft cleanup failed", error); }
+    return { completed: true, syncState: "synced" };
   }
 
   resolveCta(response: SurveyResponse | null): SurveyCtaState {
     if (!response) return "start";
-    if (response.completed && (!response.syncState || response.syncState === "synced")) return "results";
+    if (response.completed && response.syncState === "synced") return "results";
     return "continue";
   }
 
@@ -226,6 +276,14 @@ class SurveyManager {
     );
   }
 
+  private responseKey(ids: SurveyIdentifiers, uid: string): string {
+    return JSON.stringify([uid, ids.showId, ids.seasonId, ids.episodeId]);
+  }
+
+  private getDraftDocRef(ids: SurveyIdentifiers, uid: string) {
+    return doc(this.getFirestore(), SURVEY_COLLECTION, ids.showId, "seasons", ids.seasonId, "episodes", ids.episodeId, "drafts", uid);
+  }
+
   private getResponseDocRef(ids: SurveyIdentifiers, uid: string) {
     return doc(
       this.getFirestore(),
@@ -246,8 +304,9 @@ export function useSurveyManager(): SurveyManager {
 }
 
 const deriveSurveyKey = (ids: SurveyIdentifiers): string => {
-  const season = ids.seasonId ?? "season";
-  return `${ids.showId}_${season}`.toLowerCase();
+  if (ids.showId === "tt12623782" && parseOrdinal(ids.seasonId) === 6) return "rhoslc_s6";
+  if (ids.showId === "rhop" && parseOrdinal(ids.seasonId) === 10) return "rhop_s10";
+  return `${ids.showId}_${ids.seasonId}`.toLowerCase();
 };
 
 const parseOrdinal = (value?: string): number | null => {

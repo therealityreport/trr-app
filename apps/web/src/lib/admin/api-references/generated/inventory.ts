@@ -3,8 +3,8 @@ import type { AdminApiReferenceInventory } from "@/lib/admin/api-references/type
 export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
   "inventorySchemaVersion": "1.0.0",
   "generatorVersion": "1.0.0",
-  "generatedAt": "2026-10-22T18:08:46.649Z",
-  "sourceCommitSha": "d8dae43f8d3c84f5a68eb95a63f7735b59071164",
+  "generatedAt": "2026-10-31T07:44:57.185Z",
+  "sourceCommitSha": "88b3539e3165108365aa68d9376d097cab3b004a",
   "overrideDigest": "45a4759bd47a0c80cfa12afe9b325647fe7e09833ec1687dc2accb459108c24c",
   "nodes": [
     {
@@ -10669,7 +10669,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/trr-api/cast-screentime/[...path]/route.ts",
       "sourceLocator": {
-        "line": 65,
+        "line": 68,
         "symbol": "GET"
       },
       "provenance": "static_scan",
@@ -14445,7 +14445,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "PATCH",
       "sourceFile": "src/app/api/admin/trr-api/cast-screentime/[...path]/route.ts",
       "sourceLocator": {
-        "line": 73,
+        "line": 76,
         "symbol": "PATCH"
       },
       "provenance": "static_scan",
@@ -16755,7 +16755,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "POST",
       "sourceFile": "src/app/api/admin/trr-api/cast-screentime/[...path]/route.ts",
       "sourceLocator": {
-        "line": 69,
+        "line": 72,
         "symbol": "POST"
       },
       "provenance": "static_scan",

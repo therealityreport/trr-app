@@ -88,7 +88,7 @@ export default function RHOPS10PlayPage() {
         setResponse(next);
         const ids = next?.ranking?.map((item) => item.id) ?? [];
         setRankingIds(ids);
-      });
+      }, { mode: "editable" });
     };
 
     bootstrap();
