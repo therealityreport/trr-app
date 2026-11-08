@@ -8,14 +8,14 @@
     "uncompressedBytes": 1185524,
     "uncompressedSha256": "a15659138d3e026febba5badbda2d4d0cfe6bf5f7986a1b8eb3803490d218838"
   },
-  "maximumUncompressedArtifactBytes": 177091,
+  "maximumUncompressedArtifactBytes": 177109,
   "artifacts": {
     "page": {
       "path": "page.html.gz",
-      "compressedBytes": 22480,
-      "compressedSha256": "89c17ffe63e469dfdc09815c3a6f87e2ed3743545f33fd801be9429de1bebff4",
-      "uncompressedBytes": 177091,
-      "uncompressedSha256": "33c811b06608d1d60152712a71a09b6bf54b73ead9570a035241d1625486d98d"
+      "compressedBytes": 22483,
+      "compressedSha256": "41cdbdcf4ce6292e5da035f829aea04b78ac866fb250848b677cb924850f504d",
+      "uncompressedBytes": 177109,
+      "uncompressedSha256": "93881ce255497e1f42b793bf048cc38adb09f4d827baaf3af5ef50d9f92f962b"
     },
     "edition-rail": {
       "path": "fragments/edition-rail.html.gz",
@@ -89,10 +89,10 @@
     },
     "poetry-promo": {
       "path": "fragments/poetry-promo.html.gz",
-      "compressedBytes": 2192,
-      "compressedSha256": "df1f6527ec91751c5b67186112fd043bf7865baf8a7064dbf7850253d1da6e5a",
-      "uncompressedBytes": 8833,
-      "uncompressedSha256": "9ca747c705ad736c78f3eb51bb897f725d4391024964e9c1012108b35b5d9ffa"
+      "compressedBytes": 2196,
+      "compressedSha256": "9f4c70aaa8e7d551d24375b315bb4aa8e22f4894ef57bd326aaed463aa7946f6",
+      "uncompressedBytes": 8851,
+      "uncompressedSha256": "cbd0339917238b437ea62c5308a7e46629d26e7c2f8d51f805080a0619d71914"
     },
     "weather-strip": {
       "path": "fragments/weather-strip.html.gz",
