@@ -82,18 +82,20 @@ describe("typed ingestion lifecycle", () => {
   });
   it("preserves all four outcomes and discovery incomplete despite high request counts", () => {
     render(<StageProgress progress={progress()} />);
-    expect(screen.getByText("Discovery incomplete · total can grow")).toBeInTheDocument();
-    for (const label of ["Committed", "Cached satisfied", "Source unavailable", "Unresolved"]) expect(screen.getByText(label)).toBeInTheDocument();
+    expect(screen.getByText("Target discovery open · total can grow")).toBeInTheDocument();
+    for (const label of ["Targets saved", "Targets already satisfied", "Unavailable from source", "Unresolved targets"]) expect(screen.getByText(label)).toBeInTheDocument();
     expect(screen.getByText(/Requests 100/)).toBeInTheDocument();
-    expect(screen.getByText(/Work remains/)).toBeInTheDocument();
+    expect(screen.getByText(/Unresolved targets remain/)).toBeInTheDocument();
   });
   it("describes resolved outcomes with unavailable counts and a safe execution hold code", () => {
     const run = progress({ state: "completed", complete: true, execution_hold_reason: "worker_offline" });
     run.stages = [{ ...run.stages[0], discovery_complete: true, complete: true, unresolved: 0, source_unavailable: 4 }];
     render(<StageProgress progress={run} />);
-    expect(screen.getByText(/All selected stages resolved · 4 source unavailable/)).toBeInTheDocument();
-    expect(screen.getByText("Resolved · 4 source unavailable")).toBeInTheDocument();
+    expect(screen.getByText(/All selected targets resolved · 4 unavailable targets/)).toBeInTheDocument();
+    expect(screen.getByText("Targets resolved · 4 unavailable targets")).toBeInTheDocument();
     expect(screen.getByText("Execution hold: worker_offline")).toBeInTheDocument();
+    expect(screen.getByText(/Run status: Finished/)).toBeInTheDocument();
+    expect(screen.getByText("Scan status: Unknown · Verification: Not verified")).toBeInTheDocument();
   });
   it("refreshes actionable diagnostics when generation, state, or committed results change", async () => {
     let run = progress();

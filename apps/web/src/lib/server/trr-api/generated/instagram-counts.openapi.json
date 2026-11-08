@@ -1,0 +1,469 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Instagram independent comment counts",
+    "version": "1"
+  },
+  "paths": {},
+  "components": {
+    "schemas": {
+      "CommentCountObservation": {
+        "properties": {
+          "value": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          },
+          "status": {
+            "enum": [
+              "observed",
+              "unknown"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "source_field": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Field"
+          },
+          "source_surface": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Surface"
+          },
+          "observed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed At"
+          },
+          "evidence_reference": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evidence Reference"
+          },
+          "observed_in_latest_response": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed In Latest Response"
+          },
+          "unknown_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unknown Reason"
+          }
+        },
+        "required": [
+          "value",
+          "status",
+          "source",
+          "source_field",
+          "source_surface",
+          "observed_at",
+          "evidence_reference",
+          "observed_in_latest_response",
+          "unknown_reason"
+        ],
+        "title": "CommentCountObservation",
+        "type": "object"
+      },
+      "InstagramCommentCounts": {
+        "properties": {
+          "version": {
+            "const": 1,
+            "default": 1,
+            "title": "Version",
+            "type": "integer"
+          },
+          "post_reported_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Post Reported Count"
+          },
+          "instagram_saved_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instagram Saved Count"
+          },
+          "instagram_saved_top_level_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instagram Saved Top Level Count"
+          },
+          "instagram_saved_reply_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instagram Saved Reply Count"
+          },
+          "instagram_saved_unclassified_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instagram Saved Unclassified Count"
+          },
+          "instagram_marked_missing_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instagram Marked Missing Count"
+          },
+          "facebook_count_observed_on_instagram": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Facebook Count Observed On Instagram"
+          },
+          "threads_count_observed_on_instagram": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Threads Count Observed On Instagram"
+          },
+          "post_minus_saved_difference": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Post Minus Saved Difference"
+          },
+          "inventory_status": {
+            "enum": [
+              "available",
+              "unavailable"
+            ],
+            "title": "Inventory Status",
+            "type": "string"
+          },
+          "inventory_observed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inventory Observed At"
+          },
+          "observations": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/CommentCountObservation"
+            },
+            "title": "Observations",
+            "type": "object"
+          },
+          "observation_conflicts": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Observation Conflicts",
+            "type": "array"
+          }
+        },
+        "required": [
+          "post_reported_count",
+          "instagram_saved_count",
+          "instagram_saved_top_level_count",
+          "instagram_saved_reply_count",
+          "instagram_saved_unclassified_count",
+          "instagram_marked_missing_count",
+          "facebook_count_observed_on_instagram",
+          "threads_count_observed_on_instagram",
+          "post_minus_saved_difference",
+          "inventory_status",
+          "inventory_observed_at",
+          "observations",
+          "observation_conflicts"
+        ],
+        "title": "InstagramCommentCounts",
+        "type": "object"
+      },
+      "InstagramCommentCountsSummary": {
+        "properties": {
+          "version": {
+            "const": 1,
+            "default": 1,
+            "title": "Version",
+            "type": "integer"
+          },
+          "posts_count": {
+            "title": "Posts Count",
+            "type": "integer"
+          },
+          "post_reported_known_subtotal": {
+            "title": "Post Reported Known Subtotal",
+            "type": "integer"
+          },
+          "post_reported_known_posts_count": {
+            "title": "Post Reported Known Posts Count",
+            "type": "integer"
+          },
+          "post_reported_unknown_posts_count": {
+            "title": "Post Reported Unknown Posts Count",
+            "type": "integer"
+          },
+          "posts_with_reported_comments_count": {
+            "title": "Posts With Reported Comments Count",
+            "type": "integer"
+          },
+          "posts_reporting_zero_comments_count": {
+            "title": "Posts Reporting Zero Comments Count",
+            "type": "integer"
+          },
+          "reported_count_unknown_posts_count": {
+            "title": "Reported Count Unknown Posts Count",
+            "type": "integer"
+          },
+          "posts_with_reported_comments_but_no_saved_records_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Posts With Reported Comments But No Saved Records Count"
+          },
+          "facebook_known_subtotal": {
+            "title": "Facebook Known Subtotal",
+            "type": "integer"
+          },
+          "facebook_known_posts_count": {
+            "title": "Facebook Known Posts Count",
+            "type": "integer"
+          },
+          "facebook_unknown_posts_count": {
+            "title": "Facebook Unknown Posts Count",
+            "type": "integer"
+          },
+          "threads_known_subtotal": {
+            "title": "Threads Known Subtotal",
+            "type": "integer"
+          },
+          "threads_known_posts_count": {
+            "title": "Threads Known Posts Count",
+            "type": "integer"
+          },
+          "threads_unknown_posts_count": {
+            "title": "Threads Unknown Posts Count",
+            "type": "integer"
+          },
+          "instagram_saved_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instagram Saved Count"
+          },
+          "instagram_saved_top_level_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instagram Saved Top Level Count"
+          },
+          "instagram_saved_reply_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instagram Saved Reply Count"
+          },
+          "instagram_saved_unclassified_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instagram Saved Unclassified Count"
+          },
+          "instagram_marked_missing_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instagram Marked Missing Count"
+          },
+          "post_minus_saved_difference_known_subtotal": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Post Minus Saved Difference Known Subtotal"
+          },
+          "inventory_status": {
+            "enum": [
+              "available",
+              "unavailable"
+            ],
+            "title": "Inventory Status",
+            "type": "string"
+          },
+          "inventory_observed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inventory Observed At"
+          }
+        },
+        "required": [
+          "posts_count",
+          "post_reported_known_subtotal",
+          "post_reported_known_posts_count",
+          "post_reported_unknown_posts_count",
+          "posts_with_reported_comments_count",
+          "posts_reporting_zero_comments_count",
+          "reported_count_unknown_posts_count",
+          "posts_with_reported_comments_but_no_saved_records_count",
+          "facebook_known_subtotal",
+          "facebook_known_posts_count",
+          "facebook_unknown_posts_count",
+          "threads_known_subtotal",
+          "threads_known_posts_count",
+          "threads_unknown_posts_count",
+          "instagram_saved_count",
+          "instagram_saved_top_level_count",
+          "instagram_saved_reply_count",
+          "instagram_saved_unclassified_count",
+          "instagram_marked_missing_count",
+          "post_minus_saved_difference_known_subtotal",
+          "inventory_status",
+          "inventory_observed_at"
+        ],
+        "title": "InstagramCommentCountsSummary",
+        "type": "object"
+      }
+    }
+  }
+}

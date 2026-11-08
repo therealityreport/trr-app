@@ -1,3 +1,4 @@
+import { instagramRunStatusLabel, instagramVerificationLabel } from "@/lib/admin/instagram-counts";
 import SocialPostsSection from "@/components/admin/social-posts-section";
 import {
   JOB_STATUS_PLAIN,
@@ -105,6 +106,7 @@ export function SeasonSocialRunStatus({
               <span className="text-sm font-medium text-zinc-500">{jobsOpen ? "Hide" : "Show"}</span>
             </button>
             {jobsOpen && (<>
+            {runScopedJobs.some(job => job.platform === "instagram") ? <p className="mt-3 text-xs text-zinc-500">Instagram run status describes job execution. Scan outcomes and saved inventory are separate. Comment completeness: Not verified.</p> : null}
             <div className="mt-4 mb-4 flex justify-end">
               <button
                 type="button"
@@ -137,7 +139,8 @@ export function SeasonSocialRunStatus({
                   const account = typeof job.config?.account === "string" && job.config.account ? job.config.account : null;
                   const counters = getJobStageCounters(job);
                   const persistCounters = getJobPersistCounters(job);
-                  const activitySummary = formatJobActivitySummary(getJobActivity(job));
+                  const rawActivitySummary = formatJobActivitySummary(getJobActivity(job));
+                  const activitySummary = job.platform === "instagram" ? rawActivitySummary?.replaceAll("Comments complete", "Comment collection phase finished").replaceAll("Posts complete", "Post collection phase finished") : rawActivitySummary;
                   const retrievalMeta = (job.metadata as Record<string, unknown>)?.retrieval_meta as
                     | Record<string, unknown>
                     | undefined;
@@ -172,11 +175,12 @@ export function SeasonSocialRunStatus({
                             {PLATFORM_LABELS[job.platform] ?? job.platform}
                           </span>
                           {account && <span className="text-xs text-zinc-500">@{account}</span>}
+                          {job.platform === "instagram" ? <span className="text-xs text-zinc-500">Verification: {instagramVerificationLabel(job.metadata)}</span> : null}
                           <span className="rounded bg-zinc-200 px-1.5 py-0.5 text-xs font-medium text-zinc-600">
                             {STAGE_LABELS_PLAIN[stage] ?? stage}
                           </span>
                           <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${statusBadge[job.status] ?? "bg-zinc-100 text-zinc-500"}`}>
-                            {JOB_STATUS_PLAIN[job.status] ?? job.status}
+                            {job.platform === "instagram" ? instagramRunStatusLabel(job.status) : JOB_STATUS_PLAIN[job.status] ?? job.status}
                           </span>
                         </div>
                         <div className="flex items-center gap-2 text-xs text-zinc-500">

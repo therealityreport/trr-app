@@ -1,3 +1,4 @@
+import type { InstagramCommentCountsSummary } from "@/lib/admin/instagram-counts";
 import type { RedditWindowCoverageCounts } from "@/lib/admin/reddit-window-coverage";
 import type { DisplayThumbnailVariants } from "@/components/admin/social-week/social-media-thumbnails";
 import type { PhotoMetadata } from "@/lib/photo-metadata";
@@ -155,6 +156,7 @@ export type StaleRunState = {
 };
 
 export type AnalyticsResponse = {
+  comment_counts?: InstagramCommentCountsSummary | null;
   window: {
     start: string;
     end: string;
@@ -164,6 +166,7 @@ export type AnalyticsResponse = {
     source_scope?: string;
   };
   summary: {
+    comment_counts?: InstagramCommentCountsSummary | null;
     show_id: string;
     season_id: string;
     season_number: number;

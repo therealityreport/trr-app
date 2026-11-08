@@ -1,5 +1,7 @@
 "use client";
 
+import { InstagramCountComparison } from "@/components/admin/instagram/InstagramCountComparison";
+import { INSTAGRAM_COUNT_LABELS, formatInstagramCount, type InstagramCommentCounts } from "@/lib/admin/instagram-counts";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { Route } from "next";
@@ -196,6 +198,7 @@ interface MediaAssetMeta {
 }
 
 interface BasePost {
+  comment_counts?: InstagramCommentCounts | null;
   source_id: string;
   author: string;
   text: string;
@@ -428,6 +431,7 @@ interface WeekSummaryResponse {
 }
 
 interface PostDetailResponse {
+  comment_counts?: InstagramCommentCounts | null;
   platform: string;
   source_id: string;
   author: string;
@@ -3608,7 +3612,7 @@ function PostStatsDrawer({
         ? Math.max(0, Number(data.refresh?.comment_gap?.saved ?? 0))
         : Math.max(0, Number(data.total_comments_in_db ?? 0)))
     : 0;
-  const commentsIncomplete = data?.refresh?.comment_gap
+  const commentsIncomplete = data?.platform === "instagram" ? false : data?.refresh?.comment_gap
     ? data.refresh.comment_gap.is_complete === false
     : isCommentsCoverageIncomplete(savedCommentsCount, reportedCommentsCount);
   const commentGapReason = data?.refresh?.comment_gap?.reason ?? null;
@@ -3775,7 +3779,7 @@ function PostStatsDrawer({
                 </li>
                 <li>
                   Comments:{" "}
-                  {data.refresh.detail_sync.comments?.is_complete
+                  {data.platform === "instagram" ? "Scan status: Unknown · Verification: Not verified" : data.refresh.detail_sync.comments?.is_complete
                     ? "complete"
                     : `incomplete${data.refresh.detail_sync.comments?.reason ? ` — ${data.refresh.detail_sync.comments.reason}` : ""}`}
                 </li>
@@ -4034,13 +4038,13 @@ function PostStatsDrawer({
                 ) : null}
 
                 <h3 className="text-sm font-semibold text-gray-900 mb-1">
-                  {supportsReplyQuoteSwitch && replyQuoteMode === "quotes"
+                  {data.platform === "instagram" ? `${INSTAGRAM_COUNT_LABELS.saved} (${formatInstagramCount(data.comment_counts?.instagram_saved_count)})` : supportsReplyQuoteSwitch && replyQuoteMode === "quotes"
                     ? `All Quotes (${detailMetricFormatter(reportedQuoteCount)})`
                     : `All Comments (${detailMetricFormatter(savedCommentsCount)}/${detailMetricFormatter(reportedCommentsCount)}${
                         commentsIncomplete ? "*" : ""
                       })`}
                 </h3>
-                {supportsReplyQuoteSwitch && replyQuoteMode === "quotes" ? (
+                {data.platform === "instagram" ? <div className="mb-3"><InstagramCountComparison counts={data.comment_counts} /></div> : supportsReplyQuoteSwitch && replyQuoteMode === "quotes" ? (
                   <p className="text-xs text-gray-500 mb-3">
                     {quotesIncomplete
                       ? `Saved in Supabase: ${detailMetricFormatter(savedQuoteCount)} of ${detailMetricFormatter(reportedQuoteCount)} platform-reported quotes.`
@@ -4097,7 +4101,8 @@ function EngagementRow({ platform, post }: { platform: string; post: AnyPost }) 
 
   if (platform === "instagram") {
     pushMetric("Likes", getNum(post, "likes"));
-    items.push({ label: "Comments", value: commentsValue });
+    items.push({ label: INSTAGRAM_COUNT_LABELS.post, value: formatInstagramCount(post.comment_counts?.post_reported_count) });
+    items.push({ label: INSTAGRAM_COUNT_LABELS.saved, value: formatInstagramCount(post.comment_counts?.instagram_saved_count) });
     pushMetric("Views", getNum(post, "views"));
   } else if (platform === "tiktok") {
     pushMetric("Likes", getNum(post, "likes"));
@@ -4444,7 +4449,7 @@ function PostCard({
               className="text-xs font-medium px-2.5 py-1 rounded-md bg-gray-900 text-white hover:bg-gray-700 transition-colors"
             >
               Post Details
-              {actualComments > 0 && (
+              {platform === "instagram" ? <span className="ml-1 opacity-70"> · {INSTAGRAM_COUNT_LABELS.post}: {formatInstagramCount(post.comment_counts?.post_reported_count)}</span> : actualComments > 0 && (
                 <span className="ml-1 opacity-70">
                   · {formatSavedVsActualComments(displayedSavedComments, actualComments)}
                   {commentsCoverageIncomplete ? "*" : ""} comments

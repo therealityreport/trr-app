@@ -1,5 +1,7 @@
 "use client";
 
+import { InstagramCountComparison, InstagramCountSummary } from "@/components/admin/instagram/InstagramCountComparison";
+import { INSTAGRAM_COUNT_LABELS, formatInstagramCount, instagramInventoryExplanation, knownCount, type InstagramCommentCountsSummary } from "@/lib/admin/instagram-counts";
 import { type SyntheticEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDownIcon, SearchIcon, XIcon } from "lucide-react";
 import type { Route } from "next";
@@ -182,6 +184,7 @@ type InstagramCompletionLaneSummary = {
 };
 
 type InstagramCompletionSummary = {
+  comment_counts?: InstagramCommentCountsSummary | null;
   year: number;
   total_posts: number;
   total_reported_comments: number;
@@ -199,7 +202,7 @@ type InstagramCompletionSummary = {
 type InstagramCommentsGapDisplayRow = {
   key: string;
   label: string;
-  missingCommentGap: number;
+  missingCommentGap: number | null;
   savedCommentCount: number | null;
   reportedCommentCount: number | null;
   status: string | null;
@@ -743,16 +746,11 @@ const normalizeInstagramCommentsGapDisplayRow = (value: unknown): InstagramComme
     readString(record.source_id) ||
     readString(record.post_id) ||
     readString(record.post_url);
-  const savedCommentCount = readNonNegativeInteger(record.saved_comment_count);
-  const reportedCommentCount =
-    readNonNegativeInteger(record.reported_comment_count) ??
-    readNonNegativeInteger(record.observed_comment_count);
-  const missingCommentGap =
-    readNonNegativeInteger(record.missing_comment_gap) ??
-    (reportedCommentCount !== null ? Math.max(reportedCommentCount - (savedCommentCount ?? 0), 0) : null);
-  if (!key || !label || missingCommentGap === null || missingCommentGap <= 0) {
-    return null;
-  }
+  const counts = asRecord(record.comment_counts);
+  const savedCommentCount = knownCount(counts?.instagram_saved_count);
+  const reportedCommentCount = knownCount(counts?.post_reported_count);
+  const missingCommentGap = knownCount(counts?.post_minus_saved_difference);
+  if (!key || !label) return null;
   return {
     key,
     label,
@@ -786,6 +784,8 @@ const buildInstagramCommentsGapDisplayRows = (
   return Array.from(rows.values())
     .sort((left, right) => {
       if (right.missingCommentGap !== left.missingCommentGap) {
+        if (left.missingCommentGap === null) return 1;
+        if (right.missingCommentGap === null) return -1;
         return right.missingCommentGap - left.missingCommentGap;
       }
       return left.label.localeCompare(right.label);
@@ -1597,8 +1597,8 @@ const getActiveCommentsRunScopeNotice = (progress?: SocialAccountCommentsRunProg
   }
   if (targetFilter === "incomplete" || incompleteFill) {
     return targetCount && targetCount > 0
-      ? `Incomplete Fill ${statusWord}: this run ${targetVerb} ${formatInteger(targetCount)} incomplete posts.`
-      : `Incomplete Fill ${statusWord}: this run ${targetVerb} incomplete posts.`;
+      ? `Count-difference targets ${statusWord}: this run ${targetVerb} ${formatInteger(targetCount)} posts selected by the legacy count-difference filter.`
+      : `Count-difference targets ${statusWord}: this run ${targetVerb} posts selected by the legacy count-difference filter.`;
   }
   if (mode === "profile" && targetCount && targetCount > 0) {
     return `Profile comments sync ${statusWord}: this run ${targetVerb} ${formatInteger(targetCount)} posts.`;
@@ -5474,8 +5474,8 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     const averageSecondsPerPost = readFiniteNumber(progress?.throughput?.average_seconds_per_post);
     const backendEstimatedSecondsRemaining = readFiniteNumber(progress?.throughput?.estimated_seconds_remaining);
     const runningCommentJobs = readFiniteNumber(progress?.active_comment_jobs);
-    const savedComments = readFiniteNumber(summary?.comments_saved_summary?.saved_comments);
-    const reportedComments = readFiniteNumber(summary?.comments_saved_summary?.retrieved_comments);
+    const savedComments = platform === "instagram" ? summary?.comment_counts?.instagram_saved_count ?? null : readFiniteNumber(summary?.comments_saved_summary?.saved_comments);
+    const reportedComments = platform === "instagram" ? null : readFiniteNumber(summary?.comments_saved_summary?.retrieved_comments);
     const postsPercent = toProgressPercent(completedPosts, totalPosts);
     const savedPercent = toProgressPercent(savedComments, reportedComments);
     const remainingPosts =
@@ -5537,14 +5537,9 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
         commentsRefreshed !== null ? `${formatInteger(commentsRefreshed)} existing comments seen this run` : null,
       commentsChangedLabel:
         commentsChanged !== null ? `${formatInteger(commentsChanged)} existing comments changed this run` : null,
-      postsCompletionLabel:
+      postsCompletionLabel: platform === "instagram" ? "Scan status: Unknown · Verification: Not verified" :
         completePosts !== null || incompletePosts !== null
-          ? [
-              completePosts !== null ? `${formatInteger(completePosts)} complete` : null,
-              incompletePosts !== null ? `${formatInteger(incompletePosts)} incomplete` : null,
-            ]
-              .filter(Boolean)
-              .join(" · ")
+          ? [completePosts !== null ? `${formatInteger(completePosts)} complete` : null, incompletePosts !== null ? `${formatInteger(incompletePosts)} incomplete` : null].filter(Boolean).join(" · ")
           : null,
       throughputLabel:
         postsPerMinute !== null ||
@@ -5565,13 +5560,15 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
         savedComments !== null && reportedComments !== null
           ? `${formatInteger(savedComments)} saved comments / ${formatInteger(reportedComments)} reported comments`
           : savedComments !== null
-            ? `${formatInteger(savedComments)} saved comments`
+            ? `${formatInteger(savedComments)} ${platform === "instagram" ? "saved Instagram comments and replies" : "saved comments"}`
             : null,
     };
   }, [
     activeCommentsRunProgressData,
     activeCommentsRunEffectiveStatus,
     commentsRunMovement,
+    platform,
+    summary?.comment_counts,
     summary?.comments_saved_summary?.retrieved_comments,
     summary?.comments_saved_summary?.saved_comments,
   ]);
@@ -6792,18 +6789,18 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   }, [catalogRunProgress?.classify_incomplete, catalogRunProgress?.scrape_complete]);
 
   const commentsSavedCount = useMemo(() => {
-    return Number(summary?.comments_saved_summary?.saved_comments ?? 0);
-  }, [summary?.comments_saved_summary?.saved_comments]);
+    return platform === "instagram" ? summary?.comment_counts?.instagram_saved_count ?? null : Number(summary?.comments_saved_summary?.saved_comments ?? 0);
+  }, [platform, summary?.comment_counts?.instagram_saved_count, summary?.comments_saved_summary?.saved_comments]);
 
   const commentsRetrievedCount = useMemo(
-    () => Number(summary?.comments_saved_summary?.retrieved_comments ?? 0),
-    [summary?.comments_saved_summary?.retrieved_comments],
+    () => platform === "instagram" ? summary?.comment_counts?.post_reported_known_subtotal ?? null : Number(summary?.comments_saved_summary?.retrieved_comments ?? 0),
+    [platform, summary?.comment_counts?.post_reported_known_subtotal, summary?.comments_saved_summary?.retrieved_comments],
   );
   const commentsGapCount = useMemo(
-    () => Math.max(0, commentsRetrievedCount - commentsSavedCount),
-    [commentsRetrievedCount, commentsSavedCount],
+    () => platform === "instagram" ? summary?.comment_counts?.post_minus_saved_difference_known_subtotal ?? null : Math.max(0, (commentsRetrievedCount ?? 0) - (commentsSavedCount ?? 0)),
+    [platform, summary?.comment_counts?.post_minus_saved_difference_known_subtotal, commentsRetrievedCount, commentsSavedCount],
   );
-  const commentsSavedSummaryUnavailable = !summaryInitialStatePending && summary?.comments_saved_summary == null;
+  const commentsSavedSummaryUnavailable = !summaryInitialStatePending && (platform === "instagram" ? summary?.comment_counts == null : summary?.comments_saved_summary == null);
 
   const mediaSavedFiles = useMemo(
     () => Number(summary?.media_coverage?.saved_files ?? 0),
@@ -7016,8 +7013,8 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
         value: supportsCatalog
           ? `${formatInteger(displayCatalogTotalPosts)} / ${formatInteger(displayTotalPosts)} posts saved`
           : `${formatInteger(displayTotalPosts)} posts saved`,
-        detail: `${formatInteger(commentsSavedCount)} saved comments · ${formatInteger(mediaSavedFiles)} media files · latest saved post ${formatDateTime(displayLastPostAt)}. These totals are all-time saved data.`,
-        recommendation: "Use these totals for coverage only; active run cards show what workers are doing now.",
+        detail: `${platform === "instagram" ? formatInstagramCount(commentsSavedCount) : formatInteger(commentsSavedCount)} saved comments · ${formatInteger(mediaSavedFiles)} media files · latest saved post ${formatDateTime(displayLastPostAt)}. These totals are all-time saved data.`,
+        recommendation: "Use these totals to review saved data; active run cards show what workers are doing now.",
       });
     }
     return rows;
@@ -9498,7 +9495,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                   />
                 ) : null}
                 <div className="mt-4 flex flex-col gap-1">
-                  <h2 className="text-base font-semibold text-zinc-900">Coverage</h2>
+                  <h2 className="text-base font-semibold text-zinc-900">{platform === "instagram" ? "Saved data" : "Coverage"}</h2>
                   <p className="text-xs text-zinc-500">
                     These are all-time saved records for this profile. Active backfill progress is shown separately below.
                   </p>
@@ -9523,36 +9520,34 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                     )}
                   </div>
                   <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">All-time Saved Comments</p>
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">{platform === "instagram" ? INSTAGRAM_COUNT_LABELS.saved : "All-time Saved Comments"}</p>
                     {summaryInitialStatePending || commentsSavedSummaryUnavailable ? (
                       <>
                         <p className="mt-2 text-sm font-semibold text-zinc-500">
-                          {summaryInitialStatePending ? "Loading…" : "Unavailable"}
+                          {summaryInitialStatePending ? "Loading…" : (platform === "instagram" ? "Unknown" : "Unavailable")}
                         </p>
                       </>
                     ) : (
                       <>
-                        <p className="mt-2 text-2xl font-bold text-zinc-900">{formatInteger(commentsSavedCount)}</p>
-                        <p className="mt-1 text-xs text-zinc-500">
-                          {formatInteger(commentsSavedCount)} saved comments / {formatInteger(commentsRetrievedCount)} reported comments
-                        </p>
+                        <p className="mt-2 text-2xl font-bold text-zinc-900">{platform === "instagram" ? formatInstagramCount(commentsSavedCount) : formatInteger(commentsSavedCount)}</p>
+                        {platform !== "instagram" ? <p className="mt-1 text-xs text-zinc-500">{`${formatInteger(commentsSavedCount)} saved comments / ${formatInteger(commentsRetrievedCount)} reported comments`}</p> : null}
                       </>
                     )}
+                    {platform === "instagram" && !summaryInitialStatePending ? <p className="mt-1 text-xs text-zinc-500">{instagramInventoryExplanation(summary?.comment_counts)}</p> : null}
                   </div>
                   <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">All-time Comment Gap</p>
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">{platform === "instagram" ? `${INSTAGRAM_COUNT_LABELS.difference} (known subtotal)` : "All-time Comment Gap"}</p>
                     {summaryInitialStatePending || commentsSavedSummaryUnavailable ? (
                       <p className="mt-2 text-sm font-semibold text-zinc-500">
-                        {summaryInitialStatePending ? "Loading…" : "Unavailable"}
+                        {summaryInitialStatePending ? "Loading…" : (platform === "instagram" ? "Unknown" : "Unavailable")}
                       </p>
                     ) : (
                       <>
-                        <p className="mt-2 text-2xl font-bold text-zinc-900">{formatInteger(commentsGapCount)}</p>
-                        <p className="mt-1 text-xs text-zinc-500">
-                          {formatInteger(commentsRetrievedCount)} reported minus {formatInteger(commentsSavedCount)} saved
-                        </p>
+                        <p className="mt-2 text-2xl font-bold text-zinc-900">{platform === "instagram" ? formatInstagramCount(commentsGapCount, true) : formatInteger(commentsGapCount)}</p>
+                        {platform !== "instagram" ? <p className="mt-1 text-xs text-zinc-500">{`${formatInteger(commentsRetrievedCount)} reported minus ${formatInteger(commentsSavedCount)} saved`}</p> : null}
                       </>
                     )}
+                    {platform === "instagram" && !summaryInitialStatePending ? <p className="mt-1 text-xs text-zinc-500">{instagramInventoryExplanation(summary?.comment_counts, "difference")}</p> : null}
                   </div>
                   <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
                     <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">All-time Media Saved</p>
@@ -9602,7 +9597,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                     <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
                       <div>
                         <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
-                          {displayedInstagramCompletionYear} Completion
+                          {displayedInstagramCompletionYear} Run outcomes
                         </p>
                         <h3 className="mt-1 text-base font-semibold text-zinc-900">
                           {instagramCompletionSummaryLoading
@@ -9613,11 +9608,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                         </h3>
                       </div>
                       {instagramCompletionSummary ? (
-                        <p className="text-xs text-zinc-500">
-                          {formatInteger(instagramCompletionSummary.total_reported_comments)} reported comments ·{" "}
-                          {formatInteger(instagramCompletionSummary.saved_comments)} saved ·{" "}
-                          {formatInteger(instagramCompletionSummary.missing_comments)} missing
-                        </p>
+                        <InstagramCountSummary summary={instagramCompletionSummary.comment_counts} />
                       ) : null}
                     </div>
                     {instagramCompletionSummary ? (
@@ -9626,10 +9617,10 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                           <div key={lane.key} className="rounded-xl border border-zinc-100 bg-zinc-50 px-3 py-3">
                             <p className="text-xs font-semibold text-zinc-800">{lane.label}</p>
                             <p className="mt-1 text-sm font-semibold text-zinc-900">
-                              {formatInteger(lane.summary.finished)} finished
+                              {lane.key === "comments" ? "Scan status: Unknown" : `${formatInteger(lane.summary.finished)} finished`}
                             </p>
                             <p className="mt-1 text-xs text-zinc-500">
-                              {formatInteger(lane.summary.in_progress)} in progress · {formatInteger(lane.summary.not_started)} not started
+                              {lane.key === "comments" ? "Verification: Not verified" : `${formatInteger(lane.summary.in_progress)} in progress · ${formatInteger(lane.summary.not_started)} not started`}
                             </p>
                           </div>
                         ))}
@@ -9716,8 +9707,8 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                             <thead className="text-zinc-500">
                               <tr>
                                 <th className="pb-2 pr-3 font-semibold uppercase tracking-[0.14em]">Post</th>
-                                <th className="pb-2 pr-3 font-semibold uppercase tracking-[0.14em]">Gap</th>
-                                <th className="pb-2 pr-3 font-semibold uppercase tracking-[0.14em]">Saved / reported</th>
+                                <th className="pb-2 pr-3 font-semibold uppercase tracking-[0.14em]">{INSTAGRAM_COUNT_LABELS.difference}</th>
+                                <th className="pb-2 pr-3 font-semibold uppercase tracking-[0.14em]">Saved Instagram records / post count</th>
                                 <th className="pb-2 pr-3 font-semibold uppercase tracking-[0.14em]">State</th>
                                 <th className="pb-2 font-semibold uppercase tracking-[0.14em]">Recovery hint</th>
                               </tr>
@@ -9732,15 +9723,15 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                                     </span>
                                   </td>
                                   <td className="py-2 pr-3 tabular-nums text-amber-700">
-                                    {formatInteger(row.missingCommentGap)}
+                                    {formatInstagramCount(row.missingCommentGap, true)}
                                   </td>
                                   <td className="py-2 pr-3 tabular-nums text-zinc-700">
-                                    {formatInteger(row.savedCommentCount)} / {formatInteger(row.reportedCommentCount)}
+                                    {formatInstagramCount(row.savedCommentCount)} / {formatInstagramCount(row.reportedCommentCount)}
                                   </td>
                                   <td className="py-2 pr-3 text-zinc-700">
                                     {[row.status ? formatRunStatusLabel(row.status) : null, row.phase ? formatDiagnosticToken(row.phase) : null]
                                       .filter(Boolean)
-                                      .join(" · ") || "Gap open"}
+                                      .join(" · ") || "Run state unknown"}
                                   </td>
                                   <td className="py-2 text-zinc-600">
                                     {[
@@ -11610,7 +11601,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                                 <div className="space-y-1 text-xs">
                                   <div>{formatInteger(item.metrics.engagement)} engagement</div>
                                   <div>{formatInteger(item.metrics.views)} views</div>
-                                  <div>{formatInteger(item.metrics.comments_count)} comments</div>
+                                  <div>{platform === "instagram" ? `${INSTAGRAM_COUNT_LABELS.post}: ${formatInstagramCount(item.comment_counts?.post_reported_count)}` : `${formatInteger(item.metrics.comments_count)} comments`}</div>
                                 </div>
                               </td>
                               {supportsComments ? (
@@ -12186,30 +12177,31 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                             <div>
                               <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Likes</p>
                               <p className="mt-1 text-lg font-semibold text-zinc-900">
-                                {formatDetailMetricValue(catalogDetail.saved_metrics?.likes)}
+                                {platform === "instagram" ? formatInstagramCount(catalogDetail.saved_metrics?.likes) : formatDetailMetricValue(catalogDetail.saved_metrics?.likes)}
                               </p>
                             </div>
                             <div>
-                              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Comments</p>
+                              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">{platform === "instagram" ? INSTAGRAM_COUNT_LABELS.post : "Comments"}</p>
                               <p className="mt-1 text-lg font-semibold text-zinc-900">
-                                {formatDetailMetricValue(catalogDetail.saved_metrics?.comments_count)}
+                                {platform === "instagram" ? formatInstagramCount(catalogDetail.comment_counts?.post_reported_count) : formatDetailMetricValue(catalogDetail.saved_metrics?.comments_count)}
                               </p>
                             </div>
                             <div>
                               <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Views</p>
                               <p className="mt-1 text-lg font-semibold text-zinc-900">
-                                {formatDetailMetricValue(catalogDetail.saved_metrics?.views)}
+                                {platform === "instagram" ? formatInstagramCount(catalogDetail.saved_metrics?.views) : formatDetailMetricValue(catalogDetail.saved_metrics?.views)}
                               </p>
                             </div>
                             <div>
                               <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Engagement</p>
                               <p className="mt-1 text-lg font-semibold text-zinc-900">
-                                {formatDetailMetricValue(catalogDetail.saved_metrics?.engagement)}
+                                {platform === "instagram" ? formatInstagramCount(catalogDetail.saved_metrics?.engagement) : formatDetailMetricValue(catalogDetail.saved_metrics?.engagement)}
                               </p>
                             </div>
                           </div>
                         </div>
 
+                        {platform === "instagram" ? <InstagramCountComparison counts={catalogDetail.comment_counts} /> : null}
                         {catalogDetail.facebook_crosspost?.comments_count ||
                         catalogDetail.facebook_crosspost?.is_shared_to_fb != null ||
                         catalogDetail.comment_completeness?.external_facebook_comments ? (
@@ -12220,15 +12212,10 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                                   Facebook Crosspost
                                 </h3>
                                 <p className="mt-2 text-sm leading-6 text-zinc-700">
-                                  {formatInteger(
-                                    catalogDetail.facebook_crosspost?.comments_count ??
-                                      catalogDetail.comment_completeness?.external_facebook_comments ??
-                                      0,
-                                  )}{" "}
-                                  comments from Facebook
+                                  {platform === "instagram" ? `${INSTAGRAM_COUNT_LABELS.facebook}: ${formatInstagramCount(catalogDetail.comment_counts?.facebook_count_observed_on_instagram)}` : `${formatInteger(catalogDetail.facebook_crosspost?.comments_count ?? catalogDetail.comment_completeness?.external_facebook_comments ?? 0)} comments from Facebook`}
                                 </p>
-                                {catalogDetail.comment_completeness?.instagram_fetchable_comments != null ||
-                                catalogDetail.comment_completeness?.saved_instagram_comments != null ? (
+                                {platform !== "instagram" && (catalogDetail.comment_completeness?.instagram_fetchable_comments != null ||
+                                catalogDetail.comment_completeness?.saved_instagram_comments != null) ? (
                                   <p className="mt-1 text-xs leading-5 text-zinc-500">
                                     {formatInteger(catalogDetail.comment_completeness?.saved_instagram_comments ?? 0)} saved comments out of{" "}
                                     {formatInteger(catalogDetail.comment_completeness?.instagram_fetchable_comments ?? 0)}{" "}
@@ -12308,11 +12295,8 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                           <div className="flex items-center justify-between gap-3">
                             <h3 className="text-sm font-semibold uppercase tracking-[0.16em] text-zinc-500">Saved Discussion</h3>
                             <p className="text-xs text-zinc-500">
-                              {formatInteger(
-                                catalogDetail.total_comments_in_db ??
-                                  catalogDetail.saved_comments ??
-                                  catalogDetail.discussion_items?.length ??
-                                  0,
+                              {platform === "instagram" ? formatInstagramCount(catalogDetail.comment_counts?.instagram_saved_count) : formatInteger(
+                                catalogDetail.total_comments_in_db ?? catalogDetail.saved_comments ?? catalogDetail.discussion_items?.length ?? 0,
                               )}{" "}
                               items
                             </p>

@@ -350,7 +350,7 @@ export function SeasonSocialWeeklyTable({
                         {weekRow.days.map((day) => {
                           const value = getWeeklyDayValue(day, weeklyMetric, heatmapPlatform);
                           const displayLabel =
-                            weeklyMetric === "completeness"
+                            weeklyMetric === "completeness" && heatmapPlatform === "instagram" ? "Not verified" : weeklyMetric === "completeness"
                               ? value < 0
                                 ? "N/A"
                                 : `${(value * 100).toFixed(1)}%`
@@ -371,7 +371,7 @@ export function SeasonSocialWeeklyTable({
                                   });
                                 }}
                                 aria-label={`${weekRow.label} ${day.date_local} ${displayLabel} ${weeklyMetric}`}
-                                className={`flex ${socialDensity === "comfortable" ? "h-12 w-full text-[10px]" : "h-9 w-9 sm:h-10 sm:w-10 text-[9px]"} flex-col items-center justify-center rounded px-1 font-semibold tabular-nums ${getHeatmapToneClass({ value, maxValue: weeklyHeatmapMaxValue, metric: weeklyMetric })}`}
+                                className={`flex ${socialDensity === "comfortable" ? "h-12 w-full text-[10px]" : "h-9 w-9 sm:h-10 sm:w-10 text-[9px]"} flex-col items-center justify-center rounded px-1 font-semibold tabular-nums ${getHeatmapToneClass({ value: weeklyMetric === "completeness" && heatmapPlatform === "instagram" ? -1 : value, maxValue: weeklyHeatmapMaxValue, metric: weeklyMetric })}`}
                               >
                                 <span className="sr-only">{monthDay}</span>
                                 <span className="leading-none">{monthLabel}</span>

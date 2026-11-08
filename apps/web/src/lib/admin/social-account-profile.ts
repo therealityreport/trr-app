@@ -1,3 +1,4 @@
+import type { InstagramCommentCounts, InstagramCommentCountsSummary } from "@/lib/admin/instagram-counts";
 import type { SocialAccountProfileTab, SocialPlatformSlug } from "@/lib/admin/show-admin-routes";
 
 export type { SocialAccountProfileTab, SocialPlatformSlug } from "@/lib/admin/show-admin-routes";
@@ -83,6 +84,7 @@ export type SocialAccountDashboardFreshness = {
 };
 
 export type SocialAccountProfileSummary = {
+  comment_counts?: InstagramCommentCountsSummary | null;
   summary_detail?: SocialAccountProfileSummaryDetail | null;
   platform: SocialPlatformSlug;
   account_handle: string;
@@ -275,6 +277,7 @@ export type SocialAccountLegacyCommentCompleteness = {
 };
 
 export type SocialAccountProfilePost = {
+  comment_counts?: InstagramCommentCounts | null;
   id: string;
   source_id: string;
   platform: SocialPlatformSlug;
@@ -426,6 +429,7 @@ export type SocialAccountProfileComment = {
 };
 
 export type SocialAccountProfileCommentsResponse = {
+  comment_counts?: InstagramCommentCounts | null;
   items: SocialAccountProfileComment[];
   pagination: SocialAccountProfilePagination;
   comment_breakdown?: SocialAccountCommentBreakdown | null;
@@ -921,6 +925,7 @@ export type SocialAccountCatalogPost = SocialAccountProfilePost & {
 export type CatalogBackfillSelectedTask = "post_details" | "comments" | "media";
 
 export type SocialAccountCatalogPostDetail = {
+  comment_counts?: InstagramCommentCounts | null;
   platform: SocialPlatformSlug;
   account_handle: string;
   id?: string | null;

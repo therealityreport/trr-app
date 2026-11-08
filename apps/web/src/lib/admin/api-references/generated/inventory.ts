@@ -3,8 +3,8 @@ import type { AdminApiReferenceInventory } from "@/lib/admin/api-references/type
 export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
   "inventorySchemaVersion": "1.0.0",
   "generatorVersion": "1.0.0",
-  "generatedAt": "2026-10-31T07:44:57.185Z",
-  "sourceCommitSha": "88b3539e3165108365aa68d9376d097cab3b004a",
+  "generatedAt": "2026-11-08T06:16:02.711Z",
+  "sourceCommitSha": "f7afe661562f431974027930e768e9c423b1335a",
   "overrideDigest": "45a4759bd47a0c80cfa12afe9b325647fe7e09833ec1687dc2accb459108c24c",
   "nodes": [
     {
@@ -6540,7 +6540,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "set-interval",
       "sourceFile": "src/components/admin/social-week/WeekDetailPageView.tsx",
       "sourceLocator": {
-        "line": 7047,
+        "line": 7052,
         "matchedText": "setInterval"
       },
       "provenance": "static_scan",
@@ -6571,7 +6571,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "set-interval",
       "sourceFile": "src/components/admin/social-week/WeekDetailPageView.tsx",
       "sourceLocator": {
-        "line": 7055,
+        "line": 7060,
         "matchedText": "setInterval"
       },
       "provenance": "static_scan",
@@ -20843,7 +20843,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/components/admin/social-week/WeekDetailPageView.tsx",
       "sourceLocator": {
-        "line": 7047,
+        "line": 7052,
         "matchedText": "setInterval"
       },
       "provenance": "static_scan",
@@ -20861,7 +20861,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/components/admin/social-week/WeekDetailPageView.tsx",
       "sourceLocator": {
-        "line": 7055,
+        "line": 7060,
         "matchedText": "setInterval"
       },
       "provenance": "static_scan",
@@ -21527,7 +21527,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/components/admin/social-week/WeekDetailPageView.tsx",
       "sourceLocator": {
-        "line": 4972,
+        "line": 4977,
         "matchedText": "`/api/admin/trr-api/shows/resolve-slug?slug=${encodeURIComponent(raw)}`"
       },
       "provenance": "static_scan",

@@ -1,0 +1,12 @@
+import type { InstagramCommentCounts, InstagramCommentCountsSummary } from "@/lib/admin/instagram-counts";
+
+const observation = { value: null, status: "unknown" as const, source: null, source_field: null, source_surface: null, observed_at: null, unknown_reason: "not_observed", evidence_reference: null, observed_in_latest_response: null };
+export function instagramCounts(overrides: Partial<InstagramCommentCounts> = {}): InstagramCommentCounts {
+  return {
+    version: 1, inventory_observed_at: "2026-11-08T10:05:00Z", post_reported_count: 100, instagram_saved_count: 90, instagram_saved_top_level_count: 70, instagram_saved_reply_count: 20, instagram_saved_unclassified_count: 0, instagram_marked_missing_count: 4, facebook_count_observed_on_instagram: 10, threads_count_observed_on_instagram: null, post_minus_saved_difference: 10, inventory_status: "available",
+    observations: { post_reported_count: { ...observation, value: 100, status: "observed", source: "instagram_response", unknown_reason: null, source_field: "comment_count", source_surface: "post_details", observed_at: "2026-11-08T10:00:00Z", evidence_reference: "response-1", observed_in_latest_response: true }, facebook_count_observed_on_instagram: { ...observation, value: 10, status: "observed", source: "instagram_response", unknown_reason: null, source_field: "fb_comment_count", source_surface: "post_details", observed_at: "2026-11-07T10:00:00Z", observed_in_latest_response: false }, threads_count_observed_on_instagram: { ...observation } }, observation_conflicts: [], ...overrides,
+  };
+}
+export function instagramCountSummary(overrides: Partial<InstagramCommentCountsSummary> = {}): InstagramCommentCountsSummary {
+  return { posts_with_reported_comments_count: 1, posts_reporting_zero_comments_count: 1, reported_count_unknown_posts_count: 1, posts_with_reported_comments_but_no_saved_records_count: 0, version: 1, inventory_observed_at: "2026-11-08T10:05:00Z", posts_count: 3, post_reported_known_subtotal: 100, post_reported_known_posts_count: 2, post_reported_unknown_posts_count: 1, facebook_known_subtotal: 10, facebook_known_posts_count: 1, facebook_unknown_posts_count: 2, threads_known_subtotal: 0, threads_known_posts_count: 0, threads_unknown_posts_count: 3, instagram_saved_count: 90, instagram_saved_top_level_count: 70, instagram_saved_reply_count: 20, instagram_saved_unclassified_count: 0, instagram_marked_missing_count: 4, inventory_status: "available", post_minus_saved_difference_known_subtotal: 10, ...overrides };
+}

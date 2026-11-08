@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ArrowDownIcon, ArrowUpDownIcon, ArrowUpIcon, SearchIcon } from "lucide-react";
+import { INSTAGRAM_COUNT_LABELS, formatInstagramCount, instagramRunStatusLabel } from "@/lib/admin/instagram-counts";
+import { InstagramCountSummary } from "@/components/admin/instagram/InstagramCountComparison";
 import InstagramCommentsPostModal from "@/components/admin/instagram/InstagramCommentsPostModal";
 import { Button } from "@/components/ui/button";
 import {
@@ -66,13 +68,16 @@ type ProxyErrorPayload = InstagramCommentsProxyErrorPayload & {
   retry_after_seconds?: number;
 };
 
-type CommentsPostFilter = "commentable" | "incomplete" | "not_commentable";
+type CommentsPostFilter = "commentable" | "incomplete" | "not_commentable" | "reported_positive" | "reported_zero" | "reported_unknown" | "count_difference";
 type CommentsSortField =
   | "post"
   | "created"
   | "caption"
+  | "post_reported_count"
+  | "instagram_saved_count"
   | "post_total"
   | "saved_comments"
+  | "count_difference"
   | "missing_comments"
   | "likes";
 type CommentsSortDirection = "asc" | "desc";
@@ -136,12 +141,12 @@ const COMMENTS_SORT_COLUMNS: Array<{ key: CommentsSortField; label: string }> = 
 const DEFAULT_COMMENTS_SORT: CommentsSortState = { field: "missing_comments", direction: "desc" };
 const TEXT_COMMENTS_SORT_FIELDS = new Set<CommentsSortField>(["post", "caption"]);
 type NormalizedPostCommentBreakdown = {
-  reportedComments: number;
-  savedInstagramComments: number;
+  reportedComments: number | null;
+  savedInstagramComments: number | null;
   parentComments: number | null;
   childReplies: number | null;
-  facebookComments: number;
-  missingComments: number;
+  facebookComments: number | null;
+  missingComments: number | null;
   hasThreadBreakdown: boolean;
   hasFacebookData: boolean;
 };
@@ -199,6 +204,7 @@ const getCaptionPreview = (post: SocialAccountProfilePost): string => {
 
 const normalizeRunStatus = (value?: string | null): string => String(value || "").trim().toLowerCase();
 const readFiniteNumber = (value: unknown): number | null => {
+  if (value == null || value === "" || typeof value === "boolean") return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
 };
@@ -230,6 +236,7 @@ const isCommentsProgressNonAuthoritative = (progress?: SocialAccountCommentsRunP
 };
 
 const readNonNegativeInteger = (value: unknown): number | null => {
+  if (value == null || value === "" || typeof value === "boolean") return null;
   const parsed = readFiniteNumber(value);
   return parsed === null ? null : Math.max(0, Math.trunc(parsed));
 };
@@ -328,7 +335,11 @@ const getPostSavedInstagramComments = (post: SocialAccountProfilePost): number =
   );
 };
 
-const getPostCommentBreakdown = (post: SocialAccountProfilePost): NormalizedPostCommentBreakdown => {
+const getPostCommentBreakdown = (post: SocialAccountProfilePost, platform: SocialPlatformSlug): NormalizedPostCommentBreakdown => {
+  if (platform === "instagram") {
+    const counts = post.comment_counts;
+    return { reportedComments: counts?.post_reported_count ?? null, savedInstagramComments: counts?.instagram_saved_count ?? null, parentComments: counts?.instagram_saved_top_level_count ?? null, childReplies: counts?.instagram_saved_reply_count ?? null, facebookComments: counts?.facebook_count_observed_on_instagram ?? null, missingComments: counts?.post_minus_saved_difference ?? null, hasThreadBreakdown: true, hasFacebookData: true };
+  }
   const savedInstagramComments = getPostSavedInstagramComments(post);
   const reportedComments = getPostReportedComments(post);
   const parentComments = firstNonNegativeInteger(post.comment_breakdown?.saved_parent_comments);
@@ -392,12 +403,6 @@ const formatCommentsProgressMessage = (progress: SocialAccountCommentsRunProgres
   const totalPosts =
     readFiniteNumber(progress.post_progress?.total_posts) ??
     readFiniteNumber(progress.target_source_ids_count);
-  const completePosts =
-    readFiniteNumber(progress.post_progress?.complete_posts) ??
-    readFiniteNumber(progress.summary?.complete_posts_total);
-  const incompletePosts =
-    readFiniteNumber(progress.post_progress?.incomplete_posts) ??
-    readFiniteNumber(progress.summary?.incomplete_posts_total);
   const shardJobSummary = formatCommentsShardJobSummary(progress);
   const postsPerMinute = readFiniteNumber(progress.throughput?.posts_per_minute);
   const commentsPerMinute = readFiniteNumber(progress.throughput?.comments_per_minute);
@@ -408,14 +413,6 @@ const formatCommentsProgressMessage = (progress: SocialAccountCommentsRunProgres
   const progressBits = [
     shardJobSummary,
     totalPosts !== null && totalPosts > 0 ? `${completedPosts} / ${totalPosts} posts checked` : null,
-    completePosts !== null || incompletePosts !== null
-      ? [
-          completePosts !== null ? `${formatInteger(completePosts)} complete` : null,
-          incompletePosts !== null ? `${formatInteger(incompletePosts)} incomplete` : null,
-        ]
-          .filter(Boolean)
-          .join(", ")
-      : null,
     throughputBits.length ? throughputBits.join(", ") : null,
   ].filter(Boolean);
   return `Comments sync ${status}. Run ${runId.slice(0, 8)}${progressBits.length ? ` · ${progressBits.join(" · ")}` : ""}.`;
@@ -511,8 +508,6 @@ const formatShardProgressMetrics = (row: SocialAccountCommentsShardProgress): st
     readFiniteNumber(row.processed_post_count) ??
     readFiniteNumber(row.completed_posts) ??
     readFiniteNumber(row.matched_posts);
-  const completePosts = readFiniteNumber(row.complete_posts);
-  const incompletePosts = readFiniteNumber(row.incomplete_posts);
   const savedPosts = readFiniteNumber(row.saved_posts);
   const remainingTargets = readFiniteNumber(row.remaining_target_count);
   const retryTargets = readFiniteNumber(row.retry_target_count);
@@ -533,8 +528,6 @@ const formatShardProgressMetrics = (row: SocialAccountCommentsShardProgress): st
     status,
     targetCount !== null ? `${formatInteger(targetCount)} targets` : null,
     completedPosts !== null ? `${formatInteger(completedPosts)} checked` : null,
-    completePosts !== null ? `${formatInteger(completePosts)} complete` : null,
-    incompletePosts !== null ? `${formatInteger(incompletePosts)} incomplete` : null,
     canHaveUncheckedTargets && remainingTargets !== null && remainingTargets > 0
       ? `${formatInteger(remainingTargets)} unchecked`
       : null,
@@ -648,7 +641,7 @@ const getIncompleteFillPreviewSummary = (
 const formatIncompleteFillPreviewMessage = (data: SocialAccountCommentsDryRunPreviewResponse): string => {
   const summary = getIncompleteFillPreviewSummary(data);
   return [
-    `Incomplete Fill preview: ${formatInteger(summary.targetCount)} targets`,
+    `Count-difference targets preview: ${formatInteger(summary.targetCount)} targets`,
     summary.shardCount > 0 ? `${formatInteger(summary.shardCount)} shard${summary.shardCount === 1 ? "" : "s"}` : null,
     summary.strategy,
     summary.windowLabel,
@@ -690,8 +683,8 @@ const getCommentsRunScopeNotice = (progress?: SocialAccountCommentsRunProgress |
   }
   if (targetFilter === "incomplete" || incompleteFill) {
     return targetCount && targetCount > 0
-      ? `Incomplete Fill active: this run is targeting ${formatInteger(targetCount)} incomplete posts.`
-      : "Incomplete Fill active: this run is targeting incomplete posts.";
+      ? `Count-difference targets active: this run is targeting ${formatInteger(targetCount)} posts selected by the legacy count-difference filter.`
+      : "Count-difference targets active: this run is targeting posts selected by the legacy count-difference filter.";
   }
   if (mode === "profile" && targetCount && targetCount > 0) {
     return `Profile comments sync active: this run is targeting ${formatInteger(targetCount)} posts.`;
@@ -761,9 +754,9 @@ export default function InstagramCommentsPanel({
   const [postsLoading, setPostsLoading] = useState(false);
   const [postsError, setPostsError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
-  const [commentsPostFilter, setCommentsPostFilter] = useState<CommentsPostFilter>("commentable");
+  const [commentsPostFilter, setCommentsPostFilter] = useState<CommentsPostFilter>(platform === "instagram" ? "reported_positive" : "commentable");
   const [commentsSearch, setCommentsSearch] = useState("");
-  const [commentsSort, setCommentsSort] = useState<CommentsSortState>(DEFAULT_COMMENTS_SORT);
+  const [commentsSort, setCommentsSort] = useState<CommentsSortState>(platform === "instagram" ? { field: "count_difference", direction: "desc" } : DEFAULT_COMMENTS_SORT);
   const [scrapeMessage, setScrapeMessage] = useState<string | null>(null);
   const [scrapeError, setScrapeError] = useState<string | null>(null);
   const [scrapeRunId, setScrapeRunId] = useState<string | null>(null);
@@ -1323,7 +1316,7 @@ export default function InstagramCommentsPanel({
   // P0-1: `Available Posts` must match the saved-post total shown by the Posts card —
   // `live_catalog_total_posts` first, falling back to `catalog_total_posts`. Do NOT
   // derive from `coverage.available_posts`; that field conflates the commentable subset
-  // with the saved-post inventory. `Commentable now` stays on `coverage.eligible_posts`.
+  // with the saved-post inventory. Instagram source categories use the additive contract.
   const availablePosts = Number(summary?.live_catalog_total_posts ?? summary?.catalog_total_posts ?? 0);
   const commentablePosts = Number(coverage?.eligible_posts ?? savedSummary?.retrieved_comment_posts ?? 0);
   const activePostsFilterTotal = posts?.pagination.total ?? null;
@@ -1341,7 +1334,7 @@ export default function InstagramCommentsPanel({
       incompletePosts,
     });
   }, [availablePosts, commentablePosts, incompletePosts, onCoverageMetricsChange]);
-  const effectiveCoverageLabel = String(coverage?.effective_label || "").trim()
+  const effectiveCoverageLabel = platform === "instagram" ? instagramRunStatusLabel(displayedRunProgress?.run_status ?? coverage?.last_comments_run_status) : String(coverage?.effective_label || "").trim()
     || (savedSummary ? "Rows saved" : formatStatusLabel(coverage?.effective_status ?? coverage?.last_comments_run_status));
   const historicalFailure = Boolean(coverage?.historical_failure);
   const lastAttemptStatus = normalizeRunStatus(coverage?.last_attempt_status);
@@ -1371,10 +1364,6 @@ export default function InstagramCommentsPanel({
   );
   const relayCheckpointRecoveryTargetCount =
     readNonNegativeInteger(relayCheckpointRecovery?.selected_target_source_ids_count) ?? relayCheckpointRecoveryRows.length;
-  const relayCheckpointRecoveryGap = relayCheckpointRecoveryRows.reduce(
-    (total, row) => total + (readNonNegativeInteger(row.missing_comment_gap) ?? 0),
-    0,
-  );
   const relayCheckpointRecoveryActiveRunId = readCommentsRunId(relayCheckpointRecovery?.active_run);
   const relayCheckpointActionDisabled =
     platform === "instagram" ||
@@ -1387,7 +1376,7 @@ export default function InstagramCommentsPanel({
     !hasAccess;
   const catalogActionDisabled = (platform === "instagram" && (boundedBackfillDisabled || isScraping)) || catalogRefreshPending || checking || !user || !hasAccess;
   const primaryActionPending = catalogRefreshPending;
-  const emptyPostsLabel = supportsInlineCommentsSync
+  const emptyPostsLabel = platform === "instagram" ? "No posts match this count filter. Unknown counts stay unknown." : supportsInlineCommentsSync
     ? commentsPostFilter === "incomplete"
       ? `No incomplete ${platformLabel} comment totals are saved for this account.`
       : commentsPostFilter === "not_commentable"
@@ -1396,7 +1385,7 @@ export default function InstagramCommentsPanel({
     : `No saved ${platformLabel} posts with discussion are available for this account yet.`;
   const panelTitle = supportsInlineCommentsSync ? `${platformLabel} Comments` : `${platformLabel} Discussion`;
   const panelDescription = platform === "instagram"
-    ? "Review saved discussion coverage. Choose a bounded date window and tasks in Backfill Posts to refresh public Instagram comments."
+    ? "Review saved Instagram comments and replies. Counts do not establish completeness. Choose a bounded date window and tasks in Backfill Posts to refresh public Instagram comments."
     : `Review saved discussion coverage and queue a catalog-driven refresh for post details, comments, and media across saved ${platformLabel} posts.`;
   const primaryActionLabel = platform === "instagram"
     ? "Choose Bounded Backfill"
@@ -1518,7 +1507,7 @@ export default function InstagramCommentsPanel({
                   disabled={commentsPreviewDisabled}
                   className={SECONDARY_BUTTON_CLASS}
                 >
-                  {commentsPreviewPending ? "Previewing..." : "Preview Incomplete Fill"}
+                  {commentsPreviewPending ? "Previewing..." : "Preview Count-difference targets"}
                 </button>
                 <button
                   type="button"
@@ -1554,23 +1543,23 @@ export default function InstagramCommentsPanel({
         <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
           <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
             <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Available Posts</p>
-            <p className="mt-2 text-2xl font-bold text-zinc-900">{formatInteger(availablePosts)}</p>
-            <p className="mt-1 text-xs text-zinc-500">Commentable now: {formatInteger(commentablePosts)}</p>
+            <p className="mt-2 text-2xl font-bold text-zinc-900">{platform === "instagram" ? formatInstagramCount(summary?.live_catalog_total_posts ?? summary?.catalog_total_posts) : formatInteger(availablePosts)}</p>
+            <p className="mt-1 text-xs text-zinc-500">{platform === "instagram" ? `Posts with reported comments: ${formatInstagramCount(summary?.comment_counts?.posts_with_reported_comments_count)}` : `Commentable now: ${formatInteger(commentablePosts)}`}</p>
           </div>
           <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Missing All Comments</p>
-            <p className="mt-2 text-2xl font-bold text-zinc-900">{formatInteger(coverage?.missing_posts)}</p>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">{platform === "instagram" ? "Posts with reported comments but no saved Instagram records" : "Missing All Comments"}</p>
+            <p className="mt-2 text-2xl font-bold text-zinc-900">{platform === "instagram" ? formatInstagramCount(summary?.comment_counts?.posts_with_reported_comments_but_no_saved_records_count) : formatInteger(coverage?.missing_posts)}</p>
           </div>
           <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Refresh Candidates</p>
-            <p className="mt-2 text-2xl font-bold text-zinc-900">{formatInteger(coverage?.stale_posts)}</p>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">{platform === "instagram" ? "Legacy refresh candidates" : "Refresh Candidates"}</p>
+            <p className="mt-2 text-2xl font-bold text-zinc-900">{platform === "instagram" ? formatInstagramCount(coverage?.stale_posts) : formatInteger(coverage?.stale_posts)}</p>
           </div>
           <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
             <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Last Run</p>
             <p className="mt-2 text-sm font-semibold text-zinc-900">{formatDateTime(coverage?.last_comments_run_at)}</p>
           </div>
           <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Status</p>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">{platform === "instagram" ? "Run status" : "Status"}</p>
             <p className="mt-2 text-sm font-semibold text-zinc-900">{effectiveCoverageLabel}</p>
             {historicalFailure && lastAttemptStatus === "failed" ? (
               <p className="mt-1 text-xs text-amber-700">
@@ -1599,7 +1588,7 @@ export default function InstagramCommentsPanel({
                 <p className="mt-1 text-xs text-zinc-500">
                   {relayCheckpointRecoveryLoading
                     ? "Loading relay checkpoint targets..."
-                    : `${formatInteger(relayCheckpointRecoveryTargetCount)} checkpoint targets / ${formatInteger(relayCheckpointRecoveryGap)} comments still open`}
+                    : `${formatInteger(relayCheckpointRecoveryTargetCount)} checkpoint targets / legacy count-difference review; completeness unverified`}
                   {relayCheckpointRecoveryActiveRunId ? ` / active run ${relayCheckpointRecoveryActiveRunId.slice(0, 8)}` : ""}
                 </p>
                 <p className="mt-2 max-w-2xl text-xs text-zinc-500">
@@ -1712,7 +1701,7 @@ export default function InstagramCommentsPanel({
             <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
               <div>
                 <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-emerald-800">
-                  Incomplete Fill Preview
+                  Count-difference targets Preview
                 </p>
                 <p className="mt-1 text-sm text-emerald-900">
                   Dry-run only. No run was queued and no workers were dispatched.
@@ -1858,14 +1847,20 @@ export default function InstagramCommentsPanel({
           </div>
         ) : null}
 
+        {platform === "instagram" ? <div className="mt-4"><InstagramCountSummary summary={summary?.comment_counts} /></div> : null}
         {supportsInlineCommentsSync ? (
           <div className="mt-6 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex flex-wrap gap-2">
-              {[
+              {(platform === "instagram" ? [
+                { label: "Reported positive", value: "reported_positive" as const, count: summary?.comment_counts?.posts_with_reported_comments_count ?? null },
+                { label: "Reported zero", value: "reported_zero" as const, count: summary?.comment_counts?.posts_reporting_zero_comments_count ?? null },
+                { label: "Reported unknown", value: "reported_unknown" as const, count: summary?.comment_counts?.reported_count_unknown_posts_count ?? null },
+                { label: "Count difference", value: "count_difference" as const, count: null },
+              ] : [
                 { label: "Commentable", value: "commentable" as const, count: commentablePosts },
                 { label: "Incomplete", value: "incomplete" as const, count: incompletePosts },
                 { label: "Not Commentable", value: "not_commentable" as const, count: notCommentablePosts },
-              ].map((filter) => {
+              ]).map((filter) => {
                 const active = commentsPostFilter === filter.value;
                 return (
                   <button
@@ -1907,7 +1902,7 @@ export default function InstagramCommentsPanel({
         <div className={supportsInlineCommentsSync ? "mt-4" : "mt-6"}>
           <Table className="min-w-full">
             <TableHeader>
-              <TableRow>{COMMENTS_SORT_COLUMNS.map(renderSortableHeader)}</TableRow>
+              <TableRow>{(platform === "instagram" ? COMMENTS_SORT_COLUMNS.map(column => column.key === "post_total" ? { key: "post_reported_count" as const, label: INSTAGRAM_COUNT_LABELS.post } : column.key === "saved_comments" ? { key: "instagram_saved_count" as const, label: INSTAGRAM_COUNT_LABELS.saved } : column.key === "missing_comments" ? { key: "count_difference" as const, label: INSTAGRAM_COUNT_LABELS.difference } : column) : COMMENTS_SORT_COLUMNS).map(renderSortableHeader)}</TableRow>
             </TableHeader>
             <TableBody>
               {postsLoading ? (
@@ -1930,9 +1925,10 @@ export default function InstagramCommentsPanel({
                 </TableRow>
               ) : (
                 (posts?.items ?? []).map((item) => {
-                  const breakdown = getPostCommentBreakdown(item);
+                  const breakdown = getPostCommentBreakdown(item, platform);
                   const captureHealthSummary = formatPostCaptureHealthSummary(item.comment_breakdown);
-                  const incomplete = breakdown.missingComments > 0;
+                  const incomplete = platform !== "instagram" && (breakdown.missingComments ?? 0) > 0;
+                  const countLabel = platform === "instagram" ? formatInstagramCount : formatInteger;
                   return (
                     <TableRow key={item.id}>
                       <TableCell className="py-4 pr-4 align-top text-zinc-700">
@@ -1965,18 +1961,19 @@ export default function InstagramCommentsPanel({
                         </div>
                       </TableCell>
                       <TableCell className="py-4 pr-4 align-top tabular-nums text-zinc-700">
-                        {formatInteger(breakdown.reportedComments)}
+                        {countLabel(breakdown.reportedComments)}
                       </TableCell>
                       <TableCell className="py-4 pr-4 align-top text-zinc-700">
                         <div className="flex flex-col gap-1">
                           <div className="flex flex-wrap items-center gap-2">
+                            {platform === "instagram" ? <span className="tabular-nums">{countLabel(breakdown.savedInstagramComments)} saved Instagram comments and replies</span> : null}
                             {breakdown.hasThreadBreakdown ? (
                               <>
-                                <span className="tabular-nums">{formatInteger(breakdown.parentComments ?? 0)} parent</span>
-                                <span className="tabular-nums">{formatInteger(breakdown.childReplies ?? 0)} replies</span>
+                                <span className="tabular-nums">{countLabel(breakdown.parentComments)} {platform === "instagram" ? "saved top-level comments" : "parent"}</span>
+                                <span className="tabular-nums">{countLabel(breakdown.childReplies)} {platform === "instagram" ? "saved replies" : "replies"}</span>
                               </>
                             ) : (
-                              <span className="tabular-nums">{formatInteger(breakdown.savedInstagramComments)} saved comments</span>
+                              <span className="tabular-nums">{countLabel(breakdown.savedInstagramComments)} saved comments</span>
                             )}
                           {incomplete ? (
                             <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-amber-700">
@@ -1986,20 +1983,20 @@ export default function InstagramCommentsPanel({
                           </div>
                           {breakdown.hasFacebookData ? (
                             <p className="text-xs text-zinc-500">
-                              {formatInteger(breakdown.facebookComments)} Facebook accounted
+                              {countLabel(breakdown.facebookComments)} {platform === "instagram" ? INSTAGRAM_COUNT_LABELS.facebook : "Facebook accounted"}
                             </p>
                           ) : null}
-                          {captureHealthSummary ? (
+                          {platform !== "instagram" && captureHealthSummary ? (
                             <p className="text-xs text-zinc-500">{captureHealthSummary}</p>
                           ) : null}
                         </div>
                       </TableCell>
                       <TableCell
                         className={`py-4 pr-4 align-top tabular-nums ${
-                          breakdown.missingComments > 0 ? "font-semibold text-amber-700" : "text-zinc-700"
+                          (breakdown.missingComments ?? 0) > 0 ? "font-semibold text-amber-700" : "text-zinc-700"
                         }`}
                       >
-                        {formatInteger(breakdown.missingComments)}
+                        {platform === "instagram" ? formatInstagramCount(breakdown.missingComments, true) : formatInteger(breakdown.missingComments)}
                       </TableCell>
                       <TableCell className="py-4 align-top tabular-nums text-zinc-700">
                         {formatInteger(item.metrics.likes)}
