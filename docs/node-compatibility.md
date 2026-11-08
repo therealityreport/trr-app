@@ -15,16 +15,16 @@ CI and the Vercel install command install `corepack@0.36.0` before enabling it.
 This exact pin is locally verified; it is not a claim about the latest release.
 Corepack 0.36.0 declares Node `^22.22.2 || ^24.15.0 || >=26.0.0` support, so Node
 24 bootstrap requires at least 24.15.0. The application's package manager stays
-`pnpm@11.5.2`, whose installed package declares Node `>=22.13` support.
+`pnpm@11.28.9`, whose installed package declares Node `>=22.13` support.
 
 ```sh
 npm install --global corepack@0.36.0
 export PATH="$(npm prefix --global)/bin:$PATH"
 test "$(corepack --version)" = "0.36.0"
 corepack enable
-corepack prepare pnpm@11.5.2 --activate
+corepack prepare pnpm@11.28.9 --activate
 corepack --version  # must report 0.36.0
-pnpm --version      # must report 11.5.2
+pnpm --version      # must report 11.28.9
 pnpm install --frozen-lockfile
 ```
 

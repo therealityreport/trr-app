@@ -27,7 +27,7 @@ jobs:
       run:
         working-directory: apps/web
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Check for unresolved merge markers
         run: |
           if git grep -n -E '^(<<<<<<< |>>>>>>> )' -- .; then
@@ -41,20 +41,20 @@ jobs:
             exit 1
           fi
         working-directory: .
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ matrix.node-version }}
       - name: Bootstrap the pinned package manager
         run: |
           npm install --global corepack@0.36.0
           corepack enable
-          corepack prepare pnpm@11.5.2 --activate
+          corepack prepare pnpm@11.28.9 --activate
           test "$(corepack --version)" = "0.36.0"
-          test "$(pnpm --version)" = "11.5.2"
+          test "$(pnpm --version)" = "11.28.9"
         working-directory: .
       # Cache setup runs only after pnpm exists on the selected Node runtime.
       - name: Cache pnpm dependencies
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
@@ -112,7 +112,7 @@ jobs:
           NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: "1234567890"
           NEXT_PUBLIC_FIREBASE_APP_ID: "1:1234567890:web:demo-build"
       - name: Upload coverage artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always() && matrix.lane == 'full'
         with:
           name: web-coverage-node-${{ matrix.node-version }}
@@ -128,17 +128,17 @@ jobs:
       # Preview the current runtime without changing the Node 24 engine policy.
       npm_config_engine_strict: "false"
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 26
       - name: Bootstrap the pinned package manager
         run: |
           npm install --global corepack@0.36.0
           corepack enable
-          corepack prepare pnpm@11.5.2 --activate
+          corepack prepare pnpm@11.28.9 --activate
           test "$(corepack --version)" = "0.36.0"
-          test "$(pnpm --version)" = "11.5.2"
+          test "$(pnpm --version)" = "11.28.9"
       - name: Install the frozen workspace dependencies
         run: pnpm install --frozen-lockfile --config.engine-strict=false
       - name: Prove the Node 26 preview without switching runtimes
