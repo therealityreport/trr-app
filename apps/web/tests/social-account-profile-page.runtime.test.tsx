@@ -1336,6 +1336,32 @@ describe("SocialAccountProfilePage", () => {
 
     await waitFor(() => {
       expect(screen.getByText("Local cookies healthy")).toBeInTheDocument();
+  it.each(["catalog", "comments"] as const)("shows public-only access on the Instagram %s surface without sign-in controls", async (tab) => {
+    const requestUrls: string[] = [];
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      requestUrls.push(url);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
+      if (url.includes("/snapshot")) return profileSnapshotResponse(baseSummary);
+      if (url.includes("/summary")) return jsonResponse(baseSummary);
+      if (url.includes("/cookies/health")) return jsonResponse({
+        platform: "instagram", required: false, healthy: true, reason: "public_only_policy", source_kind: "public_only", auth_probe_skipped: true,
+        refresh_supported: false, refresh_available: false, refresh_action: null, refresh_label: null,
+        cookie_fingerprint: "stale-local-fixture", posts_auth_probe: { status: "valid", cookie_fingerprint: "stale-local-fixture" },
+        comments_auth_health: { platform: "instagram", status: "public", category: "public", ready: false, public_ready: true, authenticated_ready: false, auth_probe_skipped: true, reason: "public_only_policy" },
+      });
+      if (url.includes("/posts?")) return jsonResponse({ items: [], pagination: { page: 1, page_size: 25, total: 0, total_pages: 1 } });
+      if (url.includes("/live-profile-total")) return jsonResponse({ platform: "instagram", account_handle: "bravotv", live_total_posts_current: 12 });
+      throw new Error(`Unhandled request: ${url}`);
+    });
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab={tab} />);
+    expect(await screen.findByText("Instagram sign-in is disabled", { exact: true })).toBeInTheDocument();
+    expect(screen.getAllByText("Public access only", { exact: true }).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/Local cookies healthy|Cookie file present|Modal uses same cookie payload|Modal posts auth verified|authenticated comments not verified/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Manual Instagram Auth|Confirm Manual Auth Check|Repair Comments Auth|Sync Validated Cookies/ })).not.toBeInTheDocument();
+    expect(requestUrls.some(url => /cookies\/refresh|repair-auth|auth-repair/.test(url))).toBe(false);
+  });
+
     });
     const cookieHealthUrl = requestUrls.find((url) => url.includes("/cookies/health"));
     expect(cookieHealthUrl).toBeDefined();

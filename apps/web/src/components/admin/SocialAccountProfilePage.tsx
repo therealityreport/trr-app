@@ -167,7 +167,7 @@ import {
   type SocialAccountRequestError,
 } from "./social-account-profile/profile-api";
 import { useProfileCookieHealth, useProfileCookieHealthPreflight } from "./social-account-profile/use-profile-cookie-health";
-import { ProfileCookieHealthCard } from "./social-account-profile/ProfileCookieHealthCard";
+import { ProfileCookieHealthCard, isInstagramPublicOnlyAccess } from "./social-account-profile/ProfileCookieHealthCard";
 
 export { __resetSocialProfileRequestInflightForTests } from "./social-account-profile/profile-api";
 
@@ -2539,7 +2539,7 @@ const getCatalogLaunchGuardMessage = (
   const staleBlockedAuthIsRepaired =
     TERMINAL_CATALOG_RUN_STATUSES.has(runStatus) &&
     isInstagramPostsAuthVerified(cookieHealth);
-  if (operationalState === "blocked_auth" && !staleBlockedAuthIsRepaired) {
+  if (operationalState === "blocked_auth" && !staleBlockedAuthIsRepaired && !isInstagramPublicOnlyAccess(cookieHealth)) {
     return "Catalog launch is blocked until the existing run's auth repair is completed or cancelled.";
   }
   const dispatchMessage = getCatalogDispatchStatusMessage(progress);
@@ -2589,6 +2589,7 @@ const formatCookieHealthSourceLabel = (cookieHealth?: SocialProfileCookieHealth 
 };
 
 const isInstagramPostsAuthVerified = (cookieHealth?: SocialProfileCookieHealth | null): boolean => {
+  if (isInstagramPublicOnlyAccess(cookieHealth)) return false;
   const health = cookieHealth?.posts_auth_health ?? null;
   const probe = cookieHealth?.posts_auth_probe as JsonRecord | null | undefined;
   const probeStatus = String(probe?.status || probe?.result || "").trim().toLowerCase();
@@ -2599,6 +2600,7 @@ const getInstagramPostsAuthStatusCopy = (
   progress?: SocialAccountCatalogRunProgressSnapshot | null,
   cookieHealth?: SocialProfileCookieHealth | null,
 ): { tone: string; text: string } => {
+  if (isInstagramPublicOnlyAccess(cookieHealth)) return { tone: "text-zinc-600", text: "Public access only · Instagram sign-in is disabled" };
   const postsAuthMode = normalizeComparable(progress?.instagram_posts_auth_mode || progress?.posts_auth_mode);
   if (postsAuthMode === "anonymous") {
     return { tone: "text-emerald-700", text: "Instagram posts anonymous mode" };
@@ -2645,6 +2647,7 @@ const getInstagramPostsAuthStatusCopy = (
 const getInstagramCommentsAuthStatusCopy = (
   cookieHealth?: SocialProfileCookieHealth | null,
 ): { tone: string; text: string } => {
+  if (isInstagramPublicOnlyAccess(cookieHealth)) return { tone: "text-zinc-600", text: "Public access only · Instagram sign-in is disabled" };
   const health = cookieHealth?.comments_auth_health ?? null;
   const probe = cookieHealth?.comments_auth_probe as JsonRecord | null | undefined;
   const probeStatus = String(probe?.status || probe?.result || "").trim().toLowerCase();
@@ -2715,7 +2718,7 @@ const getInstagramCookiePayloadStatusCopy = (
   cookieHealth: SocialProfileCookieHealth | null | undefined,
   selectedTab: SocialAccountProfileTab,
 ): { tone: string; text: string } | null => {
-  if (!cookieHealth?.cookie_fingerprint) return null;
+  if (isInstagramPublicOnlyAccess(cookieHealth) || !cookieHealth?.cookie_fingerprint) return null;
   const authHealth =
     selectedTab === "comments" ? cookieHealth.comments_auth_health : cookieHealth.posts_auth_health;
   const probe =
@@ -5636,7 +5639,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     return getCatalogLaunchGuardMessage(catalogRunProgress, cookieHealth);
   }, [catalogRunProgress, cookieHealth, platform, ingestion.enabled, ingestion.capabilitiesUnavailable, ingestion.capabilities.isError, ingestion.capabilities.data?.disabled_reason]);
   const instagramCommentsModalAuthActive = useMemo(() => {
-    if (platform !== "instagram") return false;
+    if (platform !== "instagram" || isInstagramPublicOnlyAccess(cookieHealth)) return false;
     const activeCommentsStatus = String(activeCommentsRunProgressData?.run_status || "").trim().toLowerCase();
     return (
       ["queued", "running", "retrying", "pending"].includes(activeCommentsStatus) &&
@@ -5644,11 +5647,12 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       (activeCommentsRunProgressData?.manual_auth_required === false ||
         isCommentsEndpointProbeAdvisoryActive(activeCommentsRunProgressData))
     );
-  }, [activeCommentsRunProgressData, platform]);
+  }, [activeCommentsRunProgressData, cookieHealth, platform]);
   const instagramCommentsAuthOwnsCurrentSurface =
     instagramCommentsModalAuthActive && selectedTab === "comments";
   const instagramPostsAuthStatusCopy = useMemo(() => {
     if (platform !== "instagram") return null;
+    if (isInstagramPublicOnlyAccess(cookieHealth)) return getInstagramCommentsAuthStatusCopy(cookieHealth);
     if (instagramCommentsModalAuthActive) {
       return { tone: "text-emerald-700", text: "Modal Instagram comments auth active" };
     }
@@ -5662,6 +5666,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   }, [activeCommentsRunProgressData, catalogRunProgress, cookieHealth, instagramCommentsModalAuthActive, platform, selectedTab]);
   const cookieHealthPrimaryLabel = useMemo(() => {
     if (!cookieHealth) return null;
+    if (platform === "instagram" && isInstagramPublicOnlyAccess(cookieHealth)) return "Public access only";
     const sourceLabel = formatCookieHealthSourceLabel(cookieHealth);
     if (platform === "instagram" && selectedTab === "comments") {
       return `Cookie file present${sourceLabel}`;
@@ -5912,6 +5917,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     return getCatalogRunDisplayStatusLabel(displayedCatalogRunStatus, catalogRunProgress);
   }, [catalogRunProgress, displayedCatalogRunStatus, detailsRefreshProgress]);
   const catalogBlockedAuthPresentation = useMemo(() => {
+    if (platform === "instagram" && isInstagramPublicOnlyAccess(cookieHealth)) return null;
     const operationalState = String(catalogRunProgress?.operational_state || "").trim().toLowerCase();
     const launchState = String(catalogRunProgress?.launch_state || "").trim().toLowerCase();
     const repairAction = catalogRunProgress?.repair_action;
@@ -5990,7 +5996,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
           : `${platformLabel} cookies must be refreshed before this catalog run can continue. A local headed Chrome window will open for confirmation.`
         : `${platformLabel} auth must be completed manually before this catalog run can continue.`,
     };
-  }, [catalogRunProgress, displayedCatalogRunId, displayedCatalogRunStatus, platform]);
+  }, [catalogRunProgress, cookieHealth, displayedCatalogRunId, displayedCatalogRunStatus, platform]);
   const catalogAlertCodes = useMemo(() => {
     return new Set(
       (catalogRunProgress?.alerts ?? [])
@@ -6975,37 +6981,45 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
         progressValue: activeCommentsProgressSummary.postsPercent ?? null,
       });
     }
-    rows.push({
-      key: "auth",
-      label: "Auth state",
-      value:
-        authActionNeeded
-          ? "Action needed"
-          : cookieHealthChecking
-            ? "Checking"
-          : "Usable",
-      detail: [
-        `Post/details: ${postsAuthText}`,
-        cookieHealth?.healthy === true
-          ? "local cookie file is healthy"
-          : cookieHealth?.healthy === false
-            ? `local cookie file is blocked${cookieHealth.reason ? `: ${cookieHealth.reason}` : ""}`
-            : cookieHealth?.degraded
-              ? "local cookie health check is degraded"
-              : "local cookie health is still loading",
-        instagramCommentsModalAuthActive
-          ? "comments: Modal auth active"
-          : activeCommentsRunProgressData?.manual_auth_required === true
-            ? "comments: Modal auth blocked"
-            : "comments: no active comments auth run",
-      ].join(". "),
-      recommendation:
-        authActionNeeded
-          ? "Repair or sync validated Instagram auth before starting the blocked lane."
-          : cookieHealthChecking
-            ? "Wait for the local cookie health check to finish before treating auth as blocked."
-          : "No auth action is needed right now.",
-    });
+    if (isInstagramPublicOnlyAccess(cookieHealth)) {
+      rows.push({
+        key: "auth", label: "Access policy", value: "Public access only",
+        detail: "Instagram sign-in is disabled. Cookies and signed-in sessions are not used.",
+        recommendation: "Use anonymous public collection. An authentication repair is not available under this policy.",
+      });
+    } else {
+      rows.push({
+        key: "auth",
+        label: "Auth state",
+        value:
+          authActionNeeded
+            ? "Action needed"
+            : cookieHealthChecking
+              ? "Checking"
+            : "Usable",
+        detail: [
+          `Post/details: ${postsAuthText}`,
+          cookieHealth?.healthy === true
+            ? "local cookie file is healthy"
+            : cookieHealth?.healthy === false
+              ? `local cookie file is blocked${cookieHealth.reason ? `: ${cookieHealth.reason}` : ""}`
+              : cookieHealth?.degraded
+                ? "local cookie health check is degraded"
+                : "local cookie health is still loading",
+          instagramCommentsModalAuthActive
+            ? "comments: Modal auth active"
+            : activeCommentsRunProgressData?.manual_auth_required === true
+              ? "comments: Modal auth blocked"
+              : "comments: no active comments auth run",
+        ].join(". "),
+        recommendation:
+          authActionNeeded
+            ? "Repair or sync validated Instagram auth before starting the blocked lane."
+            : cookieHealthChecking
+              ? "Wait for the local cookie health check to finish before treating auth as blocked."
+            : "No auth action is needed right now.",
+      });
+    }
     if (hasSummary) {
       rows.push({
         key: "library",
@@ -7148,7 +7162,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
         tone: "amber",
       });
     }
-    if (activeCommentsProgressWarning) {
+    if (activeCommentsProgressWarning && !(isInstagramPublicOnlyAccess(cookieHealth) && /auth|cookie|login|sign.in|checkpoint/i.test(activeCommentsProgressWarning))) {
       issues.push({
         key: "comments-warning",
         title: "Comments warning",
@@ -7177,7 +7191,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
         tone: commentsShardHealthSummary.failed > 0 ? "red" : "amber",
       });
     }
-    if (cookieHealth?.healthy === false) {
+    if (!isInstagramPublicOnlyAccess(cookieHealth) && cookieHealth?.healthy === false) {
       issues.push({
         key: "cookies-blocked",
         title: cookieHealth.auth_surface_blocked ? "Instagram auth is blocked" : "Local cookies need refresh",
@@ -7185,7 +7199,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
         recommendation: "Sync validated cookies before rerunning post/details or comments auth-dependent work.",
         tone: "red",
       });
-    } else if (cookieHealth?.degraded) {
+    } else if (!isInstagramPublicOnlyAccess(cookieHealth) && cookieHealth?.degraded) {
       issues.push({
         key: "cookies-degraded",
         title: "Cookie health check is degraded",
@@ -7211,6 +7225,8 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     commentsShardAttentionRecommendation,
     commentsShardHealthSummary.issueReasons,
     commentsShardHealthSummary.retrying,
+    cookieHealth?.platform,
+    cookieHealth?.source_kind,
     cookieHealth?.auth_surface_blocked,
     cookieHealth?.degraded,
     cookieHealth?.healthy,
