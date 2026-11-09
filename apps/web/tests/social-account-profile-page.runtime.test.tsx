@@ -1336,6 +1336,12 @@ describe("SocialAccountProfilePage", () => {
 
     await waitFor(() => {
       expect(screen.getByText("Local cookies healthy")).toBeInTheDocument();
+    });
+    const cookieHealthUrl = requestUrls.find((url) => url.includes("/cookies/health"));
+    expect(cookieHealthUrl).toBeDefined();
+    expect(cookieHealthUrl).not.toContain("posts_auth=true");
+  });
+
   it.each(["catalog", "comments"] as const)("shows public-only access on the Instagram %s surface without sign-in controls", async (tab) => {
     const requestUrls: string[] = [];
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
@@ -1360,12 +1366,6 @@ describe("SocialAccountProfilePage", () => {
     expect(screen.queryByText(/Local cookies healthy|Cookie file present|Modal uses same cookie payload|Modal posts auth verified|authenticated comments not verified/i)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Manual Instagram Auth|Confirm Manual Auth Check|Repair Comments Auth|Sync Validated Cookies/ })).not.toBeInTheDocument();
     expect(requestUrls.some(url => /cookies\/refresh|repair-auth|auth-repair/.test(url))).toBe(false);
-  });
-
-    });
-    const cookieHealthUrl = requestUrls.find((url) => url.includes("/cookies/health"));
-    expect(cookieHealthUrl).toBeDefined();
-    expect(cookieHealthUrl).not.toContain("posts_auth=true");
   });
 
   it("reuses the Instagram cookie health check across route remounts without probing posts auth", async () => {
