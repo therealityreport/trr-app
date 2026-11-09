@@ -46,7 +46,7 @@ export function ProfileCookieHealthCard({
   buttonClassName,
 }: ProfileCookieHealthCardProps) {
   return (
-    <div className="mt-3 flex items-center gap-3 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2.5">
+    <div className="mt-3 flex min-w-0 flex-wrap items-center gap-3 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2.5 [&>span]:min-w-0 [&>span]:break-words">
       {showCookieHealthLoading ? (
         <>
           <span className="inline-block h-2.5 w-2.5 animate-pulse rounded-full bg-zinc-400" />
