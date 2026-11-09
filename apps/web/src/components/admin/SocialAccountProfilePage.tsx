@@ -11515,6 +11515,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
               platform={platform}
               handle={handle}
               summary={summary}
+              postsReadPending={platform === "instagram" && !hasCurrentSummary && !summaryError}
               onSummaryRefresh={refreshCommentsSummary}
               onOpenBoundedBackfill={platform === "instagram" ? openInstagramBackfillDialog : undefined}
               boundedBackfillDisabled={catalogLaunchActionsBlocked}

@@ -1565,10 +1565,8 @@ describe("SocialAccountProfilePage", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Choose Bounded Backfill" })).toBeEnabled());
     expect(screen.queryByRole("button", { name: "Count-difference targets", exact: true })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Repair gaps" })).not.toBeInTheDocument();
-    await waitFor(() => {
-      expect(commentsPostsCalls).toBe(1);
-    });
-    expect(screen.getByText("No posts match this count filter. Unknown counts stay unknown.")).toBeInTheDocument();
+    expect(commentsPostsCalls).toBe(0);
+    expect(screen.getByText("Loading posts with comments...")).toBeInTheDocument();
   });
 
   it("hydrates the account total from the live Instagram profile after the page loads", async () => {

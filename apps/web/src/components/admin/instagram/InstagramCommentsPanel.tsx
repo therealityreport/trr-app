@@ -50,6 +50,7 @@ type Props = {
   platform: SocialPlatformSlug;
   handle: string;
   summary: SocialAccountProfileSummary | null;
+  postsReadPending?: boolean;
   onSummaryRefresh?: () => Promise<void> | void;
   onOpenBoundedBackfill?: () => void;
   boundedBackfillDisabled?: boolean;
@@ -726,6 +727,7 @@ export default function InstagramCommentsPanel({
   platform,
   handle,
   summary,
+  postsReadPending = false,
   onSummaryRefresh,
   onOpenBoundedBackfill,
   boundedBackfillDisabled = false,
@@ -799,6 +801,7 @@ export default function InstagramCommentsPanel({
   );
 
   const refreshPosts = useCallback(async () => {
+    if (postsReadPending) { setPostsLoading(true); return; }
     if (checking || !user || !hasAccess) return;
     setPostsLoading(true);
     setPostsError(null);
@@ -833,6 +836,7 @@ export default function InstagramCommentsPanel({
       setPostsLoading(false);
     }
   }, [
+    postsReadPending,
     checking,
     commentsPostFilter,
     commentsSearch,
