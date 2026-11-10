@@ -3,7 +3,7 @@
 Inherit `../AGENTS.md`; it is authoritative for shared workspace policy, including the managed Project knowledge link.
 
 ## Scope
-- App-only instructions for /Users/thomashulihan/Projects/TRR/TRR-APP.
+- App-only instructions for this directory (`TRR-APP`).
 
 ## Cross-Boundary Triggers
 - When app behavior needs a new or changed API, schema, or auth contract, update the current contract under `../docs/` and coordinate backend-first implementation in the same session.
