@@ -26,8 +26,11 @@ const buildCommentsAuthCookieHealthProbeKey = (
 
 const COOKIE_HEALTH_SESSION_CACHE_TTL_MS = 5 * 60 * 1000;
 
-const buildCookieHealthSessionCacheKey = (platform: string, handle: string): string =>
-  `trr-social-cookie-health:${platform.toLowerCase()}:${handle.toLowerCase()}`;
+const buildCookieHealthSessionCacheKey = (platform: string, handle: string): string => {
+  // Recheck Instagram policy after deployment; retain other platforms' cache keys.
+  const namespace = platform.toLowerCase() === "instagram" ? "trr-social-cookie-health-access-policy-v2" : "trr-social-cookie-health";
+  return `${namespace}:${platform.toLowerCase()}:${handle.toLowerCase()}`;
+};
 
 const hasCommentsAuthProbe = (cookieHealth: SocialProfileCookieHealth): boolean =>
   Boolean(cookieHealth.comments_auth_health || cookieHealth.comments_auth_probe);

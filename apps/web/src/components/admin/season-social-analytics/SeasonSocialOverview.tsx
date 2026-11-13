@@ -1,3 +1,4 @@
+import { InstagramCountSummary } from "@/components/admin/instagram/InstagramCountComparison";
 import Link from "next/link";
 import { formatRedditWindowCoverage } from "@/lib/admin/reddit-window-coverage";
 import type { Route } from "next";
@@ -186,18 +187,18 @@ export function SeasonSocialOverview({
               data-testid="metric-comments-saved-pct-card"
             >
               <p className="mt-2 text-3xl font-bold text-zinc-900" data-testid="metric-comments-saved-pct-value">
-                {formatPctLabel(commentsSavedPctCard)}
+                {platformTab === "instagram" ? "Not verified" : formatPctLabel(commentsSavedPctCard)}
               </p>
-              <p className="mt-1 text-xs text-zinc-500">of Comments Saved</p>
+              <p className="mt-1 text-xs text-zinc-500">{platformTab === "instagram" ? "Instagram comment completeness" : "of Comments Saved"}</p>
             </article>
             <article
               className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm"
               data-testid="metric-comments-saved-actual-card"
             >
               <p className="mt-2 text-3xl font-bold text-zinc-900 break-all" data-testid="metric-comments-saved-actual-value">
-                {`${formatCompactInteger(commentsSavedActualSummary.saved)}/${formatCompactInteger(commentsSavedActualSummary.actual)}*`}
+                {platformTab === "instagram" ? "Independent counts" : `${formatCompactInteger(commentsSavedActualSummary.saved)}/${formatCompactInteger(commentsSavedActualSummary.actual)}*`}
               </p>
-              <p className="mt-1 text-xs text-zinc-500">Comments (Saved/Actual)</p>
+              {platformTab === "instagram" ? <InstagramCountSummary summary={analytics?.comment_counts ?? analytics?.summary.comment_counts} /> : <p className="mt-1 text-xs text-zinc-500">Comments (Saved/Actual)</p>}
             </article>
             {isSentimentView && (
               <article className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">

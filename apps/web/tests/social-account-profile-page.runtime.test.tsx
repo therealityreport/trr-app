@@ -1,4 +1,5 @@
 import React from "react";
+import { instagramCounts, instagramCountSummary } from "./fixtures/instagram-counts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { readDetailTargetProgress } from "@/lib/admin/social-account-catalog-progress";
@@ -177,6 +178,7 @@ const installClipboardMock = () => {
 };
 
 const baseSummary = {
+  comment_counts: instagramCountSummary({ instagram_saved_count: 41, post_reported_known_subtotal: 429, post_minus_saved_difference_known_subtotal: 388 }),
   summary_detail: "full" as const,
   platform: "instagram",
   account_handle: "bravotv",
@@ -436,7 +438,7 @@ describe("SocialAccountProfilePage", () => {
     render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="comments" />);
     await waitFor(() => expect(screen.getByRole("button", { name: "Choose Bounded Backfill" })).toBeEnabled());
     expect(screen.queryByRole("button", { name: "Sync Comments", exact: true })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Incomplete Fill", exact: true })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Count-difference targets", exact: true })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Queue Checkpoint Targets" })).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: "Choose Bounded Backfill" }));
     expect(await screen.findByText("Choose what this backfill should run")).toBeInTheDocument();
@@ -698,17 +700,37 @@ describe("SocialAccountProfilePage", () => {
 
     render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
 
-    const commentsTile = await screen.findByText("All-time Saved Comments");
+    const commentsTile = await screen.findByText("Saved Instagram comments and replies");
     const commentsCard = commentsTile.closest("div.rounded-2xl");
     expect(commentsCard).not.toBeNull();
     expect(within(commentsCard as HTMLElement).getByText("41")).toBeInTheDocument();
-    expect(within(commentsCard as HTMLElement).getByText("41 saved comments / 429 reported comments")).toBeInTheDocument();
+    expect(within(commentsCard as HTMLElement).getByText(/^Canonical saved Instagram comment records/)).toBeInTheDocument();
 
     const mediaTile = screen.getByText("All-time Media Saved");
     const mediaCard = mediaTile.closest("div.rounded-2xl");
     expect(mediaCard).not.toBeNull();
     expect(within(mediaCard as HTMLElement).getByText("1,289")).toBeInTheDocument();
     expect(within(mediaCard as HTMLElement).getByText("1,289 / 1,400 files")).toBeInTheDocument();
+  });
+
+  it("explains unavailable saved inventory separately from reported-count coverage", async () => {
+    const unavailableSummary = { ...baseSummary, comment_counts: instagramCountSummary({ inventory_status: "unavailable", instagram_saved_count: null, post_minus_saved_difference_known_subtotal: null, post_reported_known_subtotal: 0, post_reported_known_posts_count: 0, post_reported_unknown_posts_count: 18490 }) };
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
+      if (url.includes("/snapshot")) return profileSnapshotResponse(unavailableSummary);
+      if (url.includes("/summary")) return jsonResponse(unavailableSummary);
+      throw new Error(`Unhandled request: ${url}`);
+    });
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="stats" />);
+    const savedCard = (await screen.findByText("Saved Instagram comments and replies")).closest("div.rounded-2xl") as HTMLElement;
+    await waitFor(() => expect(within(savedCard).getByText("Unknown", { exact: true })).toBeInTheDocument());
+    expect(within(savedCard).getByText("Saved Instagram inventory is unavailable. The saved count is unknown.")).toBeInTheDocument();
+    expect(within(savedCard).queryByText(/known subtotal/)).not.toBeInTheDocument();
+    const differenceCard = screen.getByText("Post count minus saved Instagram records (known subtotal)").closest("div.rounded-2xl") as HTMLElement;
+    expect(within(differenceCard).getByText("Unknown", { exact: true })).toBeInTheDocument();
+    expect(within(differenceCard).getByText("The difference is unknown because saved Instagram inventory is unavailable.")).toBeInTheDocument();
+    expect(within(differenceCard).queryByText(/0 known subtotal/)).not.toBeInTheDocument();
   });
 
   it("preserves summary cards while run-progress polling omits the summary", async () => {
@@ -744,6 +766,7 @@ describe("SocialAccountProfilePage", () => {
     };
     const traitorsSummary = {
       ...baseSummary,
+      comment_counts: instagramCountSummary({ instagram_saved_count: 102300, post_reported_known_subtotal: 106702, post_minus_saved_difference_known_subtotal: 4402 }),
       account_handle: "thetraitorsus",
       profile_url: "https://www.instagram.com/thetraitorsus/",
       total_posts: 438,
@@ -836,9 +859,9 @@ describe("SocialAccountProfilePage", () => {
     expect(screen.getByText("Saved Posts", { selector: "p" }).parentElement?.textContent?.replace(/\s+/g, " ").trim()).toContain(
       "437 / 438",
     );
-    const commentsCard = screen.getByText("All-time Saved Comments").closest("div.rounded-2xl");
+    const commentsCard = screen.getByText("Saved Instagram comments and replies").closest("div.rounded-2xl");
     expect(commentsCard).not.toBeNull();
-    expect(within(commentsCard as HTMLElement).getByText("102,300 saved comments / 106,702 reported comments")).toBeInTheDocument();
+    expect(within(commentsCard as HTMLElement).getByText(/^Canonical saved Instagram comment records/)).toBeInTheDocument();
     const mediaCard = screen.getByText("All-time Media Saved").closest("div.rounded-2xl");
     expect(mediaCard).not.toBeNull();
     expect(within(mediaCard as HTMLElement).queryByText("Unavailable")).not.toBeInTheDocument();
@@ -1180,7 +1203,7 @@ describe("SocialAccountProfilePage", () => {
     const statusRow = (await screen.findByText("Data status: Cached")).closest('[role="status"]');
     expect(statusRow).toHaveTextContent("Data status: Cached");
     expect(statusRow).toHaveTextContent("updated 2 minutes ago");
-    expect(screen.getByText("All-time Saved Comments")).toBeInTheDocument();
+    expect(screen.getByText("Saved Instagram comments and replies")).toBeInTheDocument();
   });
 
   it("renders cached summary data when dashboard freshness is error", async () => {
@@ -1212,7 +1235,7 @@ describe("SocialAccountProfilePage", () => {
     const statusRow = (await screen.findByText("Data status: Degraded")).closest('[role="status"]');
     expect(statusRow).toHaveTextContent("Data status: Degraded");
     expect(statusRow).toHaveTextContent("showing the last successful profile data");
-    expect(screen.getByText("All-time Saved Comments")).toBeInTheDocument();
+    expect(screen.getByText("Saved Instagram comments and replies")).toBeInTheDocument();
     expect(screen.queryByText("Failed to load social account profile summary")).not.toBeInTheDocument();
   });
 
@@ -1259,9 +1282,9 @@ describe("SocialAccountProfilePage", () => {
     render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="stats" />);
 
     await waitFor(() => {
-      expect(screen.getByText("All-time Saved Comments")).toBeInTheDocument();
+      expect(screen.getByText("Saved Instagram comments and replies")).toBeInTheDocument();
     });
-    expect(screen.getByText("41 saved comments / 429 reported comments")).toBeInTheDocument();
+    expect(screen.getByText("429 known subtotal · 2 posts known · 1 posts unknown")).toBeInTheDocument();
     expect(screen.getByText("1,289 / 1,400 files")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Load Full Profile Insights" })).not.toBeInTheDocument();
     expect(screen.queryByText("Loads with full profile insights.")).not.toBeInTheDocument();
@@ -1311,6 +1334,32 @@ describe("SocialAccountProfilePage", () => {
     const cookieHealthUrl = requestUrls.find((url) => url.includes("/cookies/health"));
     expect(cookieHealthUrl).toBeDefined();
     expect(cookieHealthUrl).not.toContain("posts_auth=true");
+  });
+
+  it.each(["catalog", "comments"] as const)("shows public-only access on the Instagram %s surface without sign-in controls", async (tab) => {
+    const requestUrls: string[] = [];
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      requestUrls.push(url);
+      if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
+      if (url.includes("/snapshot")) return profileSnapshotResponse(baseSummary);
+      if (url.includes("/summary")) return jsonResponse(baseSummary);
+      if (url.includes("/cookies/health")) return jsonResponse({
+        platform: "instagram", required: false, healthy: true, reason: "public_only_policy", source_kind: "public_only", auth_probe_skipped: true,
+        refresh_supported: false, refresh_available: false, refresh_action: null, refresh_label: null,
+        cookie_fingerprint: "stale-local-fixture", posts_auth_probe: { status: "valid", cookie_fingerprint: "stale-local-fixture" },
+        comments_auth_health: { platform: "instagram", status: "public", category: "public", ready: false, public_ready: true, authenticated_ready: false, auth_probe_skipped: true, reason: "public_only_policy" },
+      });
+      if (url.includes("/posts?")) return jsonResponse({ items: [], pagination: { page: 1, page_size: 25, total: 0, total_pages: 1 } });
+      if (url.includes("/live-profile-total")) return jsonResponse({ platform: "instagram", account_handle: "bravotv", live_total_posts_current: 12 });
+      throw new Error(`Unhandled request: ${url}`);
+    });
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab={tab} />);
+    expect(await screen.findByText("Instagram sign-in is disabled", { exact: true })).toBeInTheDocument();
+    expect(screen.getAllByText("Public access only", { exact: true }).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/Local cookies healthy|Cookie file present|Modal uses same cookie payload|Modal posts auth verified|authenticated comments not verified/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Manual Instagram Auth|Confirm Manual Auth Check|Repair Comments Auth|Sync Validated Cookies/ })).not.toBeInTheDocument();
+    expect(requestUrls.some(url => /cookies\/refresh|repair-auth|auth-repair/.test(url))).toBe(false);
   });
 
   it("reuses the Instagram cookie health check across route remounts without probing posts auth", async () => {
@@ -1504,8 +1553,8 @@ describe("SocialAccountProfilePage", () => {
     await waitFor(() => {
       expect(commentsPostsCalls).toBe(1);
     });
-    expect(screen.getByText("Commentable now: 12")).toBeInTheDocument();
-    expect(screen.getByText("Rows saved")).toBeInTheDocument();
+    expect(screen.getByText("Posts with reported comments: 1")).toBeInTheDocument();
+    expect(screen.getByText("Finished")).toBeInTheDocument();
     expect(screen.queryByText("TRR-Backend request timed out.")).not.toBeInTheDocument();
   });
 
@@ -1530,13 +1579,14 @@ describe("SocialAccountProfilePage", () => {
     render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="comments" />);
 
     expect(await screen.findByText(/Loading account summary/)).toBeInTheDocument();
+    const availablePostsCard = screen.getByText("Available Posts").closest("div.rounded-2xl") as HTMLElement;
+    expect(within(availablePostsCard).getByText("Unknown", { exact: true })).toBeInTheDocument();
+    expect(within(availablePostsCard).queryByText("0", { exact: true })).not.toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole("button", { name: "Choose Bounded Backfill" })).toBeEnabled());
-    expect(screen.queryByRole("button", { name: "Incomplete Fill", exact: true })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Count-difference targets", exact: true })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Repair gaps" })).not.toBeInTheDocument();
-    await waitFor(() => {
-      expect(commentsPostsCalls).toBe(1);
-    });
-    expect(screen.getByText("No Instagram posts with comments are saved for this account yet.")).toBeInTheDocument();
+    expect(commentsPostsCalls).toBe(0);
+    expect(screen.getByText("Loading posts with comments...")).toBeInTheDocument();
   });
 
   it("hydrates the account total from the live Instagram profile after the page loads", async () => {
@@ -2007,7 +2057,7 @@ describe("SocialAccountProfilePage", () => {
 
     render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="comments" />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Preview Incomplete Fill" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Preview Count-difference targets" }));
 
     await waitFor(() => {
       expect(scrapeCalls).toHaveLength(1);
@@ -2025,10 +2075,10 @@ describe("SocialAccountProfilePage", () => {
     });
     expect(
       await screen.findByText(
-        /Incomplete Fill preview: 12 targets \/ 2 shards \/ public relay .* DTgXh94kXyo, DYiDH6pN-1Z/i,
+        /Count-difference targets preview: 12 targets \/ 2 shards \/ public relay .* DTgXh94kXyo, DYiDH6pN-1Z/i,
       ),
     ).toBeInTheDocument();
-    expect(screen.getByText("Incomplete Fill Preview")).toBeInTheDocument();
+    expect(screen.getByText("Count-difference targets Preview")).toBeInTheDocument();
     expect(screen.getByText("Dry-run only. No run was queued and no workers were dispatched.")).toBeInTheDocument();
     expect(screen.getByText(/Public relay does not require auth cookies/i)).toBeInTheDocument();
     expect(scrapeCalls[0].url).not.toContain("dry_run=true");
@@ -2063,7 +2113,7 @@ describe("SocialAccountProfilePage", () => {
     render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="comments" />);
 
     await waitFor(() => expect(screen.getByRole("button", { name: "Choose Bounded Backfill" })).toBeEnabled());
-    expect(screen.queryByRole("button", { name: "Incomplete Fill", exact: true })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Count-difference targets", exact: true })).not.toBeInTheDocument();
   });
 
   it("hides catalog progress chrome on the comments tab", async () => {
@@ -2339,6 +2389,7 @@ describe("SocialAccountProfilePage", () => {
     };
     const refreshedSummary = {
       ...activeSummary,
+      comment_counts: instagramCountSummary({ instagram_saved_count: 52, post_reported_known_subtotal: 429, post_minus_saved_difference_known_subtotal: 377 }),
       comments_saved_summary: {
         ...baseSummary.comments_saved_summary,
         saved_comments: 52,
@@ -2445,7 +2496,7 @@ describe("SocialAccountProfilePage", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getAllByText("52 saved comments / 429 reported comments").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("429 known subtotal · 2 posts known · 1 posts unknown").length).toBeGreaterThan(0);
     });
   });
 
@@ -2942,7 +2993,7 @@ describe("SocialAccountProfilePage", () => {
     });
     expect(screen.queryByText("TRR-Backend request timed out.")).not.toBeInTheDocument();
     expect(
-      screen.getByText("No Instagram posts with comments are saved for this account yet."),
+      screen.getByText("No posts match this count filter. Unknown counts stay unknown."),
     ).toBeInTheDocument();
   });
 
@@ -2967,7 +3018,8 @@ describe("SocialAccountProfilePage", () => {
               content: "Recap caption for the reunion post.",
               url: "https://www.instagram.com/p/DVfQnTcjsCA/",
               posted_at: "2026-04-09T14:30:00.000Z",
-              saved_comments: 14,
+              saved_comments: 999,
+              comment_counts: instagramCounts({ post_reported_count: 27, instagram_saved_count: 14, instagram_saved_top_level_count: 13, instagram_saved_reply_count: 1, facebook_count_observed_on_instagram: 0, post_minus_saved_difference: 13 }),
               facebook_crosspost: {
                 comments_count: 0,
                 post_url: "not a valid facebook url",
@@ -3105,17 +3157,17 @@ describe("SocialAccountProfilePage", () => {
 
     const postLink = await screen.findByRole("link", { name: "DVfQnTcjsCA" });
     expect(postLink).toBeInTheDocument();
-    expect(screen.getByText("Reported Comments")).toBeInTheDocument();
-    expect(screen.getAllByText(/Saved Comments$/).length).toBeGreaterThanOrEqual(2);
-    expect(screen.getAllByText(/Comment Gap$/).length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText("Post comment count")).toBeInTheDocument();
+    expect(screen.getAllByText(/Saved Instagram comments and replies$/).length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText(/Post count minus saved Instagram records/).length).toBeGreaterThanOrEqual(2);
     const row = postLink.closest("tr") as HTMLElement;
     expect(within(row).getByText("27")).toBeInTheDocument();
-    expect(within(row).getByText("13 parent")).toBeInTheDocument();
-    expect(within(row).getByText("1 replies")).toBeInTheDocument();
-    expect(within(row).getByText("0 Facebook accounted")).toBeInTheDocument();
-    expect(within(row).getByText("Phases: 12 ranked, 1 headload, 1 child · Capture 52% · 1 covered")).toBeInTheDocument();
-    expect(within(row).getByText("13")).toBeInTheDocument();
-    expect(screen.getAllByText("Incomplete").length).toBeGreaterThanOrEqual(2);
+    expect(within(row).getByText("13 saved top-level comments")).toBeInTheDocument();
+    expect(within(row).getByText("1 saved replies")).toBeInTheDocument();
+    expect(within(row).getByText("0 Facebook comments shown on Instagram")).toBeInTheDocument();
+    expect(within(row).queryByText(/Capture 52%/)).not.toBeInTheDocument();
+    expect(within(row).getByText("+13")).toBeInTheDocument();
+    expect(within(row).queryByText("Incomplete")).not.toBeInTheDocument();
     expect(within(row).getByText("842")).toBeInTheDocument();
     expect(screen.getByText(formatLocalDateTime("2026-04-09T14:30:00.000Z"))).toBeInTheDocument();
 
@@ -3127,25 +3179,15 @@ describe("SocialAccountProfilePage", () => {
       { scroll: false },
     );
     expect(within(dialog).getByText("Recap caption for the reunion post.")).toBeInTheDocument();
-    expect(within(dialog).getByText("13 parent comments")).toBeInTheDocument();
-    expect(within(dialog).getByText("1 child replies")).toBeInTheDocument();
-    expect(within(dialog).getByText("0 Facebook comments")).toBeInTheDocument();
-    expect(within(dialog).getByText("13 not captured")).toBeInTheDocument();
-    expect(within(dialog).getByText("27 reported comments")).toBeInTheDocument();
-    expect(within(dialog).getByText("Facebook comments: 0")).toBeInTheDocument();
-    expect(within(dialog).queryByRole("link", { name: "Open Facebook post" })).not.toBeInTheDocument();
-    expect(within(dialog).getByText("Capture Health")).toBeInTheDocument();
-    expect(within(dialog).getByText("Capture: 52%")).toBeInTheDocument();
-    expect(within(dialog).getByText("Capture gap: 13")).toBeInTheDocument();
-    expect(within(dialog).getByText("Phases: 12 ranked, 1 headload, 1 child")).toBeInTheDocument();
-    expect(within(dialog).getByText("Covered: 1")).toBeInTheDocument();
-    expect(within(dialog).getByText("Status: 13 Active, 1 Filtered")).toBeInTheDocument();
-    expect(within(dialog).getByText("Cursors: 1 cached comments cursor, 1 next min id")).toBeInTheDocument();
-    expect(within(dialog).getByText("Trend: 14 / 27 latest run (52%)")).toBeInTheDocument();
+    expect(within(dialog).getByText("Count comparison").closest("details")).not.toHaveAttribute("open");
+    expect(within(dialog).getByText("Saved Instagram comments and replies")).toBeInTheDocument();
+    expect(within(dialog).getByText("Hypothetical combined count: Unknown")).toBeInTheDocument();
+    expect(within(dialog).queryByText(/not captured/)).not.toBeInTheDocument();
     expect(within(dialog).getByText("1 parent threads")).toBeInTheDocument();
     expect(within(dialog).getByText("Parent-thread page 1 of 1")).toBeInTheDocument();
     expect(within(dialog).queryByText("No text")).not.toBeInTheDocument();
     expect(within(dialog).getByText("Reply saved under parent comment")).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: /1 saved replies shown · Source-reported replies: 1/ })).toBeInTheDocument();
     expect(within(dialog).queryByText("2 media")).not.toBeInTheDocument();
     expect(within(dialog).getAllByRole("img", { name: "Comment media" })).toHaveLength(2);
     expect(within(dialog).getAllByRole("img", { name: "Comment media" })[0]).toHaveAttribute(
@@ -3169,7 +3211,7 @@ describe("SocialAccountProfilePage", () => {
     await waitFor(() => {
       expect(within(dialog).queryByRole("tooltip", { name: "Comment media preview" })).not.toBeInTheDocument();
     });
-    expect(within(dialog).getByText("14 Instagram rows")).toBeInTheDocument();
+    expect(within(dialog).getByText("14 saved Instagram comments and replies")).toBeInTheDocument();
   });
 
   it("opens a comments modal once when a post link is double-clicked", async () => {
@@ -3260,7 +3302,7 @@ describe("SocialAccountProfilePage", () => {
 
     await waitFor(() => {
       expect(
-        postRequestUrls.some((url) => url.includes("sort_by=missing_comments") && url.includes("sort_dir=desc")),
+        postRequestUrls.some((url) => url.includes("sort_by=count_difference") && url.includes("sort_dir=desc")),
       ).toBe(true);
     });
 
@@ -3273,9 +3315,9 @@ describe("SocialAccountProfilePage", () => {
       ["Post", "post", "asc"],
       ["Created", "created", "desc"],
       ["Caption", "caption", "asc"],
-      ["Reported Comments", "post_total", "desc"],
-      ["Saved Comments", "saved_comments", "desc"],
-      ["Comment Gap", "missing_comments", "desc"],
+      ["Post comment count", "post_reported_count", "desc"],
+      ["Saved Instagram comments and replies", "instagram_saved_count", "desc"],
+      ["Post count minus saved Instagram records", "count_difference", "desc"],
       ["Likes", "likes", "desc"],
     ];
 
@@ -3378,7 +3420,7 @@ describe("SocialAccountProfilePage", () => {
     const parentComment = await within(dialog).findByText("Direct URL comment");
     const replyComment = within(dialog).getByText("Direct URL reply saved under parent");
     expect(parentComment.compareDocumentPosition(replyComment) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(within(dialog).getByText("1,551 Instagram rows")).toBeInTheDocument();
+    expect(within(dialog).getByText("Unknown saved Instagram comments and replies")).toBeInTheDocument();
   });
 
   it("keeps the post comments modal closed after a posts refresh", async () => {
@@ -3447,96 +3489,24 @@ describe("SocialAccountProfilePage", () => {
     expect(screen.queryByRole("dialog", { name: "Comments for DVfQnTcjsCA" })).not.toBeInTheDocument();
   });
 
-  it("filters commentable posts to incomplete comment totals through the posts query", async () => {
-    const postRequestUrls: string[] = [];
-
+  it("filters reported positive, zero, unknown, and known count differences through the posts query", async () => {
+    const urls: string[] = [];
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.endsWith("/capabilities")) return jsonResponse({ enabled: false, account: "bravotv", supported_actions: [], replay_apply_enabled: false });
-      if (url.includes("/summary")) {
-        return jsonResponse(baseSummary);
-      }
-      if (url.includes("/posts?page=1&page_size=25&comments_only=true")) {
-        postRequestUrls.push(url);
-        if (url.includes("comment_filter=not_commentable")) {
-          return jsonResponse({
-            items: [
-              {
-                id: "post-3",
-                source_id: "NOCOMMENTS",
-                platform: "instagram",
-                account_handle: "bravotv",
-                content: "No reported comments yet",
-                url: "https://www.instagram.com/p/NOCOMMENTS/",
-                posted_at: "2026-04-11T14:30:00.000Z",
-                saved_comments: 0,
-                metrics: {
-                  likes: 17,
-                  comments_count: 0,
-                },
-              },
-            ],
-            pagination: { page: 1, page_size: 25, total: 2, total_pages: 1 },
-          });
-        }
-        if (url.includes("comment_filter=incomplete")) {
-          return jsonResponse({
-            items: [
-              {
-                id: "post-2",
-                source_id: "NEEDSFIX",
-                platform: "instagram",
-                account_handle: "bravotv",
-                content: "Needs more comments",
-                url: "https://www.instagram.com/p/NEEDSFIX/",
-                posted_at: "2026-04-10T14:30:00.000Z",
-                saved_comments: 3,
-                metrics: {
-                  likes: 91,
-                  comments_count: 7,
-                },
-              },
-            ],
-            pagination: { page: 1, page_size: 25, total: 1, total_pages: 1 },
-          });
-        }
-        return jsonResponse({
-          items: [],
-          pagination: { page: 1, page_size: 25, total: 12, total_pages: 1 },
-        });
+      if (url.includes("/snapshot")) return profileSnapshotResponse(baseSummary);
+      if (url.includes("/summary")) return jsonResponse(baseSummary);
+      if (url.includes("/posts?page=")) {
+        urls.push(url);
+        return jsonResponse({ items: [], pagination: { page: 1, page_size: 25, total: 0, total_pages: 1 } });
       }
       throw new Error(`Unhandled request: ${url}`);
     });
-
     render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="comments" />);
-
-    expect(await screen.findByRole("button", { name: /Commentable\s*12/i })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
-    await waitFor(() => {
-      expect(postRequestUrls.some((url) => url.includes("comment_filter=commentable"))).toBe(true);
-    });
-
-    fireEvent.click(screen.getByRole("button", { name: "Incomplete" }));
-
-    expect(await screen.findByRole("button", { name: /Incomplete\s*1/i })).toHaveAttribute("aria-pressed", "true");
-    expect(postRequestUrls.some((url) => url.includes("comment_filter=incomplete"))).toBe(true);
-    const incompletePostLink = await screen.findByRole("link", { name: "NEEDSFIX" });
-    expect(incompletePostLink).toBeInTheDocument();
-    const incompletePostRow = incompletePostLink.closest("tr") as HTMLElement;
-    expect(within(incompletePostRow).getByText("7")).toBeInTheDocument();
-    expect(within(incompletePostRow).getByText("3 saved comments")).toBeInTheDocument();
-    expect(screen.getAllByText("Incomplete").length).toBeGreaterThanOrEqual(2);
-
-    fireEvent.click(screen.getByRole("button", { name: /Not Commentable/i }));
-
-    expect(await screen.findByRole("button", { name: /Not Commentable\s*2/i })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
-    expect(postRequestUrls.some((url) => url.includes("comment_filter=not_commentable"))).toBe(true);
-    expect(await screen.findByRole("link", { name: "NOCOMMENTS" })).toBeInTheDocument();
+    for (const [label, filter] of [["Reported positive", "reported_positive"], ["Reported zero", "reported_zero"], ["Reported unknown", "reported_unknown"], ["Count difference", "count_difference"]]) {
+      fireEvent.click(await screen.findByRole("button", { name: new RegExp(`^${label}`) }));
+      await waitFor(() => expect(urls.some(url => url.includes(`comment_filter=${filter}`))).toBe(true));
+    }
   });
 
   it("sources comments panel `Available Posts` from saved-post inventory, not the commentable subset", async () => {
@@ -3578,8 +3548,8 @@ describe("SocialAccountProfilePage", () => {
     expect(await screen.findByText("Available Posts")).toBeInTheDocument();
     // Saved-post total (16,200), NOT coverage.available_posts (1,099).
     expect(screen.getByText("16,200")).toBeInTheDocument();
-    // Commentable subset stays on coverage.eligible_posts.
-    expect(screen.getByText("Commentable now: 1,099")).toBeInTheDocument();
+    // The reported-positive count uses the canonical count summary.
+    expect(screen.getByText("Posts with reported comments: 1")).toBeInTheDocument();
   });
 
   it("falls back to catalog_total_posts when live_catalog_total_posts is absent", async () => {
@@ -3616,10 +3586,10 @@ describe("SocialAccountProfilePage", () => {
 
     expect(await screen.findByText("Available Posts")).toBeInTheDocument();
     expect(screen.getByText("16,200")).toBeInTheDocument();
-    expect(screen.getByText("Commentable now: 1,099")).toBeInTheDocument();
+    expect(screen.getByText("Posts with reported comments: 1")).toBeInTheDocument();
   });
 
-  it("shows needs refresh instead of failed when the latest failed run is historical", async () => {
+  it("shows the historical run status separately from saved data", async () => {
     const summary = {
       ...baseSummary,
       comments_coverage: {
@@ -3657,12 +3627,12 @@ describe("SocialAccountProfilePage", () => {
 
     render(<SocialAccountProfilePage platform="instagram" handle="thetraitorsus" activeTab="comments" />);
 
-    expect(await screen.findByText("Needs refresh")).toBeInTheDocument();
+    expect(await screen.findByText("Failed")).toBeInTheDocument();
     expect(screen.getByText(/Last attempt failed at/i)).toBeInTheDocument();
-    expect(screen.queryByText(/^Failed$/)).not.toBeInTheDocument();
+    expect(screen.getByText("Run status")).toBeInTheDocument();
   });
 
-  it("renders comments rows while preserving the effective needs-refresh status", async () => {
+  it("renders saved comment rows separately from a failed last run", async () => {
     const summary = {
       ...baseSummary,
       comments_coverage: {
@@ -3707,7 +3677,7 @@ describe("SocialAccountProfilePage", () => {
 
     render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="comments" />);
 
-    expect(await screen.findByText("Needs refresh")).toBeInTheDocument();
+    expect(await screen.findByText("Failed")).toBeInTheDocument();
     expect(screen.getByText(/Last attempt failed at/i)).toBeInTheDocument();
     expect(await screen.findByRole("link", { name: "ABC123" })).toHaveAttribute(
       "href",
@@ -3749,7 +3719,7 @@ describe("SocialAccountProfilePage", () => {
 
     render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="comments" />);
 
-    const button = await screen.findByRole("button", { name: "Preview Incomplete Fill" });
+    const button = await screen.findByRole("button", { name: "Preview Count-difference targets" });
     fireEvent.click(button);
 
     await waitFor(() => {
@@ -3790,7 +3760,7 @@ describe("SocialAccountProfilePage", () => {
 
     render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="comments" />);
 
-    const button = await screen.findByRole("button", { name: "Preview Incomplete Fill" });
+    const button = await screen.findByRole("button", { name: "Preview Count-difference targets" });
     fireEvent.click(button);
 
     await waitFor(() => {
@@ -3876,7 +3846,7 @@ describe("SocialAccountProfilePage", () => {
 
     render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="comments" />);
 
-    const button = await screen.findByRole("button", { name: "Preview Incomplete Fill" });
+    const button = await screen.findByRole("button", { name: "Preview Count-difference targets" });
     fireEvent.click(button);
 
     await waitFor(() => {
@@ -4351,8 +4321,8 @@ describe("SocialAccountProfilePage", () => {
 
     render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="stats" />);
 
-    expect(await screen.findByText("All-time Saved Comments")).toBeInTheDocument();
-    expect(screen.getByText("41 saved comments / 429 reported comments")).toBeInTheDocument();
+    expect(await screen.findByText("Saved Instagram comments and replies")).toBeInTheDocument();
+    expect(screen.getByText("429 known subtotal · 2 posts known · 1 posts unknown")).toBeInTheDocument();
     await waitFor(() => {
       expect(screen.getByText("Hashtag load timed out before completion. Retry when needed.")).toBeInTheDocument();
     });
@@ -5346,17 +5316,19 @@ describe("SocialAccountProfilePage", () => {
 
     render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
 
-    const completionHeading = await screen.findByText(`${expectedYear} Completion`);
+    const completionHeading = await screen.findByText(`${expectedYear} Run outcomes`);
     const completionCard = completionHeading.closest("div.rounded-2xl.border.border-zinc-200.bg-white");
     expect(completionCard).not.toBeNull();
     const completion = within(completionCard as HTMLElement);
     expect(completion.getByText("437 posts")).toBeInTheDocument();
-    expect(completion.getByText("1,820 reported comments · 1,764 saved · 56 missing")).toBeInTheDocument();
+    expect(completion.getByText("Saved Instagram comments and replies:")).toBeInTheDocument();
+    expect(completion.queryByText(/56 missing/)).not.toBeInTheDocument();
     expect(completion.getByText("Details")).toBeInTheDocument();
     expect(completion.getByText("Comments")).toBeInTheDocument();
     expect(completion.getByText("Media")).toBeInTheDocument();
     expect(completion.getByText("401 finished")).toBeInTheDocument();
-    expect(completion.getByText("320 finished")).toBeInTheDocument();
+    expect(completion.getByText("Scan status: Unknown")).toBeInTheDocument();
+    expect(completion.getByText("Verification: Not verified")).toBeInTheDocument();
     expect(completion.getByText("288 finished")).toBeInTheDocument();
     expect(
       mocks.fetchAdminWithAuth.mock.calls.some(([input]) =>
@@ -5867,7 +5839,7 @@ describe("SocialAccountProfilePage", () => {
             likes: 321,
             comments_count: 17,
             views: 1400,
-            engagement: 338,
+            engagement: null,
           },
           facebook_crosspost: {
             comments_count: 742,
@@ -5934,14 +5906,15 @@ describe("SocialAccountProfilePage", () => {
     });
     expect(screen.getByText("Caption copy for the saved post.")).toBeInTheDocument();
     expect(screen.getByText("mirror-job-1")).toBeInTheDocument();
+    expect(within(screen.getByText("Engagement", { exact: true }).closest("div") as HTMLElement).getByText("Unknown")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Open permalink" })).toHaveAttribute(
       "href",
       "https://www.instagram.com/p/source-1/",
     );
     expect(screen.getByText("Facebook Crosspost")).toBeInTheDocument();
-    expect(screen.getByText("742 comments from Facebook")).toBeInTheDocument();
-    expect(screen.getByText(/12 saved comments out of 17 Instagram-fetchable comments/)).toBeInTheDocument();
-    expect(screen.getByText(/742 Facebook accounted outside Instagram comments/)).toBeInTheDocument();
+    expect(screen.getByText("Facebook comments shown on Instagram: Unknown")).toBeInTheDocument();
+    expect(screen.queryByText(/Instagram-fetchable comments/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Facebook accounted outside Instagram comments/)).not.toBeInTheDocument();
     expect(screen.getByText("Shared to Facebook")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Open Facebook post" })).toHaveAttribute(
       "href",

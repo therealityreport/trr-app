@@ -22,6 +22,9 @@ type ProfileCookieHealthCardProps = {
   buttonClassName: string;
 };
 
+export const isInstagramPublicOnlyAccess = (health?: SocialProfileCookieHealth | null): boolean =>
+  health?.platform === "instagram" && health.source_kind === "public_only";
+
 const formatCookieHealthWarningLabel = (cookieHealth?: SocialProfileCookieHealth | null): string => {
   if (cookieHealth?.warning_code === "env_json_source_refresh_writes_file") {
     return "Sync writes file";
@@ -45,8 +48,17 @@ export function ProfileCookieHealthCard({
   handleCookieRefresh,
   buttonClassName,
 }: ProfileCookieHealthCardProps) {
+  if (platform === "instagram" && isInstagramPublicOnlyAccess(cookieHealth)) {
+    return (
+      <div className="mt-3 flex min-w-0 flex-wrap items-center gap-3 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2.5" role="status">
+        <span className="text-xs font-semibold text-zinc-700">Public access only</span>
+        <span className="text-xs text-zinc-600">Instagram sign-in is disabled</span>
+        <span className="text-xs text-zinc-500">Anonymous public requests only. Cookies and signed-in sessions are not used.</span>
+      </div>
+    );
+  }
   return (
-    <div className="mt-3 flex items-center gap-3 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2.5">
+    <div className="mt-3 flex min-w-0 flex-wrap items-center gap-3 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2.5 [&>span]:min-w-0 [&>span]:break-words">
       {showCookieHealthLoading ? (
         <>
           <span className="inline-block h-2.5 w-2.5 animate-pulse rounded-full bg-zinc-400" />

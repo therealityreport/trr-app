@@ -5,7 +5,6 @@ import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
 import { signInWithEmailAndPassword } from "firebase/auth";
 import { auth, signInWithGoogle } from "@/lib/firebase";
-import { getUserProfile } from "@/lib/db/users";
 import { buildTypographyDataAttributes } from "@/lib/typography/runtime";
 
 interface FieldErrors {
@@ -55,25 +54,8 @@ function LoginContent() {
       if (Object.keys(next).length) return;
 
       // Try to sign in
-      const signInCred = await signInWithEmailAndPassword(auth, email.trim(), password);
-      const user = signInCred.user;
-
-      // Check if they have a complete profile
-      try {
-        const profile = await getUserProfile(user.uid);
-        if (profile && profile.username && Array.isArray(profile.shows) && profile.shows.length >= 3 && profile.birthday) {
-          // Complete profile exists, go to hub
-          sessionStorage.setItem("toastMessage", "Welcome back!");
-          router.replace("/hub");
-        } else {
-          // Incomplete profile, go to finish page
-          router.replace("/auth/finish");
-        }
-      } catch {
-        // When Firestore profile reads are temporarily unavailable, avoid trapping
-        // existing users in the finish flow.
-        router.replace("/hub");
-      }
+      const { user } = await signInWithEmailAndPassword(auth, email.trim(), password);
+      if (auth.currentUser?.uid === user.uid) router.replace("/auth/complete?welcome=1");
     } catch (err: unknown) {
       const message = getFriendlyError(err);
       setFormError(message);

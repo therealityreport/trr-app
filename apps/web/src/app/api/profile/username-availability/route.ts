@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/server/auth";
-import { adminDb } from "@/lib/firebaseAdmin";
+import { usernameAvailability } from "@/lib/server/profile-repository";
 import { validateUsername } from "@/lib/validation/user";
 
 export const dynamic = "force-dynamic";
@@ -8,10 +8,9 @@ export async function GET(request: NextRequest) {
   try {
     const user = await requireUser(request);
     if (user.provider !== "firebase") return NextResponse.json({ error: "Firebase sign-in required" }, { status: 403 });
-    const username = request.nextUrl.searchParams.get("username") ?? "";
+    const username = (request.nextUrl.searchParams.get("username") ?? "").trim().toLowerCase();
     if (validateUsername(username)) return NextResponse.json({ error: "Invalid username" }, { status: 400 });
-    const matches = await adminDb.collection("users").where("username", "==", username).limit(2).get();
-    return NextResponse.json({ available: matches.docs.every((doc) => doc.id === user.uid) }, {
+    return NextResponse.json({ available: await usernameAvailability(user.uid, username) }, {
       headers: { "Cache-Control": "private, no-store" },
     });
   } catch (error) {

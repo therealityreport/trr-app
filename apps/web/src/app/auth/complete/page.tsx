@@ -2,172 +2,84 @@
 
 export const dynamic = "force-dynamic";
 
-import { useEffect, useRef, Suspense } from "react";
+import { useEffect, useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { auth } from "@/lib/firebase";
-import { getUserProfile, isFirestoreUnavailableError } from "@/lib/db/users";
-import type { User } from "firebase/auth";
+import { getUserProfile } from "@/lib/db/users";
+import { isProfileComplete } from "@/lib/validation/user";
 
 function OAuthCallbackRedirectContent() {
   const router = useRouter();
   const search = useSearchParams();
-  const ran = useRef(false); // neutralize StrictMode double invoke in dev
-  const fallbackTimer = useRef<number | null>(null);
+  const hasOAuthParams = Boolean(search.get("code") || search.get("state") || search.get("oauth") || search.get("provider"));
+  const showWelcome = search.get("welcome") === "1";
+  const [attempt, setAttempt] = useState(0);
+  const [readErrorUid, setReadErrorUid] = useState<string | null>(null);
 
   useEffect(() => {
-    if (ran.current) return;
-    ran.current = true;
-    
-    console.log("Auth complete: Setting up auth state listener");
-    
-    // Force redirect after 2 seconds if auth state doesn't trigger
-    const forceRedirectTimer = setTimeout(() => {
-      console.log("Auth complete: Force redirecting to finish after timeout");
-      router.replace("/auth/finish");
-    }, 2000);
-    
-    // If we already have a current user, trigger auth state change immediately
-    if (auth.currentUser) {
-      console.log("Auth complete: Current user already exists, triggering immediate profile check");
-      clearTimeout(forceRedirectTimer);
-      // Don't return here - let the auth state handler below run the profile check
-      setTimeout(() => {
-        // Manually trigger the auth state handler with current user
-        const handleUser = async (u: User | null) => {
-          console.log("Auth complete: Processing existing user", u ? { uid: u.uid, email: u.email } : "No user");
-          
-          if (!u) {
-            router.replace("/auth/register");
-            return;
-          }
-          
-          // Check if user has a complete profile
-          try {
-            console.log("Auth complete: Checking user profile for uid:", u.uid);
-            const profile = await getUserProfile(u.uid);
-            console.log("Auth complete: Profile check result:", profile);
-            
-            // More explicit check for complete profile
-            const hasUsername = profile && profile.username && profile.username.trim().length > 0;
-            const hasShows = profile && profile.shows && Array.isArray(profile.shows) && profile.shows.length > 0;
-            
-            console.log("Auth complete: Profile analysis:", {
-              hasProfile: !!profile,
-              hasUsername,
-              hasShows,
-              username: profile?.username,
-              showsCount: profile?.shows?.length
-            });
-            
-            if (hasUsername && hasShows) {
-              console.log("Auth complete: User has complete profile (username + shows), redirecting to hub");
-              router.replace("/hub");
-            } else {
-              console.log("Auth complete: User needs to complete profile, redirecting to finish");
-              router.replace("/auth/finish");
-            }
-          } catch (error) {
-            console.error("Auth complete: Profile check failed with error:", error);
-            if (isFirestoreUnavailableError(error)) {
-              console.log("Auth complete: Firestore profile lookup unavailable, allowing hub fallback");
-              router.replace("/hub");
-            } else {
-              // Fallback to finish page for non-Firestore errors.
-              console.log("Auth complete: Profile check failed, redirecting to finish page");
-              router.replace("/auth/finish");
-            }
-          }
-        };
-        
-        handleUser(auth.currentUser);
-      }, 100);
-      return;
-    }
-    
-    const unsub = auth.onAuthStateChanged(async (u) => {
-      console.log("Auth complete: Auth state changed", u ? { uid: u.uid, email: u.email } : "No user");
-      
-      // Clear the force redirect timer since auth state fired
-      clearTimeout(forceRedirectTimer);
-      
-      if (!u) {
-        // Fail fast: if no OAuth params and no session, bounce to register.
-        // If OAuth params present, allow a short grace period for Firebase to hydrate.
-        const hasOAuthParams = !!(search.get("code") || search.get("state") || search.get("oauth") || search.get("provider"));
-        if (!hasOAuthParams) {
-          console.log("Auth complete: No user, no OAuth params, redirecting to register");
-          router.replace("/auth/register");
-        } else {
-          console.log("Auth complete: No user but OAuth params present, setting fallback timer");
-          if (fallbackTimer.current == null) {
-            fallbackTimer.current = window.setTimeout(() => {
-              console.log("Auth complete: Fallback timer expired, redirecting to register");
-              router.replace("/auth/register");
-            }, 8000);
-          }
-        }
+    let active = true;
+    let revision = 0;
+    const redirectWithoutUser = () => {
+      if (active && !auth.currentUser) router.replace("/auth/register");
+    };
+    let timer = window.setTimeout(redirectWithoutUser, hasOAuthParams ? 8000 : 2000);
+    const unsubscribe = auth.onAuthStateChanged(async (user) => {
+      if (!active) return;
+      const currentRevision = ++revision;
+      window.clearTimeout(timer);
+      setReadErrorUid(null);
+      if (!user) {
+        if (hasOAuthParams) timer = window.setTimeout(redirectWithoutUser, 8000);
+        else redirectWithoutUser();
         return;
       }
-      // We have a user; cancel any fallback redirect timer
-      if (fallbackTimer.current != null) {
-        clearTimeout(fallbackTimer.current);
-        fallbackTimer.current = null;
-      }
-      
-      console.log("Auth complete: User found", { uid: u.uid, email: u.email });
-      
-      // Check if user has a complete profile
+
+      const isActive = () => active && currentRevision === revision && auth.currentUser?.uid === user.uid;
+      let complete: boolean;
       try {
-        console.log("Auth complete: Checking user profile for uid:", u.uid);
-        const profile = await getUserProfile(u.uid);
-        console.log("Auth complete: Profile check result:", profile);
-        
-        // More explicit check for complete profile
-        const hasUsername = profile && profile.username && profile.username.trim().length > 0;
-        const hasShows = profile && profile.shows && Array.isArray(profile.shows) && profile.shows.length > 0;
-        
-        console.log("Auth complete: Profile analysis:", {
-          hasProfile: !!profile,
-          hasUsername,
-          hasShows,
-          username: profile?.username,
-          showsCount: profile?.shows?.length
-        });
-        
-        if (hasUsername && hasShows) {
-          console.log("Auth complete: User has complete profile (username + shows), redirecting to hub");
-          router.replace("/hub");
-        } else {
-          console.log("Auth complete: User needs to complete profile, redirecting to finish");
-          router.replace("/auth/finish");
-        }
-      } catch (error) {
-        console.error("Auth complete: Profile check failed with error:", error);
-        if (isFirestoreUnavailableError(error)) {
-          console.log("Auth complete: Firestore profile lookup unavailable, allowing hub fallback");
-          router.replace("/hub");
-        } else {
-          // Fallback to finish page for non-Firestore errors.
-          console.log("Auth complete: Profile check failed, redirecting to finish page");
-          router.replace("/auth/finish");
-        }
+        complete = isProfileComplete(await getUserProfile(user.uid));
+      } catch {
+        if (isActive()) setReadErrorUid(user.uid);
+        return;
       }
+      if (!isActive()) return;
+      if (complete && showWelcome) {
+        try { sessionStorage.setItem("toastMessage", "Welcome back!"); } catch {}
+      }
+      router.replace(complete ? "/hub" : "/auth/finish");
     });
+
     return () => {
-      clearTimeout(forceRedirectTimer);
-      if (fallbackTimer.current != null) clearTimeout(fallbackTimer.current);
-      unsub();
+      active = false;
+      window.clearTimeout(timer);
+      unsubscribe();
     };
-  }, [router, search]);
+  }, [router, hasOAuthParams, showWelcome, attempt]);
+
+  const readFailed = readErrorUid !== null && readErrorUid === auth.currentUser?.uid;
 
   return (
     <main className="min-h-screen bg-zinc-50 px-6 py-16 dark:bg-black flex items-center justify-center">
       <div className="mx-auto max-w-md w-full text-center">
         <div className="bg-white dark:bg-zinc-900 rounded-lg shadow-sm border border-zinc-200 dark:border-zinc-800 p-8">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-zinc-900 dark:border-zinc-100 mx-auto mb-4"></div>
-          <p className="text-sm text-zinc-600 dark:text-zinc-400">
-            Finishing sign-in…
-          </p>
+          {readFailed ? (
+            <>
+              <p role="alert" className="text-sm text-red-700 dark:text-red-300">
+                Unable to load your profile. Try again to finish signing in.
+              </p>
+              <button className="mt-4 text-sm font-semibold underline" type="button" onClick={() => {
+                setReadErrorUid(null);
+                setAttempt((previous) => previous + 1);
+              }}>
+                Retry
+              </button>
+            </>
+          ) : (
+            <>
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-zinc-900 dark:border-zinc-100 mx-auto mb-4"></div>
+              <p className="text-sm text-zinc-600 dark:text-zinc-400">Finishing sign-in…</p>
+            </>
+          )}
         </div>
       </div>
     </main>

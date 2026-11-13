@@ -46,17 +46,31 @@ function resolveSurveyFontFamily(value: unknown): string | undefined {
 
 export interface NormalizedSurveyPlayProps {
   surveySlug: string;
-  /** URL to redirect to after successful submission */
+  /** Results URL for the action shown after submission */
   successRedirect?: string;
   /** URL for the back button */
   backUrl?: string;
 }
 
-export default function NormalizedSurveyPlay({
-  surveySlug,
+export default function NormalizedSurveyPlay(props: NormalizedSurveyPlayProps) {
+  const surveyState = useNormalizedSurvey(props.surveySlug);
+  return (
+    <SurveyPlay
+      key={JSON.stringify([props.surveySlug, surveyState.generation])}
+      surveyState={surveyState}
+      successRedirect={props.successRedirect}
+      backUrl={props.backUrl}
+    />
+  );
+}
+
+function SurveyPlay({
+  surveyState,
   successRedirect,
   backUrl,
-}: NormalizedSurveyPlayProps) {
+}: Omit<NormalizedSurveyPlayProps, "surveySlug"> & {
+  surveyState: ReturnType<typeof useNormalizedSurvey>;
+}) {
   const router = useRouter();
 
   // Helper to navigate with proper typing
@@ -66,13 +80,15 @@ export default function NormalizedSurveyPlay({
   );
   const {
     loading,
+    refreshing,
     survey,
-    activeRun,
+    eligibility,
     canSubmit,
     submitting,
     error,
     submit,
-  } = useNormalizedSurvey(surveySlug);
+    refresh,
+  } = surveyState;
 
   // Local state for answers
   const [answers, setAnswers] = React.useState<Record<string, unknown>>({});
@@ -228,16 +244,60 @@ export default function NormalizedSurveyPlay({
       return input;
     });
 
-    const success = await submit(answerInputs);
-    if (success) {
+    const result = await submit(answerInputs);
+    if (result.status === "saved") {
       setSubmitted(true);
-      if (successRedirect) {
-        navigate(successRedirect);
-      }
-    } else {
-      setSubmitError(error ?? "Submission failed. Please try again.");
+    } else if (result.status === "failed") {
+      setSubmitError(result.error);
     }
-  }, [survey, answers, submit, error, successRedirect, navigate]);
+  }, [survey, answers, submit]);
+
+  const handleSubmitAnother = () => {
+    setAnswers({});
+    setSubmitError(null);
+    setSubmitted(false);
+  };
+
+  const primaryActionClass = "inline-flex items-center rounded-full bg-indigo-600 px-5 py-2 text-sm font-semibold text-white hover:bg-indigo-700";
+  const resultsAction = successRedirect && (
+    <button type="button" onClick={() => navigate(successRedirect)} className={primaryActionClass}>
+      View Results
+    </button>
+  );
+  const backAction = backUrl && (
+    <button type="button" onClick={() => navigate(backUrl)} className={primaryActionClass}>
+      Back to Surveys
+    </button>
+  );
+  const retryAction = (
+    <button type="button" onClick={() => void refresh()} className={primaryActionClass}>
+      Try Again
+    </button>
+  );
+
+  // A saved response stays confirmed even if the run closes or the allowance check fails.
+  if (submitted) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4">
+        <div className="w-full max-w-md rounded-2xl bg-white p-8 text-center shadow-lg">
+          <h1 className="text-2xl font-bold text-green-600">Thank You!</h1>
+          <p className="mt-4 text-sm text-gray-600" role="status">Your response has been submitted.</p>
+          {!successRedirect && <p className="mt-2 text-sm text-gray-600">Results are not available yet.</p>}
+          {refreshing && <p className="mt-2 text-sm text-gray-600">Checking if you can submit another response…</p>}
+          {error && <p className="mt-2 text-sm text-gray-600" role="alert">{error}</p>}
+          <div className="mt-6 flex flex-wrap justify-center gap-3">
+            {canSubmit && (
+              <button type="button" onClick={handleSubmitAnother} className={primaryActionClass}>
+                Submit Another Response
+              </button>
+            )}
+            {error && retryAction}
+            {resultsAction || backAction}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // Loading state
   if (loading) {
@@ -258,22 +318,14 @@ export default function NormalizedSurveyPlay({
         <div className="w-full max-w-md rounded-2xl bg-white p-8 text-center shadow-lg">
           <h1 className="text-2xl font-bold text-gray-900">Unable to Load Survey</h1>
           <p className="mt-4 text-sm text-gray-600">{error}</p>
-          {backUrl && (
-            <button
-              type="button"
-              onClick={() => navigate(backUrl)}
-              className="mt-6 inline-flex items-center rounded-full bg-indigo-600 px-5 py-2 text-sm font-semibold text-white hover:bg-indigo-700"
-            >
-              Go Back
-            </button>
-          )}
+          <div className="mt-6 flex flex-wrap justify-center gap-3">{retryAction}{backAction}</div>
         </div>
       </div>
     );
   }
 
   // No active run
-  if (!activeRun || !survey) {
+  if (eligibility === "no-active-run" || !survey) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4">
         <div className="w-full max-w-md rounded-2xl bg-white p-8 text-center shadow-lg">
@@ -281,38 +333,41 @@ export default function NormalizedSurveyPlay({
           <p className="mt-4 text-sm text-gray-600">
             This survey is not currently active. Please check back later.
           </p>
-          {backUrl && (
-            <button
-              type="button"
-              onClick={() => navigate(backUrl)}
-              className="mt-6 inline-flex items-center rounded-full bg-indigo-600 px-5 py-2 text-sm font-semibold text-white hover:bg-indigo-700"
-            >
-              Go Back
-            </button>
-          )}
+          {backAction && <div className="mt-6">{backAction}</div>}
         </div>
       </div>
     );
   }
 
-  // Already submitted
-  if (submitted || !canSubmit) {
+  if (eligibility === "sign-in-required") {
     return (
       <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4">
         <div className="w-full max-w-md rounded-2xl bg-white p-8 text-center shadow-lg">
-          <h1 className="text-2xl font-bold text-green-600">Thank You!</h1>
+          <h1 className="text-2xl font-bold text-gray-900">Sign In to Submit</h1>
           <p className="mt-4 text-sm text-gray-600">
-            {submitted ? "Your response has been submitted." : "You have already submitted this survey."}
+            Sign in to submit a response to {survey.title}.
           </p>
-          {successRedirect && (
-            <button
-              type="button"
-              onClick={() => navigate(successRedirect)}
-              className="mt-6 inline-flex items-center rounded-full bg-indigo-600 px-5 py-2 text-sm font-semibold text-white hover:bg-indigo-700"
-            >
-              View Results
+          <div className="mt-6 flex flex-wrap justify-center gap-3">
+            <button type="button" onClick={() => navigate("/auth/register")} className={primaryActionClass}>
+              Sign In
             </button>
-          )}
+            {backAction}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (eligibility === "limit-reached") {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4">
+        <div className="w-full max-w-md rounded-2xl bg-white p-8 text-center shadow-lg">
+          <h1 className="text-2xl font-bold text-gray-900">Response Limit Reached</h1>
+          <p className="mt-4 text-sm text-gray-600">
+            {submitError ?? "You have reached the response limit for this survey."}
+          </p>
+          <div className="mt-6 flex flex-wrap justify-center gap-3">{resultsAction || backAction}</div>
+          {!successRedirect && <p className="mt-2 text-sm text-gray-600">Results are not available yet.</p>}
         </div>
       </div>
     );
@@ -434,6 +489,7 @@ export default function NormalizedSurveyPlay({
                 question={question}
                 value={answers[question.id] ?? null}
                 onChange={(value) => handleAnswerChange(question.id, value)}
+                disabled={submitting}
                 showIconUrl={survey.show_icon_url ?? null}
               />
               {(() => {
@@ -470,9 +526,10 @@ export default function NormalizedSurveyPlay({
 
         {/* Submit section */}
         <div ref={submitSectionRef} className="mt-8 border-t border-gray-200 pt-6 sm:mt-12 sm:pt-8">
-          {submitError && (
-            <div className="mb-4 rounded-lg bg-red-50 p-4 text-center text-sm text-red-600">
-              {submitError}
+          {(submitError || error) && (
+            <div className="mb-4 rounded-lg bg-red-50 p-4 text-center text-sm text-red-600" role="alert">
+              {submitError || error}
+              {error && <div className="mt-3">{retryAction}</div>}
             </div>
           )}
 
@@ -481,7 +538,7 @@ export default function NormalizedSurveyPlay({
               ref={submitButtonRef}
               type="button"
               onClick={handleSubmit}
-              disabled={!requiredComplete || submitting}
+              disabled={!canSubmit || !requiredComplete || submitting}
               className="inline-flex items-center rounded-full bg-indigo-600 px-6 py-2.5 text-base font-semibold text-white shadow-lg transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-gray-300 sm:px-8 sm:py-3 sm:text-lg"
             >
               {submitting ? (

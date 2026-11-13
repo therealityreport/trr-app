@@ -62,7 +62,11 @@ export async function POST(
     const question = await createQuestion(
       { firebaseUid: user.uid, isAdmin: true },
       { ...body, survey_id: survey.id },
+      surveySlug,
     );
+    if (!question) {
+      return NextResponse.json({ error: "Survey not found" }, { status: 404 });
+    }
 
     return NextResponse.json({ question }, { status: 201 });
   } catch (error) {

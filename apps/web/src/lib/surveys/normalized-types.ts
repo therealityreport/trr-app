@@ -141,14 +141,19 @@ export interface SurveyWithQuestions extends NormalizedSurvey {
   };
 }
 
-/**
- * Active run response from API
- */
+export type SurveySubmissionEligibility =
+  | "sign-in-required"
+  | "no-active-run"
+  | "allowed"
+  | "limit-reached";
+
+/** Active run response from API */
 export interface ActiveRunResponse {
   activeRun: SurveyRun | null;
   survey: SurveyWithQuestions | null;
   userSubmissions: number;
   canSubmit: boolean;
+  eligibility: SurveySubmissionEligibility;
 }
 
 /**

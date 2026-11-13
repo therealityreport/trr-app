@@ -3,6 +3,8 @@
 import * as React from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowDownIcon, ArrowUpDownIcon, ArrowUpIcon, SearchIcon } from "lucide-react";
+import { InstagramCountComparison } from "@/components/admin/instagram/InstagramCountComparison";
+import { formatInstagramCount } from "@/lib/admin/instagram-counts";
 import AdminModal from "@/components/admin/AdminModal";
 import {
   AdminCommentThread,
@@ -86,11 +88,13 @@ const formatInteger = (value: number | null | undefined): string => {
 };
 
 const readFiniteNumber = (value: unknown): number | null => {
+  if (value == null || value === "" || typeof value === "boolean") return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
 };
 
 const readNonNegativeInteger = (value: unknown): number | null => {
+  if (value == null || value === "" || typeof value === "boolean") return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? Math.max(0, Math.trunc(parsed)) : null;
 };
@@ -405,7 +409,7 @@ const buildCommentThread = (items: SocialAccountProfileComment[]): SocialAccount
   return roots;
 };
 
-const toAdminCommentThreadItem = (item: SocialAccountProfileComment): AdminCommentThreadItem => {
+const toAdminCommentThreadItem = (item: SocialAccountProfileComment, instagram = false): AdminCommentThreadItem => {
   const createdAt = getCommentCreatedAt(item);
   return {
     id: getCommentPrimaryKey(item),
@@ -420,8 +424,9 @@ const toAdminCommentThreadItem = (item: SocialAccountProfileComment): AdminComme
     timestampLabel: createdAt ? formatDateTime(createdAt) : null,
     likes: getCommentLikes(item) ?? null,
     replyCount: getCommentReplies(item),
+    replyCountLabel: instagram ? `${(item.replies ?? []).length} saved replies shown · Source-reported replies: ${formatInstagramCount(item.replies_count)}` : null,
     mediaUrls: getCommentMediaUrls(item),
-    replies: (item.replies ?? []).map(toAdminCommentThreadItem),
+    replies: (item.replies ?? []).map(reply => toAdminCommentThreadItem(reply, instagram)),
   };
 };
 
@@ -515,7 +520,7 @@ export default function InstagramCommentsPostModal({
   const dialogTitle = useMemo(() => getModalTitle(platform, post), [platform, post]);
   const captionPreview = useMemo(() => getCaptionPreview(post), [post]);
   const threadedItems = useMemo(() => buildCommentThread(comments?.items ?? []), [comments?.items]);
-  const commentThreadItems = useMemo(() => threadedItems.map(toAdminCommentThreadItem), [threadedItems]);
+  const commentThreadItems = useMemo(() => threadedItems.map(item => toAdminCommentThreadItem(item, platform === "instagram")), [threadedItems, platform]);
   const currentPage = comments?.pagination.page ?? page;
   const totalPages = comments?.pagination.total_pages ?? 1;
   const platformLabel = SOCIAL_ACCOUNT_PLATFORM_LABELS[platform] ?? platform;
@@ -647,7 +652,7 @@ export default function InstagramCommentsPostModal({
               <span>{platformLabel}</span>
               <span>{post?.source_id || "Unknown post"}</span>
               <span>{formatDateTime(post?.posted_at)}</span>
-              <span>{formatInteger(commentBreakdown.savedInstagramComments)} {platformLabel} rows</span>
+              <span>{platform === "instagram" ? `${formatInstagramCount((comments?.comment_counts ?? post?.comment_counts)?.instagram_saved_count)} saved Instagram comments and replies` : `${formatInteger(commentBreakdown.savedInstagramComments)} ${platformLabel} rows`}</span>
             </div>
             <p className="max-w-3xl whitespace-pre-wrap break-words text-sm leading-6 text-zinc-700">{captionPreview}</p>
             {post?.url ? (
@@ -672,7 +677,7 @@ export default function InstagramCommentsPostModal({
         </div>
 
         <div className="px-6 py-5">
-          <div className="mb-4 rounded-lg border border-zinc-200 bg-zinc-50 px-4 py-3">
+          {platform === "instagram" ? <div className="mb-4"><InstagramCountComparison counts={comments?.comment_counts ?? post?.comment_counts} />{facebookPostUrl ? <a href={facebookPostUrl} target="_blank" rel="noreferrer" className="mt-2 inline-flex text-xs font-semibold text-blue-600 hover:underline">Open Facebook post</a> : null}</div> : <div className="mb-4 rounded-lg border border-zinc-200 bg-zinc-50 px-4 py-3">
             <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Comment Makeup</p>
             <div
               aria-label={commentBreakdown.formulaLabel}
@@ -726,7 +731,7 @@ export default function InstagramCommentsPostModal({
                 </div>
               </div>
             ) : null}
-          </div>
+          </div>}
           <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <label className="relative block w-full max-w-sm">
               <span className="sr-only">Search post comments</span>

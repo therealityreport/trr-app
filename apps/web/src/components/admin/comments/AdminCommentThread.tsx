@@ -21,6 +21,7 @@ export type AdminCommentThreadItem = {
   timestampLabel?: string | null;
   likes?: number | null;
   replyCount?: number | null;
+  replyCountLabel?: string | null;
   mediaUrls?: string[];
   replies?: AdminCommentThreadItem[];
 };
@@ -182,7 +183,7 @@ function AdminCommentItem({
                 aria-expanded={isExpanded}
               >
                 {isExpanded ? <CornerDownRight aria-hidden="true" data-icon="inline-start" /> : <MessageCircle aria-hidden="true" data-icon="inline-start" />}
-                {isExpanded ? "Hide" : "Show"} {formatCount(replyCount)} {replyCount === 1 ? "reply" : "replies"}
+                {isExpanded ? "Hide" : "Show"} {item.replyCountLabel ?? `${formatCount(replyCount)} ${replyCount === 1 ? "reply" : "replies"}`}
               </Button>
             ) : null}
           </nav>

@@ -3,8 +3,8 @@ import type { AdminApiReferenceInventory } from "@/lib/admin/api-references/type
 export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
   "inventorySchemaVersion": "1.0.0",
   "generatorVersion": "1.0.0",
-  "generatedAt": "2026-10-31T07:44:57.185Z",
-  "sourceCommitSha": "88b3539e3165108365aa68d9376d097cab3b004a",
+  "generatedAt": "2026-11-08T06:16:02.711Z",
+  "sourceCommitSha": "f7afe661562f431974027930e768e9c423b1335a",
   "overrideDigest": "45a4759bd47a0c80cfa12afe9b325647fe7e09833ec1687dc2accb459108c24c",
   "nodes": [
     {
@@ -6540,7 +6540,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "set-interval",
       "sourceFile": "src/components/admin/social-week/WeekDetailPageView.tsx",
       "sourceLocator": {
-        "line": 7047,
+        "line": 7052,
         "matchedText": "setInterval"
       },
       "provenance": "static_scan",
@@ -6571,7 +6571,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "set-interval",
       "sourceFile": "src/components/admin/social-week/WeekDetailPageView.tsx",
       "sourceLocator": {
-        "line": 7055,
+        "line": 7060,
         "matchedText": "setInterval"
       },
       "provenance": "static_scan",
@@ -6835,7 +6835,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "DELETE",
       "sourceFile": "src/app/api/admin/normalized-surveys/[surveySlug]/questions/[questionId]/route.ts",
       "sourceLocator": {
-        "line": 77,
+        "line": 76,
         "symbol": "DELETE"
       },
       "provenance": "static_scan",
@@ -6903,7 +6903,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "DELETE",
       "sourceFile": "src/app/api/admin/normalized-surveys/[surveySlug]/runs/[runId]/route.ts",
       "sourceLocator": {
-        "line": 77,
+        "line": 76,
         "symbol": "DELETE"
       },
       "provenance": "static_scan",
@@ -8468,7 +8468,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/normalized-surveys/[surveySlug]/questions/[questionId]/options/route.ts",
       "sourceLocator": {
-        "line": 17,
+        "line": 16,
         "symbol": "GET"
       },
       "provenance": "static_scan",
@@ -8570,7 +8570,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/normalized-surveys/[surveySlug]/runs/[runId]/export/route.ts",
       "sourceLocator": {
-        "line": 24,
+        "line": 25,
         "symbol": "GET"
       },
       "provenance": "static_scan",
@@ -15021,7 +15021,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "POST",
       "sourceFile": "src/app/api/admin/normalized-surveys/[surveySlug]/questions/[questionId]/options/route.ts",
       "sourceLocator": {
-        "line": 45,
+        "line": 44,
         "symbol": "POST"
       },
       "provenance": "static_scan",
@@ -15055,7 +15055,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "POST",
       "sourceFile": "src/app/api/admin/normalized-surveys/[surveySlug]/runs/route.ts",
       "sourceLocator": {
-        "line": 56,
+        "line": 57,
         "symbol": "POST"
       },
       "provenance": "static_scan",
@@ -19835,6 +19835,39 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "fanoutRisk": "low"
     },
     {
+      "id": "route:POST:/api/admin/trr-api/social/twitter/search",
+      "kind": "api_route",
+      "title": "POST /api/admin/trr-api/social/twitter/search",
+      "pathPattern": "/api/admin/trr-api/social/twitter/search",
+      "symbol": "POST",
+      "sourceFile": "src/app/api/admin/trr-api/social/twitter/search/route.ts",
+      "sourceLocator": {
+        "line": 7,
+        "symbol": "POST"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:app_api_route"
+      ],
+      "usageTier": "manual",
+      "polls": false,
+      "pollCadenceMs": null,
+      "automatic": false,
+      "loadsLargeDatasets": false,
+      "usesPagination": false,
+      "returnsWideRowsOrBlobsOrRawJson": false,
+      "fansOutQueries": false,
+      "postgresAccess": "none",
+      "viewKinds": [
+        "detail"
+      ],
+      "staticOnly": false,
+      "payloadRisk": "low",
+      "fanoutRisk": "low"
+    },
+    {
       "id": "route:PUT:/api/admin/design-system/typography/assignments",
       "kind": "api_route",
       "title": "PUT /api/admin/design-system/typography/assignments",
@@ -20042,7 +20075,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "PUT",
       "sourceFile": "src/app/api/admin/normalized-surveys/[surveySlug]/questions/[questionId]/options/route.ts",
       "sourceLocator": {
-        "line": 88,
+        "line": 86,
         "symbol": "PUT"
       },
       "provenance": "static_scan",
@@ -20810,7 +20843,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/components/admin/social-week/WeekDetailPageView.tsx",
       "sourceLocator": {
-        "line": 7047,
+        "line": 7052,
         "matchedText": "setInterval"
       },
       "provenance": "static_scan",
@@ -20828,7 +20861,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/components/admin/social-week/WeekDetailPageView.tsx",
       "sourceLocator": {
-        "line": 7055,
+        "line": 7060,
         "matchedText": "setInterval"
       },
       "provenance": "static_scan",
@@ -21494,7 +21527,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/components/admin/social-week/WeekDetailPageView.tsx",
       "sourceLocator": {
-        "line": 4972,
+        "line": 4977,
         "matchedText": "`/api/admin/trr-api/shows/resolve-slug?slug=${encodeURIComponent(raw)}`"
       },
       "provenance": "static_scan",
@@ -25055,6 +25088,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
         "route:POST:/api/admin/trr-api/social/profiles/[platform]/[handle]/socialblade/refresh",
         "route:POST:/api/admin/trr-api/social/shared/ingest",
         "route:POST:/api/admin/trr-api/social/shared/review-queue/[itemId]/resolve",
+        "route:POST:/api/admin/trr-api/social/twitter/search",
         "route:PUT:/api/admin/design-system/typography/assignments",
         "route:PUT:/api/admin/design-system/typography/sets/[setId]",
         "route:PUT:/api/admin/images/[imageType]/[imageId]/archive",
@@ -25450,11 +25484,11 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "renders_view": []
     },
     "summary": {
-      "totalNodes": 614,
+      "totalNodes": 615,
       "totalEdges": 212,
       "nodesByKind": {
         "ui_surface": 61,
-        "api_route": 419,
+        "api_route": 420,
         "backend_endpoint": 129,
         "repository_surface": 1,
         "polling_loop": 4

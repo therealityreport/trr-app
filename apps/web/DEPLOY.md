@@ -1,4 +1,18 @@
-Vercel Deploy Notes
+# Vercel Deploy Notes
+
+Official production setup (verified 2026-11-09):
+
+- Vercel project `trr-app` serves the web application at `https://trr-app.vercel.app`.
+- Vercel server routes call the Modal API with server-only
+  `TRR_API_URL=https://admin-56995--trr-backend-api.modal.run`.
+- Modal workspace `admin-56995`, environment `main`, app `trr-backend-jobs`
+  hosts `serve_backend_api` and background jobs.
+- Supabase project `vwxfvzutyufrkhfgoeaa` (`trr-core`) persists application state.
+- Render is retired. No Render service or subscription is required for this path.
+
+Verify the current production deployment and its API setting before release.
+See the workspace `docs/workspace/deployment-targets.json` contract and
+`TRR-Backend/docs/deploy/modal.md` for backend deployment and readiness.
 
 Root Directory
 - Set the project Root Directory to `apps/web` in Vercel.

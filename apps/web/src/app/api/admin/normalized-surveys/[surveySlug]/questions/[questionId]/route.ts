@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
 import {
   deleteQuestion,
-  getQuestionById,
+  getQuestionForSurvey,
   listOptions,
   updateQuestion,
   type UpdateQuestionInput,
@@ -17,14 +17,14 @@ export async function GET(
 ) {
   try {
     await requireAdmin(request);
-    const { questionId } = await params;
+    const { surveySlug, questionId } = await params;
 
-    const question = await getQuestionById(questionId);
+    const question = await getQuestionForSurvey(surveySlug, questionId);
     if (!question) {
       return NextResponse.json({ error: "Question not found" }, { status: 404 });
     }
 
-    const options = await listOptions(questionId);
+    const options = await listOptions(surveySlug, questionId);
 
     return NextResponse.json({ question: { ...question, options } });
   } catch (error) {
@@ -46,19 +46,18 @@ export async function PUT(
 ) {
   try {
     const user = await requireAdmin(request);
-    const { questionId } = await params;
+    const { surveySlug, questionId } = await params;
     const body = (await request.json()) as UpdateQuestionInput;
-
-    const existing = await getQuestionById(questionId);
-    if (!existing) {
-      return NextResponse.json({ error: "Question not found" }, { status: 404 });
-    }
 
     const question = await updateQuestion(
       { firebaseUid: user.uid, isAdmin: true },
+      surveySlug,
       questionId,
       body,
     );
+    if (!question) {
+      return NextResponse.json({ error: "Question not found" }, { status: 404 });
+    }
 
     return NextResponse.json({ question });
   } catch (error) {
@@ -80,14 +79,12 @@ export async function DELETE(
 ) {
   try {
     const user = await requireAdmin(request);
-    const { questionId } = await params;
+    const { surveySlug, questionId } = await params;
 
-    const existing = await getQuestionById(questionId);
-    if (!existing) {
+    const deleted = await deleteQuestion({ firebaseUid: user.uid, isAdmin: true }, surveySlug, questionId);
+    if (!deleted) {
       return NextResponse.json({ error: "Question not found" }, { status: 404 });
     }
-
-    await deleteQuestion({ firebaseUid: user.uid, isAdmin: true }, questionId);
 
     return NextResponse.json({ success: true });
   } catch (error) {

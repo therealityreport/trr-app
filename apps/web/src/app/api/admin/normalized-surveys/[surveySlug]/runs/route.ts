@@ -21,7 +21,7 @@ export async function GET(
   { params }: { params: Promise<{ surveySlug: string }> },
 ) {
   try {
-    await requireAdmin(request);
+    const user = await requireAdmin(request);
     const { surveySlug } = await params;
 
     const survey = await getSurveyBySlug(surveySlug);
@@ -32,10 +32,11 @@ export async function GET(
     const runs = await listRuns(survey.id);
 
     // Add response counts
+    const authContext = { firebaseUid: user.uid, isAdmin: true };
     const runsWithCounts: RunWithCount[] = await Promise.all(
       runs.map(async (run) => ({
         ...run,
-        response_count: await getResponseCount(run.id),
+        response_count: await getResponseCount(authContext, surveySlug, run.id),
       })),
     );
 
@@ -77,7 +78,11 @@ export async function POST(
     const run = await createRun(
       { firebaseUid: user.uid, isAdmin: true },
       { ...body, survey_id: survey.id },
+      surveySlug,
     );
+    if (!run) {
+      return NextResponse.json({ error: "Survey not found" }, { status: 404 });
+    }
 
     return NextResponse.json({ run }, { status: 201 });
   } catch (error) {

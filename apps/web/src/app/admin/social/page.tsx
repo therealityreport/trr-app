@@ -21,6 +21,7 @@ import {
 import ClientOnly from "@/components/ClientOnly";
 import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
 import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
+import TwitterResearchPanel from "@/components/admin/TwitterResearchPanel";
 import SocialPlatformTabIcon, {
   type SocialPlatformTabIconKey,
 } from "@/components/admin/SocialPlatformTabIcon";
@@ -3589,6 +3590,7 @@ export default function AdminSocialMediaPage() {
         </AdminGlobalHeader>
 
         <main className="mx-auto max-w-6xl px-6 py-8">
+          <TwitterResearchPanel user={user} />
           {loadingLanding ? (
             <div className="rounded-2xl border border-zinc-200 bg-white px-6 py-10 text-center text-sm text-zinc-500 shadow-sm">
               Loading social landing data…
