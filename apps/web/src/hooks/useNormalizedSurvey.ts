@@ -1,183 +1,185 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
+import type { User } from "firebase/auth";
 
 import { auth } from "@/lib/firebase";
-import type {
-  ActiveRunResponse,
-  AnswerInput,
-  SubmitResponse,
-  SurveyRun,
-  SurveyWithQuestions,
-} from "@/lib/surveys/normalized-types";
+import type { ActiveRunResponse, AnswerInput, SubmitResponse } from "@/lib/surveys/normalized-types";
 
-interface UseNormalizedSurveyReturn {
-  /** Whether the initial fetch is in progress */
-  loading: boolean;
-  /** The survey definition with questions and options */
-  survey: SurveyWithQuestions | null;
-  /** The currently active run, if any */
-  activeRun: SurveyRun | null;
-  /** Whether the current user can submit (authenticated + under max submissions) */
-  canSubmit: boolean;
-  /** Number of times the user has already submitted for this run */
-  userSubmissions: number;
-  /** Whether a submission is currently in progress */
-  submitting: boolean;
-  /** Error message if something went wrong */
-  error: string | null;
-  /** Submit answers to the survey */
-  submit: (answers: AnswerInput[]) => Promise<boolean>;
-  /** Refresh the survey data */
-  refresh: () => Promise<void>;
+type SubmissionResult =
+  | { status: "saved" }
+  | { status: "failed"; error: string }
+  | { status: "superseded" };
+
+interface SurveyScope {
+  slug: string;
+  user: User | null;
+  generation: number;
+  load: AbortController | null;
+  submission: AbortController | null;
 }
 
-/**
- * Hook for fetching and submitting to a normalized survey.
- *
- * @param surveySlug - The survey's URL slug
- * @returns Survey state and submit function
- *
- * @example
- * ```tsx
- * function SurveyPage({ surveySlug }: { surveySlug: string }) {
- *   const { loading, survey, canSubmit, submit, error } = useNormalizedSurvey(surveySlug);
- *
- *   if (loading) return <div>Loading...</div>;
- *   if (!survey) return <div>Survey not found</div>;
- *
- *   const handleSubmit = async (answers: AnswerInput[]) => {
- *     const success = await submit(answers);
- *     if (success) {
- *       // Show success message
- *     }
- *   };
- *
- *   return (
- *     <div>
- *       <h1>{survey.title}</h1>
- *       {!canSubmit && <p>You have already submitted this survey.</p>}
- *       {error && <p className="text-red-500">{error}</p>}
- *       // ... render questions
- *     </div>
- *   );
- * }
- * ```
- */
-export function useNormalizedSurvey(surveySlug: string): UseNormalizedSurveyReturn {
-  const [loading, setLoading] = useState(true);
-  const [survey, setSurvey] = useState<SurveyWithQuestions | null>(null);
-  const [activeRun, setActiveRun] = useState<SurveyRun | null>(null);
-  const [canSubmit, setCanSubmit] = useState(false);
-  const [userSubmissions, setUserSubmissions] = useState(0);
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+interface SurveyState {
+  scope: SurveyScope;
+  data: ActiveRunResponse | null;
+  loading: boolean;
+  submitting: boolean;
+  error: string | null;
+}
 
-  const fetchActiveRun = useCallback(async () => {
+const signInError = "You must be signed in to submit this survey.";
+const limitError = "You have reached the response limit for this survey.";
+
+export function useNormalizedSurvey(surveySlug: string) {
+  const [state, setState] = useState<SurveyState | null>(null);
+  const scopeRef = useRef<SurveyScope | null>(null);
+  const generationRef = useRef(0);
+
+  const isCurrent = useCallback((scope: SurveyScope) => {
+    return scopeRef.current === scope && auth.currentUser?.uid === scope.user?.uid;
+  }, []);
+
+  const update = useCallback((scope: SurveyScope, patch: Partial<Omit<SurveyState, "scope">>) => {
+    setState((previous) => previous?.scope === scope ? { ...previous, ...patch } : previous);
+  }, []);
+
+  const fetchActiveRun = useCallback(async (scope: SurveyScope) => {
+    if (!isCurrent(scope)) return;
+    scope.load?.abort();
+    const controller = new AbortController();
+    scope.load = controller;
+    const isLatest = () => isCurrent(scope) && scope.load === controller && !controller.signal.aborted;
+
+    update(scope, { loading: true, error: null });
     try {
-      setLoading(true);
-      setError(null);
-
-      // Get auth token if user is logged in
-      const token = await auth.currentUser?.getIdToken();
-      const headers: HeadersInit = token
-        ? { Authorization: `Bearer ${token}` }
-        : {};
-
-      const response = await fetch(`/api/surveys/${surveySlug}/active-run`, {
-        headers,
+      const token = await scope.user?.getIdToken();
+      if (!isLatest()) return;
+      const response = await fetch(`/api/surveys/${encodeURIComponent(scope.slug)}/active-run`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        credentials: "omit",
+        signal: controller.signal,
       });
-
-      if (!response.ok) {
-        throw new Error("Failed to fetch survey");
-      }
+      if (!response.ok) throw new Error("Failed to fetch survey");
 
       const data = (await response.json()) as ActiveRunResponse;
-
-      setSurvey(data.survey);
-      setActiveRun(data.activeRun);
-      setCanSubmit(data.canSubmit);
-      setUserSubmissions(data.userSubmissions);
-    } catch (err) {
-      console.error("[useNormalizedSurvey] Failed to fetch survey", err);
-      setError(err instanceof Error ? err.message : "Failed to load survey");
+      if (isLatest()) update(scope, { data, loading: false });
+    } catch (error) {
+      if (!isLatest()) return;
+      console.error("[useNormalizedSurvey] Failed to fetch survey", error);
+      update(scope, { error: "Unable to check survey availability. Please try again.", loading: false });
     } finally {
-      setLoading(false);
+      if (scope.load === controller) scope.load = null;
     }
-  }, [surveySlug]);
+  }, [isCurrent, update]);
 
-  const submit = useCallback(
-    async (answers: AnswerInput[]): Promise<boolean> => {
-      const token = await auth.currentUser?.getIdToken();
-      if (!token) {
-        setError("You must be logged in to submit");
-        return false;
-      }
+  useLayoutEffect(() => {
+    let disposed = false;
+    const clearScope = () => {
+      const scope = scopeRef.current;
+      scopeRef.current = null;
+      scope?.load?.abort();
+      scope?.submission?.abort();
+    };
 
-      setSubmitting(true);
-      setError(null);
-
-      try {
-        const response = await fetch(`/api/surveys/${surveySlug}/submit`, {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ answers }),
-        });
-
-        const data = (await response.json()) as SubmitResponse;
-
-        if (!response.ok) {
-          if (response.status === 409) {
-            setError("You have already submitted this survey");
-            setCanSubmit(false);
-          } else if (response.status === 401) {
-            setError("You must be logged in to submit");
-          } else {
-            setError(data.error ?? "Submission failed");
-          }
-          return false;
-        }
-
-        // Success - update state
-        setCanSubmit(false);
-        setUserSubmissions((prev) => prev + 1);
-        return true;
-      } catch (err) {
-        console.error("[useNormalizedSurvey] Submission failed", err);
-        setError(err instanceof Error ? err.message : "Submission failed");
-        return false;
-      } finally {
-        setSubmitting(false);
-      }
-    },
-    [surveySlug],
-  );
-
-  // Fetch on mount and when surveySlug changes
-  useEffect(() => {
-    fetchActiveRun();
-  }, [fetchActiveRun]);
-
-  // Re-fetch when auth state changes
-  useEffect(() => {
-    const unsubscribe = auth.onAuthStateChanged(() => {
-      fetchActiveRun();
+    // Firebase calls this once when the initial auth state is available.
+    const unsubscribe = auth.onAuthStateChanged((user) => {
+      if (disposed || (scopeRef.current && scopeRef.current.user?.uid === user?.uid)) return;
+      clearScope();
+      const scope: SurveyScope = {
+        slug: surveySlug,
+        user,
+        generation: ++generationRef.current,
+        load: null,
+        submission: null,
+      };
+      scopeRef.current = scope;
+      setState({ scope, data: null, loading: true, submitting: false, error: null });
+      void fetchActiveRun(scope);
     });
-    return unsubscribe;
-  }, [fetchActiveRun]);
+
+    return () => {
+      disposed = true;
+      clearScope();
+      unsubscribe();
+    };
+  }, [surveySlug, fetchActiveRun]);
+
+  const current = state?.scope.slug === surveySlug ? state : null;
+  const scope = current?.scope;
+  const data = current?.data;
+  const canSubmit = Boolean(data?.canSubmit && !current?.loading && !current?.error);
+
+  const refresh = useCallback(async () => {
+    if (scope) await fetchActiveRun(scope);
+  }, [scope, fetchActiveRun]);
+
+  const submit = useCallback(async (answers: AnswerInput[]): Promise<SubmissionResult> => {
+    const submissionScope = scopeRef.current;
+    if (submissionScope !== scope) return { status: "superseded" };
+    if (!submissionScope || !isCurrent(submissionScope)) return { status: "superseded" };
+    if (!submissionScope.user) return { status: "failed", error: signInError };
+    if (!canSubmit) {
+      return {
+        status: "failed",
+        error: data?.eligibility === "limit-reached" ? limitError : "Survey submissions are not available right now.",
+      };
+    }
+    if (submissionScope.submission) return { status: "superseded" };
+
+    const controller = new AbortController();
+    submissionScope.submission = controller;
+    update(submissionScope, { submitting: true });
+    try {
+      const token = await submissionScope.user.getIdToken();
+      if (!isCurrent(submissionScope)) return { status: "superseded" };
+      if (!token) return { status: "failed", error: signInError };
+
+      const response = await fetch(`/api/surveys/${encodeURIComponent(submissionScope.slug)}/submit`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        credentials: "omit",
+        signal: controller.signal,
+        body: JSON.stringify({ answers }),
+      });
+      if (!isCurrent(submissionScope)) return { status: "superseded" };
+      if (response.status === 409) {
+        submissionScope.load?.abort();
+        if (data) update(submissionScope, { data: { ...data, canSubmit: false, eligibility: "limit-reached" }, loading: false });
+        return { status: "failed", error: limitError };
+      }
+      if (response.status === 401) return { status: "failed", error: signInError };
+
+      const result = (await response.json()) as SubmitResponse;
+      if (!isCurrent(submissionScope)) return { status: "superseded" };
+      if (!response.ok || !result.success) {
+        return { status: "failed", error: result.error ?? "Submission failed. Please try again." };
+      }
+
+      // The POST succeeded. Check the updated allowance separately from the save.
+      void fetchActiveRun(submissionScope);
+      return { status: "saved" };
+    } catch (error) {
+      if (!isCurrent(submissionScope)) return { status: "superseded" };
+      console.error("[useNormalizedSurvey] Submission failed", error);
+      return { status: "failed", error: "Unable to submit your response. Please try again." };
+    } finally {
+      submissionScope.submission = null;
+      if (isCurrent(submissionScope)) update(submissionScope, { submitting: false });
+    }
+  }, [canSubmit, data, fetchActiveRun, isCurrent, scope, update]);
 
   return {
-    loading,
-    survey,
-    activeRun,
+    generation: scope?.generation,
+    loading: !current || (current.loading && !data),
+    refreshing: Boolean(current?.loading && data),
+    survey: data?.survey ?? null,
+    activeRun: data?.activeRun ?? null,
+    eligibility: data?.eligibility ?? null,
     canSubmit,
-    userSubmissions,
-    submitting,
-    error,
+    userSubmissions: data?.userSubmissions ?? 0,
+    submitting: current?.submitting ?? false,
+    error: current?.error ?? null,
     submit,
-    refresh: fetchActiveRun,
+    refresh,
   };
 }

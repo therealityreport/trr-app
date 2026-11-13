@@ -1,20 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { requireAdmin } from "@/lib/server/auth";
+import { encodeCsvRow } from "@/lib/server/surveys/csv";
 import { getSurveyWithQuestions } from "@/lib/server/surveys/survey-run-repository";
 import {
-  getRunById,
+  getRunForSurvey,
   listResponsesWithAnswers,
 } from "@/lib/server/surveys/normalized-survey-admin-repository";
 
 export const dynamic = "force-dynamic";
 
-function csvCell(value: unknown): string {
-  if (value === null || value === undefined) return "";
-  const str = typeof value === "string" ? value : String(value);
-  const needsQuotes = /[",\n]/.test(str);
-  if (!needsQuotes) return str;
-  return `"${str.replace(/"/g, '""')}"`;
+function serializeMatrixAnswer(value: unknown): string {
+  return JSON.stringify(value, (_key, entry: unknown) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return entry;
+    const record = entry as Record<string, unknown>;
+    return Object.fromEntries(Object.keys(record).sort().map((key) => [key, record[key]]));
+  });
 }
 
 function sanitizeFilenamePart(value: string): string {
@@ -34,13 +35,14 @@ export async function GET(
       return NextResponse.json({ error: "Survey not found" }, { status: 404 });
     }
 
-    const run = await getRunById(runId);
+    const run = await getRunForSurvey(surveySlug, runId);
     if (!run || run.survey_id !== survey.id) {
       return NextResponse.json({ error: "Run not found" }, { status: 404 });
     }
 
     const responses = await listResponsesWithAnswers(
       { firebaseUid: user.uid, isAdmin: true },
+      surveySlug,
       runId,
     );
 
@@ -67,7 +69,7 @@ export async function GET(
       ...questionOrder.map((id) => questionKeyById.get(id) ?? id),
     ];
 
-    const lines: string[] = [header.join(",")];
+    const lines = [encodeCsvRow(header)];
 
     for (const response of responses) {
       const answerByQuestionId = new Map(response.answers.map((a) => [a.question_id, a]));
@@ -96,8 +98,12 @@ export async function GET(
           return answer.text_value ?? "";
         }
 
+        if (questionType === "likert" && answer.json_value !== null && answer.json_value !== undefined) {
+          return serializeMatrixAnswer(answer.json_value);
+        }
+
         if (questionType === "numeric" || questionType === "likert") {
-          return typeof answer.numeric_value === "number" ? String(answer.numeric_value) : "";
+          return answer.numeric_value ?? "";
         }
 
         if (questionType === "multi_choice" || questionType === "ranking") {
@@ -119,14 +125,13 @@ export async function GET(
 
         // Unknown type: fall back to whatever is populated.
         if (answer.text_value) return answer.text_value;
-        if (typeof answer.numeric_value === "number") return String(answer.numeric_value);
+        if (typeof answer.numeric_value === "number") return answer.numeric_value;
         if (answer.option_id) return optionTextById.get(answer.option_id) ?? answer.option_id;
         if (answer.json_value !== null && answer.json_value !== undefined) return JSON.stringify(answer.json_value);
         return "";
       });
 
-      const row = [...baseCells, ...answerCells].map(csvCell).join(",");
-      lines.push(row);
+      lines.push(encodeCsvRow([...baseCells, ...answerCells]));
     }
 
     const timestamp = new Date().toISOString().replace(/[:T]/g, "-").split(".")[0];

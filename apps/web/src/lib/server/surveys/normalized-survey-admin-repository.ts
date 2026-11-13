@@ -1,5 +1,6 @@
 import "server-only";
 
+import type { PoolClient } from "pg";
 import { query, withAuthTransaction, type AuthContext } from "@/lib/server/postgres";
 import { t } from "./survey-schema";
 import type {
@@ -139,11 +140,16 @@ export async function listQuestions(surveyId: string): Promise<SurveyQuestion[]>
   return result.rows;
 }
 
-export async function getQuestionById(questionId: string): Promise<SurveyQuestion | null> {
-  const result = await query<SurveyQuestion>(
-    `SELECT * FROM ${t("questions")} WHERE id = $1`,
-    [questionId],
-  );
+const questionInSurvey = `id = $2 AND survey_id = (SELECT id FROM ${t("surveys")} WHERE slug = $1)`;
+
+export async function getQuestionForSurvey(
+  surveySlug: string,
+  questionId: string,
+  client?: PoolClient,
+): Promise<SurveyQuestion | null> {
+  const sql = `SELECT * FROM ${t("questions")} WHERE ${questionInSurvey}`;
+  const values = [surveySlug, questionId];
+  const result = client ? await client.query<SurveyQuestion>(sql, values) : await query<SurveyQuestion>(sql, values);
   return result.rows[0] ?? null;
 }
 
@@ -157,10 +163,17 @@ export interface CreateQuestionInput {
   config?: Record<string, unknown>;
 }
 
+export function createQuestion(authContext: AuthContext, input: CreateQuestionInput): Promise<SurveyQuestion>;
+export function createQuestion(
+  authContext: AuthContext,
+  input: CreateQuestionInput,
+  surveySlug: string,
+): Promise<SurveyQuestion | null>;
 export async function createQuestion(
   authContext: AuthContext,
   input: CreateQuestionInput,
-): Promise<SurveyQuestion> {
+  surveySlug?: string,
+): Promise<SurveyQuestion | null> {
   return withAuthTransaction(authContext, async (client) => {
     // Get next display_order if not provided
     let displayOrder = input.display_order;
@@ -174,7 +187,8 @@ export async function createQuestion(
 
     const result = await client.query<SurveyQuestion>(
       `INSERT INTO ${t("questions")} (survey_id, question_key, question_text, question_type, display_order, is_required, config)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       SELECT id, $2, $3, $4, $5, $6, $7 FROM ${t("surveys")}
+       WHERE id = $1 AND ($8::text IS NULL OR slug = $8)
        RETURNING *`,
       [
         input.survey_id,
@@ -184,9 +198,12 @@ export async function createQuestion(
         displayOrder,
         input.is_required ?? false,
         JSON.stringify(input.config ?? {}),
+        surveySlug ?? null,
       ],
     );
-    return result.rows[0];
+    const question = result.rows[0];
+    if (!question && surveySlug === undefined) throw new Error("Survey not found");
+    return question ?? null;
   });
 }
 
@@ -201,13 +218,14 @@ export interface UpdateQuestionInput {
 
 export async function updateQuestion(
   authContext: AuthContext,
+  surveySlug: string,
   questionId: string,
   input: UpdateQuestionInput,
 ): Promise<SurveyQuestion | null> {
   return withAuthTransaction(authContext, async (client) => {
     const sets: string[] = [];
-    const values: unknown[] = [];
-    let paramIndex = 1;
+    const values: unknown[] = [surveySlug, questionId];
+    let paramIndex = 3;
 
     if (input.question_key !== undefined) {
       sets.push(`question_key = $${paramIndex++}`);
@@ -235,12 +253,11 @@ export async function updateQuestion(
     }
 
     if (sets.length === 0) {
-      return getQuestionById(questionId);
+      return getQuestionForSurvey(surveySlug, questionId, client);
     }
 
-    values.push(questionId);
     const result = await client.query<SurveyQuestion>(
-      `UPDATE ${t("questions")} SET ${sets.join(", ")} WHERE id = $${paramIndex} RETURNING *`,
+      `UPDATE ${t("questions")} SET ${sets.join(", ")} WHERE ${questionInSurvey} RETURNING *`,
       values,
     );
     return result.rows[0] ?? null;
@@ -249,12 +266,13 @@ export async function updateQuestion(
 
 export async function deleteQuestion(
   authContext: AuthContext,
+  surveySlug: string,
   questionId: string,
 ): Promise<boolean> {
   return withAuthTransaction(authContext, async (client) => {
     const result = await client.query(
-      `DELETE FROM ${t("questions")} WHERE id = $1`,
-      [questionId],
+      `DELETE FROM ${t("questions")} WHERE ${questionInSurvey}`,
+      [surveySlug, questionId],
     );
     return (result.rowCount ?? 0) > 0;
   });
@@ -264,21 +282,18 @@ export async function deleteQuestion(
 // OPTIONS CRUD
 // ============================================================================
 
-export async function listOptions(questionId: string): Promise<QuestionOption[]> {
+const scopedQuestionId = `(SELECT id FROM ${t("questions")} WHERE ${questionInSurvey})`;
+const optionInQuestion = `question_id = ${scopedQuestionId}`;
+
+export async function listOptions(surveySlug: string, questionId: string): Promise<QuestionOption[]> {
   const result = await query<QuestionOption>(
-    `SELECT * FROM ${t("options")} WHERE question_id = $1 ORDER BY display_order`,
-    [questionId],
+    `SELECT * FROM ${t("options")} WHERE ${optionInQuestion} ORDER BY display_order`,
+    [surveySlug, questionId],
   );
   return result.rows;
 }
 
-export async function getOptionById(optionId: string): Promise<QuestionOption | null> {
-  const result = await query<QuestionOption>(
-    `SELECT * FROM ${t("options")} WHERE id = $1`,
-    [optionId],
-  );
-  return result.rows[0] ?? null;
-}
+const scopedOption = `id = $3 AND ${optionInQuestion}`;
 
 export interface CreateOptionInput {
   question_id: string;
@@ -288,10 +303,17 @@ export interface CreateOptionInput {
   metadata?: Record<string, unknown>;
 }
 
+export function createOption(authContext: AuthContext, input: CreateOptionInput): Promise<QuestionOption>;
+export function createOption(
+  authContext: AuthContext,
+  input: CreateOptionInput,
+  surveySlug: string,
+): Promise<QuestionOption | null>;
 export async function createOption(
   authContext: AuthContext,
   input: CreateOptionInput,
-): Promise<QuestionOption> {
+  surveySlug?: string,
+): Promise<QuestionOption | null> {
   return withAuthTransaction(authContext, async (client) => {
     let displayOrder = input.display_order;
     if (displayOrder === undefined) {
@@ -304,7 +326,8 @@ export async function createOption(
 
     const result = await client.query<QuestionOption>(
       `INSERT INTO ${t("options")} (question_id, option_key, option_text, display_order, metadata)
-       VALUES ($1, $2, $3, $4, $5)
+       SELECT id, $2, $3, $4, $5 FROM ${t("questions")}
+       WHERE id = $1 AND ($6::text IS NULL OR survey_id = (SELECT id FROM ${t("surveys")} WHERE slug = $6))
        RETURNING *`,
       [
         input.question_id,
@@ -312,9 +335,12 @@ export async function createOption(
         input.option_text,
         displayOrder,
         JSON.stringify(input.metadata ?? {}),
+        surveySlug ?? null,
       ],
     );
-    return result.rows[0];
+    const option = result.rows[0];
+    if (!option && surveySlug === undefined) throw new Error("Question not found");
+    return option ?? null;
   });
 }
 
@@ -327,13 +353,15 @@ export interface UpdateOptionInput {
 
 export async function updateOption(
   authContext: AuthContext,
+  surveySlug: string,
+  questionId: string,
   optionId: string,
   input: UpdateOptionInput,
 ): Promise<QuestionOption | null> {
   return withAuthTransaction(authContext, async (client) => {
     const sets: string[] = [];
-    const values: unknown[] = [];
-    let paramIndex = 1;
+    const values: unknown[] = [surveySlug, questionId, optionId];
+    let paramIndex = 4;
 
     if (input.option_key !== undefined) {
       sets.push(`option_key = $${paramIndex++}`);
@@ -353,12 +381,15 @@ export async function updateOption(
     }
 
     if (sets.length === 0) {
-      return getOptionById(optionId);
+      const result = await client.query<QuestionOption>(
+        `SELECT * FROM ${t("options")} WHERE ${scopedOption}`,
+        values,
+      );
+      return result.rows[0] ?? null;
     }
 
-    values.push(optionId);
     const result = await client.query<QuestionOption>(
-      `UPDATE ${t("options")} SET ${sets.join(", ")} WHERE id = $${paramIndex} RETURNING *`,
+      `UPDATE ${t("options")} SET ${sets.join(", ")} WHERE ${scopedOption} RETURNING *`,
       values,
     );
     return result.rows[0] ?? null;
@@ -367,12 +398,14 @@ export async function updateOption(
 
 export async function deleteOption(
   authContext: AuthContext,
+  surveySlug: string,
+  questionId: string,
   optionId: string,
 ): Promise<boolean> {
   return withAuthTransaction(authContext, async (client) => {
     const result = await client.query(
-      `DELETE FROM ${t("options")} WHERE id = $1`,
-      [optionId],
+      `DELETE FROM ${t("options")} WHERE ${scopedOption}`,
+      [surveySlug, questionId, optionId],
     );
     return (result.rowCount ?? 0) > 0;
   });
@@ -390,11 +423,17 @@ export async function listRuns(surveyId: string): Promise<SurveyRun[]> {
   return result.rows;
 }
 
-export async function getRunById(runId: string): Promise<SurveyRun | null> {
-  const result = await query<SurveyRun>(
-    `SELECT * FROM ${t("survey_runs")} WHERE id = $1`,
-    [runId],
-  );
+const runInSurvey = `id = $2 AND survey_id = (SELECT id FROM ${t("surveys")} WHERE slug = $1)`;
+const responseInRun = `survey_run_id = (SELECT id FROM ${t("survey_runs")} WHERE ${runInSurvey})`;
+
+export async function getRunForSurvey(
+  surveySlug: string,
+  runId: string,
+  client?: PoolClient,
+): Promise<SurveyRun | null> {
+  const sql = `SELECT * FROM ${t("survey_runs")} WHERE ${runInSurvey}`;
+  const values = [surveySlug, runId];
+  const result = client ? await client.query<SurveyRun>(sql, values) : await query<SurveyRun>(sql, values);
   return result.rows[0] ?? null;
 }
 
@@ -417,14 +456,22 @@ export interface CreateRunInput {
   metadata?: Record<string, unknown>;
 }
 
+export function createRun(authContext: AuthContext, input: CreateRunInput): Promise<SurveyRun>;
+export function createRun(
+  authContext: AuthContext,
+  input: CreateRunInput,
+  surveySlug: string,
+): Promise<SurveyRun | null>;
 export async function createRun(
   authContext: AuthContext,
   input: CreateRunInput,
-): Promise<SurveyRun> {
+  surveySlug?: string,
+): Promise<SurveyRun | null> {
   return withAuthTransaction(authContext, async (client) => {
     const result = await client.query<SurveyRun>(
       `INSERT INTO ${t("survey_runs")} (survey_id, run_key, title, starts_at, ends_at, max_submissions_per_user, is_active, metadata)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       SELECT id, $2, $3, $4, $5, $6, $7, $8 FROM ${t("surveys")}
+       WHERE id = $1 AND ($9::text IS NULL OR slug = $9)
        RETURNING *`,
       [
         input.survey_id,
@@ -435,9 +482,12 @@ export async function createRun(
         input.max_submissions_per_user ?? 1,
         input.is_active ?? true,
         JSON.stringify(input.metadata ?? {}),
+        surveySlug ?? null,
       ],
     );
-    return result.rows[0];
+    const run = result.rows[0];
+    if (!run && surveySlug === undefined) throw new Error("Survey not found");
+    return run ?? null;
   });
 }
 
@@ -453,13 +503,14 @@ export interface UpdateRunInput {
 
 export async function updateRun(
   authContext: AuthContext,
+  surveySlug: string,
   runId: string,
   input: UpdateRunInput,
 ): Promise<SurveyRun | null> {
   return withAuthTransaction(authContext, async (client) => {
     const sets: string[] = [];
-    const values: unknown[] = [];
-    let paramIndex = 1;
+    const values: unknown[] = [surveySlug, runId];
+    let paramIndex = 3;
 
     if (input.run_key !== undefined) {
       sets.push(`run_key = $${paramIndex++}`);
@@ -491,12 +542,11 @@ export async function updateRun(
     }
 
     if (sets.length === 0) {
-      return getRunById(runId);
+      return getRunForSurvey(surveySlug, runId, client);
     }
 
-    values.push(runId);
     const result = await client.query<SurveyRun>(
-      `UPDATE ${t("survey_runs")} SET ${sets.join(", ")} WHERE id = $${paramIndex} RETURNING *`,
+      `UPDATE ${t("survey_runs")} SET ${sets.join(", ")} WHERE ${runInSurvey} RETURNING *`,
       values,
     );
     return result.rows[0] ?? null;
@@ -505,14 +555,30 @@ export async function updateRun(
 
 export async function deleteRun(
   authContext: AuthContext,
+  surveySlug: string,
   runId: string,
-): Promise<boolean> {
+): Promise<"deleted" | "not_found" | "has_responses"> {
   return withAuthTransaction(authContext, async (client) => {
-    const result = await client.query(
-      `DELETE FROM ${t("survey_runs")} WHERE id = $1`,
-      [runId],
+    const values = [surveySlug, runId];
+    // The row lock conflicts with the foreign key lock taken by response inserts.
+    // Check for responses after taking it so an insert that won the race is visible.
+    const run = await client.query(
+      `SELECT id FROM ${t("survey_runs")} WHERE ${runInSurvey} FOR UPDATE`,
+      values,
     );
-    return (result.rowCount ?? 0) > 0;
+    if (run.rows.length === 0) return "not_found";
+
+    const responses = await client.query(
+      `SELECT 1 FROM ${t("responses")} WHERE ${responseInRun} LIMIT 1`,
+      values,
+    );
+    if (responses.rows.length > 0) return "has_responses";
+
+    const result = await client.query(
+      `DELETE FROM ${t("survey_runs")} WHERE ${runInSurvey}`,
+      values,
+    );
+    return result.rowCount ? "deleted" : "not_found";
   });
 }
 
@@ -526,12 +592,13 @@ export interface ResponseWithAnswers extends SurveyResponse {
 
 export async function listResponses(
   authContext: AuthContext,
+  surveySlug: string,
   runId: string,
 ): Promise<SurveyResponse[]> {
   return withAuthTransaction(authContext, async (client) => {
     const result = await client.query<SurveyResponse>(
-      `SELECT * FROM ${t("responses")} WHERE survey_run_id = $1 ORDER BY created_at DESC`,
-      [runId],
+      `SELECT * FROM ${t("responses")} WHERE ${responseInRun} ORDER BY created_at DESC`,
+      [surveySlug, runId],
     );
     return result.rows;
   });
@@ -539,12 +606,14 @@ export async function listResponses(
 
 export async function getResponseWithAnswers(
   authContext: AuthContext,
+  surveySlug: string,
+  runId: string,
   responseId: string,
 ): Promise<ResponseWithAnswers | null> {
   return withAuthTransaction(authContext, async (client) => {
     const responseResult = await client.query<SurveyResponse>(
-      `SELECT * FROM ${t("responses")} WHERE id = $1`,
-      [responseId],
+      `SELECT * FROM ${t("responses")} WHERE id = $3 AND ${responseInRun}`,
+      [surveySlug, runId, responseId],
     );
     const response = responseResult.rows[0];
     if (!response) return null;
@@ -563,12 +632,13 @@ export async function getResponseWithAnswers(
 
 export async function listResponsesWithAnswers(
   authContext: AuthContext,
+  surveySlug: string,
   runId: string,
 ): Promise<ResponseWithAnswers[]> {
   return withAuthTransaction(authContext, async (client) => {
     const responseResult = await client.query<SurveyResponse>(
-      `SELECT * FROM ${t("responses")} WHERE survey_run_id = $1 ORDER BY created_at DESC`,
-      [runId],
+      `SELECT * FROM ${t("responses")} WHERE ${responseInRun} ORDER BY created_at DESC`,
+      [surveySlug, runId],
     );
     const responses = responseResult.rows;
     if (responses.length === 0) return [];
@@ -593,10 +663,16 @@ export async function listResponsesWithAnswers(
   });
 }
 
-export async function getResponseCount(runId: string): Promise<number> {
-  const result = await query<{ count: string }>(
-    `SELECT COUNT(*)::text as count FROM ${t("responses")} WHERE survey_run_id = $1`,
-    [runId],
-  );
-  return parseInt(result.rows[0]?.count ?? "0", 10);
+export async function getResponseCount(
+  authContext: AuthContext,
+  surveySlug: string,
+  runId: string,
+): Promise<number> {
+  return withAuthTransaction(authContext, async (client) => {
+    const result = await client.query<{ count: string }>(
+      `SELECT COUNT(*)::text as count FROM ${t("responses")} WHERE ${responseInRun}`,
+      [surveySlug, runId],
+    );
+    return parseInt(result.rows[0]?.count ?? "0", 10);
+  });
 }

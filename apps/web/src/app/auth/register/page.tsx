@@ -2,19 +2,27 @@
 
 export const dynamic = "force-dynamic";
 
-import { useEffect, useState, Suspense } from "react";
+import { useEffect, useRef, useState, Suspense } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { auth, signInWithGoogle } from "@/lib/firebase";
 import { createUserWithEmailAndPassword, signInWithEmailAndPassword, OAuthProvider, signInWithPopup, updateProfile } from "firebase/auth";
-import { upsertUserProfile, getUserProfile, checkUserExists, isFirestoreUnavailableError } from "@/lib/db/users";
+import { upsertUserProfile, getUserProfile, checkUserExists } from "@/lib/db/users";
 import { buildTypographyDataAttributes } from "@/lib/typography/runtime";
-import { validateEmail, validatePassword } from "@/lib/validation/user";
+import { isProfileComplete, validateEmail, validatePassword } from "@/lib/validation/user";
 
 const ENABLE_APPLE = (process.env.NEXT_PUBLIC_ENABLE_APPLE ?? "false").toLowerCase() === "true";
 
 type FieldErrors = Partial<Record<"email" | "password" | "birthday" | "name" | "confirm", string>>;
+
+function clearRegistrationDraft() {
+  try {
+    for (const key of ["reg_stage", "reg_email", "reg_name", "reg_birthday"]) {
+      sessionStorage.removeItem(key);
+    }
+  } catch {}
+}
 
 function RegisterContent() {
   const router = useRouter();
@@ -32,14 +40,23 @@ function RegisterContent() {
   const [pending, setPending] = useState(false);
   const [errors, setErrors] = useState<FieldErrors>({});
   const [formError, setFormError] = useState<string | null>(null);
+  const [createdUid, setCreatedUid] = useState<string | null>(null);
+  const [profileReadAttempt, setProfileReadAttempt] = useState(0);
+  const [profileReadErrorUid, setProfileReadErrorUid] = useState<string | null>(null);
+  const submitting = useRef(false);
+  const navigating = useRef(false);
+
+  function continueSignIn(path: "/auth/complete" | "/auth/complete?welcome=1" | "/auth/finish") {
+    navigating.current = true;
+    router.replace(path);
+  }
 
   const checkIfUserExists = async (emailToCheck: string) => {
     try {
       const exists = await checkUserExists(emailToCheck);
       setIsExistingUser(exists);
       setStage(exists ? "login" : "details");
-    } catch (error) {
-      console.error("Error checking user:", error);
+    } catch {
       setStage("details"); // Default to signup on error
     }
   };
@@ -74,33 +91,40 @@ function RegisterContent() {
   };
 
 
-  // Redirect signed-in users with complete profiles away from register
+  // Redirect existing signed-in users. A form submission handles its own navigation.
   useEffect(() => {
-    const unsub = auth.onAuthStateChanged(async (user) => {
-      if (user) {
-        try {
-          // Check if user has a complete profile
-          const profile = await getUserProfile(user.uid);
-          const complete = !!profile && !!profile.username && Array.isArray(profile.shows) && profile.shows.length >= 3 && !!profile.birthday;
-          
-          // Only redirect if profile is complete AND we're not already handling form submission
-          if (complete && !pending) {
-            router.replace("/hub");
-          }
-          // If profile is incomplete, let them stay on register/finish flow
-        } catch (error) {
-          console.error("Error checking profile completeness:", error);
-          // On error, don't redirect to avoid breaking the flow
-        }
+    if (pending || createdUid || navigating.current) return;
+    let active = true;
+    let revision = 0;
+    const unsubscribe = auth.onAuthStateChanged(async (user) => {
+      if (!active) return;
+      const currentRevision = ++revision;
+      setProfileReadErrorUid(null);
+      if (!user || submitting.current || navigating.current) return;
+      const isActive = () => active && currentRevision === revision && auth.currentUser?.uid === user.uid &&
+        !submitting.current && !navigating.current;
+      let complete: boolean;
+      try {
+        complete = isProfileComplete(await getUserProfile(user.uid));
+      } catch {
+        if (isActive()) setProfileReadErrorUid(user.uid);
+        return;
+      }
+      if (isActive()) {
+        navigating.current = true;
+        router.replace(complete ? "/hub" : "/auth/finish");
       }
     });
-    return unsub;
-  }, [router, pending]);
-
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, [router, pending, createdUid, profileReadAttempt]);
 
   const handleEmailSignup = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (pending) return;
+    if (submitting.current || pending || navigating.current) return;
+    submitting.current = true;
     setPending(true);
     setFormError(null);
     try {
@@ -141,67 +165,48 @@ function RegisterContent() {
         setErrors(next);
         if (Object.keys(next).length) return;
 
-        // Try to sign in
-        const signInCred = await signInWithEmailAndPassword(auth, email.trim(), password);
-        const user = signInCred.user;
-
-        // Check if they have a complete profile
-        try {
-          const profile = await getUserProfile(user.uid);
-          if (profile && profile.username && Array.isArray(profile.shows) && profile.shows.length >= 3 && profile.birthday) {
-            // Complete profile exists, go to hub
-            sessionStorage.setItem("toastMessage", "Welcome back!");
-            router.replace("/hub");
-          } else {
-            // Incomplete profile, go to finish page
-            router.replace("/auth/finish");
-          }
-        } catch (error) {
-          if (isFirestoreUnavailableError(error)) {
-            // Avoid trapping existing users in /auth/finish when Firestore lookups are down.
-            router.replace("/hub");
-          } else {
-            // If we can't get profile for another reason, assume incomplete and go to finish.
-            router.replace("/auth/finish");
-          }
-        }
+        const { user } = await signInWithEmailAndPassword(auth, email.trim(), password);
+        if (auth.currentUser?.uid === user.uid) continueSignIn("/auth/complete?welcome=1");
         return;
       }
 
-      // Details stage validation (for new user signup)
-      const emailErr = validateEmail(email);
-      const passErr = validatePassword(password);
-      const matchErr = password !== confirm ? "Passwords do not match." : null;
-      const nameErr = !name.trim() || name.trim().length < 2 ? "Enter your name." : null;
+      // On retry, the password and email have already created the account.
+      const profileName = name.trim();
       const next: FieldErrors = {};
-      if (emailErr) next.email = emailErr;
-      if (passErr) next.password = passErr;
-      if (matchErr) next.confirm = matchErr;
-      if (nameErr) next.name = nameErr;
+      if (profileName.length < 2) next.name = "Enter your name.";
+      if (!createdUid) {
+        const emailErr = validateEmail(email);
+        const passErr = validatePassword(password);
+        if (emailErr) next.email = emailErr;
+        if (passErr) next.password = passErr;
+        if (password !== confirm) next.confirm = "Passwords do not match.";
+      }
       setErrors(next);
       if (Object.keys(next).length) return;
 
-      // Create new user
-      const cred = await createUserWithEmailAndPassword(auth, email.trim(), password);
-      const user = cred.user;
-      if (name.trim()) {
-        try { await updateProfile(user, { displayName: name.trim() }); } catch {}
+      let uid = createdUid;
+      if (!uid) {
+        const { user } = await createUserWithEmailAndPassword(auth, email.trim(), password);
+        uid = user.uid;
+        setCreatedUid(uid);
+        if (auth.currentUser?.uid === uid) {
+          try { await updateProfile(user, { displayName: profileName }); } catch {}
+        }
       }
-      // Partial profile (finish later)
-      await upsertUserProfile(user.uid, {
-        uid: user.uid,
-        email: user.email ?? email.trim(),
-        name: name.trim(),
-        provider: "password",
-      });
-      sessionStorage.setItem("toastMessage", "Account created");
+      if (auth.currentUser?.uid !== uid) {
+        setFormError("Sign back in to the account you just created to save your profile.");
+        return;
+      }
       try {
-        sessionStorage.removeItem("reg_stage");
-        sessionStorage.removeItem("reg_email");
-        sessionStorage.removeItem("reg_name");
-        sessionStorage.removeItem("reg_birthday");
-      } catch {}
-      router.replace("/auth/finish");
+        await upsertUserProfile(uid, { name: profileName });
+      } catch {
+        setFormError("Your account was created. Unable to save your profile. Try again.");
+        return;
+      }
+      if (auth.currentUser?.uid !== uid) return;
+      try { sessionStorage.setItem("toastMessage", "Account created"); } catch {}
+      clearRegistrationDraft();
+      continueSignIn("/auth/finish");
     } catch (err: unknown) {
       if ((err as { code?: string })?.code === "auth/email-already-in-use") {
         setIsExistingUser(true);
@@ -212,6 +217,7 @@ function RegisterContent() {
       const message = getFriendlyError(err);
       setFormError(message);
     } finally {
+      submitting.current = false;
       setPending(false);
     }
   };
@@ -223,7 +229,7 @@ function RegisterContent() {
     try {
       const provider = new OAuthProvider("apple.com");
       await signInWithPopup(auth, provider);
-      router.replace("/auth/complete");
+      continueSignIn("/auth/complete");
     } catch (err: unknown) {
       const message = getFriendlyError(err);
       setFormError(message);
@@ -231,6 +237,18 @@ function RegisterContent() {
       setPending(false);
     }
   };
+
+  if (profileReadErrorUid !== null && profileReadErrorUid === auth.currentUser?.uid) {
+    return (
+      <main className="mx-auto max-w-md space-y-4 px-6 py-16">
+        <p role="alert">Unable to load your profile. Try again to finish signing in.</p>
+        <button type="button" className="font-semibold underline" onClick={() => {
+          setProfileReadErrorUid(null);
+          setProfileReadAttempt((previous) => previous + 1);
+        }}>Retry</button>
+      </main>
+    );
+  }
 
   return (
     <div className="min-h-screen w-full relative bg-white">
@@ -259,7 +277,7 @@ function RegisterContent() {
 
         {/* Error Display */}
         {formError && (
-          <div className="w-full border border-red-300 bg-red-50 text-red-800 rounded p-3 text-sm mb-4 transition-all duration-300">
+          <div role="alert" className="w-full border border-red-300 bg-red-50 text-red-800 rounded p-3 text-sm mb-4 transition-all duration-300">
             {formError}
           </div>
         )}
@@ -301,7 +319,7 @@ function RegisterContent() {
                       type="button" 
                       className="absolute right-3 top-3 text-sm text-gray-500 font-hamburg hover:text-black transition-colors"
                       onClick={() => {
-                        sessionStorage.clear();
+                        clearRegistrationDraft();
                         router.push("/");
                       }}
                     >
@@ -330,7 +348,7 @@ function RegisterContent() {
                       type="button" 
                       className="text-sm text-gray-500 font-hamburg hover:text-black transition-colors"
                       onClick={() => {
-                        sessionStorage.clear();
+                        clearRegistrationDraft();
                         router.push("/");
                       }}
                     >
@@ -471,11 +489,7 @@ function RegisterContent() {
               className="w-full h-full bg-transparent text-center justify-center text-white text-base font-hamburg font-bold leading-9 disabled:opacity-60 transition-all duration-200"
               disabled={pending || isTransitioning}
             >
-              {pending || isTransitioning ? "Continuing…" : (
-                stage === "email" ? "Continue" : 
-                stage === "login" ? "Log in" : 
-                "Continue"
-              )}
+              {pending || isTransitioning ? "Continuing…" : createdUid ? "Retry profile save" : stage === "login" ? "Log in" : "Continue"}
             </button>
           </div>
         </form>
@@ -502,7 +516,7 @@ function RegisterContent() {
                   setFormError(null); 
                   try { 
                     const ok = await signInWithGoogle(); 
-                    if (ok) router.replace("/auth/complete"); 
+                    if (ok) continueSignIn("/auth/complete");
                   } catch (e) { 
                     setFormError(getFriendlyError(e)); 
                   } finally { 

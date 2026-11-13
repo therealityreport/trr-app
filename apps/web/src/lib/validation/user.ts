@@ -23,6 +23,7 @@ export type UserProfile = {
   email: string | null;
   name?: string; // optional display name from email flow
   username: string; // lowercase, 3-20, [a-z0-9_]
+  usernameStatus?: "reserved" | "conflict" | "unreserved";
   birthday: string; // ISO date YYYY-MM-DD
   shows: string[];
   showRequests?: string[];
@@ -37,6 +38,10 @@ export type UserProfile = {
 };
 
 // Validation helpers return `null` when valid, or an error message string
+export function isProfileComplete(profile: Partial<UserProfile> | null | undefined): boolean {
+  return Boolean(profile?.username?.trim() && profile.birthday && Array.isArray(profile.shows) && profile.shows.length >= 3);
+}
+
 export function validateEmail(email: string): string | null {
   const e = email.trim();
   if (!e) return "Email is required.";
@@ -67,7 +72,7 @@ export function validateBirthday(birthday: string): string | null {
   if (!b) return "Birthday is required.";
   if (!/^\d{4}-\d{2}-\d{2}$/.test(b)) return "Use YYYY-MM-DD format.";
   const dt = new Date(b + "T00:00:00Z");
-  if (Number.isNaN(dt.getTime())) return "Enter a valid date.";
+  if (Number.isNaN(dt.getTime()) || dt.toISOString().slice(0, 10) !== b) return "Enter a valid date.";
   const today = new Date();
   const year = dt.getUTCFullYear();
   if (year < 1900) return "Birthday year seems too early.";

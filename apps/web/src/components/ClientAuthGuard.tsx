@@ -3,8 +3,8 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { auth } from "@/lib/firebase";
-import { getUserProfile, isFirestoreUnavailableError } from "@/lib/db/users";
-import { AuthDebugger, EnvUtils } from "@/lib/debug";
+import { getUserProfile } from "@/lib/db/users";
+import { isProfileComplete } from "@/lib/validation/user";
 
 interface ClientAuthGuardProps {
   children: React.ReactNode;
@@ -13,94 +13,72 @@ interface ClientAuthGuardProps {
 
 export default function ClientAuthGuard({ children, requireComplete = false }: ClientAuthGuardProps) {
   const router = useRouter();
-  const [loading, setLoading] = useState(true);
-  const [authorized, setAuthorized] = useState(false);
+  const [authorized, setAuthorized] = useState<{ uid: string; requireComplete: boolean } | null>(null);
+  const [readErrorUid, setReadErrorUid] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
-    AuthDebugger.log("ClientAuthGuard: Component mounted", {
-      requireComplete,
-      environment: EnvUtils.getEnvironmentInfo(),
-    });
+    let active = true;
+    let revision = 0;
+    let redirectTimer: ReturnType<typeof setTimeout> | undefined;
 
-    const unsub = auth.onAuthStateChanged(async (user) => {
-      AuthDebugger.log("ClientAuthGuard: Auth state changed", { 
-        hasUser: !!user, 
-        email: user?.email,
-        uid: user?.uid?.substring(0, 8) + '...',
-        environment: EnvUtils.isProduction() ? 'production' : 'local',
-      });
-      
+    const unsubscribe = auth.onAuthStateChanged(async (user) => {
+      if (!active) return;
+      const currentRevision = ++revision;
+      clearTimeout(redirectTimer);
+      setAuthorized(null);
+      setReadErrorUid(null);
       if (!user) {
-        AuthDebugger.log("ClientAuthGuard: No user found, preparing redirect to main page");
-        
-        // Add a delay and more logging for production debugging
-        const delay = EnvUtils.isProduction() ? 200 : 100;
-        AuthDebugger.log(`ClientAuthGuard: Waiting ${delay}ms before redirect to prevent loops`);
-        
-        setTimeout(() => {
-          AuthDebugger.log("ClientAuthGuard: Executing redirect to main page");
-          router.replace("/");
-        }, delay);
+        redirectTimer = setTimeout(() => {
+          if (active && revision === currentRevision && !auth.currentUser) router.replace("/");
+        }, process.env.NODE_ENV === "production" ? 200 : 100);
         return;
       }
 
+      const isActive = () => active && revision === currentRevision && auth.currentUser?.uid === user.uid;
       if (requireComplete) {
-        AuthDebugger.log("ClientAuthGuard: Checking profile completeness", { userEmail: user.email });
+        let complete: boolean;
         try {
-          const profile = await getUserProfile(user.uid);
-          const complete = !!profile && !!profile.username && Array.isArray(profile.shows) && profile.shows.length >= 3 && !!profile.birthday;
-          
-          AuthDebugger.log("ClientAuthGuard: Profile check completed", { 
-            complete, 
-            hasProfile: !!profile,
-            hasUsername: !!profile?.username,
-            showsCount: profile?.shows?.length || 0,
-            hasBirthday: !!profile?.birthday,
-          });
-          
-          if (!complete) {
-            AuthDebugger.log("ClientAuthGuard: Profile incomplete, redirecting to finish page");
-            router.replace("/auth/finish");
-            return;
-          }
-        } catch (error) {
-          AuthDebugger.log("ClientAuthGuard: Error checking profile completeness", { error: error?.toString() });
-          if (isFirestoreUnavailableError(error)) {
-            AuthDebugger.log("ClientAuthGuard: Firestore lookup unavailable; allowing access");
-          } else {
-            router.replace("/auth/finish");
-            return;
-          }
+          complete = isProfileComplete(await getUserProfile(user.uid));
+        } catch {
+          if (isActive()) setReadErrorUid(user.uid);
+          return;
+        }
+        if (!isActive()) return;
+        if (!complete) {
+          router.replace("/auth/finish");
+          return;
         }
       }
 
-      AuthDebugger.log("ClientAuthGuard: User authorized, rendering children");
-      setAuthorized(true);
-      setLoading(false);
+      if (isActive()) setAuthorized({ uid: user.uid, requireComplete });
     });
 
     return () => {
-      AuthDebugger.log("ClientAuthGuard: Component unmounting, cleaning up auth listener");
-      unsub();
+      active = false;
+      clearTimeout(redirectTimer);
+      unsubscribe();
     };
-  }, [router, requireComplete]);
+  }, [router, requireComplete, attempt]);
 
-  if (loading) {
-    AuthDebugger.log("ClientAuthGuard: Rendering loading state");
+  if (!authorized || authorized.uid !== auth.currentUser?.uid || authorized.requireComplete !== requireComplete) {
+    const readFailed = requireComplete && readErrorUid !== null && readErrorUid === auth.currentUser?.uid;
     return (
       <main className="min-h-screen bg-zinc-50 px-6 py-16 dark:bg-black flex items-center justify-center">
         <div className="text-center">
-          <div className="text-zinc-600 dark:text-zinc-400">Loading...</div>
+          {readFailed ? (
+            <>
+              <p role="alert" className="text-sm text-red-700 dark:text-red-300">Unable to load your profile.</p>
+              <button type="button" className="mt-4 text-sm font-semibold underline" onClick={() => {
+                setReadErrorUid(null);
+                setAttempt((previous) => previous + 1);
+              }}>Retry</button>
+            </>
+          ) : <div className="text-zinc-600 dark:text-zinc-400">Loading...</div>}
         </div>
       </main>
     );
   }
 
-  if (!authorized) {
-    AuthDebugger.log("ClientAuthGuard: Not authorized, returning null (will redirect)");
-    return null; // Will redirect
-  }
-
-  AuthDebugger.log("ClientAuthGuard: Rendering authorized content");
   return <>{children}</>;
 }

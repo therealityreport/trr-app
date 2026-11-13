@@ -264,8 +264,8 @@ export async function getUserSubmissionCount(
     const result = await client.query<{ count: string }>(
       `SELECT COUNT(*)::text as count
        FROM ${t("responses")}
-       WHERE survey_run_id = $1`,
-      [surveyRunId],
+       WHERE survey_run_id = $1 AND user_id = $2`,
+      [surveyRunId, authContext.firebaseUid],
     );
     return parseInt(result.rows[0]?.count ?? "0", 10);
   });

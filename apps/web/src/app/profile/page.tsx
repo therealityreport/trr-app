@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import type { User } from "firebase/auth";
 import { auth } from "@/lib/firebase";
-import { getUserProfile, isFirestoreUnavailableError } from "@/lib/db/users";
+import { getUserProfile } from "@/lib/db/users";
 import { buildTypographyDataAttributes } from "@/lib/typography/runtime";
 import type { UserProfile } from "@/lib/validation/user";
 
@@ -65,35 +65,39 @@ export default function ProfilePage() {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [{ loading, error }, setState] = useState<ProfileState>({ loading: true, error: null });
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
+    let active = true;
+    let revision = 0;
     const unsubscribe = auth.onAuthStateChanged(async (firebaseUser) => {
+      if (!active) return;
+      const currentRevision = ++revision;
       setUser(firebaseUser);
+      setProfile(null);
       if (!firebaseUser) {
-        setProfile(null);
         setState({ loading: false, error: null });
         return;
       }
 
+      const isActive = () => active && currentRevision === revision && auth.currentUser?.uid === firebaseUser.uid;
       setState({ loading: true, error: null });
       try {
         const record = await getUserProfile(firebaseUser.uid);
+        if (!isActive()) return;
         setProfile(record);
         setState({ loading: false, error: null });
-      } catch (err) {
-        if (isFirestoreUnavailableError(err)) {
-          console.warn("Profile page: Firestore unavailable, rendering auth-backed fallback", err);
-          setProfile(null);
-          setState({ loading: false, error: null });
-          return;
-        }
-        console.error("Profile page: failed to load profile", err);
-        setState({ loading: false, error: "Unable to load profile" });
+      } catch {
+        if (!isActive()) return;
+        setState({ loading: false, error: "Unable to load your profile." });
       }
     });
 
-    return () => unsubscribe();
-  }, []);
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, [attempt]);
 
   const shows = useMemo(() => profile?.shows ?? [], [profile]);
   const displayName = profile?.name ?? user?.displayName ?? "Reality Fan";
@@ -139,8 +143,10 @@ export default function ProfilePage() {
     () => [
       {
         id: "username",
-        label: "Username reserved",
-        helper: profile?.username ? `@${profile.username}` : "Claim yours to share your stats",
+        label: profile?.username && profile.usernameStatus === "reserved" ? "Username reserved" : "Username on file",
+        helper: profile?.username
+          ? `@${profile.username}${profile.usernameStatus === "conflict" ? " · Another account uses this username" : ""}`
+          : "Claim yours to share your stats",
         complete: Boolean(profile?.username),
       },
       {
@@ -161,7 +167,7 @@ export default function ProfilePage() {
 
   const checklistProgress = Math.round((checklist.filter((item) => item.complete).length / checklist.length) * 100);
 
-  if (loading) {
+  if (loading || (user && user.uid !== auth.currentUser?.uid)) {
     return (
       <section className="flex min-h-[50vh] items-center justify-center text-sm text-zinc-500">
         Loading your profile…
@@ -186,14 +192,20 @@ export default function ProfilePage() {
     );
   }
 
+  if (error) {
+    return (
+      <section className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+        <p role="alert">{error}</p>
+        <button type="button" className="mt-2 font-semibold underline" onClick={() => {
+          setState({ loading: true, error: null });
+          setAttempt((previous) => previous + 1);
+        }}>Retry</button>
+      </section>
+    );
+  }
+
   return (
     <section className="space-y-8">
-      {error && (
-        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
-          {error}
-        </div>
-      )}
-
       <article className="relative overflow-hidden rounded-[32px] border border-zinc-200 bg-gradient-to-br from-[#FEF9F3] via-white to-[#F2ECE1] p-6 shadow-[0_25px_80px_rgba(15,23,42,0.08)]">
         <div className="pointer-events-none absolute inset-0 opacity-20" style={{ backgroundImage: "url(/assets/icons/side-menu/background.svg)" }} aria-hidden="true" />
         <div className="pointer-events-none absolute inset-0 bg-gradient-to-tr from-white/30 via-transparent to-white/10" aria-hidden="true" />

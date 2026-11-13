@@ -4,8 +4,7 @@ import { requireAdmin } from "@/lib/server/auth";
 import {
   createOption,
   deleteOption,
-  getOptionById,
-  getQuestionById,
+  getQuestionForSurvey,
   listOptions,
   updateOption,
   type CreateOptionInput,
@@ -20,14 +19,14 @@ export async function GET(
 ) {
   try {
     await requireAdmin(request);
-    const { questionId } = await params;
+    const { surveySlug, questionId } = await params;
 
-    const question = await getQuestionById(questionId);
+    const question = await getQuestionForSurvey(surveySlug, questionId);
     if (!question) {
       return NextResponse.json({ error: "Question not found" }, { status: 404 });
     }
 
-    const options = await listOptions(questionId);
+    const options = await listOptions(surveySlug, questionId);
     return NextResponse.json({ options });
   } catch (error) {
     const message = error instanceof Error ? error.message : "failed";
@@ -48,13 +47,8 @@ export async function POST(
 ) {
   try {
     const user = await requireAdmin(request);
-    const { questionId } = await params;
+    const { surveySlug, questionId } = await params;
     const body = (await request.json()) as Omit<CreateOptionInput, "question_id">;
-
-    const question = await getQuestionById(questionId);
-    if (!question) {
-      return NextResponse.json({ error: "Question not found" }, { status: 404 });
-    }
 
     if (!body.option_key || !body.option_text) {
       return NextResponse.json(
@@ -66,7 +60,11 @@ export async function POST(
     const option = await createOption(
       { firebaseUid: user.uid, isAdmin: true },
       { ...body, question_id: questionId },
+      surveySlug,
     );
+    if (!option) {
+      return NextResponse.json({ error: "Question not found" }, { status: 404 });
+    }
 
     return NextResponse.json({ option }, { status: 201 });
   } catch (error) {
@@ -87,26 +85,28 @@ export async function POST(
 
 export async function PUT(
   request: NextRequest,
+  { params }: { params: Promise<{ surveySlug: string; questionId: string }> },
 ) {
   try {
     const user = await requireAdmin(request);
+    const { surveySlug, questionId } = await params;
     const body = (await request.json()) as UpdateOptionInput & { optionId: string };
 
     if (!body.optionId) {
       return NextResponse.json({ error: "optionId is required" }, { status: 400 });
     }
 
-    const existing = await getOptionById(body.optionId);
-    if (!existing) {
-      return NextResponse.json({ error: "Option not found" }, { status: 404 });
-    }
-
     const { optionId, ...updates } = body;
     const option = await updateOption(
       { firebaseUid: user.uid, isAdmin: true },
+      surveySlug,
+      questionId,
       optionId,
       updates,
     );
+    if (!option) {
+      return NextResponse.json({ error: "Option not found" }, { status: 404 });
+    }
 
     return NextResponse.json({ option });
   } catch (error) {
@@ -124,9 +124,11 @@ export async function PUT(
 
 export async function DELETE(
   request: NextRequest,
+  { params }: { params: Promise<{ surveySlug: string; questionId: string }> },
 ) {
   try {
     const user = await requireAdmin(request);
+    const { surveySlug, questionId } = await params;
     const url = new URL(request.url);
     const optionId = url.searchParams.get("optionId");
 
@@ -134,12 +136,15 @@ export async function DELETE(
       return NextResponse.json({ error: "optionId query param is required" }, { status: 400 });
     }
 
-    const existing = await getOptionById(optionId);
-    if (!existing) {
+    const deleted = await deleteOption(
+      { firebaseUid: user.uid, isAdmin: true },
+      surveySlug,
+      questionId,
+      optionId,
+    );
+    if (!deleted) {
       return NextResponse.json({ error: "Option not found" }, { status: 404 });
     }
-
-    await deleteOption({ firebaseUid: user.uid, isAdmin: true }, optionId);
 
     return NextResponse.json({ success: true });
   } catch (error) {

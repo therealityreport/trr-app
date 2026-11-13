@@ -1,5 +1,6 @@
 import "server-only";
 import { query } from "@/lib/server/postgres";
+import { encodeCsvRow } from "./csv";
 import { getColumnsForSurvey, getSurveyDefinition, type SurveyColumn } from "./definitions";
 import { getAllSurveys } from "./repository";
 
@@ -174,11 +175,11 @@ export async function fetchSurveyResponseById(
   return result.rows[0] ?? null;
 }
 
-function serializeValue(value: unknown): string {
+function serializeValue(value: unknown): string | number {
   if (value === null || value === undefined) return "";
+  if (typeof value === "number") return value;
   if (Array.isArray(value)) return value.join(" | ");
   if (typeof value === "object") return JSON.stringify(value);
-  if (value instanceof Date) return value.toISOString();
   return String(value);
 }
 
@@ -202,16 +203,9 @@ export async function exportSurveyResponses(
 
   const result = await query<Record<string, unknown>>(sql, values);
 
-  const lines = [headers.join(",")];
+  const lines = [encodeCsvRow(headers)];
   for (const row of result.rows) {
-    const cells = headers.map((column) => {
-      const raw = (row as Record<string, unknown>)[column];
-      const serialized = serializeValue(raw);
-      const needsQuotes = /[",\n]/.test(serialized);
-      if (!needsQuotes) return serialized;
-      return `"${serialized.replace(/"/g, '""')}"`;
-    });
-    lines.push(cells.join(","));
+    lines.push(encodeCsvRow(headers.map((column) => serializeValue(row[column]))));
   }
 
   const timestamp = new Date().toISOString().replace(/[:T]/g, "-").split(".")[0];

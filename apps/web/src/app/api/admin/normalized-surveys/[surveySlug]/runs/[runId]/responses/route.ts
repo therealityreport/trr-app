@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { requireAdmin } from "@/lib/server/auth";
 import {
-  getRunById,
+  getRunForSurvey,
   listResponses,
   getResponseWithAnswers,
 } from "@/lib/server/surveys/normalized-survey-admin-repository";
@@ -15,9 +15,9 @@ export async function GET(
 ) {
   try {
     const user = await requireAdmin(request);
-    const { runId } = await params;
+    const { surveySlug, runId } = await params;
 
-    const run = await getRunById(runId);
+    const run = await getRunForSurvey(surveySlug, runId);
     if (!run) {
       return NextResponse.json({ error: "Run not found" }, { status: 404 });
     }
@@ -29,6 +29,8 @@ export async function GET(
     if (responseId) {
       const response = await getResponseWithAnswers(
         { firebaseUid: user.uid, isAdmin: true },
+        surveySlug,
+        runId,
         responseId,
       );
       if (!response) {
@@ -40,6 +42,7 @@ export async function GET(
     // List all responses for this run
     const responses = await listResponses(
       { firebaseUid: user.uid, isAdmin: true },
+      surveySlug,
       runId,
     );
 

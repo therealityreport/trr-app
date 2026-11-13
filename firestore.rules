@@ -106,9 +106,15 @@ service cloud.firestore {
     match /users/{uid} {
       allow get: if isOwner(uid);
       allow list, delete: if false;
-      allow create: if isOwner(uid) && request.resource.data.keys().hasOnly(profileFields()) && validProfile(request.resource.data, uid, request.resource.data.keys());
+      // Username claims and profile username changes are atomic, server-owned writes.
+      allow create: if isOwner(uid) && !("username" in request.resource.data)
+        && request.resource.data.keys().hasOnly(profileFields()) && validProfile(request.resource.data, uid, request.resource.data.keys());
       allow update: if isOwner(uid) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(profileFields())
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(["username"])
         && request.resource.data.createdAt == resource.data.createdAt && validProfile(request.resource.data, uid, request.resource.data.diff(resource.data).affectedKeys());
+    }
+    match /username_claims/{username} {
+      allow read, write: if false;
     }
     function validGamePrefs(value, realitease) {
       return value is map && value.keys().hasOnly(realitease ? ["ageOrZodiac", "serviceMode"] : ["ageOrZodiac"])

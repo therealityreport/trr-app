@@ -2,10 +2,12 @@
 
 export const dynamic = "force-dynamic";
 
-import { useEffect, useMemo, useState, Suspense } from "react";
+import { useEffect, useMemo, useRef, useState, Suspense } from "react";
 import { useRouter } from "next/navigation";
+import type { User } from "firebase/auth";
 import { auth } from "@/lib/firebase";
-import { isUsernameAvailable, upsertUserProfile, isFirestoreUnavailableError } from "@/lib/db/users";
+import { getUserProfile, isUsernameAvailable, upsertUserProfile } from "@/lib/db/users";
+import { clearProfileDraft, readProfileDraft, writeProfileDraft, type ProfileDraft } from "@/lib/profile-draft";
 import { validateBirthday, validateUsername, parseShows, validateShowsMin, type UserProfile } from "@/lib/validation/user";
 import { ALL_SHOWS } from "@/lib/data/shows";
 import { COUNTRIES } from "@/lib/data/countries";
@@ -19,112 +21,141 @@ type ShowListResponse = {
   shows?: Array<{ name?: unknown }>;
 };
 
-const FINISH_SHOW_REQUESTS_STORAGE_KEY = "finish_show_requests";
+type ProfileLoad =
+  | { status: "loading" }
+  | { status: "error" }
+  | {
+      status: "ready";
+      uid: string;
+      savedUsername: string;
+      draft: ProfileDraft;
+      isActive: () => boolean;
+    };
 
-// Explicit overrides only. If a show is not listed here, render raw show name.
-const SHOW_DISPLAY_NAME_OVERRIDES: Record<string, string> = {};
+function suggestUsername(user: User): string {
+  for (const source of [user.displayName, user.email?.split("@")[0]]) {
+    if (!source) continue;
+    const candidate = source.toLowerCase().replace(/[^a-z0-9_]/g, "_");
+    if (!validateUsername(candidate)) return candidate;
+  }
+  return "";
+}
+
+function savedProfileDraft(user: User, profile: UserProfile | null): ProfileDraft {
+  return {
+    username: profile?.username || suggestUsername(user),
+    birthday: profile?.birthday ?? "",
+    gender: profile?.gender ?? "",
+    country: profile?.livesInUS ? "United States" : (profile?.country ?? ""),
+    state: profile?.state ?? "",
+    shows: parseShows(profile?.shows ?? []),
+    showRequests: parseShows(profile?.showRequests ?? []),
+    showRequestInput: "",
+  };
+}
 
 function FinishProfileContent() {
   const router = useRouter();
-  const [pending, setPending] = useState(false);
-  const [formError, setFormError] = useState<string | null>(null);
+  const [load, setLoad] = useState<ProfileLoad>({ status: "loading" });
+  const [attempt, setAttempt] = useState(0);
 
-  const [username, setUsername] = useState("");
-  const [birthday, setBirthday] = useState("");
-  const [requireBirthday, setRequireBirthday] = useState(true);
-  const [showSelections, setShowSelections] = useState<Record<string, boolean>>({});
-  const [gender, setGender] = useState("");
-  const [country, setCountry] = useState("");
-  const [state, setState] = useState("");
-  const [errors, setErrors] = useState<FieldErrors>({});
-  const [showsLoading, setShowsLoading] = useState(true);
-  const [apiShows, setApiShows] = useState<string[]>([]);
-  const [showRequestOpen, setShowRequestOpen] = useState(false);
-  const [showRequestInput, setShowRequestInput] = useState("");
-  const [showRequests, setShowRequests] = useState<string[]>([]);
-
-  // Fetch shows with alternative names from API
   useEffect(() => {
-    const fetchShows = async () => {
-      try {
-        const response = await fetch("/api/shows/list");
-        if (response.ok) {
-          const data = (await response.json().catch(() => ({}))) as ShowListResponse;
-          const names = parseShows(
-            (data.shows ?? []).flatMap((show) => (typeof show.name === "string" ? [show.name] : [])),
-          );
-          setApiShows(names);
-        }
-      } catch (error) {
-        console.error("Failed to fetch shows:", error);
-      } finally {
-        setShowsLoading(false);
-      }
-    };
-    fetchShows();
-  }, []);
-
-  // Load user and prefill hints
-  useEffect(() => {
-    const unsub = auth.onAuthStateChanged(async (u) => {
-      console.log("Finish: Auth state changed", u ? { uid: u.uid, email: u.email } : "No user");
-      if (!u) {
+    let active = true;
+    let revision = 0;
+    const unsubscribe = auth.onAuthStateChanged(async (user) => {
+      if (!active) return;
+      const currentRevision = ++revision;
+      setLoad({ status: "loading" });
+      if (!user) {
         router.replace("/auth/register");
         return;
       }
-      
-      // Check if user came from Google OAuth (has google.com provider)
-      const isGoogleUser = u.providerData.some(provider => provider.providerId === 'google.com');
-      
-      // Skip profile checking for now due to Firestore permissions issue
-      // Just set up the form with user data
-      console.log("Finish: Setting up form for user", u.email, "Google user:", isGoogleUser);
-      
-      // For Google users, we need birthday since they didn't provide it during signup
-      if (isGoogleUser) {
-        setRequireBirthday(true);
-      }
-      
-      if (u.email) {
-        const base = u.email.split("@")[0]?.toLowerCase().replace(/[^a-z0-9_]/g, "_");
-        if (base && base.length >= 3 && base.length <= 20) setUsername(base);
-      }
-      
-      // If user has displayName from Google, prefill it but we'll ask for birthday anyway
-      if (u.displayName) {
-        // Username suggestion from display name or email
-        const displayBase = u.displayName.toLowerCase().replace(/[^a-z0-9_]/g, "_");
-        if (displayBase && displayBase.length >= 3 && displayBase.length <= 20) {
-          setUsername(displayBase);
-        }
-      }
-      
-      // Restore any saved finish state
+      const uid = user.uid;
+      const isActive = () => active && revision === currentRevision && auth.currentUser?.uid === uid;
       try {
-        const sUser = sessionStorage.getItem("finish_username");
-        const sShows = sessionStorage.getItem("finish_shows");
-        const sB = sessionStorage.getItem("finish_birthday");
-        if (sUser) setUsername(sUser);
-        if (sB) setBirthday(sB);
-        if (sShows) {
-          const arr: string[] = JSON.parse(sShows);
-          const map: Record<string, boolean> = {};
-          for (const s of arr) map[s] = true;
-          setShowSelections(map);
-        }
-        const sShowRequests = sessionStorage.getItem(FINISH_SHOW_REQUESTS_STORAGE_KEY);
-        if (sShowRequests) {
-          const arr: string[] = JSON.parse(sShowRequests);
-          setShowRequests(parseShows(arr));
-        }
-      } catch {}
+        const profile = await getUserProfile(uid);
+        if (!isActive()) return;
+        setLoad({
+          status: "ready",
+          uid,
+          savedUsername: profile?.username ?? "",
+          draft: readProfileDraft(uid) ?? savedProfileDraft(user, profile),
+          isActive,
+        });
+      } catch {
+        if (isActive()) setLoad({ status: "error" });
+      }
     });
-    return () => unsub();
-  }, [router]);
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, [router, attempt]);
 
-  const selectedShows = useMemo(() => Object.keys(showSelections).filter((s) => showSelections[s]), [showSelections]);
-  const showOptions = apiShows.length > 0 ? apiShows : ALL_SHOWS;
-  
+  if (load.status === "error") {
+    return (
+      <main className="mx-auto max-w-md space-y-4 px-6 py-16">
+        <p role="alert">Unable to load your profile. Try again to continue.</p>
+        <button type="button" onClick={() => {
+          setLoad({ status: "loading" });
+          setAttempt((previous) => previous + 1);
+        }}>Retry</button>
+      </main>
+    );
+  }
+
+  return load.status === "ready" && load.isActive() ? (
+    <FinishProfileForm key={load.uid} uid={load.uid} savedUsername={load.savedUsername} initialDraft={load.draft} isActive={load.isActive} />
+  ) : <ProfileLoading />;
+}
+
+function FinishProfileForm({
+  uid, savedUsername, initialDraft, isActive,
+}: {
+  uid: string;
+  savedUsername: string;
+  initialDraft: ProfileDraft;
+  isActive: () => boolean;
+}) {
+  const router = useRouter();
+  const [pending, setPending] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [draft, setDraft] = useState(initialDraft);
+  const { username, birthday, gender, country, state, shows: selectedShows, showRequests, showRequestInput } = draft;
+  const [errors, setErrors] = useState<FieldErrors>({});
+  const [usernameAdvisory, setUsernameAdvisory] = useState<string | null>(null);
+  const [showsLoading, setShowsLoading] = useState(true);
+  const [apiShows, setApiShows] = useState<string[]>([]);
+  const [showRequestOpen, setShowRequestOpen] = useState(Boolean(showRequestInput));
+  const usernameCheck = useRef(0);
+  const saving = useRef(false);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const fetchShows = async () => {
+      try {
+        const response = await fetch("/api/shows/list", { signal: controller.signal });
+        if (response.ok) {
+          const data = (await response.json()) as ShowListResponse;
+          const names = parseShows(
+            (data.shows ?? []).flatMap((show) => (typeof show.name === "string" ? [show.name] : [])),
+          );
+          if (!controller.signal.aborted) setApiShows(names);
+        }
+      } catch {
+        // The bundled show list is available if the request fails.
+      } finally {
+        if (!controller.signal.aborted) setShowsLoading(false);
+      }
+    };
+    void fetchShows();
+    return () => controller.abort();
+  }, []);
+
+  // Keep saved selections editable even if the current show list no longer contains them.
+  const showOptions = parseShows([...(apiShows.length > 0 ? apiShows : ALL_SHOWS), ...initialDraft.shows]);
+  const isUS = country.trim() === "United States";
+
   // Calculate max date for birthday (enforce 13+ age requirement from validation)
   const maxDate = useMemo(() => {
     const today = new Date();
@@ -143,157 +174,100 @@ function FinishProfileContent() {
     "#644073", "#772149", "#DFC3D9", "#E9A6C7"
   ];
   
-  const toggleShow = (name: string) => setShowSelections((prev) => {
-    const next = { ...prev, [name]: !prev[name] };
-    try { sessionStorage.setItem("finish_shows", JSON.stringify(Object.keys(next).filter((k) => next[k]))); } catch {}
-    return next;
-  });
-
-  const deselectAll = () => setShowSelections(() => {
-    try { sessionStorage.setItem("finish_shows", JSON.stringify([])); } catch {}
-    return {};
-  });
-
-  // Use assigned display-name overrides only; otherwise keep the raw show name.
-  const getDisplayName = (showName: string): string => {
-    return SHOW_DISPLAY_NAME_OVERRIDES[showName] ?? showName;
+  const updateDraft = (patch: Partial<ProfileDraft>) => {
+    if (!isActive() || saving.current) return;
+    const next = { ...draft, ...patch };
+    setDraft(next);
+    writeProfileDraft(uid, next);
   };
+
+  const toggleShow = (name: string) => updateDraft({
+    shows: selectedShows.includes(name)
+      ? selectedShows.filter((show) => show !== name)
+      : [...selectedShows, name],
+  });
 
   const addShowRequest = () => {
-    const next = showRequestInput.trim();
-    if (!next) return;
-    setShowRequests((prev) => {
-      const merged = parseShows([...prev, next]);
-      try {
-        sessionStorage.setItem(FINISH_SHOW_REQUESTS_STORAGE_KEY, JSON.stringify(merged));
-      } catch {}
-      return merged;
-    });
-    setShowRequestInput("");
-  };
-
-  const removeShowRequest = (request: string) => {
-    setShowRequests((prev) => {
-      const next = prev.filter((item) => item !== request);
-      try {
-        sessionStorage.setItem(FINISH_SHOW_REQUESTS_STORAGE_KEY, JSON.stringify(next));
-      } catch {}
-      return next;
-    });
-  };
-
-  const checkUsernameUnique = async (u: string): Promise<string | null> => {
-    const baseErr = validateUsername(u);
-    if (baseErr) return baseErr;
-    try {
-      const available = await isUsernameAvailable(u);
-      return !available ? "That username is taken. Try another." : null;
-    } catch (error) {
-      console.warn("Username availability lookup failed", error);
-      return "Unable to check username. Please try again.";
-    }
-  };
-
-  const validateAll = async (): Promise<boolean> => {
-    const next: FieldErrors = {};
-    const userErr = await checkUsernameUnique(username);
-    if (userErr) next.username = userErr;
-    if (requireBirthday) {
-      const bErr = validateBirthday(birthday);
-      if (bErr) next.birthday = bErr;
-    }
-    const showsErr = validateShowsMin(selectedShows, 3);
-    if (showsErr) next.shows = showsErr;
-    if (!gender) next.gender = "Gender is required.";
-    if (!country) next.country = "Country is required.";
-    if (country === "United States" && !state) next.state = "State is required.";
-    setErrors(next);
-    return Object.keys(next).length === 0;
+    const requested = showRequestInput.trim();
+    if (!requested) return;
+    updateDraft({ showRequests: parseShows([...showRequests, requested]), showRequestInput: "" });
   };
 
   const onBlurUsername = async () => {
-    const e = await checkUsernameUnique(username);
-    setErrors((prev) => ({ ...prev, username: e ?? undefined }));
-    try { sessionStorage.setItem("finish_username", username); } catch {}
+    if (!isActive() || saving.current) return;
+    const revision = ++usernameCheck.current;
+    const candidate = username.trim();
+    if (savedUsername.trim() && username === savedUsername) return;
+    const error = validateUsername(candidate);
+    setErrors((previous) => ({ ...previous, username: error ?? undefined }));
+    if (error) return;
+    try {
+      const available = await isUsernameAvailable(candidate);
+      if (isActive() && revision === usernameCheck.current) {
+        setUsernameAdvisory(available ? null : "That username may be taken.");
+      }
+    } catch {
+      // Saving checks availability on the server.
+    }
   };
 
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (pending) return;
-    setPending(true);
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!isActive() || saving.current) return;
+    const submissionUid = uid;
+    usernameCheck.current += 1;
+    setUsernameAdvisory(null);
     setFormError(null);
+
+    const next: FieldErrors = {};
+    const candidate = username.trim();
+    const keepSavedUsername = Boolean(savedUsername.trim() && username === savedUsername);
+    const usernameError = keepSavedUsername ? null : validateUsername(candidate);
+    const birthdayError = validateBirthday(birthday);
+    const showsError = validateShowsMin(selectedShows);
+    if (usernameError) next.username = usernameError;
+    if (birthdayError) next.birthday = birthdayError;
+    if (showsError) next.shows = showsError;
+    if (!gender) next.gender = "Gender is required.";
+    if (!country.trim()) next.country = "Country is required.";
+    if (isUS && !state.trim()) next.state = "State is required.";
+    setErrors(next);
+    if (Object.keys(next).length) return;
+
+    saving.current = true;
+    setPending(true);
+    writeProfileDraft(submissionUid, draft);
     try {
-      const ok = await validateAll();
-      if (!ok) return;
-      const u = auth.currentUser;
-      if (!u) throw new Error("Not signed in");
-
-
-      const provider = u.providerData?.[0]?.providerId ?? "password";
-      const isUS = country.trim() === "United States";
-      const payload: Partial<UserProfile> = {
-        uid: u.uid,
-        email: u.email ?? null,
-        username: username.trim(),
-        birthday: requireBirthday ? birthday.trim() : birthday.trim(),
+      await upsertUserProfile(submissionUid, {
+        ...(keepSavedUsername ? {} : { username: candidate }),
+        birthday: birthday.trim(),
         shows: parseShows(selectedShows),
         showRequests: parseShows(showRequests),
         gender: gender.trim(),
         livesInUS: isUS,
-        ...(isUS ? { state: state.trim() } : { country: country.trim() }),
-        provider,
-      };
-
-
-      // Force token refresh to ensure fresh authentication
-      try {
-        console.log("Finish: Refreshing auth token");
-        await u.getIdToken(true); // force refresh
-        console.log("Finish: Token refreshed");
-      } catch (tokenError) {
-        console.error("Finish: Token refresh failed", tokenError);
+        state: isUS ? state.trim() : "",
+        country: isUS ? "" : country.trim(),
+      });
+      clearProfileDraft(submissionUid, draft);
+      if (!isActive()) return;
+      try { sessionStorage.setItem("toastMessage", "Profile completed"); } catch {}
+      router.replace("/hub");
+    } catch (error) {
+      if (!isActive()) return;
+      const code = (error as { code?: unknown } | null)?.code;
+      if (code === "profile/username-taken") {
+        setErrors({ username: "That username is taken. Try another." });
+      } else {
+        setFormError("Unable to save your profile. Try again.");
       }
-      
-      // The profile helper preserves the original creation timestamp.
-      try {
-        console.log("Finish: Saving profile");
-        await upsertUserProfile(u.uid, payload);
-        console.log("Finish: Profile saved successfully");
-        
-        sessionStorage.setItem("toastMessage", "Profile completed");
-        try {
-          sessionStorage.removeItem("finish_username");
-          sessionStorage.removeItem("finish_shows");
-          sessionStorage.removeItem("finish_birthday");
-          sessionStorage.removeItem(FINISH_SHOW_REQUESTS_STORAGE_KEY);
-        } catch {}
-        router.replace("/hub");
-      } catch (firestoreError) {
-        console.error("Finish: Profile write failed", firestoreError);
-        if (isFirestoreUnavailableError(firestoreError)) {
-          sessionStorage.setItem("toastMessage", "Signed in. Profile sync is temporarily unavailable.");
-          router.replace("/hub");
-        } else {
-          setFormError("Unable to save profile. Please try again.");
-        }
-      }
-    } catch (err: unknown) {
-      console.error("Finish: Error saving profile", err);
-      setFormError(getFriendlyError(err));
     } finally {
-      setPending(false);
+      saving.current = false;
+      if (isActive()) setPending(false);
     }
   };
 
   return (
-    <ClientOnly fallback={
-      <div className="min-h-screen bg-zinc-50 px-6 py-16 dark:bg-black flex items-center justify-center">
-        <div className="text-center">
-          <div className="w-8 h-8 border-2 border-neutral-900 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="font-hamburg text-sm text-gray-600 dark:text-gray-400">Loading...</p>
-        </div>
-      </div>
-    }>
+    <ClientOnly fallback={<ProfileLoading />}>
       <div className="min-h-screen bg-zinc-50 dark:bg-black">
         {/* Header */}
         <div className="w-full h-20 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-center px-4">
@@ -319,7 +293,7 @@ function FinishProfileContent() {
 
           <form onSubmit={submit} noValidate className="space-y-6">
             {formError && (
-              <div className="border border-red-300 bg-red-50 text-red-800 dark:border-red-800 dark:bg-red-900/20 dark:text-red-200 rounded-lg p-4 text-sm">
+              <div role="alert" className="border border-red-300 bg-red-50 text-red-800 dark:border-red-800 dark:bg-red-900/20 dark:text-red-200 rounded-lg p-4 text-sm">
                 {formError}
               </div>
             )}
@@ -338,36 +312,40 @@ function FinishProfileContent() {
                 autoComplete="username"
                 className="w-full h-11 bg-white dark:bg-zinc-900 rounded border border-zinc-300 dark:border-zinc-700 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-neutral-900 dark:focus:ring-neutral-100 text-zinc-900 dark:text-zinc-100"
                 value={username}
-                onChange={(e) => setUsername(e.target.value)}
+                onChange={(event) => {
+                  usernameCheck.current += 1;
+                  setUsernameAdvisory(null);
+                  setErrors((previous) => ({ ...previous, username: undefined }));
+                  updateDraft({ username: event.target.value });
+                }}
                 onBlur={onBlurUsername}
                 disabled={pending}
                 placeholder="e.g. reality_fan123"
                 required
               />
               {errors.username && <p className="text-sm text-red-600 dark:text-red-400 font-hamburg">{errors.username}</p>}
+              {usernameAdvisory && !errors.username && <p className="text-sm text-zinc-600 dark:text-zinc-400">{usernameAdvisory}</p>}
             </div>
 
-            {/* Birthday Field - Only show if required */}
-            {requireBirthday && (
-              <div className="space-y-2">
-                <label htmlFor="birthday" className="block text-zinc-900 dark:text-zinc-100 text-sm font-hamburg font-medium">
-                  Birthday
-                </label>
-                <input
-                  id="birthday"
-                  name="birthday"
-                  type="date"
-                  autoComplete="bday"
-                  className="w-full h-11 bg-white dark:bg-zinc-900 rounded border border-zinc-300 dark:border-zinc-700 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-neutral-900 dark:focus:ring-neutral-100 text-zinc-900 dark:text-zinc-100"
-                  value={birthday}
-                  onChange={(e) => setBirthday(e.target.value)}
-                  disabled={pending}
-                  max={maxDate}
-                  required
-                />
-                {errors.birthday && <p className="text-sm text-red-600 dark:text-red-400 font-hamburg">{errors.birthday}</p>}
-              </div>
-            )}
+            {/* Birthday Field */}
+            <div className="space-y-2">
+              <label htmlFor="birthday" className="block text-zinc-900 dark:text-zinc-100 text-sm font-hamburg font-medium">
+                Birthday
+              </label>
+              <input
+                id="birthday"
+                name="birthday"
+                type="date"
+                autoComplete="bday"
+                className="w-full h-11 bg-white dark:bg-zinc-900 rounded border border-zinc-300 dark:border-zinc-700 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-neutral-900 dark:focus:ring-neutral-100 text-zinc-900 dark:text-zinc-100"
+                value={birthday}
+                onChange={(event) => updateDraft({ birthday: event.target.value })}
+                disabled={pending}
+                max={maxDate}
+                required
+              />
+              {errors.birthday && <p className="text-sm text-red-600 dark:text-red-400 font-hamburg">{errors.birthday}</p>}
+            </div>
 
             {/* Gender Field */}
             <div className="space-y-2">
@@ -379,7 +357,7 @@ function FinishProfileContent() {
                 name="gender"
                 className="w-full h-11 bg-white dark:bg-zinc-900 rounded border border-zinc-300 dark:border-zinc-700 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-neutral-900 dark:focus:ring-neutral-100 text-zinc-900 dark:text-zinc-100"
                 value={gender}
-                onChange={(e) => setGender(e.target.value)}
+                onChange={(event) => updateDraft({ gender: event.target.value })}
                 disabled={pending}
                 required
               >
@@ -406,12 +384,9 @@ function FinishProfileContent() {
                 autoComplete="off"
                 className="w-full h-11 bg-white dark:bg-zinc-900 rounded border border-zinc-300 dark:border-zinc-700 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-neutral-900 dark:focus:ring-neutral-100 text-zinc-900 dark:text-zinc-100"
                 value={country}
-                onChange={(e) => {
-                  setCountry(e.target.value);
-                  // Clear state if not US
-                  if (e.target.value !== "United States") {
-                    setState("");
-                  }
+                onChange={(event) => {
+                  const next = event.target.value;
+                  updateDraft({ country: next, state: next.trim() === "United States" ? state : "" });
                 }}
                 disabled={pending}
                 placeholder="Type to search..."
@@ -426,7 +401,7 @@ function FinishProfileContent() {
             </div>
 
             {/* State Field - Only show if United States is selected */}
-            {country === "United States" && (
+            {isUS && (
               <div className="space-y-2">
                 <label htmlFor="state" className="block text-zinc-900 dark:text-zinc-100 text-sm font-hamburg font-medium">
                   State
@@ -439,7 +414,7 @@ function FinishProfileContent() {
                   autoComplete="off"
                   className="w-full h-11 bg-white dark:bg-zinc-900 rounded border border-zinc-300 dark:border-zinc-700 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-neutral-900 dark:focus:ring-neutral-100 text-zinc-900 dark:text-zinc-100"
                   value={state}
-                  onChange={(e) => setState(e.target.value)}
+                  onChange={(event) => updateDraft({ state: event.target.value })}
                   disabled={pending}
                   placeholder="Type to search..."
                   required
@@ -462,7 +437,7 @@ function FinishProfileContent() {
                 {selectedShows.length > 0 && (
                   <button
                     type="button"
-                    onClick={deselectAll}
+                    onClick={() => updateDraft({ shows: [] })}
                     disabled={pending}
                     className="text-zinc-600 dark:text-zinc-400 text-sm font-hamburg font-medium hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors duration-200 disabled:opacity-60"
                   >
@@ -479,7 +454,7 @@ function FinishProfileContent() {
                   title="Which shows do you watch?"
                   items={showOptions.map((name, index) => ({
                     id: name,
-                    label: getDisplayName(name),
+                    label: name,
                     color: showColors[index % showColors.length],
                   }))}
                   minRequired={3}
@@ -505,7 +480,7 @@ function FinishProfileContent() {
                             <input
                               type="text"
                               value={showRequestInput}
-                              onChange={(event) => setShowRequestInput(event.target.value)}
+                              onChange={(event) => updateDraft({ showRequestInput: event.target.value })}
                               placeholder="Type a show name..."
                               className="h-9 w-full rounded border border-zinc-300 bg-white px-3 text-sm text-zinc-900"
                               disabled={pending}
@@ -525,7 +500,8 @@ function FinishProfileContent() {
                                 <button
                                   key={request}
                                   type="button"
-                                  onClick={() => removeShowRequest(request)}
+                                  onClick={() => updateDraft({ showRequests: showRequests.filter((item) => item !== request) })}
+                                  disabled={pending}
                                   className="inline-flex items-center gap-1 rounded-full border border-zinc-300 bg-white px-2.5 py-1 text-xs text-zinc-700"
                                   aria-label={`Remove requested show ${request}`}
                                 >
@@ -549,7 +525,7 @@ function FinishProfileContent() {
             <button
               type="submit"
               className="w-full h-11 bg-neutral-900 dark:bg-neutral-100 text-white dark:text-neutral-900 rounded font-hamburg font-bold hover:bg-neutral-800 dark:hover:bg-neutral-200 transition-colors duration-200 disabled:opacity-60"
-              disabled={pending || selectedShows.length < 3 || !gender || !country || (country === "United States" && !state)}
+              disabled={pending || selectedShows.length < 3 || !gender || !country.trim() || (isUS && !state.trim())}
             >
               {pending ? "Saving…" : "Continue"}
             </button>
@@ -560,26 +536,21 @@ function FinishProfileContent() {
   );
 }
 
-export default function FinishProfilePage() {
+function ProfileLoading() {
   return (
-    <Suspense fallback={
-      <div className="min-h-screen bg-zinc-50 px-6 py-16 dark:bg-black flex items-center justify-center">
-        <div className="text-center">
-          <div className="w-8 h-8 border-2 border-neutral-900 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="font-hamburg text-sm text-gray-600 dark:text-gray-400">Loading...</p>
-        </div>
+    <div className="min-h-screen bg-zinc-50 px-6 py-16 dark:bg-black flex items-center justify-center">
+      <div className="text-center" role="status">
+        <div className="w-8 h-8 border-2 border-neutral-900 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+        <p className="font-hamburg text-sm text-gray-600 dark:text-gray-400">Loading your profile…</p>
       </div>
-    }>
-      <FinishProfileContent />
-    </Suspense>
+    </div>
   );
 }
 
-function getFriendlyError(err: unknown): string {
-  if (typeof err === "string") return err;
-  if (typeof err === "object" && err !== null) {
-    const message = (err as { message?: unknown }).message;
-    if (typeof message === "string") return message;
-  }
-  return "Something went wrong. Please try again.";
+export default function FinishProfilePage() {
+  return (
+    <Suspense fallback={<ProfileLoading />}>
+      <FinishProfileContent />
+    </Suspense>
+  );
 }

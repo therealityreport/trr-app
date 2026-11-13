@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
 import {
   deleteRun,
-  getRunById,
+  getRunForSurvey,
   updateRun,
   getResponseCount,
   type UpdateRunInput,
@@ -16,15 +16,15 @@ export async function GET(
   { params }: { params: Promise<{ surveySlug: string; runId: string }> },
 ) {
   try {
-    await requireAdmin(request);
-    const { runId } = await params;
+    const user = await requireAdmin(request);
+    const { surveySlug, runId } = await params;
 
-    const run = await getRunById(runId);
+    const run = await getRunForSurvey(surveySlug, runId);
     if (!run) {
       return NextResponse.json({ error: "Run not found" }, { status: 404 });
     }
 
-    const responseCount = await getResponseCount(runId);
+    const responseCount = await getResponseCount({ firebaseUid: user.uid, isAdmin: true }, surveySlug, runId);
 
     return NextResponse.json({ run: { ...run, response_count: responseCount } });
   } catch (error) {
@@ -46,19 +46,18 @@ export async function PUT(
 ) {
   try {
     const user = await requireAdmin(request);
-    const { runId } = await params;
+    const { surveySlug, runId } = await params;
     const body = (await request.json()) as UpdateRunInput;
-
-    const existing = await getRunById(runId);
-    if (!existing) {
-      return NextResponse.json({ error: "Run not found" }, { status: 404 });
-    }
 
     const run = await updateRun(
       { firebaseUid: user.uid, isAdmin: true },
+      surveySlug,
       runId,
       body,
     );
+    if (!run) {
+      return NextResponse.json({ error: "Run not found" }, { status: 404 });
+    }
 
     return NextResponse.json({ run });
   } catch (error) {
@@ -80,23 +79,19 @@ export async function DELETE(
 ) {
   try {
     const user = await requireAdmin(request);
-    const { runId } = await params;
+    const { surveySlug, runId } = await params;
 
-    const existing = await getRunById(runId);
-    if (!existing) {
+    const result = await deleteRun({ firebaseUid: user.uid, isAdmin: true }, surveySlug, runId);
+    if (result === "not_found") {
       return NextResponse.json({ error: "Run not found" }, { status: 404 });
     }
 
-    // Check if run has responses
-    const responseCount = await getResponseCount(runId);
-    if (responseCount > 0) {
+    if (result === "has_responses") {
       return NextResponse.json(
         { error: "Cannot delete run with existing responses" },
         { status: 400 },
       );
     }
-
-    await deleteRun({ firebaseUid: user.uid, isAdmin: true }, runId);
 
     return NextResponse.json({ success: true });
   } catch (error) {

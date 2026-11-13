@@ -1,91 +1,57 @@
 import { auth } from "@/lib/firebase";
 import { fetchSignInMethodsForEmail } from "firebase/auth";
-import { requireDb } from "@/lib/firebase-db";
-import {
-  doc,
-  getDoc,
-  serverTimestamp,
-  setDoc,
-} from "firebase/firestore";
 import type { UserProfile } from "@/lib/validation/user";
+import { EDITABLE_PROFILE_FIELDS } from "@/lib/profile-contract";
 
-const USERS = "users" as const;
+async function profileRequest(uid: string, path: string, options: RequestInit = {}) {
+  const user = auth.currentUser;
+  if (!user || user.uid !== uid) throw Object.assign(new Error("Sign in to manage your profile."), { code: "profile/unauthorized" });
+  const token = await user.getIdToken();
+  if (auth.currentUser?.uid !== uid) throw Object.assign(new Error("The signed-in account changed."), { code: "profile/unauthorized" });
+  let response: Response;
+  try {
+    response = await fetch(path, {
+      ...options, credentials: "omit", cache: "no-store",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}`, ...options.headers },
+    });
+  } catch (error) {
+    if (error instanceof TypeError) throw Object.assign(new Error("Profile service is temporarily unavailable. Please retry."), { code: "profile/unavailable" });
+    throw error;
+  }
+  const body = await response.json();
+  if (!response.ok) throw Object.assign(new Error(body.error ?? "Unable to access your profile."), { code: body.code ?? (response.status === 503 ? "profile/unavailable" : "profile/failed") });
+  return body;
+}
 
 export async function isUsernameAvailable(username: string): Promise<boolean> {
-  const user = auth.currentUser;
-  if (!user) throw new Error("Sign in to check username availability.");
-  const token = await user.getIdToken();
-  const response = await fetch(`/api/profile/username-availability?username=${encodeURIComponent(username)}`, {
-    headers: { authorization: `Bearer ${token}` },
-    cache: "no-store",
-  });
-  if (!response.ok) throw new Error("Username availability is unavailable. Please retry.");
-  const body = await response.json();
+  const uid = auth.currentUser?.uid;
+  if (!uid) throw new Error("Sign in to check username availability.");
+  const body = await profileRequest(uid, `/api/profile/username-availability?username=${encodeURIComponent(username)}`);
   if (typeof body.available !== "boolean") throw new Error("Invalid username availability response.");
   return body.available;
 }
 
-export async function createUserProfile(
-  uid: string,
-  data: Omit<UserProfile, "uid" | "createdAt" | "updatedAt">,
-): Promise<void> {
-  const ref = doc(requireDb(), USERS, uid);
-  await setDoc(ref, {
-    uid,
-    ...data,
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-  });
+export async function createUserProfile(uid: string, data: Omit<UserProfile, "uid" | "createdAt" | "updatedAt">): Promise<void> {
+  await upsertUserProfile(uid, data);
 }
 
 export async function upsertUserProfile(uid: string, partial: Partial<UserProfile>): Promise<void> {
-  const ref = doc(requireDb(), USERS, uid);
-  const existing = await getDoc(ref);
-  if (existing.exists()) {
-    await setDoc(ref, { ...partial, updatedAt: serverTimestamp() }, { merge: true });
-  } else {
-    await setDoc(
-      ref,
-      {
-        uid,
-        ...partial,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      },
-      { merge: true },
-    );
-  }
+  const editable = Object.fromEntries(EDITABLE_PROFILE_FIELDS.filter(key => partial[key] !== undefined).map(key => [key, partial[key]]));
+  await profileRequest(uid, "/api/profile", { method: "PATCH", body: JSON.stringify(editable) });
 }
 
 export async function getUserProfile(uid: string): Promise<UserProfile | null> {
-  const ref = doc(requireDb(), USERS, uid);
-  const snap = await getDoc(ref);
-  if (!snap.exists()) return null;
-  const profile = snap.data();
-  // Owner-supplied private list entries remain untrusted at the read boundary.
-  const strings = (value: unknown): string[] => Array.isArray(value)
-    ? value.filter((entry): entry is string => typeof entry === "string")
-    : [];
-  return { ...profile, shows: strings(profile.shows), showRequests: strings(profile.showRequests) } as UserProfile;
+  const body = await profileRequest(uid, "/api/profile");
+  return body.profile ?? null;
 }
 
 export async function checkUserExists(email: string): Promise<boolean> {
-  // Auth discovery may intentionally return [] under email enumeration protection.
-  // Account creation handles email-already-in-use and offers the login stage.
+  // Email enumeration protection can return []; account creation handles collisions.
   return (await fetchSignInMethodsForEmail(auth, email.trim())).length > 0;
 }
 
 export function isFirestoreUnavailableError(error: unknown): boolean {
   if (typeof error !== "object" || error === null) return false;
-  const candidate = error as { message?: unknown; code?: unknown; name?: unknown };
-  const message = typeof candidate.message === "string" ? candidate.message.toLowerCase() : "";
-  const code = typeof candidate.code === "string" ? candidate.code.toLowerCase() : "";
-  const name = typeof candidate.name === "string" ? candidate.name.toLowerCase() : "";
-
-  return (
-    message.includes("service firestore is not available") ||
-    code.includes("service/unavailable") ||
-    code.includes("unavailable") ||
-    name.includes("firebaseerror")
-  );
+  const code = (error as { code?: unknown }).code;
+  return code === "unavailable" || code === "firestore/unavailable" || code === "profile/unavailable";
 }

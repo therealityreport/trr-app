@@ -6835,7 +6835,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "DELETE",
       "sourceFile": "src/app/api/admin/normalized-surveys/[surveySlug]/questions/[questionId]/route.ts",
       "sourceLocator": {
-        "line": 77,
+        "line": 76,
         "symbol": "DELETE"
       },
       "provenance": "static_scan",
@@ -6903,7 +6903,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "DELETE",
       "sourceFile": "src/app/api/admin/normalized-surveys/[surveySlug]/runs/[runId]/route.ts",
       "sourceLocator": {
-        "line": 77,
+        "line": 76,
         "symbol": "DELETE"
       },
       "provenance": "static_scan",
@@ -8468,7 +8468,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/normalized-surveys/[surveySlug]/questions/[questionId]/options/route.ts",
       "sourceLocator": {
-        "line": 17,
+        "line": 16,
         "symbol": "GET"
       },
       "provenance": "static_scan",
@@ -8570,7 +8570,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/normalized-surveys/[surveySlug]/runs/[runId]/export/route.ts",
       "sourceLocator": {
-        "line": 24,
+        "line": 25,
         "symbol": "GET"
       },
       "provenance": "static_scan",
@@ -15021,7 +15021,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "POST",
       "sourceFile": "src/app/api/admin/normalized-surveys/[surveySlug]/questions/[questionId]/options/route.ts",
       "sourceLocator": {
-        "line": 45,
+        "line": 44,
         "symbol": "POST"
       },
       "provenance": "static_scan",
@@ -15055,7 +15055,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "POST",
       "sourceFile": "src/app/api/admin/normalized-surveys/[surveySlug]/runs/route.ts",
       "sourceLocator": {
-        "line": 56,
+        "line": 57,
         "symbol": "POST"
       },
       "provenance": "static_scan",
@@ -20075,7 +20075,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "PUT",
       "sourceFile": "src/app/api/admin/normalized-surveys/[surveySlug]/questions/[questionId]/options/route.ts",
       "sourceLocator": {
-        "line": 88,
+        "line": 86,
         "symbol": "PUT"
       },
       "provenance": "static_scan",

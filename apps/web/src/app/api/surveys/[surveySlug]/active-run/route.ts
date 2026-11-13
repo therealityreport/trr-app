@@ -6,9 +6,21 @@ import {
   getSurveyWithQuestions,
   getUserSubmissionCount,
 } from "@/lib/server/surveys/survey-run-repository";
-import type { ActiveRunResponse } from "@/lib/surveys/normalized-types";
+import type {
+  ActiveRunResponse,
+  SurveySubmissionEligibility,
+} from "@/lib/surveys/normalized-types";
 
 export const dynamic = "force-dynamic";
+
+const noActiveRun: ActiveRunResponse = {
+  activeRun: null,
+  survey: null,
+  userSubmissions: 0,
+  canSubmit: false,
+  eligibility: "no-active-run",
+};
+const responseOptions = { headers: { "Cache-Control": "private, no-store" } };
 
 export async function GET(
   request: NextRequest,
@@ -20,46 +32,34 @@ export async function GET(
     // Get active run
     const activeRun = await getActiveRunForSurvey(surveySlug);
     if (!activeRun) {
-      return NextResponse.json({
-        activeRun: null,
-        survey: null,
-        userSubmissions: 0,
-        canSubmit: false,
-      });
+      return NextResponse.json(noActiveRun, responseOptions);
     }
 
     // Get survey with questions
     const survey = await getSurveyWithQuestions(surveySlug);
     if (!survey) {
-      return NextResponse.json({
-        activeRun: null,
-        survey: null,
-        userSubmissions: 0,
-        canSubmit: false,
-      });
+      return NextResponse.json(noActiveRun, responseOptions);
     }
 
     // Check user authentication (optional for this endpoint)
     const user = await getUserFromRequest(request);
     let userSubmissions = 0;
-    let canSubmit = false;
+    let eligibility: SurveySubmissionEligibility = "sign-in-required";
 
     if (user) {
       userSubmissions = await getUserSubmissionCount(
         { firebaseUid: user.uid },
         activeRun.id,
       );
-      canSubmit = userSubmissions < activeRun.max_submissions_per_user;
+      eligibility = userSubmissions < activeRun.max_submissions_per_user ? "allowed" : "limit-reached";
     }
 
-    return NextResponse.json({
-      activeRun,
-      survey,
-      userSubmissions,
-      canSubmit,
-    });
+    return NextResponse.json(
+      { activeRun, survey, userSubmissions, canSubmit: eligibility === "allowed", eligibility },
+      responseOptions,
+    );
   } catch (error) {
     console.error("[api] Failed to fetch active run", error);
-    return NextResponse.json({ error: "Internal error" }, { status: 500 });
+    return NextResponse.json({ error: "Internal error" }, { ...responseOptions, status: 500 });
   }
 }

@@ -13,8 +13,7 @@ export default function NormalizedSurveyPlayPage({ params }: PageProps) {
   return (
     <NormalizedSurveyPlay
       surveySlug={surveySlug}
-      backUrl={`/surveys/n/${surveySlug}`}
-      successRedirect={`/surveys/n/${surveySlug}/results`}
+      backUrl="/hub/surveys"
     />
   );
 }
