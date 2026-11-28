@@ -413,13 +413,13 @@ describe("SocialAccountProfilePage", () => {
     // Logged-out v2 runs skip Post Details by default and run on Modal unless This Mac is chosen.
     expect(JSON.parse(launch![1].body)).toMatchObject({ action: "backfill", source_scope: "network", backfill_scope: "bounded_window", date_start: "2026-01-01T00:00:00.000Z", date_end: "2027-01-01T00:00:00.000Z", selected_tasks: ["comments", "media"], comments_worker_count: 8, execution_placement: "modal" });
     expect(new Headers(launch![1].headers).get("Idempotency-Key")).toBeTruthy();
-    await waitFor(() => expect(screen.getAllByText(/Run 11111111 · running/).length).toBeGreaterThan(0));
+    await waitFor(() => expect(screen.getByText("Run 11111111 · Run status: Running")).toBeInTheDocument());
     expect(mocks.fetchAdminWithAuth.mock.calls.some(([input]) => String(input).includes("/catalog/backfill"))).toBe(false);
     expect(mocks.fetchAdminWithAuth.mock.calls.some(([input]) => String(input).includes(`/catalog/runs/${newRunId}`))).toBe(false);
     const snapshotsBeforeCompletion = mocks.fetchAdminWithAuth.mock.calls.filter(([input]) => String(input).includes("/snapshot")).length;
     newRunState = "completed";
     fireEvent.click(within(screen.getByRole("region", { name: "Durable Instagram ingestion" })).getByRole("button", { name: "Refresh", exact: true }));
-    await waitFor(() => expect(screen.getByText(/Run 11111111 · completed/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("Run 11111111 · Run status: Finished")).toBeInTheDocument());
     await waitFor(() => expect(mocks.fetchAdminWithAuth.mock.calls.filter(([input]) => String(input).includes("/snapshot")).length).toBeGreaterThan(snapshotsBeforeCompletion));
     expect(mocks.fetchAdminWithAuth.mock.calls.some(([input]) => String(input).includes("/snapshot") && String(input).includes(newRunId))).toBe(false);
   });
@@ -1554,7 +1554,7 @@ describe("SocialAccountProfilePage", () => {
       expect(commentsPostsCalls).toBe(1);
     });
     expect(screen.getByText("Posts with reported comments: 1")).toBeInTheDocument();
-    expect(screen.getByText("Finished")).toBeInTheDocument();
+    expect(screen.getByText("Run status", { exact: true }).parentElement).toHaveTextContent("Unknown");
     expect(screen.queryByText("TRR-Backend request timed out.")).not.toBeInTheDocument();
   });
 

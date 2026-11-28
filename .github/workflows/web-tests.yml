@@ -1,6 +1,7 @@
 name: Web Tests
 
 on:
+  workflow_dispatch:
   pull_request:
     branches: [ main ]
     paths:
@@ -14,16 +15,10 @@ on:
       - '.github/workflows/web-tests.yml'
 
 jobs:
-  web-ci:
-    name: Web CI (Node ${{ matrix.node-version }} / ${{ matrix.lane }})
+  static-unit:
+    name: Static checks and unit tests (Node 24)
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - node-version: 24
-            lane: full
-    defaults:
+    defaults: &web-defaults
       run:
         working-directory: apps/web
     steps:
@@ -41,10 +36,12 @@ jobs:
             exit 1
           fi
         working-directory: .
-      - uses: actions/setup-node@v7
+      - &node24
+        uses: actions/setup-node@v7
         with:
-          node-version: ${{ matrix.node-version }}
-      - name: Bootstrap the pinned package manager
+          node-version: 24
+      - &bootstrap-pnpm
+        name: Bootstrap the pinned package manager
         run: |
           npm install --global corepack@0.36.0
           corepack enable
@@ -53,7 +50,8 @@ jobs:
           test "$(pnpm --version)" = "11.28.9"
         working-directory: .
       # Cache setup runs only after pnpm exists on the selected Node runtime.
-      - name: Cache pnpm dependencies
+      - &cache-pnpm
+        name: Cache pnpm dependencies
         uses: actions/setup-node@v7
         with:
           cache: pnpm
@@ -64,7 +62,8 @@ jobs:
             --file apps/web/.env.example \
             --required TRR_API_URL TRR_INTERNAL_ADMIN_SHARED_SECRET
         working-directory: .
-      - name: Install workspace deps
+      - &install-dependencies
+        name: Install workspace deps
         run: pnpm install --frozen-lockfile
         working-directory: .
       - name: Verify the supported Node baseline
@@ -76,22 +75,36 @@ jobs:
       - name: Run lint
         run: pnpm run lint
       - name: Run targeted fandom typecheck (Node 24 full lane)
-        if: matrix.lane == 'full'
         run: pnpm run typecheck:fandom
       - name: Run full typecheck
-        if: matrix.lane == 'full'
         run: pnpm run typecheck
+      - name: Run unit tests (Node 24 full lane)
+        run: pnpm run test:ci
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: web-coverage-node-24
+          path: apps/web/coverage
+          if-no-files-found: ignore
+
+  playwright:
+    name: Playwright (Node 24)
+    runs-on: ubuntu-latest
+    defaults: *web-defaults
+    steps:
+      - uses: actions/checkout@v7
+      - *node24
+      - *bootstrap-pnpm
+      - *cache-pnpm
+      - *install-dependencies
       - name: Install Playwright Chromium
-        if: matrix.lane == 'full'
         timeout-minutes: 5
         run: pnpm exec playwright install chromium
-      - name: Run unit tests (Node 24 full lane)
-        if: matrix.lane == 'full'
-        run: pnpm run test:ci
       - name: Run Playwright e2e smoke
-        if: matrix.lane == 'full'
         run: pnpm run test:e2e
         env:
+          DEBUG: pw:webserver
           DATABASE_URL: ""
           TRR_API_URL: "http://127.0.0.1:8000"
           NEXT_PUBLIC_FIREBASE_API_KEY: "placeholder-api-key-for-build"
@@ -100,6 +113,17 @@ jobs:
           NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET: "demo-build.firebasestorage.app"
           NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: "1234567890"
           NEXT_PUBLIC_FIREBASE_APP_ID: "1:1234567890:web:demo-build"
+
+  build:
+    name: Production build without database (Node 24)
+    runs-on: ubuntu-latest
+    defaults: *web-defaults
+    steps:
+      - uses: actions/checkout@v7
+      - *node24
+      - *bootstrap-pnpm
+      - *cache-pnpm
+      - *install-dependencies
       - name: Build (no DATABASE_URL)
         run: pnpm run build
         env:
@@ -112,13 +136,21 @@ jobs:
           NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET: "demo-build.firebasestorage.app"
           NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: "1234567890"
           NEXT_PUBLIC_FIREBASE_APP_ID: "1:1234567890:web:demo-build"
-      - name: Upload coverage artifact
-        uses: actions/upload-artifact@v7
-        if: always() && matrix.lane == 'full'
-        with:
-          name: web-coverage-node-${{ matrix.node-version }}
-          path: apps/web/coverage
-          if-no-files-found: ignore
+
+  web-ci:
+    name: Web CI (Node 24 / full)
+    runs-on: ubuntu-latest
+    needs: [static-unit, playwright, build]
+    if: always()
+    steps:
+      - name: Require all Node 24 jobs to succeed
+        env:
+          STATIC_UNIT: ${{ needs.static-unit.result }}
+          PLAYWRIGHT: ${{ needs.playwright.result }}
+          BUILD: ${{ needs.build.result }}
+        run: |
+          echo "Static and unit tests=$STATIC_UNIT, Playwright=$PLAYWRIGHT, build=$BUILD"
+          [[ "$STATIC_UNIT" == success && "$PLAYWRIGHT" == success && "$BUILD" == success ]]
 
   node-26-preview:
     name: Node 26 Preview (observational)

@@ -144,8 +144,13 @@ test.describe("cast + season tabs smoke (mocked)", () => {
     await page.goto(`/${SHOW_ID}/s${SEASON_NUMBER}/credits`);
     await waitForAdminReady(page);
 
-    const cancelButton = await startAndWaitForCancel(page, "Enrich Cast & Crew Media");
-    await cancelButton.click();
+    // The season header is interactive before its separate cast request has resolved.
+    await expect(page.getByText("2/2/2 cast · 0/0/0 crew · 2/2/2 visible").first()).toBeVisible();
+    await Promise.all([
+      page.waitForRequest((request) => new URL(request.url()).pathname.endsWith("/reprocess-images/stream")),
+      page.getByRole("button", { name: "Enrich Cast & Crew Media" }).click(),
+    ]);
+    await page.getByRole("button", { name: "Cancel", exact: true }).click();
     await expect(
       page
         .getByText(
